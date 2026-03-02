@@ -523,12 +523,12 @@ function initSocketServer(httpServer) {
 
         console.log(`[Socket] Host ${socket.userName} ending meeting ${roomId}`);
 
-        // Update meeting status in database
+        // Update meeting status and actual_end in database
         await prisma.video_meetings.update({
           where: { id: meeting.id },
           data: { 
             status: 'ended',
-            ended_at: new Date()
+            actual_end: new Date()
           }
         });
 
@@ -547,6 +547,10 @@ function initSocketServer(httpServer) {
           endedBy: socket.userName
         });
 
+        // Send success callback to host BEFORE disconnecting sockets
+        console.log(`[Socket] Meeting ${roomId} ended successfully`);
+        safeCallback(callback, { success: true });
+
         // Remove all peers from mediasoup room
         try {
           mediasoupService.closeRoom(roomId);
@@ -555,7 +559,7 @@ function initSocketServer(httpServer) {
           // Continue - this shouldn't block ending the meeting
         }
 
-        // Disconnect all sockets in the room
+        // Disconnect all sockets in the room (after callback sent)
         const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
         if (socketsInRoom) {
           for (const socketId of socketsInRoom) {
@@ -566,9 +570,6 @@ function initSocketServer(httpServer) {
             }
           }
         }
-
-        console.log(`[Socket] Meeting ${roomId} ended successfully`);
-        safeCallback(callback, { success: true });
       } catch (error) {
         console.error('[Socket] Error ending meeting:', error);
         safeCallback(callback, { error: error.message });

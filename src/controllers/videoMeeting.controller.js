@@ -418,6 +418,20 @@ class VideoMeetingController {
         });
       }
 
+      // Delete related records first (cascade)
+      await prisma.video_meeting_chats.deleteMany({
+        where: { meeting_id: BigInt(id) }
+      });
+      await prisma.video_meeting_participants.deleteMany({
+        where: { meeting_id: BigInt(id) }
+      });
+      await prisma.video_meeting_invitations.deleteMany({
+        where: { meeting_id: BigInt(id) }
+      });
+      await prisma.video_meeting_recordings.deleteMany({
+        where: { meeting_id: BigInt(id) }
+      });
+
       await prisma.video_meetings.delete({
         where: { id: BigInt(id) }
       });
