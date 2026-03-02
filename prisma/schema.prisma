@@ -118,6 +118,7 @@ model bankeu_proposal_kegiatan {
 model bankeu_proposals {
   id                                                  BigInt                               @id @default(autoincrement()) @db.UnsignedBigInt
   desa_id                                             BigInt                               @db.UnsignedBigInt
+  tahun_anggaran                                      Int                                  @default(2026) @db.Year
   kegiatan_id                                         Int?                                 @db.UnsignedTinyInt
   judul_proposal                                      String                               @db.VarChar(255)
   nama_kegiatan_spesifik                              String?                              @db.VarChar(255)
@@ -138,13 +139,13 @@ model bankeu_proposals {
   dinas_verified_by                                   Int?
   dinas_catatan                                       String?                              @db.Text
   kecamatan_status                                    bankeu_proposals_kecamatan_status?
-  kecamatan_catatan                                   String?                              @db.Text
   kecamatan_verified_at                               DateTime?                            @db.Timestamp(0)
   kecamatan_verified_by                               BigInt?                              @db.UnsignedBigInt
+  kecamatan_catatan                                   String?                              @db.Text
   dpmd_status                                         bankeu_proposals_dpmd_status?
-  dpmd_catatan                                        String?                              @db.Text
   dpmd_verified_at                                    DateTime?                            @db.Timestamp(0)
   dpmd_verified_by                                    BigInt?                              @db.UnsignedBigInt
+  dpmd_catatan                                        String?                              @db.Text
   submitted_to_kecamatan                              Boolean?                             @default(false)
   submitted_at                                        DateTime?                            @db.Timestamp(0)
   submitted_to_dpmd                                   Boolean?                             @default(false)
@@ -154,13 +155,12 @@ model bankeu_proposals {
   verified_at                                         DateTime?                            @db.Timestamp(0)
   berita_acara_path                                   String?                              @db.VarChar(255)
   berita_acara_generated_at                           DateTime?                            @db.Timestamp(0)
-  troubleshoot_catatan                                String?                              @db.Text
-  troubleshoot_by                                     BigInt?                              @db.UnsignedBigInt
-  troubleshoot_at                                     DateTime?                            @db.Timestamp(0)
   created_by                                          BigInt                               @db.UnsignedBigInt
   created_at                                          DateTime?                            @default(now()) @db.Timestamp(0)
   updated_at                                          DateTime?                            @default(now()) @db.Timestamp(0)
-  tahun_anggaran                                      Int                                  @default(2026) @db.Year
+  troubleshoot_at                                     DateTime?                            @db.Timestamp(0)
+  troubleshoot_by                                     BigInt?                              @db.UnsignedBigInt
+  troubleshoot_catatan                                String?                              @db.Text
   bankeu_proposal_kegiatan                            bankeu_proposal_kegiatan[]
   users_bankeu_proposals_dpmd_verified_byTousers      users?                               @relation("bankeu_proposals_dpmd_verified_byTousers", fields: [dpmd_verified_by], references: [id], onUpdate: NoAction, map: "fk_bankeu_dpmd_verified_by")
   users_bankeu_proposals_kecamatan_verified_byTousers users?                               @relation("bankeu_proposals_kecamatan_verified_byTousers", fields: [kecamatan_verified_by], references: [id], onUpdate: NoAction, map: "fk_bankeu_kecamatan_verified_by")
@@ -266,7 +266,7 @@ model informasi {
   created_by BigInt?   @db.UnsignedBigInt
   created_at DateTime? @default(now()) @db.Timestamp(0)
   updated_at DateTime? @default(now()) @db.Timestamp(0)
-  users      users?    @relation(fields: [created_by], references: [id], onDelete: SetNull, map: "fk_informasi_created_by")
+  users      users?    @relation(fields: [created_by], references: [id], map: "fk_informasi_created_by")
 
   @@index([is_active], map: "idx_is_active")
   @@index([urutan], map: "idx_urutan")
@@ -393,6 +393,7 @@ model desa_bankeu_surat {
   @@index([kecamatan_status], map: "idx_kecamatan_status")
   @@index([submitted_to_kecamatan], map: "idx_submitted")
   @@index([tahun], map: "idx_tahun")
+  @@index([submitted_to_kecamatan], map: "idx_submitted_to_kecamatan")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -563,7 +564,6 @@ model kecamatan_bankeu_config {
   kecamatan_id          BigInt    @unique(map: "kecamatan_id") @db.UnsignedBigInt
   nama_camat            String    @db.VarChar(255)
   nip_camat             String?   @db.VarChar(50)
-  jabatan_penandatangan String    @default("Camat") @db.VarChar(50)
   logo_path             String?   @db.VarChar(255)
   alamat                String?   @db.Text
   telepon               String?   @db.VarChar(50)
@@ -574,6 +574,7 @@ model kecamatan_bankeu_config {
   stempel_path          String?   @db.VarChar(255)
   created_at            DateTime? @default(now()) @db.Timestamp(0)
   updated_at            DateTime? @default(now()) @db.Timestamp(0)
+  jabatan_penandatangan String    @default("Camat") @db.VarChar(50)
 
   @@index([kecamatan_id], map: "idx_kecamatan")
 }
@@ -1078,7 +1079,6 @@ model users {
   email                                                          String                      @unique(map: "users_email_unique") @db.VarChar(255)
   email_verified_at                                              DateTime?                   @db.Timestamp(0)
   password                                                       String                      @db.VarChar(255)
-  plain_password                                                 String?                     @db.VarChar(255)
   role                                                           users_role                  @default(desa)
   kecamatan_id                                                   Int?                        @db.UnsignedInt
   desa_id                                                        BigInt?                     @db.UnsignedBigInt
@@ -1090,6 +1090,7 @@ model users {
   updated_at                                                     DateTime?                   @db.Timestamp(0)
   is_active                                                      Boolean                     @default(true)
   pegawai_id                                                     BigInt?                     @db.UnsignedBigInt
+  plain_password                                                 String?                     @db.VarChar(255)
   activity_logs                                                  activity_logs[]
   app_settings                                                   app_settings[]
   bankeu_proposals_bankeu_proposals_dpmd_verified_byTousers      bankeu_proposals[]          @relation("bankeu_proposals_dpmd_verified_byTousers")
@@ -1100,6 +1101,7 @@ model users {
   desa_bankeu_surat                                              desa_bankeu_surat[]
   disposisi_disposisi_dari_user_idTousers                        disposisi[]                 @relation("disposisi_dari_user_idTousers")
   disposisi_disposisi_ke_user_idTousers                          disposisi[]                 @relation("disposisi_ke_user_idTousers")
+  informasi                                                      informasi[]
   jadwal_kegiatan_jadwal_kegiatan_approved_byTousers             jadwal_kegiatan[]           @relation("jadwal_kegiatan_approved_byTousers")
   jadwal_kegiatan_jadwal_kegiatan_created_byTousers              jadwal_kegiatan[]           @relation("jadwal_kegiatan_created_byTousers")
   kelembagaan_activity_logs                                      kelembagaan_activity_logs[]
@@ -1111,7 +1113,6 @@ model users {
   push_subscriptions                                             push_subscriptions[]
   surat_masuk                                                    surat_masuk[]
   pegawai                                                        pegawai?                    @relation(fields: [pegawai_id], references: [id_pegawai], onDelete: Cascade, onUpdate: NoAction, map: "users_pegawai_id_foreign")
-  informasi                                                      informasi[]
 
   @@index([pegawai_id], map: "users_pegawai_id_index")
 }
@@ -1150,6 +1151,105 @@ model info_banners {
 
   @@index([aktif, urutan], map: "idx_aktif_urutan")
   @@index([tanggal_mulai, tanggal_selesai], map: "idx_tanggal")
+}
+
+model video_meeting_chats {
+  id                         BigInt                            @id @default(autoincrement()) @db.UnsignedBigInt
+  meeting_id                 BigInt                            @db.UnsignedBigInt
+  participant_id             BigInt                            @db.UnsignedBigInt
+  message                    String                            @db.Text
+  message_type               video_meeting_chats_message_type? @default(text)
+  file_url                   String?                           @db.VarChar(500)
+  created_at                 DateTime?                         @default(now()) @db.Timestamp(0)
+  video_meetings             video_meetings                    @relation(fields: [meeting_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "video_meeting_chats_ibfk_1")
+  video_meeting_participants video_meeting_participants        @relation(fields: [participant_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "video_meeting_chats_ibfk_2")
+
+  @@index([meeting_id], map: "idx_meeting_id")
+  @@index([participant_id], map: "participant_id")
+}
+
+model video_meeting_invitations {
+  id             BigInt                            @id @default(autoincrement()) @db.UnsignedBigInt
+  meeting_id     BigInt                            @db.UnsignedBigInt
+  user_id        BigInt?                           @db.UnsignedBigInt
+  email          String?                           @db.VarChar(255)
+  status         video_meeting_invitations_status? @default(pending)
+  invited_at     DateTime?                         @default(now()) @db.Timestamp(0)
+  responded_at   DateTime?                         @db.DateTime(0)
+  video_meetings video_meetings                    @relation(fields: [meeting_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "video_meeting_invitations_ibfk_1")
+
+  @@index([meeting_id], map: "idx_meeting_id")
+  @@index([user_id], map: "idx_user_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model video_meeting_participants {
+  id                  BigInt                           @id @default(autoincrement()) @db.UnsignedBigInt
+  meeting_id          BigInt                           @db.UnsignedBigInt
+  user_id             BigInt?                          @db.UnsignedBigInt
+  guest_name          String?                          @db.VarChar(255)
+  role                video_meeting_participants_role? @default(participant)
+  joined_at           DateTime?                        @db.DateTime(0)
+  left_at             DateTime?                        @db.DateTime(0)
+  is_muted            Boolean?                         @default(false)
+  is_video_on         Boolean?                         @default(true)
+  is_screen_sharing   Boolean?                         @default(false)
+  created_at          DateTime?                        @default(now()) @db.Timestamp(0)
+  video_meeting_chats video_meeting_chats[]
+  video_meetings      video_meetings                   @relation(fields: [meeting_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "video_meeting_participants_ibfk_1")
+
+  @@index([meeting_id], map: "idx_meeting_id")
+  @@index([user_id], map: "idx_user_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model video_meeting_recordings {
+  id             BigInt                           @id @default(autoincrement()) @db.UnsignedBigInt
+  meeting_id     BigInt                           @db.UnsignedBigInt
+  file_path      String                           @db.VarChar(500)
+  file_size      BigInt?
+  duration       Int?
+  status         video_meeting_recordings_status? @default(recording)
+  started_at     DateTime                         @db.DateTime(0)
+  ended_at       DateTime?                        @db.DateTime(0)
+  created_at     DateTime?                        @default(now()) @db.Timestamp(0)
+  video_meetings video_meetings                   @relation(fields: [meeting_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "video_meeting_recordings_ibfk_1")
+
+  @@index([meeting_id], map: "idx_meeting_id")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model video_meetings {
+  id                         BigInt                       @id @default(autoincrement()) @db.UnsignedBigInt
+  uuid                       String                       @unique(map: "uuid") @db.VarChar(36)
+  room_id                    String                       @unique(map: "room_id") @db.VarChar(100)
+  title                      String                       @db.VarChar(255)
+  description                String?                      @db.Text
+  host_id                    BigInt                       @db.UnsignedBigInt
+  bidang_id                  BigInt?                      @db.UnsignedBigInt
+  status                     video_meetings_status?       @default(scheduled)
+  scheduled_start            DateTime?                    @db.DateTime(0)
+  scheduled_end              DateTime?                    @db.DateTime(0)
+  actual_start               DateTime?                    @db.DateTime(0)
+  actual_end                 DateTime?                    @db.DateTime(0)
+  max_participants           Int?                         @default(50)
+  is_recording_enabled       Boolean?                     @default(false)
+  is_screen_share_enabled    Boolean?                     @default(true)
+  is_chat_enabled            Boolean?                     @default(true)
+  password                   String?                      @db.VarChar(100)
+  waiting_room_enabled       Boolean?                     @default(false)
+  created_at                 DateTime?                    @default(now()) @db.Timestamp(0)
+  updated_at                 DateTime?                    @default(now()) @db.Timestamp(0)
+  video_meeting_chats        video_meeting_chats[]
+  video_meeting_invitations  video_meeting_invitations[]
+  video_meeting_participants video_meeting_participants[]
+  video_meeting_recordings   video_meeting_recordings[]
+
+  @@index([bidang_id], map: "idx_bidang_id")
+  @@index([host_id], map: "idx_host_id")
+  @@index([room_id], map: "idx_room_id")
+  @@index([scheduled_start], map: "idx_scheduled_start")
+  @@index([status], map: "idx_status")
 }
 
 enum bankeu_master_kegiatan_jenis_kegiatan {
@@ -1428,4 +1528,36 @@ enum bankeu_verification_questionnaires_overall_recommendation {
 enum bankeu_verification_questionnaires_status {
   draft
   submitted
+}
+
+enum video_meeting_chats_message_type {
+  text
+  file
+  system
+}
+
+enum video_meeting_invitations_status {
+  pending
+  accepted
+  declined
+}
+
+enum video_meeting_participants_role {
+  host
+  co_host     @map("co-host")
+  participant
+}
+
+enum video_meeting_recordings_status {
+  recording
+  processing
+  ready
+  failed
+}
+
+enum video_meetings_status {
+  scheduled
+  active
+  ended
+  cancelled
 }

@@ -1,4 +1,5 @@
 const express = require('express');
+const http = require('http');
 const cors = require('cors');
 const helmet = require('helmet');
 const morgan = require('morgan');
@@ -297,6 +298,9 @@ app.use('/api/bhprd-t3', bhprdT3Routes); // BHPRD Tahap 3
 // External API Proxy routes (DPMD Bogorkab)
 app.use('/api/external', externalApiRoutes);
 
+// Video Meeting routes
+app.use('/api/video-meetings', require('./routes/videoMeeting.routes'));
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
@@ -310,12 +314,39 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 3001;
 
-app.listen(PORT, () => {
-  logger.info(`🚀 Server running on port ${PORT}`);
-  logger.info(`📝 Environment: ${process.env.NODE_ENV}`);
-  logger.info(`🔗 CORS enabled for: ${process.env.CORS_ORIGIN}`);
-  
-  // Initialize scheduler for push notifications
-  schedulerService.init();
-});
+// Create HTTP server
+const server = http.createServer(app);
+
+// Initialize Socket.io for video meetings
+const { initSocketServer } = require('./socket/meeting.socket');
+const mediasoupService = require('./services/mediasoup.service');
+
+// Start server
+async function startServer() {
+  try {
+    // Initialize mediasoup workers
+    await mediasoupService.init();
+    logger.info('📹 Mediasoup workers initialized');
+
+    // Initialize Socket.io signaling server
+    initSocketServer(server);
+    logger.info('🔌 Socket.io signaling server initialized');
+
+    server.listen(PORT, () => {
+      logger.info(`🚀 Server running on port ${PORT}`);
+      logger.info(`📝 Environment: ${process.env.NODE_ENV}`);
+      logger.info(`🔗 CORS enabled for: ${process.env.CORS_ORIGIN}`);
+      logger.info(`📹 Video Meeting: WebRTC + mediasoup ready`);
+      
+      // Initialize scheduler for push notifications
+      schedulerService.init();
+    });
+  } catch (error) {
+    logger.error('❌ Failed to start server:', error);
+    process.exit(1);
+  }
+}
+
+startServer();
+
 module.exports = app;
