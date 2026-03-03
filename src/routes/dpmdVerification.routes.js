@@ -49,4 +49,9 @@ router.delete('/desa/:desaId/proposals', dpmdVerificationController.deleteDesaPr
 // Delete surat (pengantar & permohonan) from a desa
 router.delete('/desa/:desaId/surat', dpmdVerificationController.deleteDesaSurat);
 
+// Reopen submission for a specific desa
+// Allow desa to upload new proposals again
+// Body: { catatan: string (optional) }
+router.patch('/desa/:desaId/reopen-submission', dpmdVerificationController.reopenDesaSubmission);
+
 module.exports = router;

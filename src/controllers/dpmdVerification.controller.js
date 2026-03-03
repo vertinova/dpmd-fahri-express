@@ -1114,6 +1114,104 @@ class DPMDVerificationController {
       });
     }
   }
+
+  /**
+   * Reopen submission for a specific desa
+   * Reset submitted_to_dinas_at to allow desa to upload new proposals
+   * PATCH /api/dpmd/bankeu/desa/:desaId/reopen-submission
+   */
+  async reopenDesaSubmission(req, res) {
+    try {
+      const { desaId } = req.params;
+      const { catatan } = req.body;
+      const userId = req.user.id;
+
+      logger.info(`🔓 DPMD REOPEN SUBMISSION - Desa ID: ${desaId}, User: ${userId}`);
+
+      // Get desa info
+      const desa = await prisma.desas.findUnique({
+        where: { id: BigInt(desaId) },
+        include: { kecamatans: true }
+      });
+
+      if (!desa) {
+        return res.status(404).json({
+          success: false,
+          message: 'Desa tidak ditemukan'
+        });
+      }
+
+      // Find all proposals from this desa that have been submitted to dinas
+      const proposals = await prisma.bankeu_proposals.findMany({
+        where: {
+          desa_id: BigInt(desaId),
+          submitted_to_dinas_at: { not: null }
+        }
+      });
+
+      if (proposals.length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'Tidak ada proposal yang perlu dibuka kembali. Desa ini belum pernah mengirim proposal ke dinas.'
+        });
+      }
+
+      // Reset submitted_to_dinas_at for all proposals
+      // This will make isSubmitted = false in frontend desa, showing the upload button again
+      const updateResult = await prisma.bankeu_proposals.updateMany({
+        where: {
+          desa_id: BigInt(desaId),
+          submitted_to_dinas_at: { not: null }
+        },
+        data: {
+          submitted_to_dinas_at: null,
+          updated_at: new Date()
+        }
+      });
+
+      logger.info(`✅ DPMD reopened submission for desa ${desa.nama} (ID: ${desaId}), ${updateResult.count} proposals affected`);
+
+      // Activity Log - CRITICAL: Track reopen action
+      ActivityLogger.log({
+        userId: userId,
+        userName: req.user.name || `User ${userId}`,
+        userRole: req.user.role,
+        bidangId: 3,
+        module: 'bankeu',
+        action: 'update',
+        entityType: 'bankeu_reopen_submission',
+        entityName: `Desa ${desa.nama}`,
+        description: `DPMD/SPKED (${req.user.name || 'User'}) membuka kembali upload proposal untuk Desa ${desa.nama} (ID: ${desaId}). ${updateResult.count} proposal di-reset.${catatan ? ' Catatan: ' + catatan : ''}`,
+        oldValue: { 
+          desa_id: parseInt(desaId), 
+          desa_nama: desa.nama,
+          kecamatan: desa.kecamatans?.nama || null,
+          proposal_count: proposals.length,
+          catatan: catatan || null 
+        },
+        ipAddress: ActivityLogger.getIpFromRequest(req),
+        userAgent: ActivityLogger.getUserAgentFromRequest(req)
+      });
+
+      return res.json({
+        success: true,
+        message: `Upload proposal untuk Desa ${desa.nama} berhasil dibuka kembali. ${updateResult.count} proposal di-reset.`,
+        data: {
+          desa_id: parseInt(desaId),
+          desa_nama: desa.nama,
+          proposals_affected: updateResult.count
+        }
+      });
+
+    } catch (error) {
+      logger.error('Error reopening desa submission:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Gagal membuka kembali upload proposal desa',
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = new DPMDVerificationController();
