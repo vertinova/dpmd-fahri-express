@@ -441,7 +441,7 @@ class BankeuProposalController {
 
       // Get existing proposal
       const [proposals] = await sequelize.query(`
-        SELECT file_proposal, status, desa_id, submitted_to_kecamatan, dinas_status
+        SELECT file_proposal, status, desa_id, submitted_to_kecamatan, submitted_to_dinas_at, dinas_status, kecamatan_status
         FROM bankeu_proposals
         WHERE id = ?
       `, { replacements: [id] });
@@ -459,7 +459,7 @@ class BankeuProposalController {
       }
 
       const proposal = proposals[0];
-      logger.info(`📋 Proposal info - Status: ${proposal.status}, Dinas Status: ${proposal.dinas_status}, Submitted: ${proposal.submitted_to_kecamatan}`);
+      logger.info(`📋 Proposal info - Status: ${proposal.status}, Dinas Status: ${proposal.dinas_status}, Kec Status: ${proposal.kecamatan_status}, Submitted Kec: ${proposal.submitted_to_kecamatan}, Submitted Dinas: ${proposal.submitted_to_dinas_at}`);
 
       // Check ownership
       if (proposal.desa_id !== desaId) {
@@ -475,10 +475,11 @@ class BankeuProposalController {
       }
 
       // Allow update if:
-      // 1. Kecamatan status is revision/rejected, OR
-      // 2. Dinas status is revision/rejected
+      // 1. Kecamatan status is revision/rejected (returned from kecamatan), OR
+      // 2. Dinas status is revision/rejected (returned from dinas)
       // AND submitted_to_kecamatan must be FALSE (returned to desa)
-      const isKecamatanRejected = proposal.status === 'revision' || proposal.status === 'rejected';
+      const isKecamatanRejected = proposal.kecamatan_status === 'revision' || proposal.kecamatan_status === 'rejected' || 
+                                   proposal.status === 'revision' || proposal.status === 'rejected';
       const isDinasRejected = proposal.dinas_status === 'revision' || proposal.dinas_status === 'rejected';
       const isReturnedToDesa = !proposal.submitted_to_kecamatan;
       
@@ -739,8 +740,12 @@ class BankeuProposalController {
         });
       }
 
-      // Only allow replace for pending status and not yet submitted to kecamatan
-      if (proposal.submitted_to_kecamatan) {
+      // Check if proposal can have file replaced:
+      // Case 1: Pending status and not yet submitted to kecamatan
+      // Case 2: Returned from kecamatan (revision/rejected)
+      const isReturnedFromKecamatan = ['rejected', 'revision'].includes(proposal.kecamatan_status) && !proposal.submitted_to_kecamatan;
+      
+      if (proposal.submitted_to_kecamatan && !isReturnedFromKecamatan) {
         // Delete uploaded file
         if (req.file && req.file.path) {
           fs.unlinkSync(req.file.path);
@@ -751,14 +756,14 @@ class BankeuProposalController {
         });
       }
 
-      if (proposal.status !== 'pending') {
+      if (proposal.status !== 'pending' && !isReturnedFromKecamatan) {
         // Delete uploaded file
         if (req.file && req.file.path) {
           fs.unlinkSync(req.file.path);
         }
         return res.status(400).json({
           success: false,
-          message: 'Hanya proposal dengan status pending yang dapat diganti filenya'
+          message: 'Hanya proposal dengan status pending atau dikembalikan untuk revisi yang dapat diganti filenya'
         });
       }
 
@@ -767,6 +772,8 @@ class BankeuProposalController {
       const oldFilePath = proposal.file_proposal;
 
       // Move old file to reference folder (preserve for history) instead of deleting
+      // FIX 2026-03-09: Also update dinas_reviewed_file to track old file for comparison
+      let oldFileMoved = false;
       if (oldFilePath) {
         const fullPath = path.join(__dirname, '../../storage/uploads/bankeu', oldFilePath);
         const referenceDir = path.join(__dirname, '../../storage/uploads/bankeu_reference');
@@ -779,12 +786,28 @@ class BankeuProposalController {
         if (fs.existsSync(fullPath)) {
           fs.renameSync(fullPath, referencePath);
           logger.info(`📦 Moved old file to reference: ${oldFilePath}`);
+          oldFileMoved = true;
         }
       }
 
       // Update proposal - only file and optionally anggaran
+      // FIX 2026-03-09: Include dinas_reviewed_file to enable comparison in frontend
       const updateFields = ['file_proposal = ?', 'file_size = ?', 'updated_at = NOW()'];
       const updateValues = [filePath, fileSize];
+      
+      // Track old file for comparison (same as updateProposal logic)
+      if (oldFileMoved && oldFilePath) {
+        updateFields.push('dinas_reviewed_file = ?', 'dinas_reviewed_at = NOW()');
+        updateValues.push(oldFilePath);
+        logger.info(`📝 Updated dinas_reviewed_file to: ${oldFilePath} for comparison tracking`);
+      }
+
+      // If proposal was returned (revision/rejected), set status back to pending
+      if (isReturnedFromKecamatan) {
+        updateFields.push('status = ?', 'verified_at = NOW()');
+        updateValues.push('pending');
+        logger.info(`📝 Proposal ${id} status reset to pending via replaceFile (was revision/rejected)`);
+      }
 
       if (anggaran_usulan) {
         const anggaranNum = parseInt(String(anggaran_usulan).replace(/\D/g, ''), 10);
@@ -1529,6 +1552,8 @@ class BankeuProposalController {
       }
 
       // Only allow edit if NOT yet submitted to kecamatan and NOT yet submitted to dinas
+      // Tombol Edit hanya untuk DRAFT (belum pernah dikirim)
+      // Untuk revisi, desa pakai endpoint updateProposal (PATCH /:id)
       const isSubmittedToKecamatan = proposal.submitted_to_kecamatan;
       const isSubmittedToDinas = proposal.submitted_to_dinas_at !== null;
       
