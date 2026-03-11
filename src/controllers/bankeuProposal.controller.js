@@ -569,6 +569,7 @@ class BankeuProposalController {
 
       // Reset status to pending, clear verification data
       // IMPORTANT: Set verified_at to NOW() for Kecamatan case so frontend can detect reupload
+      // FIX 2026-03-11: Clear troubleshoot data karena sudah tidak relevan setelah desa upload ulang
       if (returnedFromKecamatan) {
         // Returned from Kecamatan - SET verified_at untuk detection
         logger.info(`🔄 Revisi dari Kecamatan - siap kirim kembali ke Kecamatan`);
@@ -578,13 +579,17 @@ class BankeuProposalController {
           'submitted_at = NULL',
           'catatan_verifikasi = NULL',
           'verified_at = NOW()',  // CRITICAL: Set this so frontend can detect reupload
+          // Clear troubleshoot data (tidak relevan lagi setelah upload ulang)
+          'troubleshoot_catatan = NULL',
+          'troubleshoot_by = NULL',
+          'troubleshoot_at = NULL',
           'updated_at = NOW()'
         );
         // Keep verified_by for tracking who approved before Kecamatan rejection
         replacements.push('pending', false);
       } else {
-        // Returned from Dinas - Keep dinas_status untuk tracking origin
-        logger.info(`🔄 Revisi dari Dinas - siap kirim kembali ke Dinas`);
+        // Returned from Dinas/Troubleshoot - Keep dinas_status untuk tracking origin
+        logger.info(`🔄 Revisi dari Dinas/Troubleshoot - siap kirim kembali ke Dinas`);
         updates.push(
           'status = ?',
           'submitted_to_kecamatan = ?',
@@ -596,6 +601,10 @@ class BankeuProposalController {
           // Reset verified_by dan verified_at untuk dinas saja
           'dinas_verified_by = NULL',
           'dinas_verified_at = NULL',
+          // Clear troubleshoot data (tidak relevan lagi setelah upload ulang)
+          'troubleshoot_catatan = NULL',
+          'troubleshoot_by = NULL',
+          'troubleshoot_at = NULL',
           'updated_at = NOW()'
         );
         replacements.push('pending', false);
