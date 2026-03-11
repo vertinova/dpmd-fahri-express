@@ -16,38 +16,9 @@ class CronSchedulerService {
 	 */
 	init() {
 		console.log('🕐 Initializing cron scheduler...');
-
-		// Morning reminder: 7:00 AM (Today's schedule)
-		this.jobs.morningReminder = cron.schedule('0 7 * * *', async () => {
-			console.log('\n⏰ Running morning schedule reminder (7:00 AM)...');
-			try {
-				const result = await pushNotificationService.sendTodayScheduleReminder();
-				console.log('✅ Morning reminder completed:', result);
-			} catch (error) {
-				console.error('❌ Morning reminder failed:', error);
-			}
-		}, {
-			scheduled: true,
-			timezone: 'Asia/Jakarta'
-		});
-
-		// Evening reminder: 9:00 PM (Tomorrow's schedule)
-		this.jobs.eveningReminder = cron.schedule('0 21 * * *', async () => {
-			console.log('\n⏰ Running evening schedule reminder (9:00 PM)...');
-			try {
-				const result = await pushNotificationService.sendTomorrowScheduleReminder();
-				console.log('✅ Evening reminder completed:', result);
-			} catch (error) {
-				console.error('❌ Evening reminder failed:', error);
-			}
-		}, {
-			scheduled: true,
-			timezone: 'Asia/Jakarta'
-		});
-
-		console.log('✅ Cron jobs initialized:');
-		console.log('   - Morning reminder (Today\'s schedule): Every day at 07:00 WIB');
-		console.log('   - Evening reminder (Tomorrow\'s schedule): Every day at 21:00 WIB');
+		// Auto cron dinonaktifkan - notifikasi jadwal dikirim manual oleh Sekretariat
+		// dari halaman Kelola Notifikasi setelah selesai input semua kegiatan
+		console.log('ℹ️  Cron jadwal dinonaktifkan. Notifikasi dikirim manual dari halaman Kelola Notifikasi.');
 	}
 
 	/**

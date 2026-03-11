@@ -10,7 +10,14 @@ const cronSchedulerService = require('../services/cronScheduler.service');
 
 // All cron test routes require auth + superadmin or sekretariat
 router.use(auth);
-router.use(checkRole(['superadmin']));
+router.use((req, res, next) => {
+	const isSuperadmin = req.user.role === 'superadmin';
+	const isSekretariat = req.user.bidang_id && Number(req.user.bidang_id) === 2;
+	if (!isSuperadmin && !isSekretariat) {
+		return res.status(403).json({ success: false, message: 'Akses ditolak' });
+	}
+	next();
+});
 
 // Test morning reminder (today's schedule)
 router.get('/test-morning-reminder', async (req, res) => {
