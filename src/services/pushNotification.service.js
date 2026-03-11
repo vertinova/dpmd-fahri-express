@@ -161,6 +161,7 @@ class PushNotificationService {
 				return { success: true, schedulesCount: 0 };
 			}
 
+			const todayStr = today.toISOString().split('T')[0];
 			const notification = {
 				title: '📅 Jadwal Kegiatan Hari Ini',
 				body: `Ada ${todaySchedules.length} kegiatan hari ini. Tap untuk melihat detail.`,
@@ -169,6 +170,7 @@ class PushNotificationService {
 				path: 'jadwal-kegiatan',
 				data: {
 					type: 'today_schedule',
+					targetDate: todayStr,
 					schedules: todaySchedules
 				},
 				actions: [
@@ -226,6 +228,7 @@ class PushNotificationService {
 				return { success: true, schedulesCount: 0 };
 			}
 
+			const tomorrowStr = tomorrow.toISOString().split('T')[0];
 			const notification = {
 				title: '📅 Jadwal Kegiatan Besok',
 				body: `Ada ${tomorrowSchedules.length} kegiatan besok. Tap untuk melihat detail.`,
@@ -234,6 +237,7 @@ class PushNotificationService {
 				path: 'jadwal-kegiatan',
 				data: {
 					type: 'tomorrow_schedule',
+					targetDate: tomorrowStr,
 					schedules: tomorrowSchedules
 				},
 				actions: [
