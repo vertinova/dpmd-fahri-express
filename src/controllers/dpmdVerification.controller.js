@@ -1082,15 +1082,15 @@ class DPMDVerificationController {
         })
       );
 
-      // Calculate tracking summary
+      // Calculate tracking summary - diselaraskan dgn frontend getProposalStage()
       const trackingSummary = {
         total: proposals.length,
-        di_desa: proposals.filter(p => !p.submitted_to_dinas_at).length,
-        di_dinas: proposals.filter(p => p.submitted_to_dinas_at && (!p.dinas_status || p.dinas_status === 'pending')).length,
+        di_desa: proposals.filter(p => !p.submitted_to_dinas_at && !p.dinas_status && !p.dpmd_status).length,
+        di_dinas: proposals.filter(p => (p.submitted_to_dinas_at || p.dinas_status) && p.dinas_status !== 'approved' && !p.dpmd_status).length,
         dinas_approved: proposals.filter(p => p.dinas_status === 'approved' && (!p.kecamatan_status || p.kecamatan_status === 'pending')).length,
         di_kecamatan: proposals.filter(p => p.dinas_status === 'approved' && p.submitted_to_kecamatan).length,
         kecamatan_approved: proposals.filter(p => p.kecamatan_status === 'approved').length,
-        di_dpmd: proposals.filter(p => p.submitted_to_dpmd).length,
+        di_dpmd: proposals.filter(p => p.submitted_to_dpmd || p.dpmd_status).length,
         dpmd_approved: proposals.filter(p => p.dpmd_status === 'approved').length,
         dpmd_rejected: proposals.filter(p => p.dpmd_status === 'rejected').length,
         revision: proposals.filter(p => p.dinas_status === 'revision' || p.kecamatan_status === 'revision' || p.dpmd_status === 'revision').length

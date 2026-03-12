@@ -67,26 +67,22 @@ class BankeuPublicController {
       // Calculate stages for public display
       // SELESAI = submitted_to_dpmd === true (sudah sampai DPMD)
       // Harus sama dengan logic di DPMD Verification Page: submitted_to_dpmd: true AND kecamatan_status: 'approved'
+      // Stage logic diselaraskan dengan SPKED frontend (getProposalStage)
+      // Cek dari tahap akhir ke awal, termasuk status revision/rejected
       const getStage = (p) => {
-        // SELESAI = Sudah dikirim ke DPMD (submitted_to_dpmd === true)
-        // Sama dengan filter di /dpmd/bankeu/proposals endpoint
-        if (p.submitted_to_dpmd === true && p.kecamatan_status === 'approved') {
+        // SELESAI = Sudah dikirim ke DPMD, atau pernah sampai DPMD (dpmd_status set)
+        if (p.submitted_to_dpmd === true || p.dpmd_status) {
           return 'selesai';
         }
         
-        // Di Kecamatan = Dinas approved, sudah dikirim ke kecamatan, tapi belum ke DPMD
-        if (p.dinas_status === 'approved' && !p.submitted_to_dpmd) {
-          return 'di_kecamatan';
-        }
-        if (p.submitted_to_kecamatan && p.dinas_status === 'approved') return 'di_kecamatan';
-        if (p.kecamatan_status && p.kecamatan_status !== 'approved' && p.submitted_to_kecamatan) {
-          return 'di_kecamatan'; // revision/rejected/in_review/pending di kecamatan
-        }
+        // Di Kecamatan = Dinas approved (menunggu/proses kecamatan)
+        if (p.kecamatan_status === 'approved') return 'di_kecamatan';
+        if (p.dinas_status === 'approved') return 'di_kecamatan';
         
-        // Di Dinas (sudah submit ke dinas tapi belum approved)
-        if (p.submitted_to_dinas_at) return 'di_dinas';
+        // Di Dinas = Sudah pernah submit ke dinas, ATAU punya dinas_status (termasuk revision/rejected)
+        if (p.submitted_to_dinas_at || p.dinas_status) return 'di_dinas';
         
-        // Masih di Desa
+        // Masih di Desa (belum pernah interaksi dengan dinas)
         return 'di_desa';
       };
 
