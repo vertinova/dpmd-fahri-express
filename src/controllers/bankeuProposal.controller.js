@@ -1154,9 +1154,9 @@ class BankeuProposalController {
     
     try {
       const userId = req.user.id;
-      const { tahun } = req.body; // Tahun anggaran dari frontend
+      const { tahun, proposal_ids } = req.body; // Tahun anggaran + optional per-proposal IDs
 
-      logger.info(`📤 SUBMIT TO DINAS TERKAIT (FIRST SUBMISSION) - User: ${userId}, Tahun: ${tahun || 'ALL'}`);
+      logger.info(`📤 SUBMIT TO DINAS TERKAIT (FIRST SUBMISSION) - User: ${userId}, Tahun: ${tahun || 'ALL'}, ProposalIDs: ${proposal_ids ? proposal_ids.join(',') : 'ALL'}`);
 
       // Check if submission is open
       const { isOpen } = await checkSubmissionOpen();
@@ -1184,9 +1184,16 @@ class BankeuProposalController {
 
       const desaId = users[0].desa_id;
 
-      // Build tahun filter
+      // Build filters
       const tahunFilter = tahun ? 'AND tahun_anggaran = ?' : '';
-      const replacementsCount = tahun ? [desaId, parseInt(tahun)] : [desaId];
+      const proposalIdsFilter = proposal_ids && Array.isArray(proposal_ids) && proposal_ids.length > 0
+        ? `AND id IN (${proposal_ids.map(() => '?').join(',')})`
+        : '';
+      const replacementsCount = [desaId];
+      if (tahun) replacementsCount.push(parseInt(tahun));
+      if (proposal_ids && Array.isArray(proposal_ids) && proposal_ids.length > 0) {
+        replacementsCount.push(...proposal_ids.map(id => parseInt(id)));
+      }
 
       // NEW FLOW 2026-01-30: Submit proposal yang belum pernah submit
       // Kondisi: submitted_to_dinas_at IS NULL (belum pernah dikirim ke dinas)
@@ -1197,6 +1204,7 @@ class BankeuProposalController {
           AND submitted_to_dinas_at IS NULL
           AND (dinas_status IS NULL OR dinas_status = 'pending')
           ${tahunFilter}
+          ${proposalIdsFilter}
       `, { replacements: replacementsCount });
 
       if (notSubmittedCount[0].total < 1) {
@@ -1210,7 +1218,11 @@ class BankeuProposalController {
       const count = notSubmittedCount[0].total;
 
       // Submit to Dinas Terkait
-      const replacementsUpdate = tahun ? [desaId, parseInt(tahun)] : [desaId];
+      const replacementsUpdate = [desaId];
+      if (tahun) replacementsUpdate.push(parseInt(tahun));
+      if (proposal_ids && Array.isArray(proposal_ids) && proposal_ids.length > 0) {
+        replacementsUpdate.push(...proposal_ids.map(id => parseInt(id)));
+      }
       await sequelize.query(`
         UPDATE bankeu_proposals
         SET submitted_to_dinas_at = NOW(),
@@ -1220,6 +1232,7 @@ class BankeuProposalController {
           AND submitted_to_dinas_at IS NULL
           AND (dinas_status IS NULL OR dinas_status = 'pending')
           ${tahunFilter}
+          ${proposalIdsFilter}
       `, { 
         replacements: replacementsUpdate,
         transaction 
@@ -1281,9 +1294,9 @@ class BankeuProposalController {
     
     try {
       const userId = req.user.id;
-      const { destination, tahun } = req.body; // 'kecamatan' atau 'dinas' + tahun anggaran
+      const { destination, tahun, proposal_ids } = req.body; // 'kecamatan' atau 'dinas' + tahun anggaran + optional per-proposal IDs
 
-      logger.info(`📤 RESUBMIT PROPOSAL (REVISI) - User: ${userId}, Destination: ${destination || 'auto-detect'}, Tahun: ${tahun || 'ALL'}`);
+      logger.info(`📤 RESUBMIT PROPOSAL (REVISI) - User: ${userId}, Destination: ${destination || 'auto-detect'}, Tahun: ${tahun || 'ALL'}, ProposalIDs: ${proposal_ids ? proposal_ids.join(',') : 'ALL'}`);
 
       // Check if submission is open
       const { isOpen } = await checkSubmissionOpen();
@@ -1311,9 +1324,16 @@ class BankeuProposalController {
 
       const desaId = users[0].desa_id;
 
-      // Build tahun filter for resubmit
+      // Build filters
       const tahunFilter = tahun ? 'AND tahun_anggaran = ?' : '';
-      const baseReplacements = tahun ? [desaId, parseInt(tahun)] : [desaId];
+      const proposalIdsFilter = proposal_ids && Array.isArray(proposal_ids) && proposal_ids.length > 0
+        ? `AND id IN (${proposal_ids.map(() => '?').join(',')})`
+        : '';
+      const baseReplacements = [desaId];
+      if (tahun) baseReplacements.push(parseInt(tahun));
+      if (proposal_ids && Array.isArray(proposal_ids) && proposal_ids.length > 0) {
+        baseReplacements.push(...proposal_ids.map(id => parseInt(id)));
+      }
 
       // Get all revision proposals to detect origin
       // Proposal yang SUDAH UPLOAD ULANG: status='pending' tapi punya dinas_status/kecamatan_status/dpmd_status
@@ -1332,6 +1352,7 @@ class BankeuProposalController {
             OR kecamatan_status IN ('rejected', 'revision')
           )
           ${tahunFilter}
+          ${proposalIdsFilter}
       `, { replacements: baseReplacements });
 
       if (proposals.length < 1) {
@@ -1399,6 +1420,7 @@ class BankeuProposalController {
             AND (dinas_status IS NULL OR dinas_status NOT IN ('rejected', 'revision'))
             AND dpmd_status IS NULL
             ${tahunFilter}
+            ${proposalIdsFilter}
         `;
       } else {
         // REJECT DARI DINAS atau DPMD atau TROUBLESHOOT → Kirim ke Dinas (flow normal dari awal)
@@ -1434,6 +1456,7 @@ class BankeuProposalController {
               OR troubleshoot_catatan IS NOT NULL
             )
             ${tahunFilter}
+            ${proposalIdsFilter}
         `;
       }
 
