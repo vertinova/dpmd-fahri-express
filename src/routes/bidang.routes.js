@@ -96,5 +96,17 @@ router.get(
   (req, res) => bidangController.getActivityLogs(req, res)
 );
 
+/**
+ * @route   GET /api/bidang/:bidangId/pegawai
+ * @desc    Get list of pegawai for specific bidang
+ * @access  Private (pegawai/kepala_bidang for their bidang, kepala_dinas/superadmin for all)
+ */
+router.get(
+  '/:bidangId/pegawai',
+  auth,
+  checkBidangAccess,
+  (req, res) => bidangController.getPegawai(req, res)
+);
+
 
 module.exports = router;

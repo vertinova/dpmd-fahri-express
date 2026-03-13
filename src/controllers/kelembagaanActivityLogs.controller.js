@@ -149,19 +149,21 @@ const getDetailActivityLogs = async (req, res) => {
  * - desa_id: filter by desa (optional)
  * - entity_type: filter by entity (lembaga/pengurus) (optional)
  * - limit: jumlah log (default: 50)
+ * - offset: skip records for pagination (default: 0)
  * 
  * Endpoint: GET /api/kelembagaan/activity-logs
  */
 const getAllActivityLogs = async (req, res) => {
   try {
-    const { type, kelembagaan_id, desa_id, entity_type, limit } = req.query;
+    const { type, kelembagaan_id, desa_id, entity_type, limit, offset } = req.query;
 
     const logs = await fetchActivityLogs({
       kelembagaanType: type || null,
       kelembagaanId: kelembagaan_id || null,
       desaId: desa_id ? parseInt(desa_id) : null,
       entityType: entity_type || null,
-      limit: limit ? parseInt(limit) : 50
+      limit: limit ? parseInt(limit) : 50,
+      skip: offset ? parseInt(offset) : 0
     });
 
     return res.status(200).json({
@@ -172,7 +174,9 @@ const getAllActivityLogs = async (req, res) => {
           type,
           kelembagaan_id,
           desa_id: desa_id ? parseInt(desa_id) : null,
-          entity_type
+          entity_type,
+          limit: limit ? parseInt(limit) : 50,
+          offset: offset ? parseInt(offset) : 0
         },
         total: logs.length,
         logs
