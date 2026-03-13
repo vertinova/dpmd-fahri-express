@@ -253,6 +253,89 @@ class BidangController {
       });
     }
   }
+
+  /**
+   * Get list of pegawai for specific bidang
+   */
+  async getPegawai(req, res) {
+    try {
+      const { bidangId } = req.params;
+      const bidangIdInt = parseInt(bidangId);
+      
+      // Get all users yang merupakan pegawai di bidang ini
+      const pegawaiList = await prisma.users.findMany({
+        where: {
+          bidang_id: bidangIdInt,
+          pegawai_id: {
+            not: null
+          },
+          is_active: true
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          avatar: true,
+          pegawai_id: true,
+          pegawai: {
+            select: {
+              id_pegawai: true,
+              nama_pegawai: true,
+              id_bidang: true
+            }
+          }
+        },
+        orderBy: [
+          {
+            role: 'asc' // kepala_bidang first, then others
+          },
+          {
+            name: 'asc'
+          }
+        ]
+      });
+
+      // Format response
+      const formattedData = pegawaiList.map(user => {
+        // Determine role based on user.role
+        let pegawaiRole = 'staff';
+        if (user.role === 'kepala_bidang') {
+          pegawaiRole = 'kepala_bidang';
+        } else if (user.role === 'sekretaris_bidang') {
+          pegawaiRole = 'sekretaris';
+        } else if (user.role === 'koordinator') {
+          pegawaiRole = 'koordinator';
+        }
+
+        return {
+          id: Number(user.id),
+          role: pegawaiRole,
+          user: {
+            id: Number(user.id),
+            fullname: user.name,
+            email: user.email,
+            nip: user.pegawai?.id_pegawai ? String(user.pegawai.id_pegawai) : null,
+            phone: null, // Add if phone field exists in users table
+            avatar: user.avatar ? `/storage/avatars/${user.avatar}` : null
+          }
+        };
+      });
+      
+      res.json({
+        success: true,
+        message: 'Pegawai retrieved successfully',
+        data: formattedData
+      });
+    } catch (error) {
+      console.error('Error getting pegawai:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Gagal memuat data pegawai',
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = new BidangController();

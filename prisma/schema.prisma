@@ -97,6 +97,7 @@ model bankeu_master_kegiatan {
   is_active                Boolean?                              @default(true)
   created_at               DateTime?                             @default(now()) @db.Timestamp(0)
   bankeu_proposal_kegiatan bankeu_proposal_kegiatan[]
+  berita_acara_history     berita_acara_history[]
 
   @@index([dinas_terkait], map: "idx_dinas_terkait")
   @@index([jenis_kegiatan], map: "idx_jenis")
@@ -169,6 +170,7 @@ model bankeu_proposals {
   users_bankeu_proposals_verified_byTousers           users?                               @relation("bankeu_proposals_verified_byTousers", fields: [verified_by], references: [id], onUpdate: NoAction, map: "fk_bankeu_proposals_verified_by")
   users_bankeu_proposals_troubleshoot_byTousers       users?                               @relation("bankeu_proposals_troubleshoot_byTousers", fields: [troubleshoot_by], references: [id], onUpdate: NoAction, map: "fk_bankeu_troubleshoot_by")
   bankeu_verification_questionnaires                  bankeu_verification_questionnaires[]
+  berita_acara_history                                berita_acara_history[]
 
   @@index([created_by], map: "idx_created_by")
   @@index([desa_id], map: "idx_desa")
@@ -408,6 +410,7 @@ model desas {
   updated_at                DateTime?                   @db.Timestamp(0)
   aparatur_desa             aparatur_desa[]
   bankeu_proposals          bankeu_proposals[]
+  berita_acara_history      berita_acara_history[]
   desa_bankeu_surat         desa_bankeu_surat[]
   kecamatans                kecamatans                  @relation(fields: [kecamatan_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "desas_kecamatan_id_foreign")
   karang_tarunas            karang_tarunas[]
@@ -415,6 +418,7 @@ model desas {
   lpms                      lpms[]
   pengurus                  pengurus[]
   perjadin_grup             perjadin_grup[]
+  perjadin_pegawai          perjadin_pegawai[]
   petugas_monitoring        petugas_monitoring[]
   pkks                      pkks[]
   posyandus                 posyandus[]
@@ -583,8 +587,13 @@ model kecamatans {
   id                     BigInt                   @id @default(autoincrement()) @db.UnsignedBigInt
   kode                   String                   @unique(map: "kecamatans_kode_unique") @db.VarChar(255)
   nama                   String                   @db.VarChar(255)
+  nama_camat             String?                  @db.VarChar(255)
+  nip_camat              String?                  @db.VarChar(50)
+  logo_path              String?                  @db.VarChar(255)
+  alamat                 String?                  @db.Text
   created_at             DateTime?                @db.Timestamp(0)
   updated_at             DateTime?                @db.Timestamp(0)
+  berita_acara_history   berita_acara_history[]
   desas                  desas[]
   petugas_monitoring     petugas_monitoring[]
   verifikator_akses_desa verifikator_akses_desa[]
@@ -769,6 +778,7 @@ model pegawai {
   updated_at       DateTime?          @db.Timestamp(0)
   kegiatan_pegawai kegiatan_pegawai[]
   bidangs          bidangs            @relation(fields: [id_bidang], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "pegawai_id_bidang_foreign")
+  perjadin_pegawai perjadin_pegawai[]
   users            users[]
 
   @@index([id_bidang], map: "pegawai_id_bidang_foreign")
@@ -1097,6 +1107,7 @@ model users {
   bankeu_proposals_bankeu_proposals_kecamatan_verified_byTousers bankeu_proposals[]          @relation("bankeu_proposals_kecamatan_verified_byTousers")
   bankeu_proposals_bankeu_proposals_created_byTousers            bankeu_proposals[]          @relation("bankeu_proposals_created_byTousers")
   bankeu_proposals_bankeu_proposals_verified_byTousers           bankeu_proposals[]          @relation("bankeu_proposals_verified_byTousers")
+  berita_acara_history                                           berita_acara_history[]
   bankeu_proposals_bankeu_proposals_troubleshoot_byTousers       bankeu_proposals[]          @relation("bankeu_proposals_troubleshoot_byTousers")
   desa_bankeu_surat                                              desa_bankeu_surat[]
   disposisi_disposisi_dari_user_idTousers                        disposisi[]                 @relation("disposisi_dari_user_idTousers")
@@ -1110,6 +1121,7 @@ model users {
   notifications_sent                                             notifications[]             @relation("notifications_sender")
   notifications_received                                         notifications[]             @relation("notifications_user")
   perjadin_grup                                                  perjadin_grup[]
+  perjadin_pegawai                                               perjadin_pegawai[]
   push_subscriptions                                             push_subscriptions[]
   surat_masuk                                                    surat_masuk[]
   pegawai                                                        pegawai?                    @relation(fields: [pegawai_id], references: [id_pegawai], onDelete: Cascade, onUpdate: NoAction, map: "users_pegawai_id_foreign")
@@ -1134,6 +1146,77 @@ model verifikator_akses_desa {
   @@index([verifikator_id], map: "idx_verifikator_id")
 }
 
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model berita_acara_history {
+  id                     BigInt                      @id @default(autoincrement()) @db.UnsignedBigInt
+  proposal_id            BigInt                      @db.UnsignedBigInt
+  desa_id                BigInt                      @db.UnsignedBigInt
+  kecamatan_id           BigInt                      @db.UnsignedBigInt
+  kegiatan_id            Int?                        @db.UnsignedTinyInt
+  file_path              String                      @db.VarChar(255)
+  file_name              String                      @db.VarChar(255)
+  file_size              Int?                        @db.UnsignedInt
+  qr_code                String                      @unique(map: "qr_code") @db.VarChar(100)
+  qr_code_path           String?                     @db.VarChar(255)
+  generated_by           BigInt                      @db.UnsignedBigInt
+  generated_at           DateTime                    @default(now()) @db.Timestamp(0)
+  checklist_summary      Json?
+  tim_verifikasi_data    Json?
+  version                Int                         @default(1) @db.UnsignedInt
+  is_latest              Boolean?                    @default(true)
+  replaced_by            BigInt?                     @db.UnsignedBigInt
+  status                 berita_acara_history_status @default(active)
+  revoked_at             DateTime?                   @db.Timestamp(0)
+  revoked_by             BigInt?                     @db.UnsignedBigInt
+  revoked_reason         String?                     @db.Text
+  created_at             DateTime                    @default(now()) @db.Timestamp(0)
+  updated_at             DateTime                    @default(now()) @db.Timestamp(0)
+  desas                  desas                       @relation(fields: [desa_id], references: [id], onDelete: Cascade, map: "fk_ba_history_desa")
+  users                  users                       @relation(fields: [generated_by], references: [id], onDelete: Cascade, map: "fk_ba_history_generator")
+  kecamatans             kecamatans                  @relation(fields: [kecamatan_id], references: [id], onDelete: Cascade, map: "fk_ba_history_kecamatan")
+  bankeu_master_kegiatan bankeu_master_kegiatan?     @relation(fields: [kegiatan_id], references: [id], map: "fk_ba_history_kegiatan")
+  bankeu_proposals       bankeu_proposals            @relation(fields: [proposal_id], references: [id], onDelete: Cascade, map: "fk_ba_history_proposal")
+
+  @@index([generated_by], map: "fk_ba_history_generator")
+  @@index([kegiatan_id], map: "fk_ba_history_kegiatan")
+  @@index([desa_id], map: "idx_ba_history_desa")
+  @@index([generated_at], map: "idx_ba_history_generated")
+  @@index([kecamatan_id], map: "idx_ba_history_kecamatan")
+  @@index([desa_id, is_latest], map: "idx_ba_history_latest")
+  @@index([proposal_id], map: "idx_ba_history_proposal")
+  @@index([qr_code], map: "idx_ba_history_qr")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model perjadin_pegawai {
+  id                BigInt                  @id @default(autoincrement()) @db.UnsignedBigInt
+  pegawai_id        BigInt                  @db.UnsignedBigInt
+  desa_tujuan_id    BigInt?                 @db.UnsignedBigInt
+  lokasi_tujuan     String                  @db.VarChar(255)
+  alamat_tujuan     String?                 @db.Text
+  tujuan_perjalanan String                  @db.Text
+  tanggal_berangkat DateTime                @db.Date
+  tanggal_kembali   DateTime                @db.Date
+  nomor_sppd        String?                 @db.VarChar(100)
+  status            perjadin_pegawai_status @default(draft)
+  catatan_approval  String?                 @db.Text
+  approved_by       BigInt?                 @db.UnsignedBigInt
+  approved_at       DateTime?               @db.DateTime(0)
+  keterangan        String?                 @db.Text
+  created_at        DateTime?               @default(now()) @db.Timestamp(0)
+  updated_at        DateTime?               @default(now()) @db.Timestamp(0)
+  users             users?                  @relation(fields: [approved_by], references: [id], onUpdate: NoAction, map: "fk_perjadin_approved_by")
+  desas             desas?                  @relation(fields: [desa_tujuan_id], references: [id], onUpdate: NoAction, map: "fk_perjadin_desa_tujuan")
+  pegawai           pegawai                 @relation(fields: [pegawai_id], references: [id_pegawai], onDelete: Cascade, onUpdate: NoAction, map: "fk_perjadin_pegawai")
+
+  @@index([approved_by], map: "fk_perjadin_approved_by")
+  @@index([desa_tujuan_id], map: "idx_perjadin_desa_tujuan")
+  @@index([pegawai_id], map: "idx_perjadin_pegawai_id")
+  @@index([status], map: "idx_perjadin_status")
+  @@index([tanggal_berangkat, tanggal_kembali], map: "idx_perjadin_tanggal")
+}
+
+=======
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model info_banners {
   id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
@@ -1530,6 +1613,20 @@ enum bankeu_verification_questionnaires_status {
   submitted
 }
 
+enum perjadin_pegawai_status {
+  draft
+  diajukan
+  disetujui
+  ditolak
+  selesai
+}
+
+enum berita_acara_history_status {
+  active
+  superseded
+  revoked
+}
+
 enum video_meeting_chats_message_type {
   text
   file
@@ -1561,3 +1658,4 @@ enum video_meetings_status {
   ended
   cancelled
 }
+

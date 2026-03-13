@@ -197,6 +197,7 @@ async function getActivityLogs({
   kelembagaanId = null,
   desaId = null,
   limit = 50,
+  skip = 0,
   entityType = null
 }) {
   try {
@@ -223,6 +224,7 @@ async function getActivityLogs({
       orderBy: {
         created_at: 'desc'
       },
+      skip: skip,
       take: limit,
       include: {
         users: {

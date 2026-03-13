@@ -38,8 +38,14 @@ class SummaryController {
         lpmData,
         satlinmasData,
         pkkData,
-        // Get pengurus data for each kelembagaan type
-        pengurusData
+        // Get verified data
+        rwVerifiedData,
+        rtVerifiedData,
+        posyanduVerifiedData,
+        karangTarunaVerifiedData,
+        lpmVerifiedData,
+        satlinmasVerifiedData,
+        pkkVerifiedData
       ] = await Promise.all([
         prisma.rws.groupBy({
           by: ['desa_id'],
@@ -72,11 +78,37 @@ class SummaryController {
           where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif' },
           select: { id: true, desa_id: true, status_kelembagaan: true }
         }),
-        // Fetch all pengurus for active kelembagaan
-        prisma.pengurus.groupBy({
-          by: ['pengurusable_type', 'pengurusable_id'],
+        // Get verified data
+        prisma.rws.groupBy({
+          by: ['desa_id'],
           _count: { id: true },
-          where: { status_jabatan: 'aktif' }
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' }
+        }),
+        prisma.rts.groupBy({
+          by: ['desa_id'],
+          _count: { id: true },
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' }
+        }),
+        prisma.posyandus.groupBy({
+          by: ['desa_id'],
+          _count: { id: true },
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' }
+        }),
+        prisma.karang_tarunas.findMany({
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' },
+          select: { id: true, desa_id: true, status_kelembagaan: true }
+        }),
+        prisma.lpms.findMany({
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' },
+          select: { id: true, desa_id: true, status_kelembagaan: true }
+        }),
+        prisma.satlinmas.findMany({
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' },
+          select: { id: true, desa_id: true, status_kelembagaan: true }
+        }),
+        prisma.pkks.findMany({
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' },
+          select: { id: true, desa_id: true, status_kelembagaan: true }
         })
       ]);
 
@@ -89,22 +121,14 @@ class SummaryController {
       const satlinmasMap = new Map(satlinmasData.map(item => [item.desa_id.toString(), item.status_kelembagaan === 'aktif' ? 'Terbentuk' : 'Belum Terbentuk']));
       const pkkMap = new Map(pkkData.map(item => [item.desa_id.toString(), item.status_kelembagaan === 'aktif' ? 'Terbentuk' : 'Belum Terbentuk']));
 
-      // Create pengurus lookup maps by type and ID
-      const pengurusMap = new Map();
-      pengurusData.forEach(p => {
-        const key = `${p.pengurusable_type}_${p.pengurusable_id}`;
-        pengurusMap.set(key, p._count.id);
-      });
-
-      // Helper to get pengurus count for kelembagaan
-      const getPengurusCount = (type, kelembagaanArray, desaId) => {
-        return kelembagaanArray
-          .filter(k => k.desa_id.toString() === desaId.toString())
-          .reduce((sum, k) => {
-            const key = `${type}_${k.id}`;
-            return sum + (pengurusMap.get(key) || 0);
-          }, 0);
-      };
+      // Convert verified data to lookup maps
+      const rwVerifiedMap = new Map(rwVerifiedData.map(item => [item.desa_id.toString(), item._count.id]));
+      const rtVerifiedMap = new Map(rtVerifiedData.map(item => [item.desa_id.toString(), item._count.id]));
+      const posyanduVerifiedMap = new Map(posyanduVerifiedData.map(item => [item.desa_id.toString(), item._count.id]));
+      const karangTarunaVerifiedMap = new Map(karangTarunaVerifiedData.map(item => [item.desa_id.toString(), item.status_kelembagaan === 'aktif' ? 'Terbentuk' : 'Belum Terbentuk']));
+      const lpmVerifiedMap = new Map(lpmVerifiedData.map(item => [item.desa_id.toString(), item.status_kelembagaan === 'aktif' ? 'Terbentuk' : 'Belum Terbentuk']));
+      const satlinmasVerifiedMap = new Map(satlinmasVerifiedData.map(item => [item.desa_id.toString(), item.status_kelembagaan === 'aktif' ? 'Terbentuk' : 'Belum Terbentuk']));
+      const pkkVerifiedMap = new Map(pkkVerifiedData.map(item => [item.desa_id.toString(), item.status_kelembagaan === 'aktif' ? 'Terbentuk' : 'Belum Terbentuk']));
 
       const kelembagaanData = [];
 
@@ -126,14 +150,14 @@ class SummaryController {
               satlinmas: satlinmasMap.get(desaIdStr) || 'Belum Terbentuk',
               pkk: pkkMap.get(desaIdStr) || 'Belum Terbentuk'
             },
-            pengurus: {
-              rw: getPengurusCount('rws', [...rwData.map(r => ({ id: r.desa_id, desa_id: r.desa_id }))].filter(r => r.desa_id.toString() === desaIdStr), desa.id),
-              rt: getPengurusCount('rts', [...rtData.map(r => ({ id: r.desa_id, desa_id: r.desa_id }))].filter(r => r.desa_id.toString() === desaIdStr), desa.id),
-              posyandu: getPengurusCount('posyandus', posyanduData.filter(p => p.desa_id.toString() === desaIdStr), desa.id),
-              karangTaruna: getPengurusCount('karang_tarunas', karangTarunaData.filter(k => k.desa_id.toString() === desaIdStr), desa.id),
-              lpm: getPengurusCount('lpms', lpmData.filter(l => l.desa_id.toString() === desaIdStr), desa.id),
-              satlinmas: getPengurusCount('satlinmas', satlinmasData.filter(s => s.desa_id.toString() === desaIdStr), desa.id),
-              pkk: getPengurusCount('pkks', pkkData.filter(p => p.desa_id.toString() === desaIdStr), desa.id)
+            verifiedKelembagaan: {
+              rw: rwVerifiedMap.get(desaIdStr) || 0,
+              rt: rtVerifiedMap.get(desaIdStr) || 0,
+              posyandu: posyanduVerifiedMap.get(desaIdStr) || 0,
+              karangTaruna: karangTarunaVerifiedMap.get(desaIdStr) || 'Belum Terbentuk',
+              lpm: lpmVerifiedMap.get(desaIdStr) || 'Belum Terbentuk',
+              satlinmas: satlinmasVerifiedMap.get(desaIdStr) || 'Belum Terbentuk',
+              pkk: pkkVerifiedMap.get(desaIdStr) || 'Belum Terbentuk'
             }
           };
         });
@@ -149,14 +173,14 @@ class SummaryController {
           pkk: acc.pkk + (desa.kelembagaan.pkk === 'Terbentuk' ? 1 : 0)
         }), { rw: 0, rt: 0, posyandu: 0, karangTaruna: 0, lpm: 0, satlinmas: 0, pkk: 0 });
 
-        const totalPengurus = desasWithKelembagaan.reduce((acc, desa) => ({
-          rw: acc.rw + desa.pengurus.rw,
-          rt: acc.rt + desa.pengurus.rt,
-          posyandu: acc.posyandu + desa.pengurus.posyandu,
-          karangTaruna: acc.karangTaruna + desa.pengurus.karangTaruna,
-          lpm: acc.lpm + desa.pengurus.lpm,
-          satlinmas: acc.satlinmas + desa.pengurus.satlinmas,
-          pkk: acc.pkk + desa.pengurus.pkk
+        const verifiedKelembagaan = desasWithKelembagaan.reduce((acc, desa) => ({
+          rw: acc.rw + desa.verifiedKelembagaan.rw,
+          rt: acc.rt + desa.verifiedKelembagaan.rt,
+          posyandu: acc.posyandu + desa.verifiedKelembagaan.posyandu,
+          karangTaruna: acc.karangTaruna + (desa.verifiedKelembagaan.karangTaruna === 'Terbentuk' ? 1 : 0),
+          lpm: acc.lpm + (desa.verifiedKelembagaan.lpm === 'Terbentuk' ? 1 : 0),
+          satlinmas: acc.satlinmas + (desa.verifiedKelembagaan.satlinmas === 'Terbentuk' ? 1 : 0),
+          pkk: acc.pkk + (desa.verifiedKelembagaan.pkk === 'Terbentuk' ? 1 : 0)
         }), { rw: 0, rt: 0, posyandu: 0, karangTaruna: 0, lpm: 0, satlinmas: 0, pkk: 0 });
 
         kelembagaanData.push({
@@ -164,7 +188,7 @@ class SummaryController {
           nama: kecamatan.nama,
           desas: desasWithKelembagaan,
           totalKelembagaan,
-          totalPengurus
+          verifiedKelembagaan
         });
       }
 
@@ -202,84 +226,15 @@ class SummaryController {
         prisma.pkks.count({ where: { status_kelembagaan: 'aktif' } })
       ]);
 
-      // Get all active kelembagaan IDs for pengurus queries
-      const [
-        activeRws,
-        activeRts,
-        activePosyandus,
-        activeKarangTarunas,
-        activeLpms,
-        activeSatlinmas,
-        activePkks
-      ] = await Promise.all([
-        prisma.rws.findMany({ where: { status_kelembagaan: 'aktif' }, select: { id: true, desa_id: true } }),
-        prisma.rts.findMany({ where: { status_kelembagaan: 'aktif' }, select: { id: true, desa_id: true } }),
-        prisma.posyandus.findMany({ where: { status_kelembagaan: 'aktif' }, select: { id: true, desa_id: true } }),
-        prisma.karang_tarunas.findMany({ where: { status_kelembagaan: 'aktif' }, select: { id: true, desa_id: true } }),
-        prisma.lpms.findMany({ where: { status_kelembagaan: 'aktif' }, select: { id: true, desa_id: true } }),
-        prisma.satlinmas.findMany({ where: { status_kelembagaan: 'aktif' }, select: { id: true, desa_id: true } }),
-        prisma.pkks.findMany({ where: { status_kelembagaan: 'aktif' }, select: { id: true, desa_id: true } })
-      ]);
-
-      // Count pengurus for each kelembagaan type (active only)
-      const [
-        pengurusRw,
-        pengurusRt,
-        pengurusPosyandu,
-        pengurusKarangTaruna,
-        pengurusLpm,
-        pengurusSatlinmas,
-        pengurusPkk
-      ] = await Promise.all([
-        prisma.pengurus.count({ 
-          where: { 
-            pengurusable_type: 'rws',
-            pengurusable_id: { in: activeRws.map(r => r.id) },
-            status_jabatan: 'aktif'
-          } 
-        }),
-        prisma.pengurus.count({ 
-          where: { 
-            pengurusable_type: 'rts',
-            pengurusable_id: { in: activeRts.map(r => r.id) },
-            status_jabatan: 'aktif'
-          } 
-        }),
-        prisma.pengurus.count({ 
-          where: { 
-            pengurusable_type: 'posyandus',
-            pengurusable_id: { in: activePosyandus.map(p => p.id) },
-            status_jabatan: 'aktif'
-          } 
-        }),
-        prisma.pengurus.count({ 
-          where: { 
-            pengurusable_type: 'karang_tarunas',
-            pengurusable_id: { in: activeKarangTarunas.map(k => k.id) },
-            status_jabatan: 'aktif'
-          } 
-        }),
-        prisma.pengurus.count({ 
-          where: { 
-            pengurusable_type: 'lpms',
-            pengurusable_id: { in: activeLpms.map(l => l.id) },
-            status_jabatan: 'aktif'
-          } 
-        }),
-        prisma.pengurus.count({ 
-          where: { 
-            pengurusable_type: 'satlinmas',
-            pengurusable_id: { in: activeSatlinmas.map(s => s.id) },
-            status_jabatan: 'aktif'
-          } 
-        }),
-        prisma.pengurus.count({ 
-          where: { 
-            pengurusable_type: 'pkks',
-            pengurusable_id: { in: activePkks.map(p => p.id) },
-            status_jabatan: 'aktif'
-          } 
-        })
+      // Get verified counts for all kelembagaan types (active and verified)
+      const [rwVerified, rtVerified, posyanduVerified, karangTarunaVerified, lpmVerified, satlinmasVerified, pkkVerified] = await Promise.all([
+        prisma.rws.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.rts.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.posyandus.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.karang_tarunas.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.lpms.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.satlinmas.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.pkks.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'verified' } })
       ]);
 
       // Get counts by desa/kelurahan status (active only)
@@ -303,47 +258,25 @@ class SummaryController {
         prisma.pkks.count({ where: { desa_id: { in: desaKelurahanIds }, status_kelembagaan: 'aktif' } })
       ]);
 
-      // Count pengurus by desa/kelurahan status
-      const desaActiveIds = {
-        rw: activeRws.filter(r => desaDesaIds.includes(r.desa_id)).map(r => r.id),
-        rt: activeRts.filter(r => desaDesaIds.includes(r.desa_id)).map(r => r.id),
-        posyandu: activePosyandus.filter(p => desaDesaIds.includes(p.desa_id)).map(p => p.id),
-        karangTaruna: activeKarangTarunas.filter(k => desaDesaIds.includes(k.desa_id)).map(k => k.id),
-        lpm: activeLpms.filter(l => desaDesaIds.includes(l.desa_id)).map(l => l.id),
-        satlinmas: activeSatlinmas.filter(s => desaDesaIds.includes(s.desa_id)).map(s => s.id),
-        pkk: activePkks.filter(p => desaDesaIds.includes(p.desa_id)).map(p => p.id)
-      };
-
-      const kelurahanActiveIds = {
-        rw: activeRws.filter(r => desaKelurahanIds.includes(r.desa_id)).map(r => r.id),
-        rt: activeRts.filter(r => desaKelurahanIds.includes(r.desa_id)).map(r => r.id),
-        posyandu: activePosyandus.filter(p => desaKelurahanIds.includes(p.desa_id)).map(p => p.id),
-        karangTaruna: activeKarangTarunas.filter(k => desaKelurahanIds.includes(k.desa_id)).map(k => k.id),
-        lpm: activeLpms.filter(l => desaKelurahanIds.includes(l.desa_id)).map(l => l.id),
-        satlinmas: activeSatlinmas.filter(s => desaKelurahanIds.includes(s.desa_id)).map(s => s.id),
-        pkk: activePkks.filter(p => desaKelurahanIds.includes(p.desa_id)).map(p => p.id)
-      };
-
+      // Get verified counts by desa/kelurahan status (active and verified)
       const [
-        pengurusDesaRw, pengurusDesaRt, pengurusDesaPosyandu, pengurusDesaKarangTaruna, 
-        pengurusDesaLpm, pengurusDesaSatlinmas, pengurusDesaPkk,
-        pengurusKelurahanRw, pengurusKelurahanRt, pengurusKelurahanPosyandu, pengurusKelurahanKarangTaruna,
-        pengurusKelurahanLpm, pengurusKelurahanSatlinmas, pengurusKelurahanPkk
+        rwDesaVerified, rtDesaVerified, posyanduDesaVerified, karangTarunaDesaVerified, lpmDesaVerified, satlinmasDesaVerified, pkkDesaVerified,
+        rwKelurahanVerified, rtKelurahanVerified, posyanduKelurahanVerified, karangTarunaKelurahanVerified, lpmKelurahanVerified, satlinmasKelurahanVerified, pkkKelurahanVerified
       ] = await Promise.all([
-        prisma.pengurus.count({ where: { pengurusable_type: 'rws', pengurusable_id: { in: desaActiveIds.rw }, status_jabatan: 'aktif' } }),
-        prisma.pengurus.count({ where: { pengurusable_type: 'rts', pengurusable_id: { in: desaActiveIds.rt }, status_jabatan: 'aktif' } }),
-        prisma.pengurus.count({ where: { pengurusable_type: 'posyandus', pengurusable_id: { in: desaActiveIds.posyandu }, status_jabatan: 'aktif' } }),
-        prisma.pengurus.count({ where: { pengurusable_type: 'karang_tarunas', pengurusable_id: { in: desaActiveIds.karangTaruna }, status_jabatan: 'aktif' } }),
-        prisma.pengurus.count({ where: { pengurusable_type: 'lpms', pengurusable_id: { in: desaActiveIds.lpm }, status_jabatan: 'aktif' } }),
-        prisma.pengurus.count({ where: { pengurusable_type: 'satlinmas', pengurusable_id: { in: desaActiveIds.satlinmas }, status_jabatan: 'aktif' } }),
-        prisma.pengurus.count({ where: { pengurusable_type: 'pkks', pengurusable_id: { in: desaActiveIds.pkk }, status_jabatan: 'aktif' } }),
-        prisma.pengurus.count({ where: { pengurusable_type: 'rws', pengurusable_id: { in: kelurahanActiveIds.rw }, status_jabatan: 'aktif' } }),
-        prisma.pengurus.count({ where: { pengurusable_type: 'rts', pengurusable_id: { in: kelurahanActiveIds.rt }, status_jabatan: 'aktif' } }),
-        prisma.pengurus.count({ where: { pengurusable_type: 'posyandus', pengurusable_id: { in: kelurahanActiveIds.posyandu }, status_jabatan: 'aktif' } }),
-        prisma.pengurus.count({ where: { pengurusable_type: 'karang_tarunas', pengurusable_id: { in: kelurahanActiveIds.karangTaruna }, status_jabatan: 'aktif' } }),
-        prisma.pengurus.count({ where: { pengurusable_type: 'lpms', pengurusable_id: { in: kelurahanActiveIds.lpm }, status_jabatan: 'aktif' } }),
-        prisma.pengurus.count({ where: { pengurusable_type: 'satlinmas', pengurusable_id: { in: kelurahanActiveIds.satlinmas }, status_jabatan: 'aktif' } }),
-        prisma.pengurus.count({ where: { pengurusable_type: 'pkks', pengurusable_id: { in: kelurahanActiveIds.pkk }, status_jabatan: 'aktif' } })
+        prisma.rws.count({ where: { desa_id: { in: desaDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.rts.count({ where: { desa_id: { in: desaDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.posyandus.count({ where: { desa_id: { in: desaDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.karang_tarunas.count({ where: { desa_id: { in: desaDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.lpms.count({ where: { desa_id: { in: desaDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.satlinmas.count({ where: { desa_id: { in: desaDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.pkks.count({ where: { desa_id: { in: desaDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.rws.count({ where: { desa_id: { in: desaKelurahanIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.rts.count({ where: { desa_id: { in: desaKelurahanIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.posyandus.count({ where: { desa_id: { in: desaKelurahanIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.karang_tarunas.count({ where: { desa_id: { in: desaKelurahanIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.lpms.count({ where: { desa_id: { in: desaKelurahanIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.satlinmas.count({ where: { desa_id: { in: desaKelurahanIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+        prisma.pkks.count({ where: { desa_id: { in: desaKelurahanIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } })
       ]);
 
       // Calculate formation percentages
@@ -426,14 +359,14 @@ class SummaryController {
             satlinmas: satlinmasTotal,
             pkk: pkkTotal
           },
-          total_pengurus: {
-            rw: pengurusRw,
-            rt: pengurusRt,
-            posyandu: pengurusPosyandu,
-            karangTaruna: pengurusKarangTaruna,
-            lpm: pengurusLpm,
-            satlinmas: pengurusSatlinmas,
-            pkk: pengurusPkk
+          verified_kelembagaan: {
+            rw: rwVerified,
+            rt: rtVerified,
+            posyandu: posyanduVerified,
+            karangTaruna: karangTarunaVerified,
+            lpm: lpmVerified,
+            satlinmas: satlinmasVerified,
+            pkk: pkkVerified
           },
           formation_stats: formationStats,
           by_status: {
@@ -445,16 +378,7 @@ class SummaryController {
               karangTaruna: karangTarunaDesa,
               lpm: lpmDesa,
               satlinmas: satlinmasDesa,
-              pkk: pkkDesa,
-              pengurus: {
-                rw: pengurusDesaRw,
-                rt: pengurusDesaRt,
-                posyandu: pengurusDesaPosyandu,
-                karangTaruna: pengurusDesaKarangTaruna,
-                lpm: pengurusDesaLpm,
-                satlinmas: pengurusDesaSatlinmas,
-                pkk: pengurusDesaPkk
-              }
+              pkk: pkkDesa
             },
             kelurahan: {
               count: desaKelurahan.length,
@@ -464,16 +388,29 @@ class SummaryController {
               karangTaruna: karangTarunaKelurahan,
               lpm: lpmKelurahan,
               satlinmas: satlinmasKelurahan,
-              pkk: pkkKelurahan,
-              pengurus: {
-                rw: pengurusKelurahanRw,
-                rt: pengurusKelurahanRt,
-                posyandu: pengurusKelurahanPosyandu,
-                karangTaruna: pengurusKelurahanKarangTaruna,
-                lpm: pengurusKelurahanLpm,
-                satlinmas: pengurusKelurahanSatlinmas,
-                pkk: pengurusKelurahanPkk
-              }
+              pkk: pkkKelurahan
+            }
+          },
+          verified_by_status: {
+            desa: {
+              count: desaDesas.length,
+              rw: rwDesaVerified,
+              rt: rtDesaVerified,
+              posyandu: posyanduDesaVerified,
+              karangTaruna: karangTarunaDesaVerified,
+              lpm: lpmDesaVerified,
+              satlinmas: satlinmasDesaVerified,
+              pkk: pkkDesaVerified
+            },
+            kelurahan: {
+              count: desaKelurahan.length,
+              rw: rwKelurahanVerified,
+              rt: rtKelurahanVerified,
+              posyandu: posyanduKelurahanVerified,
+              karangTaruna: karangTarunaKelurahanVerified,
+              lpm: lpmKelurahanVerified,
+              satlinmas: satlinmasKelurahanVerified,
+              pkk: pkkKelurahanVerified
             }
           },
           desa: desaStats, 
