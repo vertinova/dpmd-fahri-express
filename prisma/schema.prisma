@@ -1244,7 +1244,6 @@ model perjadin_pegawai {
   @@index([tanggal_berangkat, tanggal_kembali], map: "idx_perjadin_tanggal")
 }
 
-=======
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model info_banners {
   id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
