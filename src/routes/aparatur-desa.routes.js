@@ -10,6 +10,9 @@ router.use(auth);
 // GET /api/desa/aparatur-desa - Get all aparatur desa for logged in user's desa
 router.get('/', aparaturDesaController.getAllAparaturDesa);
 
+// POST /api/desa/aparatur-desa/import-external - Import from Dapur Desa external API
+router.post('/import-external', aparaturDesaController.importFromExternal);
+
 // GET /api/desa/aparatur-desa/:id - Get single aparatur desa by ID
 router.get('/:id', aparaturDesaController.getAparaturDesaById);
 

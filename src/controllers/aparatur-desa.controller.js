@@ -2,6 +2,35 @@ const prisma = require('../config/prisma');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs').promises;
+const axios = require('axios');
+const externalApiService = require('../services/externalApiProxy.service');
+
+/**
+ * Download photo from URL and save to aparatur_desa_files directory
+ * Returns the filename if successful, null otherwise
+ */
+const downloadPhoto = async (photoUrl, personName) => {
+	if (!photoUrl) return null;
+	try {
+		const response = await axios.get(photoUrl, {
+			responseType: 'arraybuffer',
+			timeout: 15000,
+		});
+		const contentType = response.headers['content-type'] || '';
+		let ext = '.jpg';
+		if (contentType.includes('png')) ext = '.png';
+		else if (contentType.includes('webp')) ext = '.webp';
+		const safeName = (personName || 'photo').replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
+		const filename = `${Date.now()}_${safeName}${ext}`;
+		const uploadDir = path.join(__dirname, '../../storage/uploads/aparatur_desa_files');
+		await fs.mkdir(uploadDir, { recursive: true });
+		await fs.writeFile(path.join(uploadDir, filename), response.data);
+		return filename;
+	} catch (err) {
+		console.error(`[Import] Failed to download photo for ${personName}:`, err.message);
+		return null;
+	}
+};
 
 /**
  * Get all aparatur desa for logged in user's desa
@@ -485,10 +514,147 @@ const deleteAparaturDesa = async (req, res) => {
 	}
 };
 
+/**
+ * Import aparatur desa from external Dapur Desa API
+ * Maps external API fields to local database columns
+ */
+const importFromExternal = async (req, res) => {
+	try {
+		const { desa_id } = req.user;
+		const desa = await prisma.desas.findFirst({
+			where: { id: parseInt(desa_id) },
+			select: { id: true, kode: true, nama: true },
+		});
+
+		if (!desa || !desa.kode) {
+			return res.status(400).json({
+				success: false,
+				message: 'Kode desa tidak ditemukan',
+			});
+		}
+
+		const villageCode = desa.kode.replace(/\./g, '');
+
+		// Fetch all external data (both Perangkat Desa and BPD)
+		const fetchAll = async (jobType) => {
+			let allData = [];
+			let page = 1;
+			let hasMore = true;
+			while (hasMore) {
+				const result = await externalApiService.fetchAparaturDesa({
+					master_village_id: villageCode,
+					job_type: jobType,
+					page,
+					limit: 100,
+				});
+				const items = result.data || [];
+				allData = allData.concat(items);
+				const totalPage = result.meta?.totalPage || 1;
+				hasMore = page < totalPage;
+				page++;
+			}
+			return allData;
+		};
+
+		const [perangkat, bpd] = await Promise.all([
+			fetchAll('Perangkat Desa'),
+			fetchAll('BPD'),
+		]);
+		const externalData = [...perangkat, ...bpd];
+
+		if (externalData.length === 0) {
+			return res.json({
+				success: true,
+				message: 'Tidak ada data dari Dapur Desa untuk diimpor',
+				imported: 0,
+			});
+		}
+
+		// Map gender: external "L"/"P" -> DB enum "Laki_laki"/"Perempuan"
+		const mapGender = (g) => {
+			if (g === 'L') return 'Laki_laki';
+			if (g === 'P') return 'Perempuan';
+			return 'Laki_laki';
+		};
+
+		// Estimate birth date from usia (age)
+		const estimateBirthDate = (usia) => {
+			if (!usia) return new Date('2000-01-01');
+			const year = new Date().getFullYear() - parseInt(usia);
+			return new Date(`${year}-01-01`);
+		};
+
+		let imported = 0;
+		let skipped = 0;
+		const errors = [];
+
+		for (const ext of externalData) {
+			try {
+				// Check duplicate by nama_lengkap + jabatan for this desa
+				const existing = await prisma.aparatur_desa.findFirst({
+					where: {
+						desa_id: parseInt(desa_id),
+						nama_lengkap: ext.name || '',
+						jabatan: ext.master_job_level_name || '-',
+					},
+				});
+
+				if (existing) {
+					skipped++;
+					continue;
+				}
+
+				// Download photo if available
+				const photoFilename = await downloadPhoto(ext.photo, ext.name);
+
+				await prisma.aparatur_desa.create({
+					data: {
+						id: uuidv4(),
+						desa_id: parseInt(desa_id),
+						nama_lengkap: ext.name || '-',
+						jabatan: ext.master_job_level_name || '-',
+						tempat_lahir: '-',
+						tanggal_lahir: estimateBirthDate(ext.usia),
+						jenis_kelamin: mapGender(ext.gender),
+						pendidikan_terakhir: ext.master_degree_name || '-',
+						agama: ext.agama || '-',
+						pangkat_golongan: ext.status_pns === 'PNS' ? 'PNS' : null,
+						tanggal_pengangkatan: ext.sk_date ? new Date(ext.sk_date) : new Date(),
+						nomor_sk_pengangkatan: ext.no_sk || '-',
+						status: 'Aktif',
+						file_pas_foto: photoFilename,
+						keterangan: `Diimpor dari Dapur Desa (ID: ${ext.id || '-'})`,
+					},
+				});
+				imported++;
+			} catch (err) {
+				errors.push({ name: ext.name, error: err.message });
+			}
+		}
+
+		res.json({
+			success: true,
+			message: `Berhasil mengimpor ${imported} data aparatur desa${skipped > 0 ? `, ${skipped} data sudah ada (dilewati)` : ''}`,
+			imported,
+			skipped,
+			total: externalData.length,
+			errors: errors.length > 0 ? errors : undefined,
+		});
+	} catch (error) {
+		console.error('Error importing from external:', error);
+		res.status(500).json({
+			success: false,
+			message: 'Gagal mengimpor data dari Dapur Desa',
+			error: error.message,
+		});
+	}
+};
+
 module.exports = {
 	getAllAparaturDesa,
 	getAparaturDesaById,
 	createAparaturDesa,
 	updateAparaturDesa,
 	deleteAparaturDesa,
+	importFromExternal,
 };

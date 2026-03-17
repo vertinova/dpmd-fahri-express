@@ -20,7 +20,8 @@ const {
   pkkController,
   satlinmasController,
   summaryController,
-  pengurusController
+  pengurusController,
+  lembagaLainnyaController
 } = require('../controllers/kelembagaan/index');
 
 // Import dashboard controller
@@ -89,6 +90,14 @@ router.post('/pkk', pkkController.create.bind(pkkController));
 router.get('/pkk/:id', pkkController.showDesa.bind(pkkController));
 router.put('/pkk/:id', pkkController.update.bind(pkkController));
 router.put('/pkk/:id/toggle-status', pkkController.toggleStatus.bind(pkkController));
+
+// Lembaga Lainnya routes (multi-instance - desa can create many)
+router.get('/lembaga-lainnya', lembagaLainnyaController.listDesa.bind(lembagaLainnyaController));
+router.post('/lembaga-lainnya', lembagaLainnyaController.create.bind(lembagaLainnyaController));
+router.get('/lembaga-lainnya/:id', lembagaLainnyaController.showDesa.bind(lembagaLainnyaController));
+router.put('/lembaga-lainnya/:id', lembagaLainnyaController.update.bind(lembagaLainnyaController));
+router.put('/lembaga-lainnya/:id/toggle-status', lembagaLainnyaController.toggleStatus.bind(lembagaLainnyaController));
+router.put('/lembaga-lainnya/:id/toggle-verification', lembagaLainnyaController.toggleVerification.bind(lembagaLainnyaController));
 
 // Pengurus routes (polymorphic - can be attached to any kelembagaan)
 router.get('/pengurus/by-kelembagaan', pengurusController.getPengurusByKelembagaan.bind(pengurusController));

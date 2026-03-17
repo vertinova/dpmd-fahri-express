@@ -12,7 +12,8 @@ const {
   pkkController,
   satlinmasController,
   summaryController,
-  pengurusController
+  pengurusController,
+  lembagaLainnyaController
 } = require('../controllers/kelembagaan/index');
 
 // All kelembagaan routes require authentication
@@ -21,6 +22,7 @@ router.use(auth);
 // Summary and overview endpoints
 router.get('/', summaryController.index.bind(summaryController));
 router.get('/summary', summaryController.summary.bind(summaryController));
+router.get('/statistik-tahunan', summaryController.statistikTahunan.bind(summaryController));
 router.get('/kecamatan/:id', summaryController.byKecamatan.bind(summaryController));
 
 // Desa-specific endpoints
@@ -48,11 +50,13 @@ router.get('/karang-taruna', karangTarunaController.list.bind(karangTarunaContro
 router.get('/lpm', lpmController.list.bind(lpmController));
 router.get('/satlinmas', satlinmasController.list.bind(satlinmasController));
 router.get('/pkk', pkkController.list.bind(pkkController));
+router.get('/lembaga-lainnya', lembagaLainnyaController.list.bind(lembagaLainnyaController));
 
 // Create endpoints (supports desa_id query parameter for admin)
 router.post('/rw', rwController.createRW.bind(rwController));
 router.post('/rt', rtController.createRT.bind(rtController));
 router.post('/posyandu', posyanduController.createPosyandu.bind(posyanduController));
+router.post('/lembaga-lainnya', lembagaLainnyaController.create.bind(lembagaLainnyaController));
 
 // Update endpoints (supports desa_id query parameter for admin)
 router.put('/rw/:id', rwController.updateRW.bind(rwController));
@@ -74,6 +78,8 @@ router.put('/satlinmas/:id/toggle-status', satlinmasController.toggleStatus.bind
 router.put('/satlinmas/:id/toggle-verification', satlinmasController.toggleVerification.bind(satlinmasController));
 router.put('/pkk/:id/toggle-status', pkkController.toggleStatus.bind(pkkController));
 router.put('/pkk/:id/toggle-verification', pkkController.toggleVerification.bind(pkkController));
+router.put('/lembaga-lainnya/:id/toggle-status', lembagaLainnyaController.toggleStatus.bind(lembagaLainnyaController));
+router.put('/lembaga-lainnya/:id/toggle-verification', lembagaLainnyaController.toggleVerification.bind(lembagaLainnyaController));
 
 // Detail endpoints
 router.get('/rw/:id', rwController.showRW.bind(rwController));
@@ -83,6 +89,8 @@ router.get('/karang-taruna/:id', karangTarunaController.show.bind(karangTarunaCo
 router.get('/lpm/:id', lpmController.show.bind(lpmController));
 router.get('/satlinmas/:id', satlinmasController.show.bind(satlinmasController));
 router.get('/pkk/:id', pkkController.show.bind(pkkController));
+router.get('/lembaga-lainnya/:id', lembagaLainnyaController.show.bind(lembagaLainnyaController));
+router.put('/lembaga-lainnya/:id', lembagaLainnyaController.update.bind(lembagaLainnyaController));
 
 // Pengurus endpoints (polymorphic relation)
 router.get('/pengurus/by-kelembagaan', pengurusController.getPengurusByKelembagaan.bind(pengurusController));

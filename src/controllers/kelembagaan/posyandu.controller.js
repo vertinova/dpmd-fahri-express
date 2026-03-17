@@ -248,15 +248,26 @@ class PosyanduController {
       }
 
       // For desa users, validate they have access to this desa
-      if (user.role === 'desa' && user.desa_id !== item.desa_id) {
+      if (user.role === 'desa' && Number(user.desa_id) !== Number(item.desa_id)) {
         return res.status(403).json({ success: false, message: 'User tidak memiliki akses desa' });
       }
 
-      const { status_kelembagaan } = req.body;
+      const { status_kelembagaan, produk_hukum_penonaktifan_id } = req.body;
+
+      const updateData = { status_kelembagaan };
+      if (status_kelembagaan === 'nonaktif') {
+        updateData.nonaktif_at = new Date();
+        if (produk_hukum_penonaktifan_id) {
+          updateData.produk_hukum_penonaktifan_id = produk_hukum_penonaktifan_id;
+        }
+      } else if (status_kelembagaan === 'aktif') {
+        updateData.produk_hukum_penonaktifan_id = null;
+        updateData.nonaktif_at = null;
+      }
 
       const updated = await prisma.posyandus.update({
         where: { id: String(req.params.id) },
-        data: { status_kelembagaan }
+        data: updateData
       });
 
       // Log activity
@@ -305,15 +316,27 @@ class PosyanduController {
       }
 
       // For desa users, validate they have access to this desa
-      if (user.role === 'desa' && user.desa_id !== item.desa_id) {
+      if (user.role === 'desa' && Number(user.desa_id) !== Number(item.desa_id)) {
         return res.status(403).json({ success: false, message: 'User tidak memiliki akses desa' });
       }
 
-      const { status_verifikasi } = req.body;
+      const { status_verifikasi, catatan_verifikasi } = req.body;
+
+      const updateData = { 
+        status_verifikasi,
+        verifikator_nama: user.name || user.username || null,
+        verified_at: new Date(),
+      };
+
+      if (status_verifikasi === 'unverified' && catatan_verifikasi) {
+        updateData.catatan_verifikasi = catatan_verifikasi;
+      } else if (status_verifikasi === 'verified') {
+        updateData.catatan_verifikasi = null;
+      }
 
       const updated = await prisma.posyandus.update({
         where: { id: String(req.params.id) },
-        data: { status_verifikasi }
+        data: updateData
       });
 
       // Log activity
@@ -327,7 +350,7 @@ class PosyanduController {
         entityId: updated.id,
         entityName: updated.nama,
         oldValue: { status_verifikasi: item.status_verifikasi },
-        newValue: { status_verifikasi: updated.status_verifikasi },
+        newValue: { status_verifikasi: updated.status_verifikasi, catatan_verifikasi: updated.catatan_verifikasi || null },
         userId: user.id,
         userName: user.name,
         userRole: user.role,

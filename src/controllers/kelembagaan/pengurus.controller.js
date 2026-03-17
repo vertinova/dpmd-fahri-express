@@ -66,6 +66,13 @@ async function getKelembagaanDisplayName(type, id) {
         });
         return record ? record.nama : null;
         
+      case 'lembaga-lainnya':
+        record = await prisma.lembaga_lainnyas.findUnique({
+          where: { id: String(id) },
+          select: { nama: true }
+        });
+        return record ? record.nama : null;
+        
       default:
         return null;
     }
@@ -420,14 +427,19 @@ class PengurusController {
         return res.status(404).json({ success: false, message: 'Pengurus tidak ditemukan' });
       }
 
-      const { status } = req.body;
-      if (!status) {
+      const { status_jabatan, tanggal_akhir_jabatan } = req.body;
+      if (!status_jabatan) {
         return res.status(400).json({ success: false, message: 'Status wajib diisi' });
+      }
+
+      const updateData = { status_jabatan };
+      if (tanggal_akhir_jabatan) {
+        updateData.tanggal_akhir_jabatan = new Date(tanggal_akhir_jabatan);
       }
 
       const updated = await prisma.pengurus.update({
         where: { id: String(req.params.id) },
-        data: { status }
+        data: updateData
       });
 
       // Get kelembagaan display name for logging
@@ -442,9 +454,9 @@ class PengurusController {
         activityType: 'update_status',
         entityType: ENTITY_TYPES.PENGURUS,
         entityId: updated.id,
-        entityName: `${updated.nama} (${updated.jabatan})`,
-        oldValue: { status: existing.status },
-        newValue: { status: updated.status },
+        entityName: `${updated.nama_lengkap} (${updated.jabatan})`,
+        oldValue: { status_jabatan: existing.status_jabatan },
+        newValue: { status_jabatan: updated.status_jabatan },
         userId: user.id,
         userName: user.name,
         userRole: user.role,
@@ -568,7 +580,7 @@ class PengurusController {
         });
       }
 
-      const { status_verifikasi } = req.body;
+      const { status_verifikasi, catatan_verifikasi } = req.body;
       
       if (!status_verifikasi || !['verified', 'unverified'].includes(status_verifikasi)) {
         return res.status(400).json({ 
@@ -585,9 +597,21 @@ class PengurusController {
         return res.status(404).json({ success: false, message: 'Pengurus tidak ditemukan' });
       }
 
+      const updateData = {
+        status_verifikasi,
+        verifikator_nama: user.name || user.username || null,
+        verified_at: new Date(),
+      };
+
+      if (status_verifikasi === 'unverified' && catatan_verifikasi) {
+        updateData.catatan_verifikasi = catatan_verifikasi;
+      } else if (status_verifikasi === 'verified') {
+        updateData.catatan_verifikasi = null;
+      }
+
       const updated = await prisma.pengurus.update({
         where: { id: String(req.params.id) },
-        data: { status_verifikasi }
+        data: updateData
       });
 
       // Get kelembagaan display name for logging
@@ -604,7 +628,7 @@ class PengurusController {
         entityId: updated.id,
         entityName: `${updated.nama_lengkap} (${updated.jabatan})`,
         oldValue: { status_verifikasi: existing.status_verifikasi },
-        newValue: { status_verifikasi: updated.status_verifikasi },
+        newValue: { status_verifikasi: updated.status_verifikasi, catatan_verifikasi: updated.catatan_verifikasi || null },
         userId: user.id,
         userName: user.name,
         userRole: user.role,

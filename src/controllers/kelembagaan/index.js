@@ -14,6 +14,7 @@ const {
 } = require('./singleton.controller');
 const summaryController = require('./summary.controller');
 const pengurusController = require('./pengurus.controller');
+const lembagaLainnyaController = require('./lembagaLainnya.controller');
 
 module.exports = {
   // Multi-instance controllers
@@ -26,6 +27,9 @@ module.exports = {
   lpmController,
   pkkController,
   satlinmasController,
+  
+  // Custom lembaga
+  lembagaLainnyaController,
   
   // Summary & aggregation
   summaryController,

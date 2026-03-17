@@ -416,6 +416,7 @@ model desas {
   kecamatans                kecamatans                  @relation(fields: [kecamatan_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "desas_kecamatan_id_foreign")
   karang_tarunas            karang_tarunas[]
   kelembagaan_activity_logs kelembagaan_activity_logs[]
+  lembaga_lainnyas          lembaga_lainnyas[]
   lpms                      lpms[]
   pengurus                  pengurus[]
   perjadin_grup             perjadin_grup[]
@@ -549,12 +550,12 @@ model jadwal_kegiatan {
 }
 
 model jadwal_kegiatan_bidang {
-  id                BigInt          @id @default(autoincrement()) @db.UnsignedBigInt
-  jadwal_kegiatan_id BigInt         @db.UnsignedBigInt
-  bidang_id         BigInt          @db.UnsignedBigInt
-  created_at        DateTime?       @default(now()) @db.Timestamp(0)
-  jadwal_kegiatan   jadwal_kegiatan @relation(fields: [jadwal_kegiatan_id], references: [id], onDelete: Cascade, map: "fk_jkb_jadwal")
-  bidangs           bidangs         @relation(fields: [bidang_id], references: [id], onDelete: Cascade, map: "fk_jkb_bidang")
+  id                 BigInt          @id @default(autoincrement()) @db.UnsignedBigInt
+  jadwal_kegiatan_id BigInt          @db.UnsignedBigInt
+  bidang_id          BigInt          @db.UnsignedBigInt
+  created_at         DateTime?       @default(now()) @db.Timestamp(0)
+  bidangs            bidangs         @relation(fields: [bidang_id], references: [id], onDelete: Cascade, map: "fk_jkb_bidang")
+  jadwal_kegiatan    jadwal_kegiatan @relation(fields: [jadwal_kegiatan_id], references: [id], onDelete: Cascade, map: "fk_jkb_jadwal")
 
   @@unique([jadwal_kegiatan_id, bidang_id], map: "uk_jadwal_bidang")
   @@index([jadwal_kegiatan_id], map: "idx_jadwal_kegiatan_bidang_jadwal")
@@ -562,20 +563,46 @@ model jadwal_kegiatan_bidang {
 }
 
 model karang_tarunas {
-  id                 String                             @id @db.Char(36)
-  desa_id            BigInt                             @db.UnsignedBigInt
-  nama               String                             @db.VarChar(255)
-  alamat             String?                            @db.VarChar(255)
-  status_kelembagaan karang_tarunas_status_kelembagaan? @default(aktif)
-  status_verifikasi  karang_tarunas_status_verifikasi?  @default(unverified)
-  created_at         DateTime?                          @default(now()) @db.Timestamp(0)
-  updated_at         DateTime?                          @default(now()) @db.Timestamp(0)
-  produk_hukum_id    String?                            @db.Char(36)
-  desas              desas                              @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "karang_tarunas_desa_id_foreign")
-  produk_hukums      produk_hukums?                     @relation(fields: [produk_hukum_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "karang_tarunas_produk_hukum_id_foreign")
+  id                           String                             @id @db.Char(36)
+  desa_id                      BigInt                             @db.UnsignedBigInt
+  nama                         String                             @db.VarChar(255)
+  alamat                       String?                            @db.VarChar(255)
+  status_kelembagaan           karang_tarunas_status_kelembagaan? @default(aktif)
+  status_verifikasi            karang_tarunas_status_verifikasi?  @default(unverified)
+  catatan_verifikasi           String?                            @db.Text
+  verifikator_nama             String?                            @db.VarChar(255)
+  verified_at                  DateTime?                          @db.Timestamp(0)
+  created_at                   DateTime?                          @default(now()) @db.Timestamp(0)
+  updated_at                   DateTime?                          @default(now()) @db.Timestamp(0)
+  nonaktif_at                  DateTime?                          @db.Timestamp(0)
+  produk_hukum_id              String?                            @db.Char(36)
+  produk_hukum_penonaktifan_id String?                            @db.Char(36)
+  desas                        desas                              @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "karang_tarunas_desa_id_foreign")
+  produk_hukums                produk_hukums?                     @relation(fields: [produk_hukum_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "karang_tarunas_produk_hukum_id_foreign")
 
   @@index([desa_id], map: "karang_tarunas_desa_id_foreign")
   @@index([produk_hukum_id], map: "karang_tarunas_produk_hukum_id_foreign")
+}
+
+model lembaga_lainnyas {
+  id                           String                               @id @db.Char(36)
+  desa_id                      BigInt                               @db.UnsignedBigInt
+  nama                         String                               @db.VarChar(255)
+  alamat                       String?                              @db.VarChar(255)
+  status_kelembagaan           lembaga_lainnyas_status_kelembagaan? @default(aktif)
+  status_verifikasi            lembaga_lainnyas_status_verifikasi?  @default(unverified)
+  catatan_verifikasi           String?                              @db.Text
+  verifikator_nama             String?                              @db.VarChar(255)
+  verified_at                  DateTime?                            @db.Timestamp(0)
+  produk_hukum_id              String?                              @db.Char(36)
+  produk_hukum_penonaktifan_id String?                              @db.Char(36)
+  created_at                   DateTime?                            @default(now()) @db.Timestamp(0)
+  updated_at                   DateTime?                            @default(now()) @db.Timestamp(0)
+  desas                        desas                                @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "lembaga_lainnyas_desa_id_foreign")
+  produk_hukums                produk_hukums?                       @relation(fields: [produk_hukum_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "lembaga_lainnyas_produk_hukum_id_foreign")
+
+  @@index([desa_id], map: "lembaga_lainnyas_desa_id_foreign")
+  @@index([produk_hukum_id], map: "lembaga_lainnyas_produk_hukum_id_foreign")
 }
 
 model kecamatan_bankeu_config {
@@ -717,17 +744,22 @@ model lampiran_surat {
 }
 
 model lpms {
-  id                 String                   @id @db.Char(36)
-  desa_id            BigInt                   @db.UnsignedBigInt
-  nama               String                   @db.VarChar(255)
-  alamat             String?                  @db.VarChar(255)
-  status_kelembagaan lpms_status_kelembagaan? @default(aktif)
-  status_verifikasi  lpms_status_verifikasi?  @default(unverified)
-  created_at         DateTime?                @default(now()) @db.Timestamp(0)
-  updated_at         DateTime?                @default(now()) @db.Timestamp(0)
-  produk_hukum_id    String?                  @db.Char(36)
-  desas              desas                    @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "lpms_desa_id_foreign")
-  produk_hukums      produk_hukums?           @relation(fields: [produk_hukum_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "lpms_produk_hukum_id_foreign")
+  id                           String                   @id @db.Char(36)
+  desa_id                      BigInt                   @db.UnsignedBigInt
+  nama                         String                   @db.VarChar(255)
+  alamat                       String?                  @db.VarChar(255)
+  status_kelembagaan           lpms_status_kelembagaan? @default(aktif)
+  status_verifikasi            lpms_status_verifikasi?  @default(unverified)
+  catatan_verifikasi           String?                  @db.Text
+  verifikator_nama             String?                  @db.VarChar(255)
+  verified_at                  DateTime?                @db.Timestamp(0)
+  created_at                   DateTime?                @default(now()) @db.Timestamp(0)
+  updated_at                   DateTime?                @default(now()) @db.Timestamp(0)
+  nonaktif_at                  DateTime?                @db.Timestamp(0)
+  produk_hukum_id              String?                  @db.Char(36)
+  produk_hukum_penonaktifan_id String?                  @db.Char(36)
+  desas                        desas                    @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "lpms_desa_id_foreign")
+  produk_hukums                produk_hukums?           @relation(fields: [produk_hukum_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "lpms_produk_hukum_id_foreign")
 
   @@index([desa_id], map: "lpms_desa_id_foreign")
   @@index([produk_hukum_id], map: "lpms_produk_hukum_id_foreign")
@@ -826,6 +858,9 @@ model pengurus {
   tanggal_akhir_jabatan DateTime?                   @db.Date
   status_jabatan        pengurus_status_jabatan?    @default(aktif)
   status_verifikasi     pengurus_status_verifikasi? @default(unverified)
+  catatan_verifikasi    String?                     @db.Text
+  verifikator_nama      String?                     @db.VarChar(255)
+  verified_at           DateTime?                   @db.Timestamp(0)
   produk_hukum_id       String?                     @db.Char(36)
   nama_lengkap          String                      @db.VarChar(255)
   nik                   String?                     @db.VarChar(32)
@@ -886,34 +921,44 @@ model petugas_monitoring {
 }
 
 model pkks {
-  id                 String                   @id @db.Char(36)
-  desa_id            BigInt                   @db.UnsignedBigInt
-  nama               String                   @db.VarChar(255)
-  alamat             String?                  @db.VarChar(255)
-  status_kelembagaan pkks_status_kelembagaan? @default(aktif)
-  status_verifikasi  pkks_status_verifikasi?  @default(unverified)
-  created_at         DateTime?                @default(now()) @db.Timestamp(0)
-  updated_at         DateTime?                @default(now()) @db.Timestamp(0)
-  produk_hukum_id    String?                  @db.Char(36)
-  desas              desas                    @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "pkks_desa_id_foreign")
-  produk_hukums      produk_hukums?           @relation(fields: [produk_hukum_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "pkks_produk_hukum_id_foreign")
+  id                           String                   @id @db.Char(36)
+  desa_id                      BigInt                   @db.UnsignedBigInt
+  nama                         String                   @db.VarChar(255)
+  alamat                       String?                  @db.VarChar(255)
+  status_kelembagaan           pkks_status_kelembagaan? @default(aktif)
+  status_verifikasi            pkks_status_verifikasi?  @default(unverified)
+  catatan_verifikasi           String?                  @db.Text
+  verifikator_nama             String?                  @db.VarChar(255)
+  verified_at                  DateTime?                @db.Timestamp(0)
+  created_at                   DateTime?                @default(now()) @db.Timestamp(0)
+  updated_at                   DateTime?                @default(now()) @db.Timestamp(0)
+  nonaktif_at                  DateTime?                @db.Timestamp(0)
+  produk_hukum_id              String?                  @db.Char(36)
+  produk_hukum_penonaktifan_id String?                  @db.Char(36)
+  desas                        desas                    @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "pkks_desa_id_foreign")
+  produk_hukums                produk_hukums?           @relation(fields: [produk_hukum_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "pkks_produk_hukum_id_foreign")
 
   @@index([desa_id], map: "pkks_desa_id_foreign")
   @@index([produk_hukum_id], map: "pkks_produk_hukum_id_foreign")
 }
 
 model posyandus {
-  id                 String                        @id @db.Char(36)
-  desa_id            BigInt                        @db.UnsignedBigInt
-  nama               String                        @db.VarChar(255)
-  alamat             String?                       @db.VarChar(255)
-  status_kelembagaan posyandus_status_kelembagaan? @default(aktif)
-  status_verifikasi  posyandus_status_verifikasi?  @default(unverified)
-  created_at         DateTime?                     @default(now()) @db.Timestamp(0)
-  updated_at         DateTime?                     @default(now()) @db.Timestamp(0)
-  produk_hukum_id    String?                       @db.Char(36)
-  desas              desas                         @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "posyandus_desa_id_foreign")
-  produk_hukums      produk_hukums?                @relation(fields: [produk_hukum_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "posyandus_produk_hukum_id_foreign")
+  id                           String                        @id @db.Char(36)
+  desa_id                      BigInt                        @db.UnsignedBigInt
+  nama                         String                        @db.VarChar(255)
+  alamat                       String?                       @db.VarChar(255)
+  status_kelembagaan           posyandus_status_kelembagaan? @default(aktif)
+  status_verifikasi            posyandus_status_verifikasi?  @default(unverified)
+  catatan_verifikasi           String?                       @db.Text
+  verifikator_nama             String?                       @db.VarChar(255)
+  verified_at                  DateTime?                     @db.Timestamp(0)
+  created_at                   DateTime?                     @default(now()) @db.Timestamp(0)
+  updated_at                   DateTime?                     @default(now()) @db.Timestamp(0)
+  nonaktif_at                  DateTime?                     @db.Timestamp(0)
+  produk_hukum_id              String?                       @db.Char(36)
+  produk_hukum_penonaktifan_id String?                       @db.Char(36)
+  desas                        desas                         @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "posyandus_desa_id_foreign")
+  produk_hukums                produk_hukums?                @relation(fields: [produk_hukum_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "posyandus_produk_hukum_id_foreign")
 
   @@index([desa_id], map: "posyandus_desa_id_foreign")
   @@index([produk_hukum_id], map: "posyandus_produk_hukum_id_foreign")
@@ -952,6 +997,7 @@ model produk_hukums {
   bumdes_bumdes_produk_hukum_perdes_idToproduk_hukums    bumdes[]                       @relation("bumdes_produk_hukum_perdes_idToproduk_hukums")
   bumdes_bumdes_produk_hukum_sk_bumdes_idToproduk_hukums bumdes[]                       @relation("bumdes_produk_hukum_sk_bumdes_idToproduk_hukums")
   karang_tarunas                                         karang_tarunas[]
+  lembaga_lainnyas                                       lembaga_lainnyas[]
   lpms                                                   lpms[]
   pkks                                                   pkks[]
   posyandus                                              posyandus[]
@@ -1001,21 +1047,26 @@ model push_subscriptions {
 }
 
 model rts {
-  id                 String                  @id @db.Char(36)
-  rw_id              String                  @db.Char(36)
-  desa_id            BigInt                  @db.UnsignedBigInt
-  nomor              String                  @db.VarChar(255)
-  alamat             String?                 @db.VarChar(255)
-  status_kelembagaan rts_status_kelembagaan? @default(aktif)
-  status_verifikasi  rts_status_verifikasi?  @default(unverified)
-  created_at         DateTime?               @default(now()) @db.Timestamp(0)
-  updated_at         DateTime?               @default(now()) @db.Timestamp(0)
-  produk_hukum_id    String?                 @db.Char(36)
-  jumlah_jiwa        Int?
-  jumlah_kk          Int?
-  desas              desas                   @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "rts_desa_id_foreign")
-  produk_hukums      produk_hukums?          @relation(fields: [produk_hukum_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "rts_produk_hukum_id_foreign")
-  rws                rws                     @relation(fields: [rw_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "rts_rw_id_foreign")
+  id                           String                  @id @db.Char(36)
+  rw_id                        String                  @db.Char(36)
+  desa_id                      BigInt                  @db.UnsignedBigInt
+  nomor                        String                  @db.VarChar(255)
+  alamat                       String?                 @db.VarChar(255)
+  status_kelembagaan           rts_status_kelembagaan? @default(aktif)
+  status_verifikasi            rts_status_verifikasi?  @default(unverified)
+  catatan_verifikasi           String?                 @db.Text
+  verifikator_nama             String?                 @db.VarChar(255)
+  verified_at                  DateTime?               @db.Timestamp(0)
+  created_at                   DateTime?               @default(now()) @db.Timestamp(0)
+  updated_at                   DateTime?               @default(now()) @db.Timestamp(0)
+  nonaktif_at                  DateTime?               @db.Timestamp(0)
+  produk_hukum_id              String?                 @db.Char(36)
+  produk_hukum_penonaktifan_id String?                 @db.Char(36)
+  jumlah_jiwa                  Int?
+  jumlah_kk                    Int?
+  desas                        desas                   @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "rts_desa_id_foreign")
+  produk_hukums                produk_hukums?          @relation(fields: [produk_hukum_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "rts_produk_hukum_id_foreign")
+  rws                          rws                     @relation(fields: [rw_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "rts_rw_id_foreign")
 
   @@unique([rw_id, nomor], map: "unique_rw_nomor")
   @@index([desa_id], map: "rts_desa_id_foreign")
@@ -1023,35 +1074,44 @@ model rts {
 }
 
 model rws {
-  id                 String                 @id @db.Char(36)
-  desa_id            BigInt                 @db.UnsignedBigInt
-  nomor              String                 @db.VarChar(255)
-  alamat             String?                @db.VarChar(255)
-  status_kelembagaan rws_status_kelembagaan @default(aktif)
-  status_verifikasi  rws_status_verifikasi  @default(unverified)
-  created_at         DateTime?              @db.Timestamp(0)
-  updated_at         DateTime?              @db.Timestamp(0)
-  produk_hukum_id    String?                @db.Char(36)
-  rts                rts[]
-  desas              desas                  @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "rws_desa_id_foreign")
-  produk_hukums      produk_hukums?         @relation(fields: [produk_hukum_id], references: [id], onUpdate: NoAction, map: "rws_produk_hukum_id_foreign")
+  id                           String                 @id @db.Char(36)
+  desa_id                      BigInt                 @db.UnsignedBigInt
+  nomor                        String                 @db.VarChar(255)
+  alamat                       String?                @db.VarChar(255)
+  status_kelembagaan           rws_status_kelembagaan @default(aktif)
+  status_verifikasi            rws_status_verifikasi  @default(unverified)
+  catatan_verifikasi           String?                @db.Text
+  verifikator_nama             String?                @db.VarChar(255)
+  verified_at                  DateTime?              @db.Timestamp(0)
+  created_at                   DateTime?              @db.Timestamp(0)
+  updated_at                   DateTime?              @db.Timestamp(0)
+  nonaktif_at                  DateTime?              @db.Timestamp(0)
+  produk_hukum_id              String?                @db.Char(36)
+  produk_hukum_penonaktifan_id String?                @db.Char(36)
+  rts                          rts[]
+  desas                        desas                  @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "rws_desa_id_foreign")
+  produk_hukums                produk_hukums?         @relation(fields: [produk_hukum_id], references: [id], onUpdate: NoAction, map: "rws_produk_hukum_id_foreign")
 
   @@unique([desa_id, nomor], map: "rws_desa_id_nomor_unique")
   @@index([produk_hukum_id], map: "rws_produk_hukum_id_foreign")
 }
 
 model satlinmas {
-  id                 String                       @id @db.Char(36)
-  desa_id            BigInt                       @db.UnsignedBigInt
-  nama               String                       @db.VarChar(255)
-  alamat             String?                      @db.VarChar(255)
-  status_kelembagaan satlinmas_status_kelembagaan @default(aktif)
-  status_verifikasi  satlinmas_status_verifikasi  @default(unverified)
-  created_at         DateTime?                    @db.Timestamp(0)
-  updated_at         DateTime?                    @db.Timestamp(0)
-  produk_hukum_id    String?                      @db.Char(36)
-  desas              desas                        @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "satlinmas_desa_id_foreign")
-  produk_hukums      produk_hukums?               @relation(fields: [produk_hukum_id], references: [id], onUpdate: NoAction, map: "satlinmas_produk_hukum_id_foreign")
+  id                           String                       @id @db.Char(36)
+  desa_id                      BigInt                       @db.UnsignedBigInt
+  nama                         String                       @db.VarChar(255)
+  alamat                       String?                      @db.VarChar(255)
+  status_kelembagaan           satlinmas_status_kelembagaan @default(aktif)
+  status_verifikasi            satlinmas_status_verifikasi  @default(unverified)
+  catatan_verifikasi           String?                      @db.Text
+  verifikator_nama             String?                      @db.VarChar(255)
+  verified_at                  DateTime?                    @db.Timestamp(0)
+  created_at                   DateTime?                    @db.Timestamp(0)
+  updated_at                   DateTime?                    @db.Timestamp(0)
+  produk_hukum_id              String?                      @db.Char(36)
+  produk_hukum_penonaktifan_id String?                      @db.Char(36)
+  desas                        desas                        @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "satlinmas_desa_id_foreign")
+  produk_hukums                produk_hukums?               @relation(fields: [produk_hukum_id], references: [id], onUpdate: NoAction, map: "satlinmas_produk_hukum_id_foreign")
 
   @@index([desa_id], map: "satlinmas_desa_id_foreign")
   @@index([produk_hukum_id], map: "satlinmas_produk_hukum_id_foreign")
@@ -1101,16 +1161,16 @@ model tim_verifikasi_kecamatan {
 }
 
 model roles {
-  id          Int       @id @default(autoincrement()) @db.UnsignedInt
-  name        String    @unique(map: "roles_name_unique") @db.VarChar(50)
-  label       String    @db.VarChar(100)
-  color       String?   @default("gray") @db.VarChar(30)
-  description String?   @db.VarChar(255)
-  category    String?   @default("other") @db.VarChar(50)
-  is_system   Boolean   @default(false)
-  needs_entity Boolean  @default(false)
-  created_at  DateTime? @default(now()) @db.Timestamp(0)
-  updated_at  DateTime? @default(now()) @db.Timestamp(0)
+  id           Int       @id @default(autoincrement()) @db.UnsignedInt
+  name         String    @unique(map: "roles_name_unique") @db.VarChar(50)
+  label        String    @db.VarChar(100)
+  color        String?   @default("gray") @db.VarChar(30)
+  description  String?   @db.VarChar(255)
+  category     String?   @default("other") @db.VarChar(50)
+  is_system    Boolean   @default(false)
+  needs_entity Boolean   @default(false)
+  created_at   DateTime? @default(now()) @db.Timestamp(0)
+  updated_at   DateTime? @default(now()) @db.Timestamp(0)
 }
 
 model users {
@@ -1137,8 +1197,8 @@ model users {
   bankeu_proposals_bankeu_proposals_kecamatan_verified_byTousers bankeu_proposals[]          @relation("bankeu_proposals_kecamatan_verified_byTousers")
   bankeu_proposals_bankeu_proposals_created_byTousers            bankeu_proposals[]          @relation("bankeu_proposals_created_byTousers")
   bankeu_proposals_bankeu_proposals_verified_byTousers           bankeu_proposals[]          @relation("bankeu_proposals_verified_byTousers")
-  berita_acara_history                                           berita_acara_history[]
   bankeu_proposals_bankeu_proposals_troubleshoot_byTousers       bankeu_proposals[]          @relation("bankeu_proposals_troubleshoot_byTousers")
+  berita_acara_history                                           berita_acara_history[]
   desa_bankeu_surat                                              desa_bankeu_surat[]
   disposisi_disposisi_dari_user_idTousers                        disposisi[]                 @relation("disposisi_dari_user_idTousers")
   disposisi_disposisi_ke_user_idTousers                          disposisi[]                 @relation("disposisi_ke_user_idTousers")
@@ -1362,6 +1422,16 @@ model video_meetings {
   @@index([room_id], map: "idx_room_id")
   @@index([scheduled_start], map: "idx_scheduled_start")
   @@index([status], map: "idx_status")
+}
+
+enum lembaga_lainnyas_status_kelembagaan {
+  aktif
+  nonaktif
+}
+
+enum lembaga_lainnyas_status_verifikasi {
+  verified
+  unverified
 }
 
 enum bankeu_master_kegiatan_jenis_kegiatan {
@@ -1674,4 +1744,3 @@ enum video_meetings_status {
   ended
   cancelled
 }
-

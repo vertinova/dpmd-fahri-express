@@ -17,6 +17,7 @@ const REPOS = {
       '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npm install',
       '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npx prisma generate',
       '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npx prisma db push --accept-data-loss',
+      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/node /var/www/backend/database-express/auto-migrate.js',
       '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 restart dpmd-api'
     ]
   },

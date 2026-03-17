@@ -482,7 +482,7 @@ class SummaryController {
       const desaId = validateDesaAccess(req, res);
       if (!desaId) return;
 
-      const [desa, totalRW, totalRT, totalPosyandu, karangTaruna, lpm, satlinmas, pkk] = await Promise.all([
+      const [desa, totalRW, totalRT, totalPosyandu, karangTaruna, lpm, satlinmas, pkk, totalLembagaLainnya] = await Promise.all([
         prisma.desas.findUnique({ 
           where: { id: desaId }, 
           select: { id: true, nama: true, status_pemerintahan: true } 
@@ -490,10 +490,72 @@ class SummaryController {
         prisma.rws.count({ where: { desa_id: desaId } }),
         prisma.rts.count({ where: { desa_id: desaId } }),
         prisma.posyandus.count({ where: { desa_id: desaId } }),
-        prisma.karang_tarunas.findFirst({ where: { desa_id: desaId } }),
-        prisma.lpms.findFirst({ where: { desa_id: desaId } }),
-        prisma.satlinmas.findFirst({ where: { desa_id: desaId } }),
-        prisma.pkks.findFirst({ where: { desa_id: desaId } })
+        prisma.karang_tarunas.findFirst({ where: { desa_id: desaId }, select: { id: true, status_verifikasi: true, alamat: true, produk_hukum_id: true } }),
+        prisma.lpms.findFirst({ where: { desa_id: desaId }, select: { id: true, status_verifikasi: true, alamat: true, produk_hukum_id: true } }),
+        prisma.satlinmas.findFirst({ where: { desa_id: desaId }, select: { id: true, status_verifikasi: true, alamat: true, produk_hukum_id: true } }),
+        prisma.pkks.findFirst({ where: { desa_id: desaId }, select: { id: true, status_verifikasi: true, alamat: true, produk_hukum_id: true } }),
+        prisma.lembaga_lainnyas.count({ where: { desa_id: desaId } })
+      ]);
+
+      // Build verification detail for singleton lembaga
+      const buildVerifDetail = async (record, type) => {
+        if (!record) return null;
+        const pengurusCount = await prisma.pengurus.count({
+          where: { pengurusable_id: record.id, pengurusable_type: type }
+        });
+        return {
+          status_verifikasi: record.status_verifikasi || 'unverified',
+          has_sk: !!record.produk_hukum_id,
+          has_alamat: !!record.alamat,
+          pengurus_count: pengurusCount,
+        };
+      };
+
+      // Build verification detail for multi-type (RW, RT, Posyandu)
+      const buildMultiVerifDetail = async (model, type) => {
+        const records = await prisma[model].findMany({
+          where: { desa_id: desaId },
+          select: { id: true, status_verifikasi: true, alamat: true, produk_hukum_id: true,
+            ...(model === 'rts' ? { jumlah_jiwa: true, jumlah_kk: true } : {})
+          }
+        });
+        if (records.length === 0) return null;
+        const verifiedCount = records.filter(r => r.status_verifikasi === 'verified').length;
+        // Count records missing requirements
+        const missingSk = records.filter(r => !r.produk_hukum_id).length;
+        const missingAlamat = records.filter(r => !r.alamat).length;
+        let missingData = 0;
+        if (model === 'rts') {
+          missingData = records.filter(r => !r.jumlah_jiwa && !r.jumlah_kk).length;
+        }
+        // Count pengurus per record
+        const pengurusCounts = await prisma.pengurus.groupBy({
+          by: ['pengurusable_id'],
+          _count: { id: true },
+          where: { pengurusable_type: type, pengurusable_id: { in: records.map(r => r.id) } }
+        });
+        const pengurusMap = new Map(pengurusCounts.map(p => [p.pengurusable_id, p._count.id]));
+        const missingPengurus = records.filter(r => !pengurusMap.has(r.id)).length;
+        return {
+          total: records.length,
+          verified: verifiedCount,
+          unverified: records.length - verifiedCount,
+          missing_sk: missingSk,
+          missing_alamat: missingAlamat,
+          missing_pengurus: missingPengurus,
+          ...(model === 'rts' ? { missing_data_penduduk: missingData } : {}),
+        };
+      };
+
+      const [rwVerif, rtVerif, posyanduVerif, ktVerif, lpmVerif, satlinmasVerif, pkkVerif, lembagaLainnyaVerif] = await Promise.all([
+        buildMultiVerifDetail('rws', 'rw'),
+        buildMultiVerifDetail('rts', 'rt'),
+        buildMultiVerifDetail('posyandus', 'posyandu'),
+        buildVerifDetail(karangTaruna, 'karang_taruna'),
+        buildVerifDetail(lpm, 'lpm'),
+        buildVerifDetail(satlinmas, 'satlinmas'),
+        buildVerifDetail(pkk, 'pkk'),
+        buildMultiVerifDetail('lembaga_lainnyas', 'lembaga-lainnya'),
       ]);
 
       res.json({
@@ -509,10 +571,21 @@ class SummaryController {
           lpm: lpm ? 1 : 0,
           satlinmas: satlinmas ? 1 : 0,
           pkk: pkk ? 1 : 0,
+          lembaga_lainnya: totalLembagaLainnya,
           has_karang_taruna: !!karangTaruna,
           has_lpm: !!lpm,
           has_satlinmas: !!satlinmas,
-          has_pkk: !!pkk
+          has_pkk: !!pkk,
+          verifikasi: {
+            rw: rwVerif,
+            rt: rtVerif,
+            posyandu: posyanduVerif,
+            karang_taruna: ktVerif,
+            lpm: lpmVerif,
+            satlinmas: satlinmasVerif,
+            pkk: pkkVerif,
+            lembaga_lainnya: lembagaLainnyaVerif,
+          }
         }
       });
     } catch (error) {
@@ -806,6 +879,143 @@ class SummaryController {
     } catch (error) {
       console.error('Error in getDesaPKK:', error);
       res.status(500).json({ success: false, message: 'Gagal mengambil data PKK', error: error.message });
+    }
+  }
+
+  /**
+   * Get yearly statistics for kelembagaan trends
+   * GET /api/kelembagaan/statistik-tahunan
+   */
+  async statistikTahunan(req, res) {
+    try {
+      const tables = [
+        { key: 'rw', model: 'rws', label: 'RW' },
+        { key: 'rt', model: 'rts', label: 'RT' },
+        { key: 'posyandu', model: 'posyandus', label: 'Posyandu' },
+        { key: 'karangTaruna', model: 'karang_tarunas', label: 'Karang Taruna' },
+        { key: 'lpm', model: 'lpms', label: 'LPM' },
+        { key: 'pkk', model: 'pkks', label: 'PKK' },
+      ];
+
+      const results = await Promise.all(
+        tables.map(async (t) => {
+          const [byYear, byYearVerified, byYearNonaktif, cumulativeActive, cumulativeVerified, totals] = await Promise.all([
+            // Records created per year
+            prisma.$queryRawUnsafe(
+              `SELECT YEAR(created_at) as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE created_at IS NOT NULL GROUP BY YEAR(created_at) ORDER BY tahun`
+            ),
+            // Records verified per year
+            prisma.$queryRawUnsafe(
+              `SELECT YEAR(verified_at) as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE verified_at IS NOT NULL GROUP BY YEAR(verified_at) ORDER BY tahun`
+            ),
+            // Records nonaktif per year (by updated_at as proxy)
+            prisma.$queryRawUnsafe(
+              `SELECT YEAR(updated_at) as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE status_kelembagaan = 'nonaktif' AND updated_at IS NOT NULL GROUP BY YEAR(updated_at) ORDER BY tahun`
+            ),
+            // Cumulative active count per year: created that year (aktif) minus deactivated that year
+            prisma.$queryRawUnsafe(
+              `SELECT y.tahun,
+                (SELECT COUNT(*) FROM ${t.model} WHERE YEAR(created_at) <= y.tahun) -
+                (SELECT COUNT(*) FROM ${t.model} WHERE status_kelembagaan = 'nonaktif' AND YEAR(updated_at) <= y.tahun) as jumlah_aktif,
+                (SELECT COUNT(*) FROM ${t.model} WHERE YEAR(created_at) <= y.tahun) as jumlah_total
+              FROM (SELECT DISTINCT YEAR(created_at) as tahun FROM ${t.model} WHERE created_at IS NOT NULL) y
+              ORDER BY y.tahun`
+            ),
+            // Cumulative verified count per year
+            // Naik: lembaga verified yang dibuat (created_at) s/d tahun tsb
+            // Turun: lembaga verified yang dinonaktifkan (nonaktif_at) s/d tahun tsb
+            prisma.$queryRawUnsafe(
+              `SELECT y.tahun,
+                (SELECT COUNT(*) FROM ${t.model} WHERE status_verifikasi = 'verified' AND YEAR(created_at) <= y.tahun) -
+                (SELECT COUNT(*) FROM ${t.model} WHERE status_verifikasi = 'verified' AND status_kelembagaan = 'nonaktif' AND nonaktif_at IS NOT NULL AND YEAR(nonaktif_at) <= y.tahun) as jumlah_verified
+              FROM (SELECT DISTINCT YEAR(created_at) as tahun FROM ${t.model} WHERE created_at IS NOT NULL) y
+              ORDER BY y.tahun`
+            ),
+            // Current totals
+            prisma.$queryRawUnsafe(
+              `SELECT 
+                COUNT(*) as total,
+                SUM(CASE WHEN status_kelembagaan = 'aktif' THEN 1 ELSE 0 END) as aktif,
+                SUM(CASE WHEN status_kelembagaan = 'nonaktif' THEN 1 ELSE 0 END) as nonaktif,
+                SUM(CASE WHEN status_verifikasi = 'verified' THEN 1 ELSE 0 END) as verified,
+                SUM(CASE WHEN status_verifikasi = 'unverified' THEN 1 ELSE 0 END) as unverified
+              FROM ${t.model}`
+            ),
+          ]);
+
+          return {
+            key: t.key,
+            label: t.label,
+            created_per_year: byYear.map(r => ({ tahun: Number(r.tahun), jumlah: Number(r.jumlah) })),
+            verified_per_year: byYearVerified.map(r => ({ tahun: Number(r.tahun), jumlah: Number(r.jumlah) })),
+            nonaktif_per_year: byYearNonaktif.map(r => ({ tahun: Number(r.tahun), jumlah: Number(r.jumlah) })),
+            cumulative_active: cumulativeActive.map(r => ({ tahun: Number(r.tahun), jumlah_aktif: Number(r.jumlah_aktif), jumlah_total: Number(r.jumlah_total) })),
+            cumulative_verified: cumulativeVerified.map(r => ({ tahun: Number(r.tahun), jumlah_verified: Number(r.jumlah_verified) })),
+            totals: {
+              total: Number(totals[0]?.total || 0),
+              aktif: Number(totals[0]?.aktif || 0),
+              nonaktif: Number(totals[0]?.nonaktif || 0),
+              verified: Number(totals[0]?.verified || 0),
+              unverified: Number(totals[0]?.unverified || 0),
+            }
+          };
+        })
+      );
+
+      // Collect all unique years
+      const allYears = new Set();
+      results.forEach(r => {
+        r.created_per_year.forEach(y => allYears.add(y.tahun));
+        r.verified_per_year.forEach(y => allYears.add(y.tahun));
+        r.nonaktif_per_year.forEach(y => allYears.add(y.tahun));
+        r.cumulative_active.forEach(y => allYears.add(y.tahun));
+        r.cumulative_verified.forEach(y => allYears.add(y.tahun));
+      });
+      const years = [...allYears].sort((a, b) => a - b);
+
+      // Build per-lembaga data keyed by type
+      const perLembaga = {};
+      results.forEach(r => {
+        perLembaga[r.key] = {
+          label: r.label,
+          totals: r.totals,
+          created_per_year: r.created_per_year,
+          verified_per_year: r.verified_per_year,
+          nonaktif_per_year: r.nonaktif_per_year,
+          cumulative_active: r.cumulative_active,
+          cumulative_verified: r.cumulative_verified,
+        };
+      });
+
+      // Grand totals (exclude satlinmas)
+      const grandTotals = {
+        total: 0, aktif: 0, nonaktif: 0, verified: 0, unverified: 0,
+      };
+      results.forEach(r => {
+        grandTotals.total += r.totals.total;
+        grandTotals.aktif += r.totals.aktif;
+        grandTotals.nonaktif += r.totals.nonaktif;
+        grandTotals.verified += r.totals.verified;
+        grandTotals.unverified += r.totals.unverified;
+      });
+      grandTotals.persentase_verifikasi = grandTotals.total > 0
+        ? Math.round((grandTotals.verified / grandTotals.total) * 100)
+        : 0;
+      grandTotals.persentase_aktif = grandTotals.total > 0
+        ? Math.round((grandTotals.aktif / grandTotals.total) * 100)
+        : 0;
+
+      res.json({
+        success: true,
+        data: {
+          years,
+          per_lembaga: perLembaga,
+          grand_totals: grandTotals,
+        }
+      });
+    } catch (error) {
+      console.error('Error in statistikTahunan:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil statistik tahunan', error: error.message });
     }
   }
 }
