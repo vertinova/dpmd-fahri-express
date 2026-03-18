@@ -317,7 +317,7 @@ class BidangController {
             email: user.email,
             nip: user.pegawai?.id_pegawai ? String(user.pegawai.id_pegawai) : null,
             phone: null, // Add if phone field exists in users table
-            avatar: user.avatar ? `/storage/avatars/${user.avatar}` : null
+            avatar: user.avatar || null
           }
         };
       });
