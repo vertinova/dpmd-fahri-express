@@ -10,47 +10,64 @@ const { auth } = require('../middlewares/auth');
 // Get all pegawai
 router.get('/', auth, async (req, res) => {
   try {
-    const { bidang_id } = req.query;
-
-    console.log('[Pegawai API] GET / - bidang_id:', bidang_id);
+    const { bidang_id, include_users } = req.query;
 
     const where = {};
     if (bidang_id) {
       where.id_bidang = BigInt(bidang_id);
     }
 
+    const includeConfig = {
+      bidangs: {
+        select: {
+          id: true,
+          nama: true
+        }
+      }
+    };
+
+    // Optionally include linked users
+    if (include_users === 'true') {
+      includeConfig.users = {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          avatar: true
+        }
+      };
+    }
+
     const pegawai = await prisma.pegawai.findMany({
       where,
-      select: {
-        id_pegawai: true,
-        id_bidang: true,
-        nama_pegawai: true,
-        bidangs: {
-          select: {
-            id: true,
-            nama: true
-          }
-        }
-      },
+      include: includeConfig,
       orderBy: {
         nama_pegawai: 'asc'
       }
     });
-
-    console.log('[Pegawai API] Found', pegawai.length, 'pegawai');
 
     // Convert BigInt fields to Number for JSON serialization
     const serializedPegawai = pegawai.map(p => ({
       id_pegawai: Number(p.id_pegawai),
       id_bidang: p.id_bidang ? Number(p.id_bidang) : null,
       nama_pegawai: p.nama_pegawai,
+      created_at: p.created_at,
+      updated_at: p.updated_at,
       bidangs: p.bidangs ? {
         id: Number(p.bidangs.id),
         nama: p.bidangs.nama
-      } : null
+      } : null,
+      ...(p.users ? {
+        users: p.users.map(u => ({
+          id: Number(u.id),
+          name: u.name,
+          email: u.email,
+          role: u.role,
+          avatar: u.avatar
+        }))
+      } : {})
     }));
-
-    console.log('[Pegawai API] Serialized data:', JSON.stringify(serializedPegawai.slice(0, 2)));
 
     res.json({
       success: true,
@@ -156,13 +173,15 @@ router.post('/', auth, async (req, res) => {
     const pegawai = await prisma.pegawai.create({
       data: {
         nama_pegawai,
-        id_bidang: BigInt(id_bidang)
+        id_bidang: BigInt(id_bidang),
+        created_at: new Date(),
+        updated_at: new Date()
       },
       include: {
         bidangs: {
           select: {
             id: true,
-            nama_bidang: true
+            nama: true
           }
         }
       }
@@ -171,7 +190,12 @@ router.post('/', auth, async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Pegawai created successfully',
-      data: pegawai
+      data: {
+        id_pegawai: Number(pegawai.id_pegawai),
+        id_bidang: Number(pegawai.id_bidang),
+        nama_pegawai: pegawai.nama_pegawai,
+        bidangs: pegawai.bidangs ? { id: Number(pegawai.bidangs.id), nama: pegawai.bidangs.nama } : null
+      }
     });
   } catch (error) {
     console.error('Error creating pegawai:', error);
@@ -189,7 +213,7 @@ router.put('/:id', auth, async (req, res) => {
     const { id } = req.params;
     const { nama_pegawai, id_bidang } = req.body;
 
-    const updateData = {};
+    const updateData = { updated_at: new Date() };
     if (nama_pegawai) updateData.nama_pegawai = nama_pegawai;
     if (id_bidang) updateData.id_bidang = BigInt(id_bidang);
 
@@ -200,7 +224,7 @@ router.put('/:id', auth, async (req, res) => {
         bidangs: {
           select: {
             id: true,
-            nama_bidang: true
+            nama: true
           }
         }
       }
@@ -209,7 +233,12 @@ router.put('/:id', auth, async (req, res) => {
     res.json({
       success: true,
       message: 'Pegawai updated successfully',
-      data: pegawai
+      data: {
+        id_pegawai: Number(pegawai.id_pegawai),
+        id_bidang: Number(pegawai.id_bidang),
+        nama_pegawai: pegawai.nama_pegawai,
+        bidangs: pegawai.bidangs ? { id: Number(pegawai.bidangs.id), nama: pegawai.bidangs.nama } : null
+      }
     });
   } catch (error) {
     console.error('Error updating pegawai:', error);
