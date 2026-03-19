@@ -1018,6 +1018,341 @@ class SummaryController {
       res.status(500).json({ success: false, message: 'Gagal mengambil statistik tahunan', error: error.message });
     }
   }
+
+  /**
+   * Dashboard for Kelembagaan Lainnya (Satlinmas + Lembaga Custom)
+   * GET /api/kelembagaan/lainnya-dashboard
+   */
+  async lainnyaDashboard(req, res) {
+    try {
+      const kecamatans = await prisma.kecamatans.findMany({
+        include: {
+          desas: {
+            select: { id: true, nama: true, kode: true, status_pemerintahan: true }
+          }
+        },
+        orderBy: { id: 'asc' }
+      });
+
+      const allDesaIds = kecamatans.flatMap(k => k.desas.map(d => d.id));
+
+      // Batch query satlinmas + lembaga_lainnya (total and verified)
+      const [
+        satlinmasAll,
+        satlinmasVerified,
+        lembagaLainnyaAll,
+        lembagaLainnyaVerified
+      ] = await Promise.all([
+        prisma.satlinmas.findMany({
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif' },
+          select: { id: true, desa_id: true, nama: true, status_verifikasi: true }
+        }),
+        prisma.satlinmas.findMany({
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' },
+          select: { id: true, desa_id: true }
+        }),
+        prisma.lembaga_lainnyas.findMany({
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif' },
+          select: { id: true, desa_id: true, nama: true, status_verifikasi: true }
+        }),
+        prisma.lembaga_lainnyas.findMany({
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' },
+          select: { id: true, desa_id: true }
+        })
+      ]);
+
+      // Build lookup maps per desa
+      const satlinmasMap = new Map();
+      const lembagaLainnyaMap = new Map();
+
+      for (const s of satlinmasAll) {
+        const key = s.desa_id.toString();
+        if (!satlinmasMap.has(key)) satlinmasMap.set(key, []);
+        satlinmasMap.get(key).push(s);
+      }
+      for (const l of lembagaLainnyaAll) {
+        const key = l.desa_id.toString();
+        if (!lembagaLainnyaMap.has(key)) lembagaLainnyaMap.set(key, []);
+        lembagaLainnyaMap.get(key).push(l);
+      }
+
+      const satlinmasVerifiedSet = new Set(satlinmasVerified.map(s => s.desa_id.toString()));
+      const lembagaLainnyaVerifiedMap = new Map();
+      for (const l of lembagaLainnyaVerified) {
+        const key = l.desa_id.toString();
+        lembagaLainnyaVerifiedMap.set(key, (lembagaLainnyaVerifiedMap.get(key) || 0) + 1);
+      }
+
+      // Global stats
+      const totalSatlinmas = satlinmasAll.length;
+      const totalSatlinmasVerified = satlinmasVerified.length;
+      const totalLembagaLainnya = lembagaLainnyaAll.length;
+      const totalLembagaLainnyaVerified = lembagaLainnyaVerified.length;
+      const totalDesa = allDesaIds.length;
+      const desaDenganSatlinmas = satlinmasMap.size;
+      const desaDenganLembagaLainnya = lembagaLainnyaMap.size;
+
+      // Recently unverified items (for quick list)
+      const unverifiedItems = [
+        ...satlinmasAll.filter(s => s.status_verifikasi !== 'verified').map(s => ({
+          id: s.id, nama: s.nama, type: 'satlinmas', desa_id: s.desa_id.toString()
+        })),
+        ...lembagaLainnyaAll.filter(l => l.status_verifikasi !== 'verified').map(l => ({
+          id: l.id, nama: l.nama, type: 'lembaga-lainnya', desa_id: l.desa_id.toString()
+        }))
+      ];
+
+      // Build kecamatan->desa structure
+      const data = kecamatans.map(kec => {
+        const desas = kec.desas.map(desa => {
+          const desaIdStr = desa.id.toString();
+          const satlinmasList = satlinmasMap.get(desaIdStr) || [];
+          const lembagaLainnyaList = lembagaLainnyaMap.get(desaIdStr) || [];
+          const satlinmasVerifiedCount = satlinmasVerifiedSet.has(desaIdStr) ? 1 : 0;
+          const lembagaLainnyaVerifiedCount = lembagaLainnyaVerifiedMap.get(desaIdStr) || 0;
+
+          return {
+            id: Number(desa.id),
+            nama: desa.nama,
+            kode: desa.kode,
+            status: desa.status_pemerintahan,
+            satlinmas: {
+              total: satlinmasList.length,
+              verified: satlinmasVerifiedCount,
+              unverified: satlinmasList.length - satlinmasVerifiedCount,
+              terbentuk: satlinmasList.length > 0,
+              items: satlinmasList.map(s => ({
+                id: s.id, nama: s.nama, status_verifikasi: s.status_verifikasi
+              }))
+            },
+            lembaga_lainnya: {
+              total: lembagaLainnyaList.length,
+              verified: lembagaLainnyaVerifiedCount,
+              unverified: lembagaLainnyaList.length - lembagaLainnyaVerifiedCount,
+              items: lembagaLainnyaList.map(l => ({
+                id: l.id, nama: l.nama, status_verifikasi: l.status_verifikasi
+              }))
+            }
+          };
+        });
+
+        const totalSatlinmasKec = desas.reduce((a, d) => a + d.satlinmas.total, 0);
+        const verifiedSatlinmasKec = desas.reduce((a, d) => a + d.satlinmas.verified, 0);
+        const totalLembagaKec = desas.reduce((a, d) => a + d.lembaga_lainnya.total, 0);
+        const verifiedLembagaKec = desas.reduce((a, d) => a + d.lembaga_lainnya.verified, 0);
+        const desaDgnSatlinmas = desas.filter(d => d.satlinmas.terbentuk).length;
+
+        return {
+          id: Number(kec.id),
+          nama: kec.nama,
+          totalDesa: desas.length,
+          desas,
+          summary: {
+            satlinmas: { total: totalSatlinmasKec, verified: verifiedSatlinmasKec, unverified: totalSatlinmasKec - verifiedSatlinmasKec, desaTerbentuk: desaDgnSatlinmas },
+            lembaga_lainnya: { total: totalLembagaKec, verified: verifiedLembagaKec, unverified: totalLembagaKec - verifiedLembagaKec }
+          }
+        };
+      });
+
+      res.json({
+        success: true,
+        data,
+        summary: {
+          totalDesa,
+          satlinmas: {
+            total: totalSatlinmas,
+            verified: totalSatlinmasVerified,
+            unverified: totalSatlinmas - totalSatlinmasVerified,
+            desaTerbentuk: desaDenganSatlinmas,
+            desaBelumTerbentuk: totalDesa - desaDenganSatlinmas
+          },
+          lembaga_lainnya: {
+            total: totalLembagaLainnya,
+            verified: totalLembagaLainnyaVerified,
+            unverified: totalLembagaLainnya - totalLembagaLainnyaVerified,
+            desaDenganLembaga: desaDenganLembagaLainnya
+          }
+        },
+        unverified: unverifiedItems
+      });
+    } catch (error) {
+      console.error('Error in lainnyaDashboard:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil data dashboard lainnya', error: error.message });
+    }
+  }
+
+  /**
+   * Dashboard for all Pengurus across all kelembagaan
+   * GET /api/kelembagaan/pengurus-dashboard
+   * Query params: ?kecamatan_id, ?desa_id, ?pengurusable_type, ?search
+   */
+  async pengurusDashboard(req, res) {
+    try {
+      const { kecamatan_id, desa_id, pengurusable_type, search } = req.query;
+
+      // Build where clause
+      const where = { status_jabatan: 'aktif' };
+      if (desa_id) where.desa_id = BigInt(desa_id);
+      if (pengurusable_type) where.pengurusable_type = pengurusable_type;
+      if (search) {
+        where.OR = [
+          { nama_lengkap: { contains: search } },
+          { jabatan: { contains: search } },
+          { nik: { contains: search } },
+        ];
+      }
+
+      // If kecamatan_id filter, get desa IDs in that kecamatan
+      if (kecamatan_id && !desa_id) {
+        const desasInKec = await prisma.desas.findMany({
+          where: { kecamatan_id: BigInt(kecamatan_id) },
+          select: { id: true }
+        });
+        where.desa_id = { in: desasInKec.map(d => d.id) };
+      }
+
+      // Fetch all matching pengurus with desa+kecamatan relation
+      const allPengurus = await prisma.pengurus.findMany({
+        where,
+        include: {
+          desas: {
+            select: {
+              id: true, nama: true,
+              kecamatans: { select: { id: true, nama: true } }
+            }
+          }
+        },
+        orderBy: [{ created_at: 'desc' }]
+      });
+
+      // --- Build infographic stats (from ALL active pengurus, not filtered) ---
+      const allActivePengurus = await prisma.pengurus.findMany({
+        where: { status_jabatan: 'aktif' },
+        select: {
+          id: true, jenis_kelamin: true, pendidikan: true, tanggal_lahir: true,
+          status_verifikasi: true, pengurusable_type: true
+        }
+      });
+
+      const now = new Date();
+
+      // Gender distribution
+      const genderStats = { L: 0, P: 0, unknown: 0 };
+      allActivePengurus.forEach(p => {
+        if (p.jenis_kelamin === 'L') genderStats.L++;
+        else if (p.jenis_kelamin === 'P') genderStats.P++;
+        else genderStats.unknown++;
+      });
+
+      // Education distribution
+      const educationStats = {};
+      allActivePengurus.forEach(p => {
+        const edu = p.pendidikan || 'Tidak Diketahui';
+        educationStats[edu] = (educationStats[edu] || 0) + 1;
+      });
+
+      // Age distribution
+      const ageRanges = { '<20': 0, '20-30': 0, '31-40': 0, '41-50': 0, '51-60': 0, '>60': 0, 'unknown': 0 };
+      allActivePengurus.forEach(p => {
+        if (!p.tanggal_lahir) { ageRanges['unknown']++; return; }
+        const age = Math.floor((now - new Date(p.tanggal_lahir)) / (365.25 * 24 * 60 * 60 * 1000));
+        if (age < 20) ageRanges['<20']++;
+        else if (age <= 30) ageRanges['20-30']++;
+        else if (age <= 40) ageRanges['31-40']++;
+        else if (age <= 50) ageRanges['41-50']++;
+        else if (age <= 60) ageRanges['51-60']++;
+        else ageRanges['>60']++;
+      });
+
+      // Verification stats
+      const totalVerified = allActivePengurus.filter(p => p.status_verifikasi === 'verified').length;
+      const totalUnverified = allActivePengurus.length - totalVerified;
+
+      // Per kelembagaan type count
+      const typeStats = {};
+      const TYPE_LABELS = {
+        'rw': 'RW', 'rws': 'RW',
+        'rt': 'RT', 'rts': 'RT',
+        'posyandu': 'Posyandu', 'posyandus': 'Posyandu',
+        'karang_taruna': 'Karang Taruna', 'karang_tarunas': 'Karang Taruna',
+        'lpm': 'LPM', 'lpms': 'LPM',
+        'pkk': 'PKK', 'pkks': 'PKK',
+        'satlinmas': 'Satlinmas',
+        'lembaga-lainnya': 'Lembaga Lainnya', 'lembaga_lainnyas': 'Lembaga Lainnya',
+      };
+      allActivePengurus.forEach(p => {
+        const label = TYPE_LABELS[p.pengurusable_type] || p.pengurusable_type;
+        typeStats[label] = (typeStats[label] || 0) + 1;
+      });
+
+      // Unverified pengurus list (limited to 50 most recent)
+      const unverifiedList = allPengurus
+        .filter(p => p.status_verifikasi !== 'verified')
+        .slice(0, 50)
+        .map(p => ({
+          id: p.id,
+          nama_lengkap: p.nama_lengkap,
+          jabatan: p.jabatan,
+          pengurusable_type: p.pengurusable_type,
+          desa_nama: p.desas?.nama || '',
+          kecamatan_nama: p.desas?.kecamatans?.nama || '',
+        }));
+
+      // Serialize BigInt
+      const serializedPengurus = allPengurus.map(p => ({
+        id: p.id,
+        nama_lengkap: p.nama_lengkap,
+        jabatan: p.jabatan,
+        jenis_kelamin: p.jenis_kelamin,
+        pendidikan: p.pendidikan,
+        tanggal_lahir: p.tanggal_lahir,
+        no_telepon: p.no_telepon,
+        pengurusable_type: p.pengurusable_type,
+        pengurusable_id: p.pengurusable_id,
+        status_verifikasi: p.status_verifikasi,
+        desa_id: p.desa_id ? Number(p.desa_id) : null,
+        desa_nama: p.desas?.nama || '',
+        kecamatan_id: p.desas?.kecamatans?.id ? Number(p.desas.kecamatans.id) : null,
+        kecamatan_nama: p.desas?.kecamatans?.nama || '',
+      }));
+
+      // Get kecamatan list for filter dropdown
+      const kecamatans = await prisma.kecamatans.findMany({
+        select: { id: true, nama: true },
+        orderBy: { nama: 'asc' }
+      });
+
+      // Get desa list for filter dropdown (optionally filtered by kecamatan)
+      const desaWhere = kecamatan_id ? { kecamatan_id: BigInt(kecamatan_id) } : {};
+      const desas = await prisma.desas.findMany({
+        where: desaWhere,
+        select: { id: true, nama: true, kecamatan_id: true },
+        orderBy: { nama: 'asc' }
+      });
+
+      res.json({
+        success: true,
+        data: serializedPengurus,
+        summary: {
+          total: allActivePengurus.length,
+          verified: totalVerified,
+          unverified: totalUnverified,
+          genderStats,
+          educationStats,
+          ageRanges,
+          typeStats,
+        },
+        unverified: unverifiedList,
+        filters: {
+          kecamatans: kecamatans.map(k => ({ id: Number(k.id), nama: k.nama })),
+          desas: desas.map(d => ({ id: Number(d.id), nama: d.nama, kecamatan_id: Number(d.kecamatan_id) })),
+        }
+      });
+    } catch (error) {
+      console.error('Error in pengurusDashboard:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil data dashboard pengurus', error: error.message });
+    }
+  }
 }
 
 module.exports = new SummaryController();

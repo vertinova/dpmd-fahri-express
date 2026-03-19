@@ -818,17 +818,44 @@ model master_dinas {
 }
 
 model pegawai {
-  id_pegawai       BigInt             @id @default(autoincrement()) @db.UnsignedBigInt
-  id_bidang        BigInt             @db.UnsignedBigInt
-  nama_pegawai     String             @db.VarChar(255)
-  created_at       DateTime?          @db.Timestamp(0)
-  updated_at       DateTime?          @db.Timestamp(0)
-  kegiatan_pegawai kegiatan_pegawai[]
-  bidangs          bidangs            @relation(fields: [id_bidang], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "pegawai_id_bidang_foreign")
-  perjadin_pegawai perjadin_pegawai[]
-  users            users[]
+  id_pegawai          BigInt                    @id @default(autoincrement()) @db.UnsignedBigInt
+  id_bidang           BigInt                    @db.UnsignedBigInt
+  nama_pegawai        String                    @db.VarChar(255)
+  nip                 String?                   @db.VarChar(18)
+  jabatan             String?                   @db.VarChar(255)
+  golongan            String?                   @db.VarChar(20)
+  pangkat             String?                   @db.VarChar(100)
+  eselon              String?                   @db.VarChar(10)
+  jenis_kelamin       pegawai_jenis_kelamin?
+  tempat_lahir        String?                   @db.VarChar(100)
+  tanggal_lahir       DateTime?                 @db.Date
+  pendidikan_terakhir String?                   @db.VarChar(50)
+  status_kepegawaian  pegawai_status_kepegawaian?
+  no_hp               String?                   @db.VarChar(20)
+  alamat              String?                   @db.Text
+  tmt_jabatan         DateTime?                 @db.Date
+  unit_kerja          String?                   @db.VarChar(255)
+  created_at          DateTime?                 @db.Timestamp(0)
+  updated_at          DateTime?                 @db.Timestamp(0)
+  kegiatan_pegawai    kegiatan_pegawai[]
+  bidangs             bidangs                   @relation(fields: [id_bidang], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "pegawai_id_bidang_foreign")
+  perjadin_pegawai    perjadin_pegawai[]
+  users               users[]
 
   @@index([id_bidang], map: "pegawai_id_bidang_foreign")
+}
+
+enum pegawai_jenis_kelamin {
+  L
+  P
+}
+
+enum pegawai_status_kepegawaian {
+  PNS
+  PPPK
+  Honorer
+  THL
+  Kontrak
 }
 
 model pejabat_ttd {

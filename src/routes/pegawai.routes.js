@@ -10,47 +10,78 @@ const { auth } = require('../middlewares/auth');
 // Get all pegawai
 router.get('/', auth, async (req, res) => {
   try {
-    const { bidang_id } = req.query;
-
-    console.log('[Pegawai API] GET / - bidang_id:', bidang_id);
+    const { bidang_id, include_users } = req.query;
 
     const where = {};
     if (bidang_id) {
       where.id_bidang = BigInt(bidang_id);
     }
 
+    const includeConfig = {
+      bidangs: {
+        select: {
+          id: true,
+          nama: true
+        }
+      }
+    };
+
+    // Optionally include linked users
+    if (include_users === 'true') {
+      includeConfig.users = {
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          avatar: true
+        }
+      };
+    }
+
     const pegawai = await prisma.pegawai.findMany({
       where,
-      select: {
-        id_pegawai: true,
-        id_bidang: true,
-        nama_pegawai: true,
-        bidangs: {
-          select: {
-            id: true,
-            nama: true
-          }
-        }
-      },
+      include: includeConfig,
       orderBy: {
         nama_pegawai: 'asc'
       }
     });
-
-    console.log('[Pegawai API] Found', pegawai.length, 'pegawai');
 
     // Convert BigInt fields to Number for JSON serialization
     const serializedPegawai = pegawai.map(p => ({
       id_pegawai: Number(p.id_pegawai),
       id_bidang: p.id_bidang ? Number(p.id_bidang) : null,
       nama_pegawai: p.nama_pegawai,
+      nip: p.nip,
+      jabatan: p.jabatan,
+      golongan: p.golongan,
+      pangkat: p.pangkat,
+      eselon: p.eselon,
+      jenis_kelamin: p.jenis_kelamin,
+      tempat_lahir: p.tempat_lahir,
+      tanggal_lahir: p.tanggal_lahir,
+      pendidikan_terakhir: p.pendidikan_terakhir,
+      status_kepegawaian: p.status_kepegawaian,
+      no_hp: p.no_hp,
+      alamat: p.alamat,
+      tmt_jabatan: p.tmt_jabatan,
+      unit_kerja: p.unit_kerja,
+      created_at: p.created_at,
+      updated_at: p.updated_at,
       bidangs: p.bidangs ? {
         id: Number(p.bidangs.id),
         nama: p.bidangs.nama
-      } : null
+      } : null,
+      ...(p.users ? {
+        users: p.users.map(u => ({
+          id: Number(u.id),
+          name: u.name,
+          email: u.email,
+          role: u.role,
+          avatar: u.avatar
+        }))
+      } : {})
     }));
-
-    console.log('[Pegawai API] Serialized data:', JSON.stringify(serializedPegawai.slice(0, 2)));
 
     res.json({
       success: true,
@@ -109,6 +140,20 @@ router.get('/:id', auth, async (req, res) => {
       id_pegawai: Number(pegawai.id_pegawai),
       id_bidang: pegawai.id_bidang ? Number(pegawai.id_bidang) : null,
       nama_pegawai: pegawai.nama_pegawai,
+      nip: pegawai.nip,
+      jabatan: pegawai.jabatan,
+      golongan: pegawai.golongan,
+      pangkat: pegawai.pangkat,
+      eselon: pegawai.eselon,
+      jenis_kelamin: pegawai.jenis_kelamin,
+      tempat_lahir: pegawai.tempat_lahir,
+      tanggal_lahir: pegawai.tanggal_lahir,
+      pendidikan_terakhir: pegawai.pendidikan_terakhir,
+      status_kepegawaian: pegawai.status_kepegawaian,
+      no_hp: pegawai.no_hp,
+      alamat: pegawai.alamat,
+      tmt_jabatan: pegawai.tmt_jabatan,
+      unit_kerja: pegawai.unit_kerja,
       bidangs: pegawai.bidangs ? {
         id: Number(pegawai.bidangs.id),
         nama: pegawai.bidangs.nama
@@ -144,7 +189,7 @@ router.get('/:id', auth, async (req, res) => {
 // Create pegawai
 router.post('/', auth, async (req, res) => {
   try {
-    const { nama_pegawai, id_bidang } = req.body;
+    const { nama_pegawai, id_bidang, nip, jabatan, golongan, pangkat, eselon, jenis_kelamin, tempat_lahir, tanggal_lahir, pendidikan_terakhir, status_kepegawaian, no_hp, alamat, tmt_jabatan, unit_kerja } = req.body;
 
     if (!nama_pegawai || !id_bidang) {
       return res.status(400).json({
@@ -156,13 +201,29 @@ router.post('/', auth, async (req, res) => {
     const pegawai = await prisma.pegawai.create({
       data: {
         nama_pegawai,
-        id_bidang: BigInt(id_bidang)
+        id_bidang: BigInt(id_bidang),
+        nip: nip || null,
+        jabatan: jabatan || null,
+        golongan: golongan || null,
+        pangkat: pangkat || null,
+        eselon: eselon || null,
+        jenis_kelamin: jenis_kelamin || null,
+        tempat_lahir: tempat_lahir || null,
+        tanggal_lahir: tanggal_lahir ? new Date(tanggal_lahir) : null,
+        pendidikan_terakhir: pendidikan_terakhir || null,
+        status_kepegawaian: status_kepegawaian || null,
+        no_hp: no_hp || null,
+        alamat: alamat || null,
+        tmt_jabatan: tmt_jabatan ? new Date(tmt_jabatan) : null,
+        unit_kerja: unit_kerja || null,
+        created_at: new Date(),
+        updated_at: new Date()
       },
       include: {
         bidangs: {
           select: {
             id: true,
-            nama_bidang: true
+            nama: true
           }
         }
       }
@@ -171,7 +232,17 @@ router.post('/', auth, async (req, res) => {
     res.status(201).json({
       success: true,
       message: 'Pegawai created successfully',
-      data: pegawai
+      data: {
+        id_pegawai: Number(pegawai.id_pegawai),
+        id_bidang: Number(pegawai.id_bidang),
+        nama_pegawai: pegawai.nama_pegawai,
+        nip: pegawai.nip, jabatan: pegawai.jabatan, golongan: pegawai.golongan,
+        pangkat: pegawai.pangkat, eselon: pegawai.eselon, jenis_kelamin: pegawai.jenis_kelamin,
+        tempat_lahir: pegawai.tempat_lahir, tanggal_lahir: pegawai.tanggal_lahir,
+        pendidikan_terakhir: pegawai.pendidikan_terakhir, status_kepegawaian: pegawai.status_kepegawaian,
+        no_hp: pegawai.no_hp, alamat: pegawai.alamat, tmt_jabatan: pegawai.tmt_jabatan, unit_kerja: pegawai.unit_kerja,
+        bidangs: pegawai.bidangs ? { id: Number(pegawai.bidangs.id), nama: pegawai.bidangs.nama } : null
+      }
     });
   } catch (error) {
     console.error('Error creating pegawai:', error);
@@ -187,11 +258,25 @@ router.post('/', auth, async (req, res) => {
 router.put('/:id', auth, async (req, res) => {
   try {
     const { id } = req.params;
-    const { nama_pegawai, id_bidang } = req.body;
+    const { nama_pegawai, id_bidang, nip, jabatan, golongan, pangkat, eselon, jenis_kelamin, tempat_lahir, tanggal_lahir, pendidikan_terakhir, status_kepegawaian, no_hp, alamat, tmt_jabatan, unit_kerja } = req.body;
 
-    const updateData = {};
-    if (nama_pegawai) updateData.nama_pegawai = nama_pegawai;
-    if (id_bidang) updateData.id_bidang = BigInt(id_bidang);
+    const updateData = { updated_at: new Date() };
+    if (nama_pegawai !== undefined) updateData.nama_pegawai = nama_pegawai;
+    if (id_bidang !== undefined) updateData.id_bidang = BigInt(id_bidang);
+    if (nip !== undefined) updateData.nip = nip || null;
+    if (jabatan !== undefined) updateData.jabatan = jabatan || null;
+    if (golongan !== undefined) updateData.golongan = golongan || null;
+    if (pangkat !== undefined) updateData.pangkat = pangkat || null;
+    if (eselon !== undefined) updateData.eselon = eselon || null;
+    if (jenis_kelamin !== undefined) updateData.jenis_kelamin = jenis_kelamin || null;
+    if (tempat_lahir !== undefined) updateData.tempat_lahir = tempat_lahir || null;
+    if (tanggal_lahir !== undefined) updateData.tanggal_lahir = tanggal_lahir ? new Date(tanggal_lahir) : null;
+    if (pendidikan_terakhir !== undefined) updateData.pendidikan_terakhir = pendidikan_terakhir || null;
+    if (status_kepegawaian !== undefined) updateData.status_kepegawaian = status_kepegawaian || null;
+    if (no_hp !== undefined) updateData.no_hp = no_hp || null;
+    if (alamat !== undefined) updateData.alamat = alamat || null;
+    if (tmt_jabatan !== undefined) updateData.tmt_jabatan = tmt_jabatan ? new Date(tmt_jabatan) : null;
+    if (unit_kerja !== undefined) updateData.unit_kerja = unit_kerja || null;
 
     const pegawai = await prisma.pegawai.update({
       where: { id_pegawai: BigInt(id) },
@@ -200,7 +285,7 @@ router.put('/:id', auth, async (req, res) => {
         bidangs: {
           select: {
             id: true,
-            nama_bidang: true
+            nama: true
           }
         }
       }
@@ -209,7 +294,17 @@ router.put('/:id', auth, async (req, res) => {
     res.json({
       success: true,
       message: 'Pegawai updated successfully',
-      data: pegawai
+      data: {
+        id_pegawai: Number(pegawai.id_pegawai),
+        id_bidang: Number(pegawai.id_bidang),
+        nama_pegawai: pegawai.nama_pegawai,
+        nip: pegawai.nip, jabatan: pegawai.jabatan, golongan: pegawai.golongan,
+        pangkat: pegawai.pangkat, eselon: pegawai.eselon, jenis_kelamin: pegawai.jenis_kelamin,
+        tempat_lahir: pegawai.tempat_lahir, tanggal_lahir: pegawai.tanggal_lahir,
+        pendidikan_terakhir: pegawai.pendidikan_terakhir, status_kepegawaian: pegawai.status_kepegawaian,
+        no_hp: pegawai.no_hp, alamat: pegawai.alamat, tmt_jabatan: pegawai.tmt_jabatan, unit_kerja: pegawai.unit_kerja,
+        bidangs: pegawai.bidangs ? { id: Number(pegawai.bidangs.id), nama: pegawai.bidangs.nama } : null
+      }
     });
   } catch (error) {
     console.error('Error updating pegawai:', error);

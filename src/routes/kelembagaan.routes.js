@@ -22,6 +22,8 @@ router.use(auth);
 // Summary and overview endpoints
 router.get('/', summaryController.index.bind(summaryController));
 router.get('/summary', summaryController.summary.bind(summaryController));
+router.get('/lainnya-dashboard', summaryController.lainnyaDashboard.bind(summaryController));
+router.get('/pengurus-dashboard', summaryController.pengurusDashboard.bind(summaryController));
 router.get('/statistik-tahunan', summaryController.statistikTahunan.bind(summaryController));
 router.get('/kecamatan/:id', summaryController.byKecamatan.bind(summaryController));
 
