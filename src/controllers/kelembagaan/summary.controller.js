@@ -1239,8 +1239,8 @@ class SummaryController {
       // Gender distribution
       const genderStats = { L: 0, P: 0, unknown: 0 };
       allActivePengurus.forEach(p => {
-        if (p.jenis_kelamin === 'L') genderStats.L++;
-        else if (p.jenis_kelamin === 'P') genderStats.P++;
+        if (p.jenis_kelamin === 'Laki_laki') genderStats.L++;
+        else if (p.jenis_kelamin === 'Perempuan') genderStats.P++;
         else genderStats.unknown++;
       });
 
