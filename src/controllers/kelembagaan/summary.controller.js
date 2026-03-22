@@ -1225,14 +1225,19 @@ class SummaryController {
         orderBy: [{ created_at: 'desc' }]
       });
 
-      // --- Build infographic stats (from ALL active pengurus, not filtered) ---
+      // --- Build infographic stats (from active AND verified pengurus only) ---
       const allActivePengurus = await prisma.pengurus.findMany({
-        where: { status_jabatan: 'aktif' },
+        where: { status_jabatan: 'aktif', status_verifikasi: 'verified' },
         select: {
           id: true, jenis_kelamin: true, pendidikan: true, tanggal_lahir: true,
-          status_verifikasi: true, pengurusable_type: true
+          status_verifikasi: true, pengurusable_type: true, created_at: true
         }
       });
+
+      // Also get unverified count separately for summary
+      const allActiveCount = await prisma.pengurus.count({ where: { status_jabatan: 'aktif' } });
+      const verifiedCount = allActivePengurus.length;
+      const unverifiedCount = allActiveCount - verifiedCount;
 
       const now = new Date();
 
@@ -1265,8 +1270,8 @@ class SummaryController {
       });
 
       // Verification stats
-      const totalVerified = allActivePengurus.filter(p => p.status_verifikasi === 'verified').length;
-      const totalUnverified = allActivePengurus.length - totalVerified;
+      const totalVerified = verifiedCount;
+      const totalUnverified = unverifiedCount;
 
       // Per kelembagaan type count
       const typeStats = {};
@@ -1283,6 +1288,16 @@ class SummaryController {
       allActivePengurus.forEach(p => {
         const label = TYPE_LABELS[p.pengurusable_type] || p.pengurusable_type;
         typeStats[label] = (typeStats[label] || 0) + 1;
+      });
+
+      // Yearly pengurus count per kelembagaan type (active + verified)
+      const yearlyStats = {};
+      allActivePengurus.forEach(p => {
+        const year = p.created_at ? new Date(p.created_at).getFullYear() : null;
+        if (!year) return;
+        if (!yearlyStats[year]) yearlyStats[year] = {};
+        const label = TYPE_LABELS[p.pengurusable_type] || p.pengurusable_type;
+        yearlyStats[year][label] = (yearlyStats[year][label] || 0) + 1;
       });
 
       // Unverified pengurus list (limited to 50 most recent)
@@ -1334,13 +1349,14 @@ class SummaryController {
         success: true,
         data: serializedPengurus,
         summary: {
-          total: allActivePengurus.length,
+          total: allActiveCount,
           verified: totalVerified,
           unverified: totalUnverified,
           genderStats,
           educationStats,
           ageRanges,
           typeStats,
+          yearlyStats,
         },
         unverified: unverifiedList,
         filters: {
