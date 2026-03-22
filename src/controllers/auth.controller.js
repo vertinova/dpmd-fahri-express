@@ -26,6 +26,7 @@ const login = async (req, res) => {
         email: true,
         password: true,
         role: true,
+        avatar: true,
         desa_id: true,
         kecamatan_id: true,
         bidang_id: true,
@@ -107,6 +108,7 @@ const login = async (req, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
+      avatar: user.avatar || null,
       desa_id: convertBigInt(user.desa_id),
       kecamatan_id: convertBigInt(user.kecamatan_id),
       bidang_id: finalBidangId,
@@ -220,10 +222,24 @@ const verifyToken = async (req, res) => {
         name: true,
         email: true,
         role: true,
+        avatar: true,
         desa_id: true,
         kecamatan_id: true,
         bidang_id: true,
-        dinas_id: true
+        dinas_id: true,
+        pegawai_id: true,
+        pegawai: {
+          select: {
+            id_pegawai: true,
+            id_bidang: true,
+            bidangs: {
+              select: {
+                id: true,
+                nama: true
+              }
+            }
+          }
+        }
       }
     });
 
@@ -241,15 +257,19 @@ const verifyToken = async (req, res) => {
     };
 
     // Prepare response data
+    const bidangName = user.pegawai?.bidangs?.nama || null;
     const responseData = {
       id: convertBigInt(user.id),
       name: user.name,
       email: user.email,
       role: user.role,
+      avatar: user.avatar || null,
       desa_id: convertBigInt(user.desa_id),
       kecamatan_id: convertBigInt(user.kecamatan_id),
       bidang_id: convertBigInt(user.bidang_id),
-      dinas_id: convertBigInt(user.dinas_id)
+      bidang_name: bidangName,
+      dinas_id: convertBigInt(user.dinas_id),
+      pegawai_id: convertBigInt(user.pegawai_id)
     };
 
     // If user has desa_id, fetch desa data with kecamatan
@@ -349,10 +369,24 @@ const getProfile = async (req, res) => {
         name: true,
         email: true,
         role: true,
+        avatar: true,
         desa_id: true,
         kecamatan_id: true,
         bidang_id: true,
-        dinas_id: true
+        dinas_id: true,
+        pegawai_id: true,
+        pegawai: {
+          select: {
+            id_pegawai: true,
+            id_bidang: true,
+            bidangs: {
+              select: {
+                id: true,
+                nama: true
+              }
+            }
+          }
+        }
       }
     });
 
@@ -370,15 +404,19 @@ const getProfile = async (req, res) => {
     };
 
     // Prepare response data
+    const bidangName = user.pegawai?.bidangs?.nama || null;
     const responseData = {
       id: convertBigInt(user.id),
       name: user.name,
       email: user.email,
       role: user.role,
+      avatar: user.avatar || null,
       desa_id: convertBigInt(user.desa_id),
       kecamatan_id: convertBigInt(user.kecamatan_id),
       bidang_id: convertBigInt(user.bidang_id),
-      dinas_id: convertBigInt(user.dinas_id)
+      bidang_name: bidangName,
+      dinas_id: convertBigInt(user.dinas_id),
+      pegawai_id: convertBigInt(user.pegawai_id)
     };
 
     // If user has desa_id, fetch desa data with kecamatan
