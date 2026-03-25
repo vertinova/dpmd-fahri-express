@@ -36,6 +36,7 @@ class BankeuPublicController {
           submitted_to_dinas_at: true,
           submitted_to_kecamatan: true,
           submitted_to_dpmd: true,
+          troubleshoot_catatan: true,
           created_at: true,
           bankeu_proposal_kegiatan: {
             select: {
@@ -65,24 +66,31 @@ class BankeuPublicController {
       allKegiatan.forEach(k => { kegiatanMap[Number(k.id)] = k; });
 
       // Calculate stages for public display
-      // SELESAI = submitted_to_dpmd === true (sudah sampai DPMD)
-      // Harus sama dengan logic di DPMD Verification Page: submitted_to_dpmd: true AND kecamatan_status: 'approved'
-      // Stage logic diselaraskan dengan SPKED frontend (getProposalStage)
-      // Cek dari tahap akhir ke awal, termasuk status revision/rejected
+      // Logic HARUS sama persis dengan SPKED frontend getProposalStage()
+      // Cek dari tahap akhir ke awal, termasuk deteksi proposal yang dikembalikan ke desa
       const getStage = (p) => {
-        // SELESAI = Sudah dikirim ke DPMD, atau pernah sampai DPMD (dpmd_status set)
-        if (p.submitted_to_dpmd === true || p.dpmd_status) {
-          return 'selesai';
-        }
+        // 1. SELESAI = Sudah dikirim ke DPMD, atau pernah sampai DPMD (dpmd_status set)
+        if (p.submitted_to_dpmd === true || p.dpmd_status) return 'selesai';
         
-        // Di Kecamatan = Dinas approved (menunggu/proses kecamatan)
+        // 2. KEMBALI KE DESA = Proposal yang dikembalikan (revisi/rejected/troubleshoot)
+        // Troubleshoot dari DPMD yang dikembalikan ke desa
+        if (p.troubleshoot_catatan && !p.submitted_to_dinas_at) return 'di_desa';
+        // Revisi/rejected dari Kecamatan yang dikembalikan ke desa
+        if ((p.kecamatan_status === 'rejected' || p.kecamatan_status === 'revision') && !p.submitted_to_kecamatan) return 'di_desa';
+        // Revisi/rejected dari Dinas yang dikembalikan ke desa
+        if ((p.dinas_status === 'rejected' || p.dinas_status === 'revision') && !p.submitted_to_dinas_at) return 'di_desa';
+        // Sudah diupload ulang tapi belum dikirim ulang
+        if (p.status === 'pending' && !p.submitted_to_dinas_at && 
+            (p.dinas_status || p.kecamatan_status || p.troubleshoot_catatan)) return 'di_desa';
+        
+        // 3. Di Kecamatan = Dinas approved (menunggu/proses kecamatan)
         if (p.kecamatan_status === 'approved') return 'di_kecamatan';
         if (p.dinas_status === 'approved') return 'di_kecamatan';
         
-        // Di Dinas = Sudah pernah submit ke dinas, ATAU punya dinas_status (termasuk revision/rejected)
+        // 4. Di Dinas = Sudah submit ke dinas, belum approved
         if (p.submitted_to_dinas_at || p.dinas_status) return 'di_dinas';
         
-        // Masih di Desa (belum pernah interaksi dengan dinas)
+        // 5. Default: Masih di Desa (belum pernah interaksi dengan dinas)
         return 'di_desa';
       };
 
