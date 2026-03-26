@@ -54,4 +54,8 @@ router.delete('/desa/:desaId/surat', dpmdVerificationController.deleteDesaSurat)
 // Body: { catatan: string (optional) }
 router.patch('/desa/:desaId/reopen-submission', dpmdVerificationController.reopenDesaSubmission);
 
+// Edit proposal detail fields (DPMD admin)
+// Body: { anggaran_usulan, volume, lokasi, nama_kegiatan_spesifik }
+router.patch('/proposals/:id/edit-detail', dpmdVerificationController.editProposalDetail);
+
 module.exports = router;

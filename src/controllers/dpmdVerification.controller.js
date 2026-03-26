@@ -1191,6 +1191,99 @@ class DPMDVerificationController {
       });
     }
   }
+  /**
+   * Edit proposal detail fields (DPMD admin)
+   * PATCH /api/dpmd/bankeu/proposals/:id/edit-detail
+   * Fields: anggaran_usulan, volume, lokasi, nama_kegiatan_spesifik
+   */
+  async editProposalDetail(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.id;
+      const { anggaran_usulan, volume, lokasi, nama_kegiatan_spesifik } = req.body;
+
+      logger.info(`✏️ DPMD EDIT DETAIL - ID: ${id}, User: ${userId}`);
+
+      // Get existing proposal
+      const proposal = await prisma.bankeu_proposals.findUnique({
+        where: { id: BigInt(id) },
+        include: { desas: { select: { nama: true } } }
+      });
+
+      if (!proposal) {
+        return res.status(404).json({
+          success: false,
+          message: 'Proposal tidak ditemukan'
+        });
+      }
+
+      // Build update data
+      const updateData = { updated_at: new Date() };
+      if (anggaran_usulan !== undefined && anggaran_usulan !== '') {
+        const anggaranNum = parseFloat(anggaran_usulan);
+        if (isNaN(anggaranNum) || anggaranNum < 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Anggaran harus berupa angka yang valid'
+          });
+        }
+        if (anggaranNum > 1_500_000_000) {
+          return res.status(400).json({
+            success: false,
+            message: 'Anggaran tidak boleh lebih dari Rp 1.500.000.000'
+          });
+        }
+        updateData.anggaran_usulan = anggaranNum;
+      }
+      if (volume !== undefined) updateData.volume = String(volume).substring(0, 255);
+      if (lokasi !== undefined) updateData.lokasi = String(lokasi).substring(0, 255);
+      if (nama_kegiatan_spesifik !== undefined) updateData.nama_kegiatan_spesifik = String(nama_kegiatan_spesifik).substring(0, 255);
+
+      if (Object.keys(updateData).length <= 1) {
+        return res.status(400).json({
+          success: false,
+          message: 'Tidak ada data yang diubah'
+        });
+      }
+
+      await prisma.bankeu_proposals.update({
+        where: { id: BigInt(id) },
+        data: updateData
+      });
+
+      logger.info(`✅ DPMD edited proposal detail: ${id} by user ${userId}`);
+
+      ActivityLogger.log({
+        userId,
+        userName: req.user.name || `User ${userId}`,
+        userRole: req.user.role,
+        bidangId: 3,
+        module: 'bankeu',
+        action: 'update',
+        entityType: 'bankeu_proposal',
+        entityId: parseInt(id),
+        entityName: proposal.judul_proposal || `Proposal #${id}`,
+        description: `DPMD admin mengedit detail proposal #${id} (${proposal.desas?.nama || 'Desa'})`,
+        oldValue: { anggaran_usulan: proposal.anggaran_usulan, volume: proposal.volume, lokasi: proposal.lokasi, nama_kegiatan_spesifik: proposal.nama_kegiatan_spesifik },
+        newValue: { anggaran_usulan, volume, lokasi, nama_kegiatan_spesifik },
+        ipAddress: ActivityLogger.getIpFromRequest(req),
+        userAgent: ActivityLogger.getUserAgentFromRequest(req)
+      });
+
+      return res.json({
+        success: true,
+        message: 'Detail proposal berhasil diupdate',
+        data: { id: parseInt(id) }
+      });
+    } catch (error) {
+      logger.error('Error editing proposal detail:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Gagal mengedit detail proposal',
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = new DPMDVerificationController();
