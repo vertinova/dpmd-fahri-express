@@ -5,6 +5,7 @@
 
 const prisma = require('../config/prisma');
 const { v4: uuidv4 } = require('uuid');
+const bcrypt = require('bcrypt');
 const ActivityLogger = require('../utils/activityLogger');
 
 class VideoMeetingController {
@@ -68,7 +69,7 @@ class VideoMeetingController {
           is_recording_enabled,
           is_screen_share_enabled,
           is_chat_enabled,
-          password: password || null,
+          password: password ? await bcrypt.hash(password, 10) : null,
           waiting_room_enabled,
           status: scheduled_start ? 'scheduled' : 'active'
         }

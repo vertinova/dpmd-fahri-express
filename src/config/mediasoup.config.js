@@ -7,7 +7,7 @@ module.exports = {
   // Worker settings
   worker: {
     rtcMinPort: 10000,
-    rtcMaxPort: 10100,
+    rtcMaxPort: 10500,
     logLevel: 'warn',
     logTags: [
       'info',

@@ -7,8 +7,12 @@ const { Server } = require('socket.io');
 const mediasoupService = require('../services/mediasoup.service');
 const prisma = require('../config/prisma');
 const jwt = require('jsonwebtoken');
+const bcrypt = require('bcrypt');
 
 let io;
+
+// Chat rate limiter: Map<socketId, { count, resetTime }>
+const chatRateLimits = new Map();
 
 /**
  * Safe callback helper - prevents crash if callback is not a function
@@ -144,8 +148,11 @@ function initSocketServer(httpServer) {
         }
 
         // Check password if required
-        if (meeting.password && data.password !== meeting.password) {
-          return safeCallback(callback, { error: 'Invalid password' });
+        if (meeting.password) {
+          const passwordMatch = await bcrypt.compare(data.password || '', meeting.password);
+          if (!passwordMatch) {
+            return safeCallback(callback, { error: 'Invalid password' });
+          }
         }
 
         // Get or create mediasoup room
@@ -455,6 +462,23 @@ function initSocketServer(httpServer) {
         const roomId = socket.roomId;
         const participantId = socket.participantId;
 
+        // Rate limit: max 10 messages per 10 seconds per socket
+        const now = Date.now();
+        const limit = chatRateLimits.get(socket.id);
+        if (limit && now < limit.resetTime) {
+          limit.count++;
+          if (limit.count > 10) {
+            console.log(`[Socket] Chat rate limited for ${socket.userName}`);
+            return;
+          }
+        } else {
+          chatRateLimits.set(socket.id, { count: 1, resetTime: now + 10000 });
+        }
+
+        // Sanitize message length
+        const sanitizedMessage = message?.slice(0, 2000);
+        if (!sanitizedMessage?.trim()) return;
+
         // Save to database
         const chatMessage = await prisma.video_meeting_chats.create({
           data: {
@@ -462,7 +486,7 @@ function initSocketServer(httpServer) {
               (await prisma.video_meetings.findFirst({ where: { room_id: roomId } })).id
             ),
             participant_id: BigInt(participantId),
-            message,
+            message: sanitizedMessage,
             message_type: 'text'
           }
         });
@@ -470,7 +494,7 @@ function initSocketServer(httpServer) {
         // Broadcast to all in room (including sender)
         io.to(roomId).emit('chat-message', {
           id: chatMessage.id.toString(),
-          message,
+          message: sanitizedMessage,
           senderName: socket.userName,
           senderId: socket.user.id,
           timestamp: chatMessage.created_at
@@ -596,6 +620,7 @@ function initSocketServer(httpServer) {
     // Handle disconnect
     socket.on('disconnect', async () => {
       console.log(`[Socket] User disconnected: ${socket.user.name}`);
+      chatRateLimits.delete(socket.id);
       await handlePeerLeave(socket);
     });
   });
