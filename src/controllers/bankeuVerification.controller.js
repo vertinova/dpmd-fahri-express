@@ -810,12 +810,16 @@ class BankeuVerificationController {
           where: { setting_key: 'bankeu_submission_kecamatan' }
         });
         
-        if (submissionSetting && submissionSetting.setting_value === 'false') {
-          logger.warn(`⛔ Kecamatan submit to DPMD blocked - submission is closed by DPMD`);
-          return res.status(403).json({
-            success: false,
-            message: 'Pengiriman ke DPMD saat ini ditutup. Silakan hubungi DPMD untuk informasi lebih lanjut.'
-          });
+        if (submissionSetting) {
+          const { evaluateBankeuSchedule } = require('./appSettings.controller');
+          const { isOpen } = evaluateBankeuSchedule(submissionSetting.setting_value);
+          if (!isOpen) {
+            logger.warn(`⛔ Kecamatan submit to DPMD blocked - submission is closed by DPMD`);
+            return res.status(403).json({
+              success: false,
+              message: 'Pengiriman ke DPMD saat ini ditutup. Silakan hubungi DPMD untuk informasi lebih lanjut.'
+            });
+          }
         }
 
         // Check if all APPROVED proposals have berita acara

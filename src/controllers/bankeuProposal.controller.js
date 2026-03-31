@@ -15,20 +15,19 @@ const MAX_ANGGARAN = 1_500_000_000;
  */
 async function checkSubmissionOpen() {
   try {
+    const { evaluateBankeuSchedule } = require('./appSettings.controller');
     const setting = await prisma.app_settings.findUnique({
       where: { setting_key: 'bankeu_submission_desa' }
     });
     
     if (!setting) {
-      // Default: open
       return { isOpen: true, setting: null };
     }
     
-    const isOpen = setting.setting_value === 'true';
+    const { isOpen } = evaluateBankeuSchedule(setting.setting_value);
     return { isOpen, setting };
   } catch (error) {
     logger.error('Error checking submission setting:', error);
-    // Default: open on error
     return { isOpen: true, setting: null };
   }
 }

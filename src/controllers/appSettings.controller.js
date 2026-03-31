@@ -1,5 +1,63 @@
 const prisma = require('../config/prisma');
 
+/**
+ * Evaluate if a bankeu schedule setting is currently "open"
+ * based on day-of-week and time range (Asia/Jakarta timezone).
+ * 
+ * setting_value format (JSON string):
+ * { "enabled": true, "schedule": { "days": [1,2,3,4,5], "startTime": "08:00", "endTime": "16:00" } }
+ * 
+ * Legacy format: "true" or "false" (still supported)
+ */
+function evaluateBankeuSchedule(settingValue) {
+  if (!settingValue) return { isOpen: true, config: null };
+
+  // Legacy boolean format
+  if (settingValue === 'true') return { isOpen: true, config: null };
+  if (settingValue === 'false') return { isOpen: false, config: null };
+
+  try {
+    const config = JSON.parse(settingValue);
+
+    // If not enabled, it's closed regardless of schedule
+    if (!config.enabled) return { isOpen: false, config };
+
+    // If no schedule defined, just use enabled flag
+    if (!config.schedule) return { isOpen: config.enabled, config };
+
+    const { days, startTime, endTime } = config.schedule;
+
+    // Get current time in Asia/Jakarta
+    const now = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Jakarta' }));
+    const currentDay = now.getDay(); // 0=Sunday, 1=Monday, ..., 6=Saturday
+    const currentHour = now.getHours();
+    const currentMinute = now.getMinutes();
+    const currentTimeMinutes = currentHour * 60 + currentMinute;
+
+    // Check day
+    if (days && days.length > 0 && !days.includes(currentDay)) {
+      return { isOpen: false, config, reason: 'outside_day' };
+    }
+
+    // Check time range
+    if (startTime && endTime) {
+      const [startH, startM] = startTime.split(':').map(Number);
+      const [endH, endM] = endTime.split(':').map(Number);
+      const startMinutes = startH * 60 + startM;
+      const endMinutes = endH * 60 + endM;
+
+      if (currentTimeMinutes < startMinutes || currentTimeMinutes > endMinutes) {
+        return { isOpen: false, config, reason: 'outside_time' };
+      }
+    }
+
+    return { isOpen: true, config };
+  } catch {
+    // If JSON parse fails, treat as legacy
+    return { isOpen: settingValue === 'true', config: null };
+  }
+}
+
 class AppSettingsController {
   /**
    * Get setting by key
@@ -14,19 +72,20 @@ class AppSettingsController {
       });
 
       // Default values for bankeu submission settings
-      const defaultSettings = {
-        'bankeu_submission_desa': true,
-        'bankeu_submission_kecamatan': true
+      const defaultBankeu = {
+        'bankeu_submission_desa': { enabled: true, schedule: null },
+        'bankeu_submission_kecamatan': { enabled: true, schedule: null }
       };
 
       if (!setting) {
-        // Return default value if setting doesn't exist and has a default
-        if (key in defaultSettings) {
+        if (key in defaultBankeu) {
+          const def = defaultBankeu[key];
           return res.json({
             success: true,
             data: {
               key: key,
-              value: defaultSettings[key],
+              value: true,
+              config: def,
               description: null,
               updated_at: null,
               isDefault: true
@@ -39,7 +98,23 @@ class AppSettingsController {
         });
       }
 
-      // Parse boolean values
+      // For bankeu settings, evaluate schedule
+      if (key.startsWith('bankeu_submission_')) {
+        const { isOpen, config, reason } = evaluateBankeuSchedule(setting.setting_value);
+        return res.json({
+          success: true,
+          data: {
+            key: setting.setting_key,
+            value: isOpen,
+            config: config,
+            reason: reason || null,
+            description: setting.description,
+            updated_at: setting.updated_at
+          }
+        });
+      }
+
+      // Parse boolean values for non-bankeu settings
       let value = setting.setting_value;
       if (value === 'true' || value === 'false') {
         value = value === 'true';
@@ -118,8 +193,14 @@ class AppSettingsController {
         });
       }
 
-      // Convert boolean to string for storage
-      const valueStr = typeof value === 'boolean' ? value.toString() : value.toString();
+      // For bankeu settings, store as JSON config
+      let valueStr;
+      if (key.startsWith('bankeu_submission_') && typeof value === 'object' && value !== null) {
+        // New format: { enabled, schedule: { days, startTime, endTime } }
+        valueStr = JSON.stringify(value);
+      } else {
+        valueStr = typeof value === 'boolean' ? value.toString() : value.toString();
+      }
 
       const setting = await prisma.app_settings.upsert({
         where: { setting_key: key },
@@ -134,7 +215,23 @@ class AppSettingsController {
         }
       });
 
-      // Parse response value
+      // Parse response
+      if (key.startsWith('bankeu_submission_')) {
+        const { isOpen, config } = evaluateBankeuSchedule(setting.setting_value);
+        return res.json({
+          success: true,
+          message: 'Setting updated successfully',
+          data: {
+            key: setting.setting_key,
+            value: isOpen,
+            config: config,
+            description: setting.description,
+            updated_at: setting.updated_at,
+            updated_by: userId
+          }
+        });
+      }
+
       let responseValue = setting.setting_value;
       if (responseValue === 'true' || responseValue === 'false') {
         responseValue = responseValue === 'true';
@@ -199,4 +296,6 @@ class AppSettingsController {
   }
 }
 
-module.exports = new AppSettingsController();
+const appSettingsController = new AppSettingsController();
+appSettingsController.evaluateBankeuSchedule = evaluateBankeuSchedule;
+module.exports = appSettingsController;

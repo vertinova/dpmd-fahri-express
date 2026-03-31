@@ -168,12 +168,16 @@ exports.submitSuratToKecamatan = async (req, res) => {
       where: { setting_key: 'bankeu_submission_desa' }
     });
     
-    if (submissionSetting && submissionSetting.setting_value === 'false') {
-      logger.warn(`⛔ Surat submission blocked - submission is closed by DPMD`);
-      return res.status(403).json({
-        success: false,
-        message: 'Pengajuan saat ini ditutup oleh DPMD. Silakan hubungi DPMD untuk informasi lebih lanjut.'
-      });
+    if (submissionSetting) {
+      const { evaluateBankeuSchedule } = require('./appSettings.controller');
+      const { isOpen } = evaluateBankeuSchedule(submissionSetting.setting_value);
+      if (!isOpen) {
+        logger.warn(`⛔ Surat submission blocked - submission is closed by DPMD`);
+        return res.status(403).json({
+          success: false,
+          message: 'Pengajuan saat ini ditutup oleh DPMD. Silakan hubungi DPMD untuk informasi lebih lanjut.'
+        });
+      }
     }
 
     // Check surat exists and complete
