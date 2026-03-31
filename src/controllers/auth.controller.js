@@ -37,6 +37,12 @@ const login = async (req, res) => {
             id_pegawai: true,
             id_bidang: true,
             nama_pegawai: true,
+            nip: true,
+            jabatan: true,
+            tanggal_lahir: true,
+            status_kepegawaian: true,
+            pangkat: true,
+            golongan: true,
             bidangs: {
               select: {
                 id: true,
@@ -114,7 +120,13 @@ const login = async (req, res) => {
       bidang_id: finalBidangId,
       bidang_name: bidangName,
       dinas_id: convertBigInt(user.dinas_id),
-      pegawai_id: convertBigInt(user.pegawai_id)
+      pegawai_id: convertBigInt(user.pegawai_id),
+      nip: user.pegawai?.nip || null,
+      jabatan: user.pegawai?.jabatan || null,
+      tanggal_lahir: user.pegawai?.tanggal_lahir || null,
+      status_kepegawaian: user.pegawai?.status_kepegawaian?.replace(/_/g, ' ') || null,
+      pangkat: user.pegawai?.pangkat || null,
+      golongan: user.pegawai?.golongan || null
     };
 
     // If user has desa_id, fetch related desa and kecamatan
@@ -232,6 +244,12 @@ const verifyToken = async (req, res) => {
           select: {
             id_pegawai: true,
             id_bidang: true,
+            nip: true,
+            jabatan: true,
+            tanggal_lahir: true,
+            status_kepegawaian: true,
+            pangkat: true,
+            golongan: true,
             bidangs: {
               select: {
                 id: true,
@@ -269,7 +287,13 @@ const verifyToken = async (req, res) => {
       bidang_id: convertBigInt(user.bidang_id),
       bidang_name: bidangName,
       dinas_id: convertBigInt(user.dinas_id),
-      pegawai_id: convertBigInt(user.pegawai_id)
+      pegawai_id: convertBigInt(user.pegawai_id),
+      nip: user.pegawai?.nip || null,
+      jabatan: user.pegawai?.jabatan || null,
+      tanggal_lahir: user.pegawai?.tanggal_lahir || null,
+      status_kepegawaian: user.pegawai?.status_kepegawaian?.replace(/_/g, ' ') || null,
+      pangkat: user.pegawai?.pangkat || null,
+      golongan: user.pegawai?.golongan || null
     };
 
     // If user has desa_id, fetch desa data with kecamatan
@@ -379,6 +403,12 @@ const getProfile = async (req, res) => {
           select: {
             id_pegawai: true,
             id_bidang: true,
+            nip: true,
+            jabatan: true,
+            tanggal_lahir: true,
+            status_kepegawaian: true,
+            pangkat: true,
+            golongan: true,
             bidangs: {
               select: {
                 id: true,
@@ -416,7 +446,13 @@ const getProfile = async (req, res) => {
       bidang_id: convertBigInt(user.bidang_id),
       bidang_name: bidangName,
       dinas_id: convertBigInt(user.dinas_id),
-      pegawai_id: convertBigInt(user.pegawai_id)
+      pegawai_id: convertBigInt(user.pegawai_id),
+      nip: user.pegawai?.nip || null,
+      jabatan: user.pegawai?.jabatan || null,
+      tanggal_lahir: user.pegawai?.tanggal_lahir || null,
+      status_kepegawaian: user.pegawai?.status_kepegawaian?.replace(/_/g, ' ') || null,
+      pangkat: user.pegawai?.pangkat || null,
+      golongan: user.pegawai?.golongan || null
     };
 
     // If user has desa_id, fetch desa data with kecamatan

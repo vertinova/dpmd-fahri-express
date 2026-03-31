@@ -47,8 +47,7 @@ class UserController {
       if (search) {
         where.OR = [
           { name: { contains: search } },
-          { email: { contains: search } },
-          { username: { contains: search } }
+          { email: { contains: search } }
         ];
       }
 
@@ -78,6 +77,11 @@ class UserController {
                 id_pegawai: true,
                 nama_pegawai: true,
                 id_bidang: true,
+                nip: true,
+                jabatan: true,
+                tempat_lahir: true,
+                tanggal_lahir: true,
+                status_kepegawaian: true,
                 bidangs: {
                   select: {
                     id: true,
@@ -152,6 +156,11 @@ class UserController {
         desa_id: user.desa_id,
         dinas_id: user.dinas_id,
         pegawai_id: user.pegawai_id,
+        nip: user.pegawai?.nip || null,
+        jabatan: user.pegawai?.jabatan || null,
+        tempat_lahir: user.pegawai?.tempat_lahir || null,
+        tanggal_lahir: user.pegawai?.tanggal_lahir || null,
+        status_kepegawaian: user.pegawai?.status_kepegawaian || null,
         // Bidang from pegawai relation OR fallback to deprecated bidang_id
         bidang: user.bidang || null,
         kecamatan: user.kecamatan || null,
@@ -211,6 +220,11 @@ class UserController {
               id_pegawai: true,
               nama_pegawai: true,
               id_bidang: true,
+              nip: true,
+              jabatan: true,
+              tempat_lahir: true,
+              tanggal_lahir: true,
+              status_kepegawaian: true,
               bidangs: {
                 select: {
                   id: true,
@@ -387,7 +401,12 @@ class UserController {
         desa_id,
         dinas_id,
         pegawai_id,
-        is_active
+        is_active,
+        tanggal_lahir,
+        tempat_lahir,
+        jabatan,
+        nip,
+        status_kepegawaian
       } = req.body;
 
       // Convert id to BigInt for proper comparison
@@ -447,6 +466,23 @@ class UserController {
         updateData.password = await bcrypt.hash(password, 10);
       }
 
+      // Update tanggal_lahir, jabatan, nip on pegawai table
+      if (existingUser.pegawai_id) {
+        const pegawaiUpdate = {};
+        if (tanggal_lahir !== undefined) pegawaiUpdate.tanggal_lahir = tanggal_lahir ? new Date(tanggal_lahir) : null;
+        if (tempat_lahir !== undefined) pegawaiUpdate.tempat_lahir = tempat_lahir || null;
+        if (jabatan !== undefined) pegawaiUpdate.jabatan = jabatan || null;
+        if (nip !== undefined) pegawaiUpdate.nip = nip || null;
+        if (status_kepegawaian !== undefined) pegawaiUpdate.status_kepegawaian = status_kepegawaian || null;
+        
+        if (Object.keys(pegawaiUpdate).length > 0) {
+          await prisma.pegawai.update({
+            where: { id_pegawai: existingUser.pegawai_id },
+            data: pegawaiUpdate
+          });
+        }
+      }
+
       // Update bidang: support both systems (pegawai table & deprecated users.bidang_id)
       if (bidang_id !== undefined) {
         if (existingUser.pegawai_id) {
@@ -482,6 +518,11 @@ class UserController {
             select: {
               id_pegawai: true,
               id_bidang: true,
+              nip: true,
+              jabatan: true,
+              tempat_lahir: true,
+              tanggal_lahir: true,
+              status_kepegawaian: true,
               bidangs: {
                 select: {
                   id: true,

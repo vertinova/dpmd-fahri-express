@@ -821,7 +821,7 @@ model pegawai {
   id_pegawai          BigInt                    @id @default(autoincrement()) @db.UnsignedBigInt
   id_bidang           BigInt                    @db.UnsignedBigInt
   nama_pegawai        String                    @db.VarChar(255)
-  nip                 String?                   @db.VarChar(18)
+  nip                 String?                   @db.VarChar(30)
   jabatan             String?                   @db.VarChar(255)
   golongan            String?                   @db.VarChar(20)
   pangkat             String?                   @db.VarChar(100)
@@ -853,9 +853,11 @@ enum pegawai_jenis_kelamin {
 enum pegawai_status_kepegawaian {
   PNS
   PPPK
+  PPPK_Paruh_Waktu @map("PPPK Paruh Waktu")
   Honorer
   THL
   Kontrak
+  Tenaga_Alih_Daya @map("Tenaga Alih Daya")
 }
 
 model pejabat_ttd {
