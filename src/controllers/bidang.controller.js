@@ -261,11 +261,12 @@ class BidangController {
     try {
       const { bidangId } = req.params;
       const bidangIdInt = parseInt(bidangId);
+      const { all: showAll } = req.query; // ?all=true to show all DPMD pegawai
       
       // Get all users yang merupakan pegawai di bidang ini
       const pegawaiList = await prisma.users.findMany({
         where: {
-          bidang_id: bidangIdInt,
+          ...(showAll === 'true' ? {} : { bidang_id: bidangIdInt }),
           pegawai_id: {
             not: null
           },
@@ -278,11 +279,24 @@ class BidangController {
           role: true,
           avatar: true,
           pegawai_id: true,
+          bidang_id: true,
           pegawai: {
             select: {
               id_pegawai: true,
               nama_pegawai: true,
-              id_bidang: true
+              nip: true,
+              jabatan: true,
+              golongan: true,
+              pangkat: true,
+              no_hp: true,
+              status_kepegawaian: true,
+              id_bidang: true,
+              bidangs: {
+                select: {
+                  id: true,
+                  nama: true
+                }
+              }
             }
           }
         },
@@ -306,6 +320,8 @@ class BidangController {
           pegawaiRole = 'sekretaris';
         } else if (user.role === 'koordinator') {
           pegawaiRole = 'koordinator';
+        } else if (user.role === 'ketua_tim') {
+          pegawaiRole = 'ketua_tim';
         }
 
         return {
@@ -315,9 +331,14 @@ class BidangController {
             id: Number(user.id),
             fullname: user.name,
             email: user.email,
-            nip: user.pegawai?.id_pegawai ? String(user.pegawai.id_pegawai) : null,
-            phone: null, // Add if phone field exists in users table
-            avatar: user.avatar || null
+            nip: user.pegawai?.nip || null,
+            jabatan: user.pegawai?.jabatan || null,
+            golongan: user.pegawai?.golongan || null,
+            pangkat: user.pegawai?.pangkat || null,
+            phone: user.pegawai?.no_hp || null,
+            status_kepegawaian: user.pegawai?.status_kepegawaian || null,
+            avatar: user.avatar || null,
+            bidang_nama: user.pegawai?.bidangs?.nama || null
           }
         };
       });

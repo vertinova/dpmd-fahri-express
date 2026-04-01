@@ -10,12 +10,13 @@ const {
  * - type: kelembagaan type (rw, rt, posyandu, dll) - REQUIRED
  * - desa_id: filter by desa - REQUIRED
  * - limit: jumlah log (default: 20)
+ * - offset: skip records for pagination (default: 0)
  * 
  * Endpoint: GET /api/kelembagaan/activity-logs/list
  */
 const getListActivityLogs = async (req, res) => {
   try {
-    const { type, desa_id, limit } = req.query;
+    const { type, desa_id, limit, offset } = req.query;
 
     // Validasi parameter
     if (!type) {
@@ -32,12 +33,19 @@ const getListActivityLogs = async (req, res) => {
       });
     }
 
+    const parsedLimit = limit ? parseInt(limit, 10) : 20;
+    const parsedOffset = offset ? parseInt(offset, 10) : 0;
+
     // Get logs untuk list page (hanya aktivitas lembaga)
     const logs = await getListPageActivityLogs({
       kelembagaanType: type,
       desaId: parseInt(desa_id),
-      limit: limit ? parseInt(limit) : 20
+      limit: parsedLimit + 1,
+      skip: parsedOffset
     });
+
+    const hasMore = logs.length > parsedLimit;
+    const paginatedLogs = hasMore ? logs.slice(0, parsedLimit) : logs;
 
     return res.status(200).json({
       success: true,
@@ -45,8 +53,11 @@ const getListActivityLogs = async (req, res) => {
       data: {
         kelembagaan_type: type,
         desa_id: parseInt(desa_id),
-        total: logs.length,
-        logs: logs.map(log => ({
+        limit: parsedLimit,
+        offset: parsedOffset,
+        total: paginatedLogs.length,
+        hasMore,
+        logs: paginatedLogs.map(log => ({
           id: log.id,
           kelembagaan_nama: log.kelembagaan_nama,
           kelembagaan_type: log.kelembagaan_type,
@@ -78,13 +89,14 @@ const getListActivityLogs = async (req, res) => {
  * Query params:
  * - kelembagaan_id: UUID kelembagaan - REQUIRED
  * - limit: jumlah log (default: 50)
+ * - offset: skip records for pagination (default: 0)
  * 
  * Endpoint: GET /api/kelembagaan/activity-logs/detail/:type/:id
  */
 const getDetailActivityLogs = async (req, res) => {
   try {
     const { type, id } = req.params;
-    const { limit } = req.query;
+    const { limit, offset } = req.query;
 
     // Validasi parameter
     if (!id) {
@@ -94,11 +106,18 @@ const getDetailActivityLogs = async (req, res) => {
       });
     }
 
+    const parsedLimit = limit ? parseInt(limit, 10) : 50;
+    const parsedOffset = offset ? parseInt(offset, 10) : 0;
+
     // Get logs untuk detail page (semua aktivitas termasuk pengurus)
     const logs = await getDetailPageActivityLogs({
       kelembagaanId: id,
-      limit: limit ? parseInt(limit) : 50
+      limit: parsedLimit + 1,
+      skip: parsedOffset
     });
+
+    const hasMore = logs.length > parsedLimit;
+    const paginatedLogs = hasMore ? logs.slice(0, parsedLimit) : logs;
 
     return res.status(200).json({
       success: true,
@@ -106,8 +125,11 @@ const getDetailActivityLogs = async (req, res) => {
       data: {
         kelembagaan_type: type,
         kelembagaan_id: id,
-        total: logs.length,
-        logs: logs.map(log => ({
+        limit: parsedLimit,
+        offset: parsedOffset,
+        total: paginatedLogs.length,
+        hasMore,
+        logs: paginatedLogs.map(log => ({
           id: log.id,
           kelembagaan_type: log.kelembagaan_type,
           kelembagaan_nama: log.kelembagaan_nama,

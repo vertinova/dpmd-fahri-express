@@ -10,7 +10,9 @@ const {
   ACTIVITY_TYPES,
   ENTITY_TYPES,
   logKelembagaanActivity,
-  validateDesaAccess
+  validateDesaAccess,
+  toUpper,
+  createAjukanUlangHandler
 } = require('./base.controller');
 
 /**
@@ -107,9 +109,9 @@ function createSingletonController(type, tableName, displayName) {
         // Build data object
         const data = {
           id: uuidv4(), // Generate UUID for primary key
-          nama: String(nama),
+          nama: toUpper(nama),
           desa_id: desaId,
-          alamat: alamat || '',
+          alamat: toUpper(alamat) || '',
           produk_hukum_id: produk_hukum_id || null,
           status_kelembagaan: 'aktif',
           status_verifikasi: 'unverified'
@@ -178,8 +180,8 @@ function createSingletonController(type, tableName, displayName) {
 
         // Build update data
         const updateData = {
-          nama: nama || item.nama,
-          alamat: alamat !== undefined ? alamat : item.alamat,
+          nama: toUpper(nama) || item.nama,
+          alamat: alamat !== undefined ? toUpper(alamat) : item.alamat,
           produk_hukum_id: produk_hukum_id !== undefined ? (produk_hukum_id || null) : item.produk_hukum_id
         };
 
@@ -319,8 +321,8 @@ function createSingletonController(type, tableName, displayName) {
           verified_at: new Date(),
         };
 
-        // Save catatan when unverifying (returning with feedback), clear when verifying
-        if (status_verifikasi === 'unverified' && catatan_verifikasi) {
+        // Save catatan when rejecting (returning with feedback), clear when verifying
+        if (status_verifikasi === 'ditolak' && catatan_verifikasi) {
           updateData.catatan_verifikasi = catatan_verifikasi;
         } else if (status_verifikasi === 'verified') {
           updateData.catatan_verifikasi = null;
@@ -357,6 +359,9 @@ function createSingletonController(type, tableName, displayName) {
         res.status(500).json({ success: false, message: 'Gagal toggle verifikasi', error: error.message });
       }
     },
+
+    // Ajukan ulang verifikasi (desa resubmit after ditolak)
+    ajukanUlangVerifikasi: createAjukanUlangHandler(tableName, type, displayName, (item) => item.nama),
 
     /**
      * List all (for admin)

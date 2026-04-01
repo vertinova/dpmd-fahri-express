@@ -16,7 +16,9 @@ const ACTIVITY_TYPES = {
   ADD_PENGURUS: 'add_pengurus',
   UPDATE_PENGURUS: 'update_pengurus',
   TOGGLE_PENGURUS_STATUS: 'toggle_pengurus_status',
-  VERIFY_PENGURUS: 'verify_pengurus'
+  VERIFY_PENGURUS: 'verify_pengurus',
+  RESUBMIT: 'resubmit',
+  RESUBMIT_PENGURUS: 'resubmit_pengurus'
 };
 
 const ENTITY_TYPES = {
@@ -62,9 +64,15 @@ async function logKelembagaanActivity({
       case ACTIVITY_TYPES.TOGGLE_STATUS:
         actionDescription = `${userName} mengubah status ${entityType === ENTITY_TYPES.LEMBAGA ? 'kelembagaan' : 'pengurus'} ${entityName} menjadi ${newValue?.status_kelembagaan || newValue?.status_pengurus || 'aktif'}`;
         break;
-      case ACTIVITY_TYPES.VERIFY:
-        actionDescription = `${userName} ${newValue?.status_verifikasi === 'verified' ? 'memverifikasi' : 'membatalkan verifikasi'} ${entityType === ENTITY_TYPES.LEMBAGA ? 'kelembagaan' : 'pengurus'} ${entityName}`;
+      case ACTIVITY_TYPES.VERIFY: {
+        const verificationAction = newValue?.status_verifikasi === 'verified'
+          ? 'memverifikasi'
+          : newValue?.status_verifikasi === 'ditolak'
+            ? 'menolak verifikasi'
+            : 'membatalkan verifikasi';
+        actionDescription = `${userName} ${verificationAction} ${entityType === ENTITY_TYPES.LEMBAGA ? 'kelembagaan' : 'pengurus'} ${entityName}`;
         break;
+      }
       case ACTIVITY_TYPES.ADD_PENGURUS:
         actionDescription = `${userName} menambahkan pengurus ${entityName}`;
         break;
@@ -74,9 +82,15 @@ async function logKelembagaanActivity({
       case ACTIVITY_TYPES.TOGGLE_PENGURUS_STATUS:
         actionDescription = `${userName} mengubah status pengurus ${entityName} menjadi ${newValue?.status_pengurus || 'aktif'}`;
         break;
-      case ACTIVITY_TYPES.VERIFY_PENGURUS:
-        actionDescription = `${userName} ${newValue?.status_verifikasi === 'verified' ? 'memverifikasi' : 'membatalkan verifikasi'} pengurus ${entityName}`;
+      case ACTIVITY_TYPES.VERIFY_PENGURUS: {
+        const verificationAction = newValue?.status_verifikasi === 'verified'
+          ? 'memverifikasi'
+          : newValue?.status_verifikasi === 'ditolak'
+            ? 'menolak verifikasi'
+            : 'membatalkan verifikasi';
+        actionDescription = `${userName} ${verificationAction} pengurus ${entityName}`;
         break;
+      }
       default:
         actionDescription = `${userName} melakukan aktivitas pada ${entityName}`;
     }
@@ -149,9 +163,11 @@ function getDesaId(req) {
 function validateDesaAccess(req, res) {
   const user = req.user;
   
-  // Superadmin and admin can access any desa via desa_id parameter
-  if (user.role === 'superadmin' || user.role === 'pemberdayaan_masyarakat') {
-    const desaId = req.query?.desa_id || req.desaId || req.user?.desa_id;
+  // Admin roles that can access any desa via desa_id parameter
+  const adminRoles = ['superadmin', 'pemberdayaan_masyarakat', 'pegawai', 'kepala_bidang', 'ketua_tim', 'kepala_dinas', 'sekretaris_dinas'];
+  
+  if (adminRoles.includes(user.role)) {
+    const desaId = req.query?.desa_id || req.body?.desa_id || req.desaId || req.user?.desa_id;
     if (!desaId) {
       res.status(403).json({ success: false, message: 'desa_id parameter diperlukan untuk admin' });
       return null;
@@ -168,11 +184,91 @@ function validateDesaAccess(req, res) {
   return desaId;
 }
 
+/**
+ * Convert string to uppercase, return null if falsy
+ */
+function toUpper(val) {
+  return val ? String(val).toUpperCase() : val;
+}
+
+/**
+ * Shared handler for "Ajukan Ulang Verifikasi" (desa resubmit after ditolak)
+ * Resets status_verifikasi from 'ditolak' to 'unverified'
+ * @param {string} tableName - Prisma table name (e.g. 'rws', 'rts', 'posyandus')
+ * @param {string} kelembagaanType - Type string for logging (e.g. 'rw', 'rt', 'posyandu')
+ * @param {string} entityLabel - Display label (e.g. 'RW', 'RT', 'Posyandu')
+ * @param {Function} getEntityName - Function(item) to get display name for logging
+ */
+function createAjukanUlangHandler(tableName, kelembagaanType, entityLabel, getEntityName) {
+  return async (req, res) => {
+    try {
+      const user = req.user;
+
+      const item = await prisma[tableName].findUnique({
+        where: { id: String(req.params.id) }
+      });
+
+      if (!item) {
+        return res.status(404).json({ success: false, message: `${entityLabel} tidak ditemukan` });
+      }
+
+      // Validate desa ownership
+      if (user.role === 'desa' && Number(user.desa_id) !== Number(item.desa_id)) {
+        return res.status(403).json({ success: false, message: 'User tidak memiliki akses' });
+      }
+
+      // Only allow resubmit from ditolak status
+      if (item.status_verifikasi !== 'ditolak') {
+        return res.status(400).json({
+          success: false,
+          message: `Hanya ${entityLabel} dengan status "ditolak" yang dapat diajukan ulang`
+        });
+      }
+
+      const updated = await prisma[tableName].update({
+        where: { id: String(req.params.id) },
+        data: {
+          status_verifikasi: 'unverified',
+          catatan_verifikasi: null,
+          verifikator_nama: null,
+          verified_at: null,
+        }
+      });
+
+      await logKelembagaanActivity({
+        kelembagaanType,
+        kelembagaanId: updated.id,
+        kelembagaanNama: getEntityName(updated),
+        desaId: updated.desa_id,
+        activityType: ACTIVITY_TYPES.RESUBMIT,
+        entityType: ENTITY_TYPES.LEMBAGA,
+        entityId: updated.id,
+        entityName: getEntityName(updated),
+        oldValue: { status_verifikasi: item.status_verifikasi },
+        newValue: { status_verifikasi: 'unverified' },
+        userId: user.id,
+        userName: user.name,
+        userRole: user.role,
+        bidangId: user.bidang_id,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      });
+
+      res.json({ success: true, data: updated, message: `Berhasil mengajukan ulang verifikasi ${entityLabel}` });
+    } catch (error) {
+      console.error(`Error in ajukanUlangVerifikasi ${entityLabel}:`, error);
+      res.status(500).json({ success: false, message: 'Gagal mengajukan ulang verifikasi', error: error.message });
+    }
+  };
+}
+
 module.exports = {
   prisma,
   ACTIVITY_TYPES,
   ENTITY_TYPES,
   logKelembagaanActivity,
   getDesaId,
-  validateDesaAccess
+  validateDesaAccess,
+  toUpper,
+  createAjukanUlangHandler
 };

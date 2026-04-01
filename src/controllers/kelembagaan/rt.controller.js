@@ -9,7 +9,9 @@ const {
   ACTIVITY_TYPES,
   ENTITY_TYPES,
   logKelembagaanActivity,
-  validateDesaAccess
+  validateDesaAccess,
+  toUpper,
+  createAjukanUlangHandler
 } = require('./base.controller');
 
 class RTController {
@@ -146,7 +148,7 @@ class RTController {
           nomor: String(nomor),
           rw_id: String(rw_id),
           desa_id: desaId,
-          alamat: alamat || rw.alamat || '',
+          alamat: toUpper(alamat) || rw.alamat || '',
           produk_hukum_id: produk_hukum_id || null,
           jumlah_jiwa: jumlah_jiwa ? parseInt(jumlah_jiwa) : null,
           jumlah_kk: jumlah_kk ? parseInt(jumlah_kk) : null,
@@ -219,7 +221,7 @@ class RTController {
         where: { id: String(req.params.id) },
         data: {
           nomor: nomor || item.nomor,
-          alamat: alamat !== undefined ? alamat : item.alamat,
+          alamat: alamat !== undefined ? toUpper(alamat) : item.alamat,
           produk_hukum_id: produk_hukum_id !== undefined ? (produk_hukum_id || null) : item.produk_hukum_id,
           jumlah_jiwa: jumlah_jiwa !== undefined ? (jumlah_jiwa ? parseInt(jumlah_jiwa) : null) : item.jumlah_jiwa,
           jumlah_kk: jumlah_kk !== undefined ? (jumlah_kk ? parseInt(jumlah_kk) : null) : item.jumlah_kk
@@ -352,7 +354,7 @@ class RTController {
         verified_at: new Date(),
       };
 
-      if (status_verifikasi === 'unverified' && catatan_verifikasi) {
+      if (status_verifikasi === 'ditolak' && catatan_verifikasi) {
         updateData.catatan_verifikasi = catatan_verifikasi;
       } else if (status_verifikasi === 'verified') {
         updateData.catatan_verifikasi = null;
@@ -495,6 +497,9 @@ class RTController {
       res.status(500).json({ success: false, message: 'Gagal mengambil data RT', error: error.message });
     }
   }
+
+  // Ajukan ulang verifikasi (desa resubmit after ditolak)
+  ajukanUlangVerifikasi = createAjukanUlangHandler('rts', 'rt', 'RT', (item) => `RT ${item.nomor}`);
 }
 
 module.exports = new RTController();

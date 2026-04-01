@@ -9,7 +9,9 @@ const {
   ACTIVITY_TYPES,
   ENTITY_TYPES,
   logKelembagaanActivity,
-  validateDesaAccess
+  validateDesaAccess,
+  toUpper,
+  createAjukanUlangHandler
 } = require('./base.controller');
 
 class PosyanduController {
@@ -124,9 +126,9 @@ class PosyanduController {
       const newItem = await prisma.posyandus.create({
         data: {
           id: uuidv4(), // Generate UUID for primary key
-          nama: String(nama),
+          nama: toUpper(nama),
           desa_id: desaId,
-          alamat: alamat || '',
+          alamat: toUpper(alamat) || '',
           produk_hukum_id: produk_hukum_id || null,
           status_kelembagaan: 'aktif',
           status_verifikasi: 'unverified'
@@ -196,8 +198,8 @@ class PosyanduController {
       const updated = await prisma.posyandus.update({
         where: { id: String(req.params.id) },
         data: {
-          nama: nama || item.nama,
-          alamat: alamat !== undefined ? alamat : item.alamat,
+          nama: toUpper(nama) || item.nama,
+          alamat: alamat !== undefined ? toUpper(alamat) : item.alamat,
           produk_hukum_id: produk_hukum_id !== undefined ? (produk_hukum_id || null) : item.produk_hukum_id
         }
       });
@@ -328,7 +330,7 @@ class PosyanduController {
         verified_at: new Date(),
       };
 
-      if (status_verifikasi === 'unverified' && catatan_verifikasi) {
+      if (status_verifikasi === 'ditolak' && catatan_verifikasi) {
         updateData.catatan_verifikasi = catatan_verifikasi;
       } else if (status_verifikasi === 'verified') {
         updateData.catatan_verifikasi = null;
@@ -475,6 +477,9 @@ class PosyanduController {
       res.status(500).json({ success: false, message: 'Gagal mengambil data Posyandu', error: error.message });
     }
   }
+
+  // Ajukan ulang verifikasi (desa resubmit after ditolak)
+  ajukanUlangVerifikasi = createAjukanUlangHandler('posyandus', 'posyandu', 'Posyandu', (item) => item.nama);
 }
 
 module.exports = new PosyanduController();

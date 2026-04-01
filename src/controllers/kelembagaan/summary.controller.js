@@ -45,7 +45,15 @@ class SummaryController {
         karangTarunaVerifiedData,
         lpmVerifiedData,
         satlinmasVerifiedData,
-        pkkVerifiedData
+        pkkVerifiedData,
+        // Get ditolak data
+        rwDitolakData,
+        rtDitolakData,
+        posyanduDitolakData,
+        karangTarunaDitolakData,
+        lpmDitolakData,
+        satlinmasDitolakData,
+        pkkDitolakData
       ] = await Promise.all([
         prisma.rws.groupBy({
           by: ['desa_id'],
@@ -109,6 +117,38 @@ class SummaryController {
         prisma.pkks.findMany({
           where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' },
           select: { id: true, desa_id: true, status_kelembagaan: true }
+        }),
+        // Get ditolak data
+        prisma.rws.groupBy({
+          by: ['desa_id'],
+          _count: { id: true },
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' }
+        }),
+        prisma.rts.groupBy({
+          by: ['desa_id'],
+          _count: { id: true },
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' }
+        }),
+        prisma.posyandus.groupBy({
+          by: ['desa_id'],
+          _count: { id: true },
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' }
+        }),
+        prisma.karang_tarunas.findMany({
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' },
+          select: { id: true, desa_id: true, status_kelembagaan: true }
+        }),
+        prisma.lpms.findMany({
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' },
+          select: { id: true, desa_id: true, status_kelembagaan: true }
+        }),
+        prisma.satlinmas.findMany({
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' },
+          select: { id: true, desa_id: true, status_kelembagaan: true }
+        }),
+        prisma.pkks.findMany({
+          where: { desa_id: { in: allDesaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' },
+          select: { id: true, desa_id: true, status_kelembagaan: true }
         })
       ]);
 
@@ -129,6 +169,15 @@ class SummaryController {
       const lpmVerifiedMap = new Map(lpmVerifiedData.map(item => [item.desa_id.toString(), item.status_kelembagaan === 'aktif' ? 'Terbentuk' : 'Belum Terbentuk']));
       const satlinmasVerifiedMap = new Map(satlinmasVerifiedData.map(item => [item.desa_id.toString(), item.status_kelembagaan === 'aktif' ? 'Terbentuk' : 'Belum Terbentuk']));
       const pkkVerifiedMap = new Map(pkkVerifiedData.map(item => [item.desa_id.toString(), item.status_kelembagaan === 'aktif' ? 'Terbentuk' : 'Belum Terbentuk']));
+
+      // Convert ditolak data to lookup maps
+      const rwDitolakMap = new Map(rwDitolakData.map(item => [item.desa_id.toString(), item._count.id]));
+      const rtDitolakMap = new Map(rtDitolakData.map(item => [item.desa_id.toString(), item._count.id]));
+      const posyanduDitolakMap = new Map(posyanduDitolakData.map(item => [item.desa_id.toString(), item._count.id]));
+      const karangTarunaDitolakMap = new Map(karangTarunaDitolakData.map(item => [item.desa_id.toString(), item.status_kelembagaan === 'aktif' ? 'Terbentuk' : 'Belum Terbentuk']));
+      const lpmDitolakMap = new Map(lpmDitolakData.map(item => [item.desa_id.toString(), item.status_kelembagaan === 'aktif' ? 'Terbentuk' : 'Belum Terbentuk']));
+      const satlinmasDitolakMap = new Map(satlinmasDitolakData.map(item => [item.desa_id.toString(), item.status_kelembagaan === 'aktif' ? 'Terbentuk' : 'Belum Terbentuk']));
+      const pkkDitolakMap = new Map(pkkDitolakData.map(item => [item.desa_id.toString(), item.status_kelembagaan === 'aktif' ? 'Terbentuk' : 'Belum Terbentuk']));
 
       const kelembagaanData = [];
 
@@ -158,6 +207,15 @@ class SummaryController {
               lpm: lpmVerifiedMap.get(desaIdStr) || 'Belum Terbentuk',
               satlinmas: satlinmasVerifiedMap.get(desaIdStr) || 'Belum Terbentuk',
               pkk: pkkVerifiedMap.get(desaIdStr) || 'Belum Terbentuk'
+            },
+            ditolakKelembagaan: {
+              rw: rwDitolakMap.get(desaIdStr) || 0,
+              rt: rtDitolakMap.get(desaIdStr) || 0,
+              posyandu: posyanduDitolakMap.get(desaIdStr) || 0,
+              karangTaruna: karangTarunaDitolakMap.get(desaIdStr) || 'Belum Terbentuk',
+              lpm: lpmDitolakMap.get(desaIdStr) || 'Belum Terbentuk',
+              satlinmas: satlinmasDitolakMap.get(desaIdStr) || 'Belum Terbentuk',
+              pkk: pkkDitolakMap.get(desaIdStr) || 'Belum Terbentuk'
             }
           };
         });
@@ -183,12 +241,23 @@ class SummaryController {
           pkk: acc.pkk + (desa.verifiedKelembagaan.pkk === 'Terbentuk' ? 1 : 0)
         }), { rw: 0, rt: 0, posyandu: 0, karangTaruna: 0, lpm: 0, satlinmas: 0, pkk: 0 });
 
+        const ditolakKelembagaan = desasWithKelembagaan.reduce((acc, desa) => ({
+          rw: acc.rw + desa.ditolakKelembagaan.rw,
+          rt: acc.rt + desa.ditolakKelembagaan.rt,
+          posyandu: acc.posyandu + desa.ditolakKelembagaan.posyandu,
+          karangTaruna: acc.karangTaruna + (desa.ditolakKelembagaan.karangTaruna === 'Terbentuk' ? 1 : 0),
+          lpm: acc.lpm + (desa.ditolakKelembagaan.lpm === 'Terbentuk' ? 1 : 0),
+          satlinmas: acc.satlinmas + (desa.ditolakKelembagaan.satlinmas === 'Terbentuk' ? 1 : 0),
+          pkk: acc.pkk + (desa.ditolakKelembagaan.pkk === 'Terbentuk' ? 1 : 0)
+        }), { rw: 0, rt: 0, posyandu: 0, karangTaruna: 0, lpm: 0, satlinmas: 0, pkk: 0 });
+
         kelembagaanData.push({
           id: kecamatan.id,
           nama: kecamatan.nama,
           desas: desasWithKelembagaan,
           totalKelembagaan,
-          verifiedKelembagaan
+          verifiedKelembagaan,
+          ditolakKelembagaan
         });
       }
 
@@ -235,6 +304,17 @@ class SummaryController {
         prisma.lpms.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
         prisma.satlinmas.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
         prisma.pkks.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'verified' } })
+      ]);
+
+      // Get ditolak counts for all kelembagaan types
+      const [rwDitolak, rtDitolak, posyanduDitolak, karangTarunaDitolak, lpmDitolak, satlinmasDitolak, pkkDitolak] = await Promise.all([
+        prisma.rws.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' } }),
+        prisma.rts.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' } }),
+        prisma.posyandus.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' } }),
+        prisma.karang_tarunas.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' } }),
+        prisma.lpms.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' } }),
+        prisma.satlinmas.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' } }),
+        prisma.pkks.count({ where: { status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' } })
       ]);
 
       // Get counts by desa/kelurahan status (active only)
@@ -367,6 +447,15 @@ class SummaryController {
             lpm: lpmVerified,
             satlinmas: satlinmasVerified,
             pkk: pkkVerified
+          },
+          ditolak_kelembagaan: {
+            rw: rwDitolak,
+            rt: rtDitolak,
+            posyandu: posyanduDitolak,
+            karangTaruna: karangTarunaDitolak,
+            lpm: lpmDitolak,
+            satlinmas: satlinmasDitolak,
+            pkk: pkkDitolak
           },
           formation_stats: formationStats,
           by_status: {
@@ -521,6 +610,7 @@ class SummaryController {
         });
         if (records.length === 0) return null;
         const verifiedCount = records.filter(r => r.status_verifikasi === 'verified').length;
+        const ditolakCount = records.filter(r => r.status_verifikasi === 'ditolak').length;
         // Count records missing requirements
         const missingSk = records.filter(r => !r.produk_hukum_id).length;
         const missingAlamat = records.filter(r => !r.alamat).length;
@@ -539,7 +629,8 @@ class SummaryController {
         return {
           total: records.length,
           verified: verifiedCount,
-          unverified: records.length - verifiedCount,
+          unverified: records.length - verifiedCount - ditolakCount,
+          ditolak: ditolakCount,
           missing_sk: missingSk,
           missing_alamat: missingAlamat,
           missing_pengurus: missingPengurus,
@@ -672,13 +763,14 @@ class SummaryController {
       }
 
       // Fetch all kelembagaan data
-      const [rws, posyandus, karangTaruna, lpm, satlinmas, pkk] = await Promise.all([
+      const [rws, posyandus, karangTaruna, lpm, satlinmas, pkk, lembagaLainnya] = await Promise.all([
         prisma.rws.findMany({ 
           where: { desa_id: parseInt(id) },
           orderBy: { nomor: 'asc' },
           include: {
             rts: {
-              select: { id: true }
+              select: { id: true, nomor: true, status_kelembagaan: true, status_verifikasi: true },
+              orderBy: { nomor: 'asc' }
             }
           }
         }),
@@ -697,11 +789,15 @@ class SummaryController {
         }),
         prisma.pkks.findFirst({ 
           where: { desa_id: parseInt(id) }
+        }),
+        prisma.lembaga_lainnyas.findMany({ 
+          where: { desa_id: parseInt(id) },
+          orderBy: { nama: 'asc' }
         })
       ]);
 
-      // Map RW with RT count and provide frontend-compatible field names
-      const rwsWithRtCount = rws.map(rw => ({
+      // Map RW with RT data and provide frontend-compatible field names
+      const rwsWithRts = rws.map(rw => ({
         id: rw.id,
         nomor_rw: rw.nomor,
         nomor: rw.nomor,
@@ -710,6 +806,7 @@ class SummaryController {
         status_kelembagaan: rw.status_kelembagaan,
         status_verifikasi: rw.status_verifikasi,
         rt_count: rw.rts.length,
+        rts: rw.rts,
         created_at: rw.created_at,
         updated_at: rw.updated_at
       }));
@@ -725,12 +822,13 @@ class SummaryController {
             status_pemerintahan: desa.status_pemerintahan
           },
           kelembagaan: {
-            rw: rwsWithRtCount,
+            rw: rwsWithRts,
             posyandu: posyandus,
             karang_taruna: karangTaruna,
             lpm: lpm,
             satlinmas: satlinmas,
-            pkk: pkk
+            pkk: pkk,
+            lembaga_lainnya: lembagaLainnya
           }
         }
       });
@@ -938,7 +1036,8 @@ class SummaryController {
                 SUM(CASE WHEN status_kelembagaan = 'aktif' THEN 1 ELSE 0 END) as aktif,
                 SUM(CASE WHEN status_kelembagaan = 'nonaktif' THEN 1 ELSE 0 END) as nonaktif,
                 SUM(CASE WHEN status_verifikasi = 'verified' THEN 1 ELSE 0 END) as verified,
-                SUM(CASE WHEN status_verifikasi = 'unverified' THEN 1 ELSE 0 END) as unverified
+                SUM(CASE WHEN status_verifikasi = 'unverified' THEN 1 ELSE 0 END) as unverified,
+                SUM(CASE WHEN status_verifikasi = 'ditolak' THEN 1 ELSE 0 END) as ditolak
               FROM ${t.model}`
             ),
           ]);
@@ -957,6 +1056,7 @@ class SummaryController {
               nonaktif: Number(totals[0]?.nonaktif || 0),
               verified: Number(totals[0]?.verified || 0),
               unverified: Number(totals[0]?.unverified || 0),
+              ditolak: Number(totals[0]?.ditolak || 0),
             }
           };
         })
@@ -989,7 +1089,7 @@ class SummaryController {
 
       // Grand totals (exclude satlinmas)
       const grandTotals = {
-        total: 0, aktif: 0, nonaktif: 0, verified: 0, unverified: 0,
+        total: 0, aktif: 0, nonaktif: 0, verified: 0, unverified: 0, ditolak: 0,
       };
       results.forEach(r => {
         grandTotals.total += r.totals.total;
@@ -997,6 +1097,7 @@ class SummaryController {
         grandTotals.nonaktif += r.totals.nonaktif;
         grandTotals.verified += r.totals.verified;
         grandTotals.unverified += r.totals.unverified;
+        grandTotals.ditolak += r.totals.ditolak;
       });
       grandTotals.persentase_verifikasi = grandTotals.total > 0
         ? Math.round((grandTotals.verified / grandTotals.total) * 100)

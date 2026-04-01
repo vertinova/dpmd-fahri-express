@@ -46,6 +46,7 @@ router.get('/rw/:id', rwController.showDesaRW.bind(rwController));
 router.put('/rw/:id', rwController.updateRW.bind(rwController));
 router.put('/rw/:id/toggle-status', rwController.toggleStatus.bind(rwController));
 router.put('/rw/:id/toggle-verification', rwController.toggleVerification.bind(rwController));
+router.put('/rw/:id/ajukan-ulang', rwController.ajukanUlangVerifikasi.bind(rwController));
 
 // RT routes
 router.get('/rt', rtController.listDesaRT.bind(rtController));
@@ -54,6 +55,7 @@ router.get('/rt/:id', rtController.showDesaRT.bind(rtController));
 router.put('/rt/:id', rtController.updateRT.bind(rtController));
 router.put('/rt/:id/toggle-status', rtController.toggleStatus.bind(rtController));
 router.put('/rt/:id/toggle-verification', rtController.toggleVerification.bind(rtController));
+router.put('/rt/:id/ajukan-ulang', rtController.ajukanUlangVerifikasi.bind(rtController));
 
 // Posyandu routes
 router.get('/posyandu', posyanduController.listDesaPosyandu.bind(posyanduController));
@@ -62,6 +64,7 @@ router.get('/posyandu/:id', posyanduController.showDesaPosyandu.bind(posyanduCon
 router.put('/posyandu/:id', posyanduController.updatePosyandu.bind(posyanduController));
 router.put('/posyandu/:id/toggle-status', posyanduController.toggleStatus.bind(posyanduController));
 router.put('/posyandu/:id/toggle-verification', posyanduController.toggleVerification.bind(posyanduController));
+router.put('/posyandu/:id/ajukan-ulang', posyanduController.ajukanUlangVerifikasi.bind(posyanduController));
 
 // Karang Taruna routes (singleton - usually only 1 per desa)
 router.get('/karang-taruna', karangTarunaController.listDesa.bind(karangTarunaController));
@@ -69,6 +72,7 @@ router.post('/karang-taruna', karangTarunaController.create.bind(karangTarunaCon
 router.get('/karang-taruna/:id', karangTarunaController.showDesa.bind(karangTarunaController));
 router.put('/karang-taruna/:id', karangTarunaController.update.bind(karangTarunaController));
 router.put('/karang-taruna/:id/toggle-status', karangTarunaController.toggleStatus.bind(karangTarunaController));
+router.put('/karang-taruna/:id/ajukan-ulang', karangTarunaController.ajukanUlangVerifikasi);
 
 // LPM routes (singleton)
 router.get('/lpm', lpmController.listDesa.bind(lpmController));
@@ -76,6 +80,7 @@ router.post('/lpm', lpmController.create.bind(lpmController));
 router.get('/lpm/:id', lpmController.showDesa.bind(lpmController));
 router.put('/lpm/:id', lpmController.update.bind(lpmController));
 router.put('/lpm/:id/toggle-status', lpmController.toggleStatus.bind(lpmController));
+router.put('/lpm/:id/ajukan-ulang', lpmController.ajukanUlangVerifikasi);
 
 // Satlinmas routes (singleton)
 router.get('/satlinmas', satlinmasController.listDesa.bind(satlinmasController));
@@ -83,6 +88,7 @@ router.post('/satlinmas', satlinmasController.create.bind(satlinmasController));
 router.get('/satlinmas/:id', satlinmasController.showDesa.bind(satlinmasController));
 router.put('/satlinmas/:id', satlinmasController.update.bind(satlinmasController));
 router.put('/satlinmas/:id/toggle-status', satlinmasController.toggleStatus.bind(satlinmasController));
+router.put('/satlinmas/:id/ajukan-ulang', satlinmasController.ajukanUlangVerifikasi);
 
 // PKK routes (singleton)
 router.get('/pkk', pkkController.listDesa.bind(pkkController));
@@ -90,6 +96,7 @@ router.post('/pkk', pkkController.create.bind(pkkController));
 router.get('/pkk/:id', pkkController.showDesa.bind(pkkController));
 router.put('/pkk/:id', pkkController.update.bind(pkkController));
 router.put('/pkk/:id/toggle-status', pkkController.toggleStatus.bind(pkkController));
+router.put('/pkk/:id/ajukan-ulang', pkkController.ajukanUlangVerifikasi);
 
 // Lembaga Lainnya routes (multi-instance - desa can create many)
 router.get('/lembaga-lainnya', lembagaLainnyaController.listDesa.bind(lembagaLainnyaController));
@@ -98,6 +105,7 @@ router.get('/lembaga-lainnya/:id', lembagaLainnyaController.showDesa.bind(lembag
 router.put('/lembaga-lainnya/:id', lembagaLainnyaController.update.bind(lembagaLainnyaController));
 router.put('/lembaga-lainnya/:id/toggle-status', lembagaLainnyaController.toggleStatus.bind(lembagaLainnyaController));
 router.put('/lembaga-lainnya/:id/toggle-verification', lembagaLainnyaController.toggleVerification.bind(lembagaLainnyaController));
+router.put('/lembaga-lainnya/:id/ajukan-ulang', lembagaLainnyaController.ajukanUlangVerifikasi.bind(lembagaLainnyaController));
 
 // Pengurus routes (polymorphic - can be attached to any kelembagaan)
 router.get('/pengurus/by-kelembagaan', pengurusController.getPengurusByKelembagaan.bind(pengurusController));
@@ -108,5 +116,6 @@ router.get('/pengurus/:id', pengurusController.showDesaPengurus.bind(pengurusCon
 router.put('/pengurus/:id', uploadPengurus.single('avatar'), pengurusController.updatePengurus.bind(pengurusController));
 router.delete('/pengurus/:id', pengurusController.deletePengurus.bind(pengurusController));
 router.put('/pengurus/:id/status', pengurusController.updatePengurusStatus.bind(pengurusController));
+router.put('/pengurus/:id/ajukan-ulang', pengurusController.ajukanUlangVerifikasi.bind(pengurusController));
 
 module.exports = router;

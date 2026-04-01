@@ -11,7 +11,9 @@ const {
   ENTITY_TYPES,
   logKelembagaanActivity,
   validateDesaAccess,
-  getDesaId
+  getDesaId,
+  toUpper,
+  createAjukanUlangHandler
 } = require('./base.controller');
 
 const TYPE = 'lembaga-lainnya';
@@ -118,9 +120,9 @@ class LembagaLainnyaController {
 
       const data = {
         id: uuidv4(),
-        nama: String(nama).trim(),
+        nama: toUpper(String(nama).trim()),
         desa_id: desaId,
-        alamat: alamat || '',
+        alamat: toUpper(alamat) || '',
         produk_hukum_id: produk_hukum_id || null,
         status_kelembagaan: 'aktif',
         status_verifikasi: 'unverified'
@@ -179,8 +181,8 @@ class LembagaLainnyaController {
       const { nama, alamat, produk_hukum_id } = req.body;
 
       const updateData = {
-        nama: nama || item.nama,
-        alamat: alamat !== undefined ? alamat : item.alamat,
+        nama: toUpper(nama) || item.nama,
+        alamat: alamat !== undefined ? toUpper(alamat) : item.alamat,
         produk_hukum_id: produk_hukum_id !== undefined ? (produk_hukum_id || null) : item.produk_hukum_id
       };
 
@@ -312,7 +314,7 @@ class LembagaLainnyaController {
         verified_at: new Date(),
       };
 
-      if (status_verifikasi === 'unverified' && catatan_verifikasi) {
+      if (status_verifikasi === 'ditolak' && catatan_verifikasi) {
         updateData.catatan_verifikasi = catatan_verifikasi;
       } else if (status_verifikasi === 'verified') {
         updateData.catatan_verifikasi = null;
@@ -401,6 +403,9 @@ class LembagaLainnyaController {
       res.status(500).json({ success: false, message: 'Gagal mengambil data', error: error.message });
     }
   }
+
+  // Ajukan ulang verifikasi (desa resubmit after ditolak)
+  ajukanUlangVerifikasi = createAjukanUlangHandler('lembaga_lainnyas', 'lembaga-lainnya', 'Lembaga', (item) => item.nama);
 }
 
 module.exports = new LembagaLainnyaController();

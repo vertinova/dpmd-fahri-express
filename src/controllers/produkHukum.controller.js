@@ -17,7 +17,7 @@ class ProdukHukumController {
    */
   async index(req, res) {
     try {
-      const { search, all, page = 1, limit = 12 } = req.query;
+      const { search, all, page = 1, limit = 12, jenis, status_peraturan } = req.query;
 
       // req.desaId is set by desaContextMiddleware
       // For admin: comes from query parameter (optional - if not provided, show all)
@@ -36,6 +36,22 @@ class ProdukHukumController {
         where.judul = {
           contains: search
         };
+      }
+
+      // Add jenis filter (convert spaces to underscores for enum matching)
+      if (jenis) {
+        // Support comma-separated jenis for multiple values
+        const jenisValues = jenis.split(',').map(j => j.trim().replace(/ /g, '_'));
+        if (jenisValues.length === 1) {
+          where.jenis = jenisValues[0];
+        } else {
+          where.jenis = { in: jenisValues };
+        }
+      }
+
+      // Add status_peraturan filter
+      if (status_peraturan) {
+        where.status_peraturan = status_peraturan;
       }
 
       // If 'all' parameter is true, return all data without pagination

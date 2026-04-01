@@ -952,6 +952,9 @@ model pengurus {
   alamat                String?                     @db.Text
   no_telepon            String?                     @db.VarChar(32)
   pendidikan            String?                     @db.VarChar(255)
+  agama                 String?                     @db.VarChar(50)
+  golongan_darah        String?                     @db.VarChar(5)
+  nomor_buku_nikah      String?                     @db.VarChar(100)
   avatar                String?                     @db.VarChar(255)
   created_at            DateTime?                   @default(now()) @db.Timestamp(0)
   updated_at            DateTime?                   @default(now()) @db.Timestamp(0)
@@ -1515,6 +1518,7 @@ enum lembaga_lainnyas_status_kelembagaan {
 enum lembaga_lainnyas_status_verifikasi {
   verified
   unverified
+  ditolak
 }
 
 enum bankeu_master_kegiatan_jenis_kegiatan {
@@ -1588,21 +1592,25 @@ enum disposisi_instruksi {
 enum karang_tarunas_status_verifikasi {
   verified
   unverified
+  ditolak
 }
 
 enum lpms_status_verifikasi {
   verified
   unverified
+  ditolak
 }
 
 enum pkks_status_verifikasi {
   verified
   unverified
+  ditolak
 }
 
 enum posyandus_status_verifikasi {
   verified
   unverified
+  ditolak
 }
 
 enum rts_status_kelembagaan {
@@ -1613,11 +1621,13 @@ enum rts_status_kelembagaan {
 enum rws_status_verifikasi {
   verified
   unverified
+  ditolak
 }
 
 enum satlinmas_status_verifikasi {
   verified
   unverified
+  ditolak
 }
 
 enum berita_kategori {
@@ -1644,6 +1654,7 @@ enum disposisi_status {
 enum rts_status_verifikasi {
   verified
   unverified
+  ditolak
 }
 
 enum surat_masuk_jenis_surat {
@@ -1668,6 +1679,7 @@ enum desa_bankeu_surat_kecamatan_status {
 enum pengurus_status_jabatan {
   aktif
   selesai
+  nonaktif
 }
 
 enum produk_hukums_jenis {
@@ -1684,6 +1696,7 @@ enum aparatur_desa_jenis_kelamin {
 enum pengurus_status_verifikasi {
   verified
   unverified
+  ditolak
 }
 
 enum produk_hukums_singkatan_jenis {

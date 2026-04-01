@@ -261,11 +261,12 @@ async function getActivityLogs({
  * Get activity logs untuk list page (hanya aktivitas lembaga)
  * Khusus untuk RT, RW, Posyandu
  */
-async function getListPageActivityLogs({ kelembagaanType, desaId, limit = 20 }) {
+async function getListPageActivityLogs({ kelembagaanType, desaId, limit = 20, skip = 0 }) {
   return getActivityLogs({
     kelembagaanType,
     desaId,
     limit,
+    skip,
     entityType: ENTITY_TYPES.LEMBAGA // Only show lembaga activities
   });
 }
@@ -274,10 +275,11 @@ async function getListPageActivityLogs({ kelembagaanType, desaId, limit = 20 }) 
  * Get activity logs untuk detail page (semua aktivitas)
  * Termasuk aktivitas pengurus
  */
-async function getDetailPageActivityLogs({ kelembagaanId, limit = 50 }) {
+async function getDetailPageActivityLogs({ kelembagaanId, limit = 50, skip = 0 }) {
   return getActivityLogs({
     kelembagaanId,
-    limit
+    limit,
+    skip
     // No entityType filter - show all
   });
 }

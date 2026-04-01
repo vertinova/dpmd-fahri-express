@@ -9,7 +9,9 @@ const {
   ACTIVITY_TYPES,
   ENTITY_TYPES,
   logKelembagaanActivity,
-  validateDesaAccess
+  validateDesaAccess,
+  toUpper,
+  createAjukanUlangHandler
 } = require('./base.controller');
 
 class RWController {
@@ -30,13 +32,19 @@ class RWController {
           status_kelembagaan: true,
           status_verifikasi: true,
           rts: {
-            select: { id: true }
+            select: {
+              id: true,
+              nomor: true,
+              status_kelembagaan: true,
+              status_verifikasi: true,
+            },
+            orderBy: { nomor: 'asc' }
           }
         },
         orderBy: { nomor: 'asc' }
       });
 
-      // Get ketua for each RW
+      // Get ketua for each RW and each RT
       const enrichedData = await Promise.all(
         items.map(async (rw) => {
           const ketua = await prisma.pengurus.findFirst({
@@ -53,13 +61,35 @@ class RWController {
             }
           });
 
+          // Get ketua for each RT
+          const rtsWithKetua = await Promise.all(
+            (rw.rts || []).map(async (rt) => {
+              const rtKetua = await prisma.pengurus.findFirst({
+                where: {
+                  pengurusable_type: 'rts',
+                  pengurusable_id: rt.id,
+                  status_jabatan: 'aktif',
+                  jabatan: {
+                    in: ['Ketua RT', 'ketua rt', 'KETUA RT']
+                  }
+                },
+                select: { nama_lengkap: true }
+              });
+              return {
+                ...rt,
+                ketua_nama: rtKetua?.nama_lengkap || null
+              };
+            })
+          );
+
           return {
             id: rw.id,
             nomor: rw.nomor,
             status_kelembagaan: rw.status_kelembagaan,
             status_verifikasi: rw.status_verifikasi,
             ketua_nama: ketua?.nama_lengkap || null,
-            jumlah_rt: rw.rts?.length || 0
+            jumlah_rt: rw.rts?.length || 0,
+            rts: rtsWithKetua
           };
         })
       );
@@ -170,7 +200,7 @@ class RWController {
           id: uuidv4(),
           nomor: String(nomor),
           desa_id: desaId,
-          alamat: alamat || '',
+          alamat: toUpper(alamat) || '',
           produk_hukum_id: produk_hukum_id || null,
           status_kelembagaan: 'aktif',
           status_verifikasi: 'unverified'
@@ -242,7 +272,7 @@ class RWController {
         where: { id: String(req.params.id) },
         data: {
           nomor: nomor || item.nomor,
-          alamat: alamat !== undefined ? alamat : item.alamat,
+          alamat: alamat !== undefined ? toUpper(alamat) : item.alamat,
           produk_hukum_id: produk_hukum_id !== undefined ? (produk_hukum_id || null) : item.produk_hukum_id
         }
       });
@@ -378,7 +408,7 @@ class RWController {
         verified_at: new Date(),
       };
 
-      if (status_verifikasi === 'unverified' && catatan_verifikasi) {
+      if (status_verifikasi === 'ditolak' && catatan_verifikasi) {
         updateData.catatan_verifikasi = catatan_verifikasi;
       } else if (status_verifikasi === 'verified') {
         updateData.catatan_verifikasi = null;
@@ -458,7 +488,13 @@ class RWController {
             }
           },
           rts: {
-            select: { id: true }
+            select: {
+              id: true,
+              nomor: true,
+              status_kelembagaan: true,
+              status_verifikasi: true,
+            },
+            orderBy: { nomor: 'asc' }
           }
         },
         orderBy: [
@@ -467,9 +503,10 @@ class RWController {
         ]
       });
 
-      // Get ketua for each RW
+      // Get ketua for each RW and each RT
       const enrichedData = await Promise.all(
         items.map(async (rw) => {
+          // Get RW ketua
           const ketua = await prisma.pengurus.findFirst({
             where: {
               pengurusable_type: 'rws',
@@ -484,6 +521,27 @@ class RWController {
             }
           });
 
+          // Get ketua for each RT
+          const rtsWithKetua = await Promise.all(
+            (rw.rts || []).map(async (rt) => {
+              const rtKetua = await prisma.pengurus.findFirst({
+                where: {
+                  pengurusable_type: 'rts',
+                  pengurusable_id: rt.id,
+                  status_jabatan: 'aktif',
+                  jabatan: {
+                    in: ['Ketua RT', 'ketua rt', 'KETUA RT']
+                  }
+                },
+                select: { nama_lengkap: true }
+              });
+              return {
+                ...rt,
+                ketua_nama: rtKetua?.nama_lengkap || null
+              };
+            })
+          );
+
           return {
             id: rw.id,
             nomor: rw.nomor,
@@ -493,7 +551,8 @@ class RWController {
             desa_id: rw.desa_id,
             desa: rw.desas,
             ketua_nama: ketua?.nama_lengkap || null,
-            jumlah_rt: rw.rts?.length || 0
+            jumlah_rt: rw.rts?.length || 0,
+            rts: rtsWithKetua
           };
         })
       );
@@ -588,6 +647,9 @@ class RWController {
       res.status(500).json({ success: false, message: 'Gagal mengambil data RW', error: error.message });
     }
   }
+
+  // Ajukan ulang verifikasi (desa resubmit after ditolak)
+  ajukanUlangVerifikasi = createAjukanUlangHandler('rws', 'rw', 'RW', (item) => `RW ${item.nomor}`);
 }
 
 module.exports = new RWController();

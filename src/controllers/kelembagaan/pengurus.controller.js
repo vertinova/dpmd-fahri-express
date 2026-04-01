@@ -4,7 +4,7 @@
  * This is polymorphic - can be attached to any kelembagaan type
  */
 
-const { prisma, ACTIVITY_TYPES, ENTITY_TYPES, logKelembagaanActivity, validateDesaAccess } = require('./base.controller');
+const { prisma, ACTIVITY_TYPES, ENTITY_TYPES, logKelembagaanActivity, validateDesaAccess, toUpper } = require('./base.controller');
 const { v4: uuidv4 } = require('uuid');
 
 /**
@@ -81,6 +81,20 @@ async function getKelembagaanDisplayName(type, id) {
     console.error('Type:', type, 'ID:', id);
     return null;
   }
+}
+
+function mapJenisKelaminToEnum(jenisKelamin) {
+  const normalizedJenisKelamin = toUpper(jenisKelamin);
+
+  if (normalizedJenisKelamin === 'LAKI-LAKI' || normalizedJenisKelamin === 'LAKI_LAKI') {
+    return 'Laki_laki';
+  }
+
+  if (normalizedJenisKelamin === 'PEREMPUAN') {
+    return 'Perempuan';
+  }
+
+  return null;
 }
 
 class PengurusController {
@@ -164,6 +178,9 @@ class PengurusController {
         jenis_kelamin,
         status_perkawinan,
         pendidikan,
+        agama,
+        golongan_darah,
+        nomor_buku_nikah,
         tanggal_mulai_jabatan,
         tanggal_akhir_jabatan,
         status_jabatan,
@@ -180,31 +197,26 @@ class PengurusController {
       // Handle avatar upload if exists
       const avatarPath = req.file ? `uploads/pengurus_files/${req.file.filename}` : null;
 
-      // Map jenis_kelamin to Prisma enum format (handle hyphen to underscore)
-      let jenisKelaminEnum = null;
-      if (jenis_kelamin) {
-        if (jenis_kelamin === "Laki-laki") {
-          jenisKelaminEnum = "Laki_laki";
-        } else if (jenis_kelamin === "Perempuan") {
-          jenisKelaminEnum = "Perempuan";
-        }
-      }
+      const jenisKelaminEnum = mapJenisKelaminToEnum(jenis_kelamin);
 
       const pengurus = await prisma.pengurus.create({
         data: {
           id: uuidv4(),
           pengurusable_type,
           pengurusable_id,
-          nama_lengkap,
-          jabatan,
+          nama_lengkap: toUpper(nama_lengkap),
+          jabatan: toUpper(jabatan),
           no_telepon: no_telepon || null,
-          alamat: alamat || null,
+          alamat: toUpper(alamat) || null,
           nik: nik || null,
-          tempat_lahir: tempat_lahir || null,
+          tempat_lahir: toUpper(tempat_lahir) || null,
           tanggal_lahir: tanggal_lahir ? new Date(tanggal_lahir) : null,
           jenis_kelamin: jenisKelaminEnum,
-          status_perkawinan: status_perkawinan || null,
-          pendidikan: pendidikan || null,
+          status_perkawinan: toUpper(status_perkawinan) || null,
+          pendidikan: toUpper(pendidikan) || null,
+          agama: toUpper(agama) || null,
+          golongan_darah: toUpper(golongan_darah) || null,
+          nomor_buku_nikah: toUpper(nomor_buku_nikah) || null,
           tanggal_mulai_jabatan: tanggal_mulai_jabatan ? new Date(tanggal_mulai_jabatan) : null,
           tanggal_akhir_jabatan: tanggal_akhir_jabatan ? new Date(tanggal_akhir_jabatan) : null,
           status_jabatan: status_jabatan || 'aktif',
@@ -227,9 +239,9 @@ class PengurusController {
         activityType: ACTIVITY_TYPES.CREATE,
         entityType: ENTITY_TYPES.PENGURUS,
         entityId: pengurus.id,
-        entityName: `${nama_lengkap} (${jabatan})`,
+        entityName: `${pengurus.nama_lengkap} (${pengurus.jabatan})`,
         oldValue: null,
-        newValue: { nama_lengkap, jabatan, status_jabatan: 'aktif' },
+        newValue: { nama_lengkap: pengurus.nama_lengkap, jabatan: pengurus.jabatan, status_jabatan: 'aktif' },
         userId: user.id,
         userName: user.name,
         userRole: user.role,
@@ -277,6 +289,9 @@ class PengurusController {
         jenis_kelamin,
         status_perkawinan,
         pendidikan,
+        agama,
+        golongan_darah,
+        nomor_buku_nikah,
         tanggal_mulai_jabatan,
         tanggal_akhir_jabatan,
         status_jabatan,
@@ -286,30 +301,26 @@ class PengurusController {
       // Handle avatar upload if exists
       const avatarPath = req.file ? `uploads/pengurus_files/${req.file.filename}` : undefined;
 
-      // Map jenis_kelamin to Prisma enum format (handle hyphen to underscore)
       let jenisKelaminEnum = undefined;
       if (jenis_kelamin !== undefined) {
-        if (jenis_kelamin === "Laki-laki") {
-          jenisKelaminEnum = "Laki_laki";
-        } else if (jenis_kelamin === "Perempuan") {
-          jenisKelaminEnum = "Perempuan";
-        } else {
-          jenisKelaminEnum = null;
-        }
+        jenisKelaminEnum = mapJenisKelaminToEnum(jenis_kelamin);
       }
 
       // Build update data object - only include fields that are provided
       const updateData = {};
-      if (nama_lengkap !== undefined) updateData.nama_lengkap = nama_lengkap;
-      if (jabatan !== undefined) updateData.jabatan = jabatan;
+      if (nama_lengkap !== undefined) updateData.nama_lengkap = toUpper(nama_lengkap);
+      if (jabatan !== undefined) updateData.jabatan = toUpper(jabatan);
       if (no_telepon !== undefined) updateData.no_telepon = no_telepon || null;
-      if (alamat !== undefined) updateData.alamat = alamat || null;
+      if (alamat !== undefined) updateData.alamat = toUpper(alamat) || null;
       if (nik !== undefined) updateData.nik = nik || null;
-      if (tempat_lahir !== undefined) updateData.tempat_lahir = tempat_lahir || null;
+      if (tempat_lahir !== undefined) updateData.tempat_lahir = toUpper(tempat_lahir) || null;
       if (tanggal_lahir !== undefined) updateData.tanggal_lahir = tanggal_lahir ? new Date(tanggal_lahir) : null;
       if (jenisKelaminEnum !== undefined) updateData.jenis_kelamin = jenisKelaminEnum;
-      if (status_perkawinan !== undefined) updateData.status_perkawinan = status_perkawinan || null;
-      if (pendidikan !== undefined) updateData.pendidikan = pendidikan || null;
+      if (status_perkawinan !== undefined) updateData.status_perkawinan = toUpper(status_perkawinan) || null;
+      if (pendidikan !== undefined) updateData.pendidikan = toUpper(pendidikan) || null;
+      if (agama !== undefined) updateData.agama = toUpper(agama) || null;
+      if (golongan_darah !== undefined) updateData.golongan_darah = toUpper(golongan_darah) || null;
+      if (nomor_buku_nikah !== undefined) updateData.nomor_buku_nikah = toUpper(nomor_buku_nikah) || null;
       if (tanggal_mulai_jabatan !== undefined) updateData.tanggal_mulai_jabatan = tanggal_mulai_jabatan ? new Date(tanggal_mulai_jabatan) : null;
       if (tanggal_akhir_jabatan !== undefined) updateData.tanggal_akhir_jabatan = tanggal_akhir_jabatan ? new Date(tanggal_akhir_jabatan) : null;
       if (status_jabatan !== undefined) updateData.status_jabatan = status_jabatan;
@@ -582,10 +593,10 @@ class PengurusController {
 
       const { status_verifikasi, catatan_verifikasi } = req.body;
       
-      if (!status_verifikasi || !['verified', 'unverified'].includes(status_verifikasi)) {
+      if (!status_verifikasi || !['verified', 'unverified', 'ditolak'].includes(status_verifikasi)) {
         return res.status(400).json({ 
           success: false, 
-          message: 'Status verifikasi harus "verified" atau "unverified"' 
+          message: 'Status verifikasi harus "verified", "unverified", atau "ditolak"' 
         });
       }
 
@@ -603,7 +614,7 @@ class PengurusController {
         verified_at: new Date(),
       };
 
-      if (status_verifikasi === 'unverified' && catatan_verifikasi) {
+      if (status_verifikasi === 'ditolak' && catatan_verifikasi) {
         updateData.catatan_verifikasi = catatan_verifikasi;
       } else if (status_verifikasi === 'verified') {
         updateData.catatan_verifikasi = null;
@@ -641,6 +652,74 @@ class PengurusController {
     } catch (error) {
       console.error('Error in updateVerifikasi:', error);
       res.status(500).json({ success: false, message: 'Gagal mengubah status verifikasi', error: error.message });
+    }
+  }
+
+  /**
+   * Ajukan ulang verifikasi pengurus (for desa - reset ditolak to unverified)
+   * PUT /api/desa/pengurus/:id/ajukan-ulang
+   */
+  async ajukanUlangVerifikasi(req, res) {
+    try {
+      const user = req.user;
+
+      const existing = await prisma.pengurus.findUnique({
+        where: { id: String(req.params.id) }
+      });
+
+      if (!existing) {
+        return res.status(404).json({ success: false, message: 'Pengurus tidak ditemukan' });
+      }
+
+      // Validate desa ownership
+      if (user.role === 'desa' && Number(user.desa_id) !== Number(existing.desa_id)) {
+        return res.status(403).json({ success: false, message: 'User tidak memiliki akses' });
+      }
+
+      // Only allow resubmit from ditolak status
+      if (existing.status_verifikasi !== 'ditolak') {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Hanya pengurus dengan status "ditolak" yang dapat diajukan ulang' 
+        });
+      }
+
+      const updated = await prisma.pengurus.update({
+        where: { id: String(req.params.id) },
+        data: {
+          status_verifikasi: 'unverified',
+          catatan_verifikasi: null,
+          verifikator_nama: null,
+          verified_at: null,
+        }
+      });
+
+      // Get kelembagaan display name for logging
+      const kelembagaanDisplayName = await getKelembagaanDisplayName(updated.pengurusable_type, updated.pengurusable_id);
+
+      await logKelembagaanActivity({
+        kelembagaanType: updated.pengurusable_type,
+        kelembagaanId: updated.pengurusable_id,
+        kelembagaanNama: kelembagaanDisplayName || `${updated.pengurusable_type.toUpperCase()}`,
+        desaId: updated.desa_id,
+        activityType: ACTIVITY_TYPES.RESUBMIT_PENGURUS,
+        entityType: ENTITY_TYPES.PENGURUS,
+        entityId: updated.id,
+        entityName: `${updated.nama_lengkap} (${updated.jabatan})`,
+        oldValue: { status_verifikasi: existing.status_verifikasi },
+        newValue: { status_verifikasi: 'unverified' },
+        userId: user.id,
+        userName: user.name,
+        userRole: user.role,
+        bidangId: user.bidang_id,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent')
+      });
+
+      res.json({ success: true, data: updated, message: 'Berhasil mengajukan ulang verifikasi pengurus' });
+    } catch (error) {
+      console.error('Error in ajukanUlangVerifikasi:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengajukan ulang verifikasi', error: error.message });
     }
   }
 }
