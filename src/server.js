@@ -227,6 +227,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes); // User management routes
 app.use('/api/roles', require('./routes/role.routes')); // Role management routes
 app.use('/api/pegawai', pegawaiRoutes); // Pegawai routes
+app.use('/api/absensi', require('./routes/absensi.routes')); // Absensi pegawai routes
 app.use('/api/bidang', bidangRoutes); // Bidang routes
 app.use('/api', locationRoutes); // Kecamatan & Desa routes
 

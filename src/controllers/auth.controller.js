@@ -75,6 +75,16 @@ const login = async (req, res) => {
 
     logger.info(`✅ Login successful: ${user.email} (${user.role})`);
 
+    // Auto-register device_id if provided
+    const { device_id } = req.body;
+    if (device_id) {
+      await prisma.users.update({
+        where: { id: user.id },
+        data: { device_id }
+      });
+      logger.info(`📱 Device registered for ${user.email}: ${device_id.substring(0, 8)}...`);
+    }
+
     // Helper to convert BigInt to string
     const convertBigInt = (value) => {
       if (value === null || value === undefined) return value;

@@ -70,6 +70,7 @@ class UserController {
             created_at: true,
             updated_at: true,
             pegawai_id: true,
+            device_id: true,
             plain_password: true, // Include plain_password for admin view
             // Include pegawai relation (which includes bidangs)
             pegawai: {
@@ -161,6 +162,7 @@ class UserController {
         tempat_lahir: user.pegawai?.tempat_lahir || null,
         tanggal_lahir: user.pegawai?.tanggal_lahir || null,
         status_kepegawaian: user.pegawai?.status_kepegawaian || null,
+        device_id: user.device_id || null,
         // Bidang from pegawai relation OR fallback to deprecated bidang_id
         bidang: user.bidang || null,
         kecamatan: user.kecamatan || null,
@@ -201,7 +203,7 @@ class UserController {
       const { id } = req.params;
 
       const user = await prisma.users.findUnique({
-        where: { id: parseInt(id) },
+        where: { id: BigInt(String(id)) },
         select: {
           id: true,
           name: true,
@@ -603,7 +605,7 @@ class UserController {
 
       // Check if user exists
       const existingUser = await prisma.users.findUnique({
-        where: { id: parseInt(id) }
+        where: { id: BigInt(String(id)) }
       });
 
       if (!existingUser) {
@@ -628,40 +630,41 @@ class UserController {
       }
 
       // Delete related records first to avoid foreign key constraint errors
-      
+      const bigId = BigInt(String(id));
+
       // 1. Delete disposisi where user is sender (dari_user_id)
       await prisma.disposisi.deleteMany({
-        where: { dari_user_id: parseInt(id) }
+        where: { dari_user_id: bigId }
       });
 
       // 2. Delete disposisi where user is receiver (ke_user_id)
       await prisma.disposisi.deleteMany({
-        where: { ke_user_id: parseInt(id) }
+        where: { ke_user_id: bigId }
       });
 
       // 3. Delete surat_masuk created by user
       await prisma.surat_masuk.deleteMany({
-        where: { created_by: parseInt(id) }
+        where: { created_by: bigId }
       });
 
       // 4. Delete activity logs
       await prisma.activity_logs.deleteMany({
-        where: { user_id: parseInt(id) }
+        where: { user_id: bigId }
       });
 
       // 5. Delete lampiran_surat
       await prisma.lampiran_surat.deleteMany({
-        where: { uploaded_by: parseInt(id) }
+        where: { uploaded_by: bigId }
       });
 
       // 6. Delete push subscriptions
       await prisma.push_subscriptions.deleteMany({
-        where: { user_id: parseInt(id) }
+        where: { user_id: bigId }
       });
 
       // Finally, delete the user
       await prisma.users.delete({
-        where: { id: parseInt(id) }
+        where: { id: bigId }
       });
 
       res.json({
@@ -696,7 +699,7 @@ class UserController {
 
       // Check if user exists
       const existingUser = await prisma.users.findUnique({
-        where: { id: parseInt(id) }
+        where: { id: BigInt(String(id)) }
       });
 
       if (!existingUser) {
@@ -711,7 +714,7 @@ class UserController {
 
       // Update password and plain_password
       await prisma.users.update({
-        where: { id: parseInt(id) },
+        where: { id: BigInt(String(id)) },
         data: { 
           password: hashedPassword,
           plain_password: password // Store plain password for admin view
@@ -937,7 +940,7 @@ class UserController {
       // Check if user exists
       console.log('[Avatar Upload] Checking if user exists...');
       const user = await prisma.users.findUnique({
-        where: { id: parseInt(id) }
+        where: { id: BigInt(String(id)) }
       });
 
       if (!user) {
@@ -974,7 +977,7 @@ class UserController {
       console.log('[Avatar Upload] Updating database with path:', avatarPath);
       
       const updatedUser = await prisma.users.update({
-        where: { id: parseInt(id) },
+        where: { id: BigInt(String(id)) },
         data: { avatar: avatarPath },
         select: {
           id: true,

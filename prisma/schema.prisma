@@ -858,6 +858,58 @@ enum pegawai_status_kepegawaian {
   THL
   Kontrak
   Tenaga_Alih_Daya @map("Tenaga Alih Daya")
+  Tenaga_Keamanan   @map("Tenaga Keamanan")
+  Tenaga_Kebersihan @map("Tenaga Kebersihan")
+}
+
+model absensi_pegawai {
+  id              BigInt                    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id         BigInt                    @db.UnsignedBigInt
+  tanggal         DateTime                  @db.Date
+  jam_masuk       DateTime?                 @db.Time(0)
+  jam_keluar      DateTime?                 @db.Time(0)
+  status          absensi_pegawai_status    @default(hadir)
+  keterangan      String?                   @db.Text
+  foto_masuk      String?                   @db.VarChar(255)
+  foto_keluar     String?                   @db.VarChar(255)
+  latitude_masuk  Float?                    @db.Double
+  longitude_masuk Float?                    @db.Double
+  jarak_masuk     Float?                    @db.Double
+  latitude_keluar Float?                    @db.Double
+  longitude_keluar Float?                   @db.Double
+  jarak_keluar    Float?                    @db.Double
+  lokasi_masuk    String?                   @db.VarChar(255)
+  lokasi_keluar   String?                   @db.VarChar(255)
+  device_id       String?                   @db.VarChar(100)
+  tujuan_dinas    String?                   @db.VarChar(500)
+  created_at      DateTime?                 @db.Timestamp(0)
+  updated_at      DateTime?                 @db.Timestamp(0)
+  user            users                     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+
+  @@unique([user_id, tanggal], map: "absensi_pegawai_user_tanggal_unique")
+  @@index([user_id], map: "absensi_pegawai_user_id_index")
+  @@index([tanggal], map: "absensi_pegawai_tanggal_index")
+}
+
+enum absensi_pegawai_status {
+  hadir
+  izin
+  sakit
+  alpha
+  cuti
+  dinas_luar
+  wfh
+  wfa
+}
+
+model absensi_settings {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  key             String    @unique @db.VarChar(100)
+  value           String    @db.VarChar(255)
+  description     String?   @db.VarChar(500)
+  updated_by      BigInt?   @db.UnsignedBigInt
+  created_at      DateTime? @default(now()) @db.Timestamp(0)
+  updated_at      DateTime? @default(now()) @db.Timestamp(0)
 }
 
 model pejabat_ttd {
@@ -1220,6 +1272,7 @@ model users {
   is_active                                                      Boolean                     @default(true)
   pegawai_id                                                     BigInt?                     @db.UnsignedBigInt
   plain_password                                                 String?                     @db.VarChar(255)
+  device_id                                                      String?                     @db.VarChar(100)
   activity_logs                                                  activity_logs[]
   app_settings                                                   app_settings[]
   bankeu_proposals_bankeu_proposals_dpmd_verified_byTousers      bankeu_proposals[]          @relation("bankeu_proposals_dpmd_verified_byTousers")
@@ -1243,6 +1296,7 @@ model users {
   perjadin_pegawai                                               perjadin_pegawai[]
   push_subscriptions                                             push_subscriptions[]
   surat_masuk                                                    surat_masuk[]
+  absensi_pegawai                                                absensi_pegawai[]
   pegawai                                                        pegawai?                    @relation(fields: [pegawai_id], references: [id_pegawai], onDelete: Cascade, onUpdate: NoAction, map: "users_pegawai_id_foreign")
 
   @@index([pegawai_id], map: "users_pegawai_id_index")

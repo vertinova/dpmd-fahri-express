@@ -125,6 +125,43 @@ const checkRole = (...roles) => {
   };
 };
 
+// Bidang-based middleware for absensi admin
+// Allows: superadmin OR users whose bidang = 'Sekretariat'
+const checkAbsensiAdmin = async (req, res, next) => {
+  if (!req.user) {
+    return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
+  // Superadmin always allowed
+  if (req.user.role === 'superadmin') {
+    return next();
+  }
+
+  // Check if user's bidang is Sekretariat
+  if (req.user.bidang_id) {
+    try {
+      const prisma = require('../config/prisma');
+      const bidang = await prisma.bidangs.findUnique({
+        where: { id: BigInt(req.user.bidang_id) },
+        select: { nama: true }
+      });
+
+      if (bidang && bidang.nama.toLowerCase().includes('sekretariat')) {
+        logger.info(`✅ Absensi admin check passed - User ${req.user.email} bidang: ${bidang.nama}`);
+        return next();
+      }
+    } catch (error) {
+      logger.error('Error checking bidang for absensi admin:', error.message);
+    }
+  }
+
+  logger.warn(`❌ Absensi admin access denied - User ${req.user.email} (role: ${req.user.role}, bidang_id: ${req.user.bidang_id})`);
+  return res.status(403).json({
+    success: false,
+    message: 'Akses ditolak - Hanya superadmin atau bidang Sekretariat yang dapat mengakses'
+  });
+};
+
 // Generate JWT token
 const generateToken = (user) => {
   // Convert all BigInt fields to strings for JWT serialization
@@ -196,4 +233,4 @@ const requireSuperadmin = (req, res, next) => {
   next();
 };
 
-module.exports = { auth, checkRole, generateToken, authorizeDinas, requireSuperadmin };
+module.exports = { auth, checkRole, checkAbsensiAdmin, generateToken, authorizeDinas, requireSuperadmin };
