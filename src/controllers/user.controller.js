@@ -467,6 +467,8 @@ class UserController {
       }
 
       // Update tanggal_lahir, jabatan, nip on pegawai table
+      const hasPegawaiFields = [tanggal_lahir, tempat_lahir, jabatan, nip, status_kepegawaian].some(v => v !== undefined);
+      
       if (existingUser.pegawai_id) {
         const pegawaiUpdate = {};
         if (tanggal_lahir !== undefined) pegawaiUpdate.tanggal_lahir = tanggal_lahir ? new Date(tanggal_lahir) : null;
@@ -481,6 +483,24 @@ class UserController {
             data: pegawaiUpdate
           });
         }
+      } else if (hasPegawaiFields) {
+        // Auto-create pegawai record for DPMD staff without one
+        const defaultBidangId = existingUser.bidang_id || 1;
+        const newPegawai = await prisma.pegawai.create({
+          data: {
+            nama_pegawai: existingUser.name,
+            id_bidang: BigInt(String(defaultBidangId)),
+            tanggal_lahir: tanggal_lahir ? new Date(tanggal_lahir) : null,
+            tempat_lahir: tempat_lahir || null,
+            jabatan: jabatan || null,
+            nip: nip || null,
+            status_kepegawaian: status_kepegawaian || null,
+            created_at: new Date(),
+            updated_at: new Date(),
+          }
+        });
+        // Link pegawai to user
+        updateData.pegawai_id = newPegawai.id_pegawai;
       }
 
       // Update bidang: support both systems (pegawai table & deprecated users.bidang_id)
