@@ -2,6 +2,7 @@
 const fs = require('fs');
 const path = require('path');
 const prisma = require('../../config/prisma');
+const Berita = require('../../models/Berita');
 
 /**
  * Validate desa access from request
@@ -49,6 +50,10 @@ function readPublicJsonFile(filename) {
  */
 function cleanCurrency(value) {
   if (!value || value === "0") return 0;
+
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : 0;
+  }
   
   // Format in JSON uses comma as thousand separator
   // Example: "478,327,869" should become 478327869
@@ -68,6 +73,137 @@ function formatCurrency(value) {
   }).format(value);
 }
 
+function isFilled(value) {
+  return value !== null && value !== undefined && value !== '';
+}
+
+function formatText(value) {
+  if (!value) return null;
+
+  return String(value)
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function calculateProfileCompletion(profile) {
+  const requiredFields = [
+    'klasifikasi_desa',
+    'status_desa',
+    'tipologi_desa',
+    'jumlah_penduduk',
+    'luas_wilayah',
+    'alamat_kantor',
+    'no_telp',
+    'email'
+  ];
+
+  const filled = requiredFields.filter(field => isFilled(profile?.[field])).length;
+  const total = requiredFields.length;
+
+  return {
+    filled,
+    total,
+    percentage: total > 0 ? Math.round((filled / total) * 100) : 0
+  };
+}
+
+function buildBankeuSummary(proposals) {
+  const years = [...new Set(
+    proposals
+      .map(proposal => proposal.tahun_anggaran)
+      .filter(Boolean)
+  )].sort((left, right) => right - left);
+
+  const totalAnggaranUsulan = proposals.reduce(
+    (total, proposal) => total + cleanCurrency(proposal.anggaran_usulan),
+    0
+  );
+
+  const approved = proposals.filter(
+    proposal => proposal.dpmd_status === 'approved' || proposal.status === 'verified'
+  ).length;
+
+  const needsAction = proposals.filter(proposal => (
+    proposal.status === 'rejected' ||
+    proposal.status === 'revision' ||
+    proposal.dinas_status === 'rejected' ||
+    proposal.dinas_status === 'revision' ||
+    proposal.kecamatan_status === 'rejected' ||
+    proposal.kecamatan_status === 'revision' ||
+    proposal.dpmd_status === 'rejected' ||
+    proposal.dpmd_status === 'revision'
+  )).length;
+
+  const inProgress = proposals.filter(proposal => {
+    const hasWorkflow = Boolean(
+      proposal.submitted_to_dinas_at ||
+      proposal.dinas_status ||
+      proposal.kecamatan_status ||
+      proposal.dpmd_status
+    );
+
+    const isApproved = proposal.dpmd_status === 'approved' || proposal.status === 'verified';
+    const isNeedsAction = (
+      proposal.status === 'rejected' ||
+      proposal.status === 'revision' ||
+      proposal.dinas_status === 'rejected' ||
+      proposal.dinas_status === 'revision' ||
+      proposal.kecamatan_status === 'rejected' ||
+      proposal.kecamatan_status === 'revision' ||
+      proposal.dpmd_status === 'rejected' ||
+      proposal.dpmd_status === 'revision'
+    );
+
+    return hasWorkflow && !isApproved && !isNeedsAction;
+  }).length;
+
+  const drafts = proposals.filter(proposal => (
+    proposal.status === 'pending' &&
+    !proposal.submitted_to_dinas_at &&
+    !proposal.dinas_status &&
+    !proposal.kecamatan_status &&
+    !proposal.dpmd_status
+  )).length;
+
+  return {
+    total_proposals: proposals.length,
+    approved,
+    in_progress: inProgress,
+    needs_action: needsAction,
+    drafts,
+    years,
+    latest_year: years[0] || null,
+    total_anggaran_usulan: totalAnggaranUsulan,
+    total_anggaran_usulan_formatted: formatCurrency(totalAnggaranUsulan)
+  };
+}
+
+async function getLatestBerita(limit = 4) {
+  try {
+    const latestBerita = await Berita.findAll({
+      where: { status: 'published' },
+      limit,
+      order: [['tanggal_publish', 'DESC'], ['created_at', 'DESC']],
+      attributes: [
+        'id_berita',
+        'slug',
+        'judul',
+        'ringkasan',
+        'kategori',
+        'views',
+        'tanggal_publish',
+        'created_at'
+      ]
+    });
+
+    return latestBerita.map(item => item.toJSON());
+  } catch (error) {
+    console.error('Error fetching latest berita:', error);
+    return [];
+  }
+}
+
 /**
  * Get dashboard summary for specific desa
  * GET /api/desa/dashboard/summary
@@ -76,6 +212,7 @@ async function getDesaDashboardSummary(req, res) {
   try {
     const desaId = validateDesaAccess(req, res);
     if (!desaId) return;
+    const desaIdNumber = Number(desaId);
 
     // 1. Get desa info
     const desa = await prisma.desas.findUnique({
@@ -101,15 +238,94 @@ async function getDesaDashboardSummary(req, res) {
     }
 
     // 2. Get kelembagaan summary
-    const [totalRW, totalRT, totalPosyandu, karangTaruna, lpm, satlinmas, pkk] = await Promise.all([
+    const [
+      totalRW,
+      totalRT,
+      totalPosyandu,
+      karangTaruna,
+      lpm,
+      satlinmas,
+      pkk,
+      profilDesa,
+      aparaturDesa,
+      totalProdukHukum,
+      produkHukumBerlaku,
+      produkHukumDicabut,
+      bumdes,
+      bankeuProposals,
+      beritaTerbaru
+    ] = await Promise.all([
       prisma.rws.count({ where: { desa_id: desaId } }),
       prisma.rts.count({ where: { desa_id: desaId } }),
       prisma.posyandus.count({ where: { desa_id: desaId } }),
       prisma.karang_tarunas.findFirst({ where: { desa_id: desaId } }),
       prisma.lpms.findFirst({ where: { desa_id: desaId } }),
       prisma.satlinmas.findFirst({ where: { desa_id: desaId } }),
-      prisma.pkks.findFirst({ where: { desa_id: desaId } })
+      prisma.pkks.findFirst({ where: { desa_id: desaId } }),
+      prisma.profil_desas.findUnique({
+        where: { desa_id: desaId },
+        select: {
+          klasifikasi_desa: true,
+          status_desa: true,
+          tipologi_desa: true,
+          jumlah_penduduk: true,
+          luas_wilayah: true,
+          alamat_kantor: true,
+          no_telp: true,
+          email: true,
+          foto_kantor_desa_path: true
+        }
+      }),
+      prisma.aparatur_desa.findMany({
+        where: { desa_id: desaIdNumber },
+        select: {
+          status: true
+        }
+      }),
+      prisma.produk_hukums.count({ where: { desa_id: desaId } }),
+      prisma.produk_hukums.count({
+        where: {
+          desa_id: desaId,
+          status_peraturan: 'berlaku'
+        }
+      }),
+      prisma.produk_hukums.count({
+        where: {
+          desa_id: desaId,
+          status_peraturan: 'dicabut'
+        }
+      }),
+      prisma.bumdes.findFirst({
+        where: { desa_id: desaIdNumber },
+        select: {
+          namabumdesa: true,
+          status: true,
+          badanhukum: true,
+          JenisUsaha: true,
+          TotalTenagaKerja: true,
+          NilaiAset: true
+        }
+      }),
+      prisma.bankeu_proposals.findMany({
+        where: { desa_id: desaIdNumber },
+        select: {
+          tahun_anggaran: true,
+          anggaran_usulan: true,
+          status: true,
+          dinas_status: true,
+          kecamatan_status: true,
+          dpmd_status: true,
+          submitted_to_dinas_at: true
+        }
+      }),
+      getLatestBerita(4)
     ]);
+
+    const profilCompletion = calculateProfileCompletion(profilDesa);
+    const aparaturAktif = aparaturDesa.filter(item => item.status === 'Aktif').length;
+    const kelembagaanStrategis = [karangTaruna, lpm, pkk, satlinmas].filter(Boolean).length;
+    const bankeuSummary = buildBankeuSummary(bankeuProposals);
+    const bumdesAset = cleanCurrency(bumdes?.NilaiAset);
 
     // 3. Read financial data from JSON files
     // ADD 2025
@@ -279,6 +495,39 @@ async function getDesaDashboardSummary(req, res) {
           status_pemerintahan: desa.status_pemerintahan,
           kecamatan: desa.kecamatans?.nama || null
         },
+        profil: {
+          exists: !!profilDesa,
+          completion: profilCompletion,
+          klasifikasi_desa: formatText(profilDesa?.klasifikasi_desa),
+          status_desa: formatText(profilDesa?.status_desa),
+          tipologi_desa: formatText(profilDesa?.tipologi_desa),
+          jumlah_penduduk: profilDesa?.jumlah_penduduk || 0,
+          luas_wilayah: profilDesa?.luas_wilayah || null,
+          alamat_kantor: profilDesa?.alamat_kantor || null,
+          no_telp: profilDesa?.no_telp || null,
+          email: profilDesa?.email || null,
+          has_photo: !!profilDesa?.foto_kantor_desa_path
+        },
+        aparatur: {
+          total: aparaturDesa.length,
+          aktif: aparaturAktif,
+          nonaktif: Math.max(aparaturDesa.length - aparaturAktif, 0)
+        },
+        produk_hukum: {
+          total: totalProdukHukum,
+          berlaku: produkHukumBerlaku,
+          dicabut: produkHukumDicabut
+        },
+        bumdes: {
+          exists: !!bumdes,
+          nama: bumdes?.namabumdesa || null,
+          status: formatText(bumdes?.status),
+          badan_hukum: formatText(bumdes?.badanhukum),
+          jenis_usaha: bumdes?.JenisUsaha || null,
+          total_tenaga_kerja: cleanCurrency(bumdes?.TotalTenagaKerja),
+          nilai_aset: bumdesAset,
+          nilai_aset_formatted: formatCurrency(bumdesAset)
+        },
         kelembagaan: {
           rw: totalRW,
           rt: totalRT,
@@ -287,12 +536,14 @@ async function getDesaDashboardSummary(req, res) {
           lpm: lpm ? 1 : 0,
           satlinmas: satlinmas ? 1 : 0,
           pkk: pkk ? 1 : 0,
+          lembaga_strategis: kelembagaanStrategis,
           total_lembaga: totalRW + totalRT + totalPosyandu + 
                         (karangTaruna ? 1 : 0) + 
                         (lpm ? 1 : 0) + 
                         (satlinmas ? 1 : 0) + 
                         (pkk ? 1 : 0)
         },
+        bankeu: bankeuSummary,
         keuangan: {
           add: financialData.add,
           bhprd: financialData.bhprd,
@@ -300,7 +551,8 @@ async function getDesaDashboardSummary(req, res) {
           bankeu: financialData.bankeu,
           total_realisasi: totalRealisasi,
           total_realisasi_formatted: formatCurrency(totalRealisasi)
-        }
+        },
+        berita: beritaTerbaru
       }
     });
 
