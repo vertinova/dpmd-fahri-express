@@ -133,6 +133,15 @@ const absensiController = {
         });
       }
 
+      // Cek jika sudah submit izin/sakit/cuti hari ini
+      if (existing && ['izin', 'sakit', 'cuti'].includes(existing.status)) {
+        const statusLabel = { izin: 'Izin', sakit: 'Sakit', cuti: 'Cuti' };
+        return res.status(400).json({
+          success: false,
+          message: `Anda sudah submit ${statusLabel[existing.status]} hari ini. Hanya bisa 1x absensi per hari.`
+        });
+      }
+
       // Simpan foto
       const fotoPath = saveBase64Photo(foto, userId.toString(), 'masuk');
 
@@ -170,10 +179,28 @@ const absensiController = {
       }
 
       const modeLabel = { hadir: 'Hadir', dinas_luar: 'Dinas Luar', wfh: 'WFH', wfa: 'WFA' };
+
+      // Calculate late info
+      const settingsRows = await prisma.absensi_settings.findMany();
+      const settingsMap = {};
+      settingsRows.forEach(s => { settingsMap[s.key] = s.value; });
+      const jamMasukSetting = settingsMap.jam_masuk || '08:00';
+      const toleransi = parseInt(settingsMap.toleransi_terlambat || '15', 10);
+      const [jmH, jmM] = jamMasukSetting.split(':').map(Number);
+      const batasMasuk = new Date('1970-01-01T00:00:00');
+      batasMasuk.setHours(jmH, jmM + toleransi, 0, 0);
+      const masukTime = new Date('1970-01-01T00:00:00');
+      masukTime.setHours(now.getUTCHours(), now.getUTCMinutes(), 0, 0);
+      const telatMenit = Math.max(0, Math.floor((masukTime - batasMasuk) / 60000));
+
+      let message = `Absen masuk ${modeLabel[absensiMode]} berhasil (jarak: ${Math.round(jarak)}m)`;
+      if (telatMenit > 0) message += ` — Telat ${telatMenit} menit`;
+
       return res.status(201).json({
         success: true,
-        message: `Absen masuk ${modeLabel[absensiMode]} berhasil (jarak: ${Math.round(jarak)}m)`,
-        data: result
+        message,
+        data: result,
+        telat_masuk_menit: telatMenit,
       });
     } catch (error) {
       console.error('[Absensi] Clock-in error:', error);
@@ -277,14 +304,58 @@ const absensiController = {
   async getToday(req, res) {
     try {
       const userId = BigInt(req.user.id);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      // Gunakan UTC date untuk konsistensi dengan clockIn/clockOut
+      const now = new Date();
+      const y = now.getUTCFullYear();
+      const m = String(now.getUTCMonth() + 1).padStart(2, '0');
+      const d = String(now.getUTCDate()).padStart(2, '0');
+      const today = new Date(`${y}-${m}-${d}T00:00:00.000Z`);
 
       const absensi = await prisma.absensi_pegawai.findUnique({
         where: { user_id_tanggal: { user_id: userId, tanggal: today } }
       });
 
-      return res.json({ success: true, data: absensi || null });
+      // Fetch settings for late calculation
+      const settingsRows = await prisma.absensi_settings.findMany();
+      const settings = {};
+      settingsRows.forEach(s => { settings[s.key] = s.value; });
+      const jamMasukSetting = settings.jam_masuk || '08:00';
+      const jamPulangSetting = settings.jam_pulang || '16:00';
+      const toleransi = parseInt(settings.toleransi_terlambat || '15', 10);
+
+      let telat_masuk_menit = 0;
+      let telat_pulang_menit = 0;
+      let pulang_lebih_awal_menit = 0;
+
+      if (absensi?.jam_masuk) {
+        const masuk = new Date(absensi.jam_masuk);
+        const [jmH, jmM] = jamMasukSetting.split(':').map(Number);
+        const batasMasuk = new Date('1970-01-01T00:00:00');
+        batasMasuk.setHours(jmH, jmM + toleransi, 0, 0);
+        const masukTime = new Date('1970-01-01T00:00:00');
+        masukTime.setHours(masuk.getUTCHours(), masuk.getUTCMinutes(), 0, 0);
+        const diffMasuk = Math.floor((masukTime - batasMasuk) / 60000);
+        if (diffMasuk > 0) telat_masuk_menit = diffMasuk;
+      }
+
+      if (absensi?.jam_keluar) {
+        const keluar = new Date(absensi.jam_keluar);
+        const [jpH, jpM] = jamPulangSetting.split(':').map(Number);
+        const batasPulang = new Date('1970-01-01T00:00:00');
+        batasPulang.setHours(jpH, jpM, 0, 0);
+        const keluarTime = new Date('1970-01-01T00:00:00');
+        keluarTime.setHours(keluar.getUTCHours(), keluar.getUTCMinutes(), 0, 0);
+        const diffPulang = Math.floor((batasPulang - keluarTime) / 60000);
+        if (diffPulang > 0) pulang_lebih_awal_menit = diffPulang;
+      }
+
+      return res.json({
+        success: true,
+        data: absensi || null,
+        settings: { jam_masuk: jamMasukSetting, jam_pulang: jamPulangSetting, toleransi_terlambat: toleransi },
+        telat_masuk_menit,
+        pulang_lebih_awal_menit,
+      });
     } catch (error) {
       console.error('[Absensi] Get today error:', error);
       return res.status(500).json({ success: false, message: 'Gagal mengambil data absensi', error: error.message });
@@ -360,6 +431,20 @@ const absensiController = {
       });
 
       if (existing) {
+        // Jika sudah clock-in (hadir/dinas_luar/wfh/wfa), tolak izin
+        if (existing.jam_masuk) {
+          return res.status(400).json({
+            success: false,
+            message: 'Anda sudah melakukan absen masuk hari ini. Tidak bisa submit izin/sakit/cuti.'
+          });
+        }
+        // Jika sudah submit izin/sakit/cuti sebelumnya, tolak
+        if (['izin', 'sakit', 'cuti'].includes(existing.status)) {
+          return res.status(400).json({
+            success: false,
+            message: 'Anda sudah submit izin/sakit/cuti hari ini. Hanya bisa 1x absensi per hari.'
+          });
+        }
         const updated = await prisma.absensi_pegawai.update({
           where: { id: existing.id },
           data: { status, keterangan: keterangan || null, updated_at: new Date() }
@@ -663,6 +748,125 @@ const absensiController = {
     } catch (error) {
       console.error('[Absensi] Admin delete error:', error);
       return res.status(500).json({ success: false, message: 'Gagal hapus data absensi', error: error.message });
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // ─── Success Messages (Popup setelah absen berhasil) ──────
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Public: Get all active success messages
+   * GET /api/absensi/success-messages
+   */
+  async getSuccessMessages(req, res) {
+    try {
+      const messages = await prisma.absensi_success_messages.findMany({
+        where: { is_active: true },
+        orderBy: { type: 'asc' },
+      });
+      const result = {};
+      messages.forEach(m => {
+        result[m.type] = {
+          id: Number(m.id),
+          title: m.title,
+          message: m.message,
+          image_path: m.image_path,
+          is_active: m.is_active,
+        };
+      });
+      return res.json({ success: true, data: result });
+    } catch (error) {
+      console.error('[Absensi] Get success messages error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal mengambil data', error: error.message });
+    }
+  },
+
+  /**
+   * Admin: Get all success messages (including inactive)
+   * GET /api/absensi/admin/success-messages
+   */
+  async getAdminSuccessMessages(req, res) {
+    try {
+      const messages = await prisma.absensi_success_messages.findMany({
+        orderBy: { type: 'asc' },
+      });
+      return res.json({ success: true, data: messages });
+    } catch (error) {
+      console.error('[Absensi] Admin get success messages error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal mengambil data', error: error.message });
+    }
+  },
+
+  /**
+   * Admin: Update a success message
+   * PUT /api/absensi/admin/success-messages/:type
+   * Body: { title, message, is_active } + optional image via base64
+   */
+  async updateSuccessMessage(req, res) {
+    try {
+      const { type } = req.params;
+      const { title, message, is_active, image_base64, remove_image } = req.body;
+      const userId = BigInt(req.user.id);
+
+      const validTypes = ['masuk', 'pulang', 'wfh', 'dinas_luar', 'wfa', 'izin', 'sakit', 'cuti'];
+      if (!validTypes.includes(type)) {
+        return res.status(400).json({ success: false, message: 'Tipe tidak valid' });
+      }
+
+      const updateData = { updated_by: userId, updated_at: new Date() };
+      if (title !== undefined) updateData.title = title;
+      if (message !== undefined) updateData.message = message;
+      if (is_active !== undefined) updateData.is_active = is_active;
+
+      // Handle image upload (base64)
+      if (image_base64) {
+        const dir = path.join(__dirname, '../../storage/uploads/absensi_popup');
+        if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+
+        const base64Clean = image_base64.replace(/^data:image\/\w+;base64,/, '');
+        const buffer = Buffer.from(base64Clean, 'base64');
+        const ext = image_base64.match(/^data:image\/(\w+);/) ? image_base64.match(/^data:image\/(\w+);/)[1] : 'png';
+        const filename = `popup_${type}_${Date.now()}.${ext}`;
+        const filepath = path.join(dir, filename);
+        fs.writeFileSync(filepath, buffer);
+        updateData.image_path = `uploads/absensi_popup/${filename}`;
+
+        // Delete old image if exists
+        const existing = await prisma.absensi_success_messages.findUnique({ where: { type } });
+        if (existing?.image_path) {
+          const oldPath = path.join(__dirname, '../../storage', existing.image_path);
+          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        }
+      }
+
+      // Handle image removal
+      if (remove_image) {
+        const existing = await prisma.absensi_success_messages.findUnique({ where: { type } });
+        if (existing?.image_path) {
+          const oldPath = path.join(__dirname, '../../storage', existing.image_path);
+          if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
+        }
+        updateData.image_path = null;
+      }
+
+      const result = await prisma.absensi_success_messages.upsert({
+        where: { type },
+        update: updateData,
+        create: {
+          type,
+          title: title || '',
+          message: message || '',
+          image_path: updateData.image_path || null,
+          is_active: is_active !== undefined ? is_active : true,
+          updated_by: userId,
+        },
+      });
+
+      return res.json({ success: true, message: 'Berhasil diupdate', data: result });
+    } catch (error) {
+      console.error('[Absensi] Update success message error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal update', error: error.message });
     }
   },
 };

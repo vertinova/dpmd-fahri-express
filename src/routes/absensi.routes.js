@@ -16,6 +16,7 @@ router.post('/clock-in', auth, absensiController.clockIn);
 router.post('/clock-out', auth, absensiController.clockOut);
 router.post('/izin', auth, absensiController.submitIzin);
 router.post('/register-device', auth, absensiController.registerDevice);
+router.get('/success-messages', auth, absensiController.getSuccessMessages);
 
 // Admin routes (superadmin + bidang Sekretariat)
 router.get('/admin/rekap', auth, checkAbsensiAdmin, absensiController.getRekapAdmin);
@@ -25,5 +26,7 @@ router.put('/admin/settings', auth, checkAbsensiAdmin, absensiController.updateS
 router.put('/admin/set-device/:userId', auth, checkAbsensiAdmin, absensiController.adminSetDevice);
 router.put('/admin/:id', auth, checkAbsensiAdmin, absensiController.adminUpdateAbsensi);
 router.delete('/admin/:id', auth, checkAbsensiAdmin, absensiController.adminDeleteAbsensi);
+router.get('/admin/success-messages', auth, checkAbsensiAdmin, absensiController.getAdminSuccessMessages);
+router.put('/admin/success-messages/:type', auth, checkAbsensiAdmin, absensiController.updateSuccessMessage);
 
 module.exports = router;
