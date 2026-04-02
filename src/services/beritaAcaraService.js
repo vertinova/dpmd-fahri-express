@@ -909,11 +909,11 @@ class BeritaAcaraService {
     );
     
     // Add Verifikator Dinas as first anggota if available from proposals
-    // Use dinas_terkait (e.g., "UPT_PU") as jabatan_label instead of verifikator's jabatan
+    // Use dinas_verifikator_jabatan (e.g., "PENILIK JALAN KEC. JONGGOL") as jabatan_label
     if (proposals && proposals.length > 0 && proposals[0].dinas_verifikator_nama) {
       anggota.unshift({
         jabatan: 'verifikator_dinas',
-        jabatan_label: proposals[0].dinas_terkait || 'Dinas Terkait',
+        jabatan_label: proposals[0].dinas_verifikator_jabatan || proposals[0].dinas_terkait || 'Dinas Terkait',
         nama: proposals[0].dinas_verifikator_nama,
         nip: proposals[0].dinas_verifikator_nip,
         ttd: proposals[0].dinas_verifikator_ttd

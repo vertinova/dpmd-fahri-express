@@ -123,7 +123,7 @@ class BeritaAcaraController {
         { no: 3, key: 'q3', text: 'Proposal (Latar Belakang, Maksud dan Tujuan, Bentuk Kegiatan, Jadwal Pelaksanaan)' },
         { no: 4, key: 'q4', text: 'RPA dan RAB' },
         { no: 5, key: 'q5', text: 'Surat Pernyataan dari Kepala Desa yang menyatakan bahwa lokasi kegiatan tidak dalam keadaan sengketa/bermasalah apabila merupakan Aset Desa', optional: true },
-        { no: 6, key: 'q6', text: 'Bukti kepemilikan Aset Desa sesuai ketentuan peraturan perundang-undangan, dalam hal usulan kegiatan yang diusulkan berupa Rehab Kantor Desa' },
+        { no: 6, key: 'q6', text: 'Bukti kepemilikan Aset Desa sesuai ketentuan peraturan perundang-undangan, dalam hal usulan kegiatan yang diusulkan berupa Rehab Kantor Desa', optional: true },
         { no: 7, key: 'q7', text: 'Dokumen kesediaan peralihan hak melalui hibah dari warga masyarakat baik perorangan maupun Badan Usaha/Badan Hukum kepada Desa atas lahan/tanah yang menjadi Aset Desa sebagai dampak kegiatan pembangunan infrastruktur desa', optional: true },
         { no: 8, key: 'q8', text: 'Dokumen pernyataan kesanggupan dari warga masyarakat untuk tidak meminta ganti rugi', optional: true },
         { no: 9, key: 'q9', text: 'Persetujuan pemanfaatan barang milik Daerah/Negara dalam hal lahan yang akan dipergunakan untuk pembangunan infrastruktur desa', optional: true },

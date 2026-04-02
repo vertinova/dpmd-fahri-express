@@ -453,7 +453,7 @@ exports.getVerifikatorStats = async (req, res) => {
           INNER JOIN bankeu_proposal_kegiatan bpk ON bp.id = bpk.proposal_id
           INNER JOIN bankeu_master_kegiatan bmk ON bpk.kegiatan_id = bmk.id
           WHERE (FIND_IN_SET(${kodeDinasForMatch}, bmk.dinas_terkait) > 0 OR FIND_IN_SET(${dinas.kode_dinas}, bmk.dinas_terkait) > 0)
-            AND (bp.submitted_to_dinas_at IS NOT NULL OR bp.dinas_status IN ('rejected', 'revision') OR bp.kecamatan_status IN ('rejected', 'revision'))
+            AND (bp.submitted_to_dinas_at IS NOT NULL OR bp.dinas_status IS NOT NULL OR bp.kecamatan_status IN ('rejected', 'revision'))
             AND d.status_pemerintahan = 'desa'
             AND bp.desa_id IN (${Prisma.join(vDesaIds)})
             AND (${tahunFilter} IS NULL OR bp.tahun_anggaran = ${tahunFilter})
@@ -499,7 +499,7 @@ exports.getVerifikatorStats = async (req, res) => {
         INNER JOIN bankeu_proposal_kegiatan bpk ON bp.id = bpk.proposal_id
         INNER JOIN bankeu_master_kegiatan bmk ON bpk.kegiatan_id = bmk.id
         WHERE (FIND_IN_SET(${kodeDinasForMatch}, bmk.dinas_terkait) > 0 OR FIND_IN_SET(${dinas.kode_dinas}, bmk.dinas_terkait) > 0)
-          AND (bp.submitted_to_dinas_at IS NOT NULL OR bp.dinas_status IN ('rejected', 'revision') OR bp.kecamatan_status IN ('rejected', 'revision'))
+          AND (bp.submitted_to_dinas_at IS NOT NULL OR bp.dinas_status IS NOT NULL OR bp.kecamatan_status IN ('rejected', 'revision'))
           AND d.status_pemerintahan = 'desa'
           AND bp.desa_id NOT IN (${Prisma.join(allAssignedDesaArray)})
           AND (${tahunFilter} IS NULL OR bp.tahun_anggaran = ${tahunFilter})
@@ -529,7 +529,7 @@ exports.getVerifikatorStats = async (req, res) => {
         INNER JOIN bankeu_proposal_kegiatan bpk ON bp.id = bpk.proposal_id
         INNER JOIN bankeu_master_kegiatan bmk ON bpk.kegiatan_id = bmk.id
         WHERE (FIND_IN_SET(${kodeDinasForMatch}, bmk.dinas_terkait) > 0 OR FIND_IN_SET(${dinas.kode_dinas}, bmk.dinas_terkait) > 0)
-          AND (bp.submitted_to_dinas_at IS NOT NULL OR bp.dinas_status IN ('rejected', 'revision') OR bp.kecamatan_status IN ('rejected', 'revision'))
+          AND (bp.submitted_to_dinas_at IS NOT NULL OR bp.dinas_status IS NOT NULL OR bp.kecamatan_status IN ('rejected', 'revision'))
           AND d.status_pemerintahan = 'desa'
           AND (${tahunFilter} IS NULL OR bp.tahun_anggaran = ${tahunFilter})
       `;

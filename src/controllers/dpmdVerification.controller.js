@@ -458,19 +458,21 @@ class DPMDVerificationController {
       const { tahun_anggaran } = req.query;
       const tahunFilter = tahun_anggaran ? { tahun_anggaran: parseInt(tahun_anggaran) } : {};
 
+      // Base filter: hanya proposal yang sudah sampai di DPMD (konsisten dengan getProposals)
+      const dpmdBaseFilter = {
+        submitted_to_dpmd: true,
+        kecamatan_status: 'approved',
+        dinas_status: 'approved',
+        ...tahunFilter
+      };
+
       const totalProposals = await prisma.bankeu_proposals.count({
-        where: {
-          submitted_to_dpmd: true,
-          kecamatan_status: 'approved',
-          ...tahunFilter
-        }
+        where: dpmdBaseFilter
       });
 
       const pending = await prisma.bankeu_proposals.count({
         where: {
-          submitted_to_dpmd: true,
-          kecamatan_status: 'approved',
-          ...tahunFilter,
+          ...dpmdBaseFilter,
           OR: [
             { dpmd_status: null },
             { dpmd_status: 'pending' }
@@ -480,17 +482,17 @@ class DPMDVerificationController {
 
       const approved = await prisma.bankeu_proposals.count({
         where: {
-          dpmd_status: 'approved',
-          ...tahunFilter
+          ...dpmdBaseFilter,
+          dpmd_status: 'approved'
         }
       });
 
       const rejected = await prisma.bankeu_proposals.count({
         where: {
+          ...dpmdBaseFilter,
           dpmd_status: {
             in: ['rejected', 'revision']
-          },
-          ...tahunFilter
+          }
         }
       });
 
