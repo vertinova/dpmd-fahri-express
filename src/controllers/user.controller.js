@@ -489,7 +489,7 @@ class UserController {
         // Auto-create pegawai record for DPMD staff without one
         const defaultBidangId = existingUser.bidang_id || 1;
         // Validasi bahwa bidang exists sebelum create
-        const bidangExists = await prisma.bidangs.findUnique({ where: { id_bidang: BigInt(String(defaultBidangId)) } });
+        const bidangExists = await prisma.bidangs.findUnique({ where: { id: BigInt(String(defaultBidangId)) } });
         if (!bidangExists) {
           return res.status(400).json({ success: false, message: `Bidang dengan ID ${defaultBidangId} tidak ditemukan. Silakan set bidang user terlebih dahulu.` });
         }
