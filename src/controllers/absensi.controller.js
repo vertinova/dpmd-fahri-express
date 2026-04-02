@@ -706,10 +706,11 @@ const absensiController = {
       if (keterangan !== undefined) updateData.keterangan = keterangan || null;
       if (tujuan_dinas !== undefined) updateData.tujuan_dinas = tujuan_dinas || null;
       if (jam_masuk !== undefined) {
-        updateData.jam_masuk = jam_masuk ? new Date(`1970-01-01T${jam_masuk}`) : null;
+        // Frontend kirim waktu WIB (e.g., "07:30"), harus di-parse sebagai WIB (+07:00) agar konsisten dengan clock-in
+        updateData.jam_masuk = jam_masuk ? new Date(`1970-01-01T${jam_masuk}:00+07:00`) : null;
       }
       if (jam_keluar !== undefined) {
-        updateData.jam_keluar = jam_keluar ? new Date(`1970-01-01T${jam_keluar}`) : null;
+        updateData.jam_keluar = jam_keluar ? new Date(`1970-01-01T${jam_keluar}:00+07:00`) : null;
       }
 
       const result = await prisma.absensi_pegawai.update({
