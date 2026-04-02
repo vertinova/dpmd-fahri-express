@@ -1285,11 +1285,15 @@ class SummaryController {
   /**
    * Dashboard for all Pengurus across all kelembagaan
    * GET /api/kelembagaan/pengurus-dashboard
-   * Query params: ?kecamatan_id, ?desa_id, ?pengurusable_type, ?search
+   * Query params: ?kecamatan_id, ?desa_id, ?pengurusable_type, ?search, ?verification_scope
    */
   async pengurusDashboard(req, res) {
     try {
-      const { kecamatan_id, desa_id, pengurusable_type, search } = req.query;
+      const { kecamatan_id, desa_id, pengurusable_type, search, verification_scope } = req.query;
+      const requestedScope = String(verification_scope || 'verified').toLowerCase();
+      const verificationScope = ['verified', 'unverified', 'ditolak', 'all'].includes(requestedScope)
+        ? requestedScope
+        : 'verified';
 
       // Build where clause
       const where = { status_jabatan: 'aktif' };
@@ -1328,16 +1332,25 @@ class SummaryController {
 
       // Build summary from the same filtered dataset used by the table.
       const verifiedPengurus = allPengurus.filter((pengurus) => pengurus.status_verifikasi === 'verified');
-      const unverifiedPengurus = allPengurus.filter((pengurus) => pengurus.status_verifikasi !== 'verified');
-      const totalPengurus = allPengurus.length;
-      const verifiedCount = verifiedPengurus.length;
-      const unverifiedCount = unverifiedPengurus.length;
+      const unverifiedPengurus = allPengurus.filter((pengurus) => pengurus.status_verifikasi === 'unverified');
+      const rejectedPengurus = allPengurus.filter((pengurus) => pengurus.status_verifikasi === 'ditolak');
+      const scopedPengurus = verificationScope === 'all'
+        ? allPengurus
+        : verificationScope === 'unverified'
+          ? unverifiedPengurus
+          : verificationScope === 'ditolak'
+            ? rejectedPengurus
+          : verifiedPengurus;
+      const totalPengurus = scopedPengurus.length;
+      const verifiedCount = scopedPengurus.filter((pengurus) => pengurus.status_verifikasi === 'verified').length;
+      const unverifiedCount = scopedPengurus.filter((pengurus) => pengurus.status_verifikasi === 'unverified').length;
+      const rejectedCount = scopedPengurus.filter((pengurus) => pengurus.status_verifikasi === 'ditolak').length;
 
       const now = new Date();
 
       // Gender distribution
       const genderStats = { L: 0, P: 0, unknown: 0 };
-      allPengurus.forEach(p => {
+      scopedPengurus.forEach(p => {
         if (p.jenis_kelamin === 'Laki_laki') genderStats.L++;
         else if (p.jenis_kelamin === 'Perempuan') genderStats.P++;
         else genderStats.unknown++;
@@ -1345,14 +1358,14 @@ class SummaryController {
 
       // Education distribution
       const educationStats = {};
-      allPengurus.forEach(p => {
+      scopedPengurus.forEach(p => {
         const edu = p.pendidikan || 'Tidak Diketahui';
         educationStats[edu] = (educationStats[edu] || 0) + 1;
       });
 
       // Age distribution
       const ageRanges = { '<20': 0, '20-30': 0, '31-40': 0, '41-50': 0, '51-60': 0, '>60': 0, 'unknown': 0 };
-      allPengurus.forEach(p => {
+      scopedPengurus.forEach(p => {
         if (!p.tanggal_lahir) { ageRanges['unknown']++; return; }
         const age = Math.floor((now - new Date(p.tanggal_lahir)) / (365.25 * 24 * 60 * 60 * 1000));
         if (age < 20) ageRanges['<20']++;
@@ -1379,14 +1392,14 @@ class SummaryController {
         'satlinmas': 'Satlinmas',
         'lembaga-lainnya': 'Lembaga Lainnya', 'lembaga_lainnyas': 'Lembaga Lainnya',
       };
-      allPengurus.forEach(p => {
+      scopedPengurus.forEach(p => {
         const label = TYPE_LABELS[p.pengurusable_type] || p.pengurusable_type;
         typeStats[label] = (typeStats[label] || 0) + 1;
       });
 
       // Yearly pengurus count per kelembagaan type for the current filtered dataset.
       const yearlyStats = {};
-      allPengurus.forEach(p => {
+      scopedPengurus.forEach(p => {
         const year = p.created_at ? new Date(p.created_at).getFullYear() : null;
         if (!year) return;
         if (!yearlyStats[year]) yearlyStats[year] = {};
@@ -1406,8 +1419,19 @@ class SummaryController {
           kecamatan_nama: p.desas?.kecamatans?.nama || '',
         }));
 
+      const rejectedList = rejectedPengurus
+        .slice(0, 50)
+        .map(p => ({
+          id: p.id,
+          nama_lengkap: p.nama_lengkap,
+          jabatan: p.jabatan,
+          pengurusable_type: p.pengurusable_type,
+          desa_nama: p.desas?.nama || '',
+          kecamatan_nama: p.desas?.kecamatans?.nama || '',
+        }));
+
       // Serialize BigInt
-      const serializedPengurus = allPengurus.map(p => ({
+        const serializedPengurus = scopedPengurus.map(p => ({
         id: p.id,
         nama_lengkap: p.nama_lengkap,
         jabatan: p.jabatan,
@@ -1445,6 +1469,16 @@ class SummaryController {
           total: totalPengurus,
           verified: totalVerified,
           unverified: totalUnverified,
+          ditolak: rejectedCount,
+          pendingVerificationCount: unverifiedPengurus.length,
+          rejectedVerificationCount: rejectedPengurus.length,
+          scope: verificationScope,
+          matchingCounts: {
+            all: allPengurus.length,
+            verified: verifiedPengurus.length,
+            unverified: unverifiedPengurus.length,
+            ditolak: rejectedPengurus.length,
+          },
           genderStats,
           educationStats,
           ageRanges,
@@ -1452,6 +1486,7 @@ class SummaryController {
           yearlyStats,
         },
         unverified: unverifiedList,
+        ditolak: rejectedList,
         filters: {
           kecamatans: kecamatans.map(k => ({ id: Number(k.id), nama: k.nama })),
           desas: desas.map(d => ({ id: Number(d.id), nama: d.nama, kecamatan_id: Number(d.kecamatan_id) })),
