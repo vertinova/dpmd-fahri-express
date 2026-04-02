@@ -161,8 +161,8 @@ const absensiController = {
       // Simpan foto
       const fotoPath = saveBase64Photo(foto, userId.toString(), 'masuk');
 
-      // jam_masuk: pakai WIB time string (bukan UTC)
-      const jamMasuk = new Date(`1970-01-01T${wib.timeString}`);
+      // jam_masuk: pakai WIB time string dengan explicit +07:00 timezone
+      const jamMasuk = new Date(`1970-01-01T${wib.timeString}+07:00`);
 
       const data = {
         jam_masuk: jamMasuk,
@@ -285,7 +285,7 @@ const absensiController = {
 
       const fotoPath = saveBase64Photo(foto, userId.toString(), 'keluar');
 
-      const jamKeluar = new Date(`1970-01-01T${wib.timeString}`);
+      const jamKeluar = new Date(`1970-01-01T${wib.timeString}+07:00`);
 
       const result = await prisma.absensi_pegawai.update({
         where: { id: existing.id },
