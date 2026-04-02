@@ -11,14 +11,25 @@ const MAX_ANGGARAN = 1_500_000_000;
 
 /**
  * Helper: Check if bankeu submission is open for desa
+ * @param {number|string} tahun - Tahun anggaran (e.g. 2026, 2027). Falls back to year-less key if year-specific not found.
  * @returns {Promise<{isOpen: boolean, setting: object|null}>}
  */
-async function checkSubmissionOpen() {
+async function checkSubmissionOpen(tahun) {
   try {
     const { evaluateBankeuSchedule } = require('./appSettings.controller');
-    const setting = await prisma.app_settings.findUnique({
-      where: { setting_key: 'bankeu_submission_desa' }
-    });
+    
+    // Try year-specific key first, then fallback to global key
+    let setting = null;
+    if (tahun) {
+      setting = await prisma.app_settings.findUnique({
+        where: { setting_key: `bankeu_submission_desa_${tahun}` }
+      });
+    }
+    if (!setting) {
+      setting = await prisma.app_settings.findUnique({
+        where: { setting_key: 'bankeu_submission_desa' }
+      });
+    }
     
     if (!setting) {
       return { isOpen: true, setting: null };
@@ -1157,8 +1168,8 @@ class BankeuProposalController {
 
       logger.info(`📤 SUBMIT TO DINAS TERKAIT (FIRST SUBMISSION) - User: ${userId}, Tahun: ${tahun || 'ALL'}, ProposalIDs: ${proposal_ids ? proposal_ids.join(',') : 'ALL'}`);
 
-      // Check if submission is open
-      const { isOpen } = await checkSubmissionOpen();
+      // Check if submission is open (per-year)
+      const { isOpen } = await checkSubmissionOpen(tahun);
       if (!isOpen) {
         await transaction.rollback();
         logger.warn(`⛔ Submission blocked - submission is closed by DPMD`);
@@ -1297,8 +1308,8 @@ class BankeuProposalController {
 
       logger.info(`📤 RESUBMIT PROPOSAL (REVISI) - User: ${userId}, Destination: ${destination || 'auto-detect'}, Tahun: ${tahun || 'ALL'}, ProposalIDs: ${proposal_ids ? proposal_ids.join(',') : 'ALL'}`);
 
-      // Check if submission is open
-      const { isOpen } = await checkSubmissionOpen();
+      // Check if submission is open (per-year)
+      const { isOpen } = await checkSubmissionOpen(tahun);
       if (!isOpen) {
         await transaction.rollback();
         logger.warn(`⛔ Resubmit blocked - submission is closed by DPMD`);

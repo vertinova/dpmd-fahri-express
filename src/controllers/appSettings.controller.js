@@ -71,15 +71,13 @@ class AppSettingsController {
         where: { setting_key: key }
       });
 
-      // Default values for bankeu submission settings
-      const defaultBankeu = {
-        'bankeu_submission_desa': { enabled: true, schedule: null },
-        'bankeu_submission_kecamatan': { enabled: true, schedule: null }
-      };
+      // Default values for bankeu submission settings (including year-suffixed keys)
+      const isBankeuKey = key.startsWith('bankeu_submission_desa') || key.startsWith('bankeu_submission_kecamatan');
+      const defaultBankeuConfig = { enabled: true, schedule: null };
 
       if (!setting) {
-        if (key in defaultBankeu) {
-          const def = defaultBankeu[key];
+        if (isBankeuKey) {
+          const def = defaultBankeuConfig;
           return res.json({
             success: true,
             data: {
@@ -174,8 +172,8 @@ class AppSettingsController {
         // Kelembagaan settings: Only Superadmin OR PMD
         hasPermission = isSuperadmin || parseInt(userBidangId) === pmdBidangId;
         requiredPermission = 'Superadmin atau Bidang PMD (bidang_id=5)';
-      } else if (key === 'bankeu_submission_desa' || key === 'bankeu_submission_kecamatan') {
-        // Bankeu settings: Only Superadmin OR SPKED
+      } else if (key.startsWith('bankeu_submission_desa') || key.startsWith('bankeu_submission_kecamatan')) {
+        // Bankeu settings (including year-suffixed): Only Superadmin OR SPKED
         hasPermission = isSuperadmin || parseInt(userBidangId) === spkedBidangId;
         requiredPermission = 'Superadmin atau Bidang SPKED (bidang_id=3)';
       } else {

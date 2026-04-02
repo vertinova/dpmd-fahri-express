@@ -806,10 +806,15 @@ class BankeuVerificationController {
 
       // For submit to DPMD: Check berita acara and surat pengantar
       if (action === 'submit') {
-        // Check if kecamatan submission is open
-        const submissionSetting = await prisma.app_settings.findUnique({
-          where: { setting_key: 'bankeu_submission_kecamatan' }
+        // Check if kecamatan submission is open (per-year, fallback to global)
+        let submissionSetting = await prisma.app_settings.findUnique({
+          where: { setting_key: `bankeu_submission_kecamatan_${tahunAnggaran}` }
         });
+        if (!submissionSetting) {
+          submissionSetting = await prisma.app_settings.findUnique({
+            where: { setting_key: 'bankeu_submission_kecamatan' }
+          });
+        }
         
         if (submissionSetting) {
           const { evaluateBankeuSchedule } = require('./appSettings.controller');
