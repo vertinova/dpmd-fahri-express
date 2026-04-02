@@ -487,27 +487,31 @@ class UserController {
         }
       } else if (hasPegawaiFields) {
         // Auto-create pegawai record for DPMD staff without one
-        const defaultBidangId = existingUser.bidang_id || 1;
-        // Validasi bahwa bidang exists sebelum create
-        const bidangExists = await prisma.bidangs.findUnique({ where: { id: BigInt(String(defaultBidangId)) } });
-        if (!bidangExists) {
-          return res.status(400).json({ success: false, message: `Bidang dengan ID ${defaultBidangId} tidak ditemukan. Silakan set bidang user terlebih dahulu.` });
-        }
-        const newPegawai = await prisma.pegawai.create({
-          data: {
-            nama_pegawai: existingUser.name,
-            id_bidang: BigInt(String(defaultBidangId)),
-            tanggal_lahir: tanggal_lahir ? new Date(tanggal_lahir) : null,
-            tempat_lahir: tempat_lahir || null,
-            jabatan: jabatan || null,
-            nip: nip || null,
-            status_kepegawaian: status_kepegawaian || null,
-            created_at: new Date(),
-            updated_at: new Date(),
+        const defaultBidangId = existingUser.bidang_id;
+        if (!defaultBidangId) {
+          // User belum punya bidang, skip auto-create pegawai tetapi simpan field lain
+          // Admin harus set bidang_id dulu di user management
+        } else {
+          const bidangExists = await prisma.bidangs.findUnique({ where: { id: BigInt(String(defaultBidangId)) } });
+          if (!bidangExists) {
+            return res.status(400).json({ success: false, message: `Bidang dengan ID ${defaultBidangId} tidak ditemukan. Silakan set bidang user terlebih dahulu.` });
           }
-        });
-        // Link pegawai to user
-        updateData.pegawai_id = newPegawai.id_pegawai;
+          const newPegawai = await prisma.pegawai.create({
+            data: {
+              nama_pegawai: existingUser.name,
+              id_bidang: BigInt(String(defaultBidangId)),
+              tanggal_lahir: tanggal_lahir ? new Date(tanggal_lahir) : null,
+              tempat_lahir: tempat_lahir || null,
+              jabatan: jabatan || null,
+              nip: nip || null,
+              status_kepegawaian: status_kepegawaian || null,
+              created_at: new Date(),
+              updated_at: new Date(),
+            }
+          });
+          // Link pegawai to user
+          updateData.pegawai_id = newPegawai.id_pegawai;
+        }
       }
 
       // Update bidang: support both systems (pegawai table & deprecated users.bidang_id)
