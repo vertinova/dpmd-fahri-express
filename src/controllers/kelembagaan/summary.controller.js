@@ -1326,25 +1326,18 @@ class SummaryController {
         orderBy: [{ created_at: 'desc' }]
       });
 
-      // --- Build infographic stats (from active AND verified pengurus only) ---
-      const allActivePengurus = await prisma.pengurus.findMany({
-        where: { status_jabatan: 'aktif', status_verifikasi: 'verified' },
-        select: {
-          id: true, jenis_kelamin: true, pendidikan: true, tanggal_lahir: true,
-          status_verifikasi: true, pengurusable_type: true, created_at: true
-        }
-      });
-
-      // Also get unverified count separately for summary
-      const allActiveCount = await prisma.pengurus.count({ where: { status_jabatan: 'aktif' } });
-      const verifiedCount = allActivePengurus.length;
-      const unverifiedCount = allActiveCount - verifiedCount;
+      // Build summary from the same filtered dataset used by the table.
+      const verifiedPengurus = allPengurus.filter((pengurus) => pengurus.status_verifikasi === 'verified');
+      const unverifiedPengurus = allPengurus.filter((pengurus) => pengurus.status_verifikasi !== 'verified');
+      const totalPengurus = allPengurus.length;
+      const verifiedCount = verifiedPengurus.length;
+      const unverifiedCount = unverifiedPengurus.length;
 
       const now = new Date();
 
       // Gender distribution
       const genderStats = { L: 0, P: 0, unknown: 0 };
-      allActivePengurus.forEach(p => {
+      allPengurus.forEach(p => {
         if (p.jenis_kelamin === 'Laki_laki') genderStats.L++;
         else if (p.jenis_kelamin === 'Perempuan') genderStats.P++;
         else genderStats.unknown++;
@@ -1352,14 +1345,14 @@ class SummaryController {
 
       // Education distribution
       const educationStats = {};
-      allActivePengurus.forEach(p => {
+      allPengurus.forEach(p => {
         const edu = p.pendidikan || 'Tidak Diketahui';
         educationStats[edu] = (educationStats[edu] || 0) + 1;
       });
 
       // Age distribution
       const ageRanges = { '<20': 0, '20-30': 0, '31-40': 0, '41-50': 0, '51-60': 0, '>60': 0, 'unknown': 0 };
-      allActivePengurus.forEach(p => {
+      allPengurus.forEach(p => {
         if (!p.tanggal_lahir) { ageRanges['unknown']++; return; }
         const age = Math.floor((now - new Date(p.tanggal_lahir)) / (365.25 * 24 * 60 * 60 * 1000));
         if (age < 20) ageRanges['<20']++;
@@ -1386,14 +1379,14 @@ class SummaryController {
         'satlinmas': 'Satlinmas',
         'lembaga-lainnya': 'Lembaga Lainnya', 'lembaga_lainnyas': 'Lembaga Lainnya',
       };
-      allActivePengurus.forEach(p => {
+      allPengurus.forEach(p => {
         const label = TYPE_LABELS[p.pengurusable_type] || p.pengurusable_type;
         typeStats[label] = (typeStats[label] || 0) + 1;
       });
 
-      // Yearly pengurus count per kelembagaan type (active + verified)
+      // Yearly pengurus count per kelembagaan type for the current filtered dataset.
       const yearlyStats = {};
-      allActivePengurus.forEach(p => {
+      allPengurus.forEach(p => {
         const year = p.created_at ? new Date(p.created_at).getFullYear() : null;
         if (!year) return;
         if (!yearlyStats[year]) yearlyStats[year] = {};
@@ -1402,8 +1395,7 @@ class SummaryController {
       });
 
       // Unverified pengurus list (limited to 50 most recent)
-      const unverifiedList = allPengurus
-        .filter(p => p.status_verifikasi !== 'verified')
+      const unverifiedList = unverifiedPengurus
         .slice(0, 50)
         .map(p => ({
           id: p.id,
@@ -1450,7 +1442,7 @@ class SummaryController {
         success: true,
         data: serializedPengurus,
         summary: {
-          total: allActiveCount,
+          total: totalPengurus,
           verified: totalVerified,
           unverified: totalUnverified,
           genderStats,

@@ -8,5 +8,6 @@ router.use(checkRole(['pegawai', 'kepala_bidang', 'ketua_tim', 'kepala_dinas', '
 
 router.get('/', controller.getAllProfilDesa);
 router.get('/stats', controller.getStats);
+router.get('/:desaId', controller.getProfilDesaDetail);
 
 module.exports = router;

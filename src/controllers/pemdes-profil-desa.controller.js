@@ -23,6 +23,43 @@ const PROFILE_SIGNAL_FIELDS = [
   'longitude',
 ];
 
+const DESA_PROFILE_SELECT = {
+  id: true,
+  kode: true,
+  nama: true,
+  status_pemerintahan: true,
+  kecamatans: {
+    select: {
+      id: true,
+      nama: true,
+    },
+  },
+  profil_desas: {
+    select: {
+      id: true,
+      klasifikasi_desa: true,
+      status_desa: true,
+      tipologi_desa: true,
+      jumlah_penduduk: true,
+      sejarah_desa: true,
+      demografi: true,
+      potensi_desa: true,
+      no_telp: true,
+      email: true,
+      instagram_url: true,
+      youtube_url: true,
+      luas_wilayah: true,
+      alamat_kantor: true,
+      radius_ke_kecamatan: true,
+      foto_kantor_desa_path: true,
+      latitude: true,
+      longitude: true,
+      created_at: true,
+      updated_at: true,
+    },
+  },
+};
+
 function isFilled(value) {
   if (value === null || value === undefined) {
     return false;
@@ -57,6 +94,20 @@ function toNumber(value) {
 
   const numericValue = Number(value);
   return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function parseBigIntParam(value) {
+  const normalizedValue = String(value || '').trim();
+
+  if (!/^\d+$/.test(normalizedValue)) {
+    return null;
+  }
+
+  try {
+    return BigInt(normalizedValue);
+  } catch (error) {
+    return null;
+  }
 }
 
 function calculateProfileCompletion(profile) {
@@ -149,6 +200,21 @@ function createSerializedProfile(desa) {
   };
 }
 
+function createSerializedProfileDetail(desa) {
+  const profile = desa.profil_desas;
+  const baseProfile = createSerializedProfile(desa);
+
+  return {
+    ...baseProfile,
+    sejarah_desa: profile?.sejarah_desa || null,
+    demografi: profile?.demografi || null,
+    potensi_desa: profile?.potensi_desa || null,
+    maps_url: baseProfile.flags.has_coordinates
+      ? `https://www.google.com/maps?q=${baseProfile.latitude},${baseProfile.longitude}`
+      : null,
+  };
+}
+
 function createFilterOptions(records, valueKey, labelKey) {
   const optionMap = new Map();
 
@@ -235,42 +301,7 @@ async function getProfileRecords(query = {}) {
 
   const desaRows = await prisma.desas.findMany({
     where,
-    select: {
-      id: true,
-      kode: true,
-      nama: true,
-      status_pemerintahan: true,
-      kecamatans: {
-        select: {
-          id: true,
-          nama: true,
-        },
-      },
-      profil_desas: {
-        select: {
-          id: true,
-          klasifikasi_desa: true,
-          status_desa: true,
-          tipologi_desa: true,
-          jumlah_penduduk: true,
-          sejarah_desa: true,
-          demografi: true,
-          potensi_desa: true,
-          no_telp: true,
-          email: true,
-          instagram_url: true,
-          youtube_url: true,
-          luas_wilayah: true,
-          alamat_kantor: true,
-          radius_ke_kecamatan: true,
-          foto_kantor_desa_path: true,
-          latitude: true,
-          longitude: true,
-          created_at: true,
-          updated_at: true,
-        },
-      },
-    },
+    select: DESA_PROFILE_SELECT,
     orderBy: [
       { kecamatans: { nama: 'asc' } },
       { nama: 'asc' },
@@ -279,6 +310,15 @@ async function getProfileRecords(query = {}) {
 
   const records = desaRows.map(createSerializedProfile);
   return filterRecords(records, query);
+}
+
+async function getProfileRecordById(desaId) {
+  return prisma.desas.findUnique({
+    where: {
+      id: desaId,
+    },
+    select: DESA_PROFILE_SELECT,
+  });
 }
 
 function buildStats(records) {
@@ -440,7 +480,43 @@ const getStats = async (req, res) => {
   }
 };
 
+const getProfilDesaDetail = async (req, res) => {
+  try {
+    const desaId = parseBigIntParam(req.params.desaId);
+
+    if (!desaId) {
+      return res.status(400).json({
+        success: false,
+        message: 'ID desa tidak valid',
+      });
+    }
+
+    const desa = await getProfileRecordById(desaId);
+
+    if (!desa) {
+      return res.status(404).json({
+        success: false,
+        message: 'Profil desa tidak ditemukan',
+      });
+    }
+
+    return res.json({
+      success: true,
+      message: 'Detail profil desa',
+      data: createSerializedProfileDetail(desa),
+    });
+  } catch (error) {
+    console.error('Error fetching profil desa detail (pemdes):', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Gagal mengambil detail profil desa',
+      error: error.message,
+    });
+  }
+};
+
 module.exports = {
   getAllProfilDesa,
   getStats,
+  getProfilDesaDetail,
 };
