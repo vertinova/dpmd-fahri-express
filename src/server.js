@@ -83,6 +83,7 @@ const beritaAcaraRoutes = require('./routes/beritaAcara.routes');
 const perjadinRoutes = require('./routes/perjadin.routes');
 const externalApiRoutes = require('./routes/externalApi.routes');
 const pemdesAparaturRoutes = require('./routes/pemdes-aparatur.routes');
+const pemdesProfilDesaRoutes = require('./routes/pemdes-profil-desa.routes');
 
 const app = express();
 
@@ -303,6 +304,9 @@ app.use('/api/external', externalApiRoutes);
 
 // Pemdes Aparatur Desa routes (bidang-level, from local DB)
 app.use('/api/pemdes/aparatur-desa', pemdesAparaturRoutes);
+
+// Pemdes Profil Desa routes (bidang-level, all desas)
+app.use('/api/pemdes/profil-desa', pemdesProfilDesaRoutes);
 
 // Pemdes Produk Hukum routes (bidang-level, all desas)
 app.use('/api/pemdes/produk-hukum', require('./routes/pemdes-produk-hukum.routes'));
