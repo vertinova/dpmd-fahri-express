@@ -54,12 +54,18 @@ function cleanCurrency(value) {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : 0;
   }
+
+  if (typeof value === 'bigint') {
+    return Number(value);
+  }
   
+  // Pastikan value adalah string sebelum .replace()
+  const str = String(value);
   // Format in JSON uses comma as thousand separator
   // Example: "478,327,869" should become 478327869
   // Remove all commas and dots
-  const cleaned = value.replace(/[,.]/g, '');
-  return parseFloat(cleaned);
+  const cleaned = str.replace(/[,.]/g, '');
+  return parseFloat(cleaned) || 0;
 }
 
 /**
