@@ -624,7 +624,7 @@ class BankeuVerificationController {
   async generateBeritaAcaraDesa(req, res) {
     try {
       const { desaId } = req.params;
-      const { kegiatanId, proposalId, optionalItems } = req.body; // proposalId untuk tim verifikasi per proposal, optionalItems untuk infra opsional
+      const { kegiatanId, proposalId, optionalItems, tanggal } = req.body; // proposalId untuk tim verifikasi per proposal, optionalItems untuk infra opsional
       const userId = req.user.id;
 
       // Get user info
@@ -670,7 +670,8 @@ class BankeuVerificationController {
         kegiatanId: kegiatanId ? parseInt(kegiatanId) : null,
         proposalId: proposalId ? parseInt(proposalId) : null,
         checklistData,
-        optionalItems: optionalItems || null
+        optionalItems: optionalItems || null,
+        tanggal: tanggal || null
       });
 
       // Update proposals with berita acara path

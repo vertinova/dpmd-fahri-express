@@ -26,7 +26,7 @@ class BeritaAcaraService {
    * @param {Object} params.optionalItems - Optional infra items to include { item_5: true/false, item_7: true, ... }
    * @returns {Promise<string>} - Path to generated PDF
    */
-  async generateBeritaAcaraVerifikasi({ desaId, kecamatanId, kegiatanId, proposalId = null, qrCode = null, checklistData = null, optionalItems = null }) {
+  async generateBeritaAcaraVerifikasi({ desaId, kecamatanId, kegiatanId, proposalId = null, qrCode = null, checklistData = null, optionalItems = null, tanggal = null }) {
     try {
       // Fetch data
       const [desaData, kecamatanConfig, timVerifikasi, proposalData] = await Promise.all([
@@ -66,7 +66,7 @@ class BeritaAcaraService {
       doc.pipe(stream);
 
       // Generate single page with all content, including QR code and auto-filled checklist
-      this.generatePage1(doc, desaData, kecamatanConfig, proposals, timVerifikasi, qrCode, checklistData, optionalItems);
+      this.generatePage1(doc, desaData, kecamatanConfig, proposals, timVerifikasi, qrCode, checklistData, optionalItems, tanggal);
 
       doc.end();
 
@@ -326,7 +326,7 @@ class BeritaAcaraService {
    * @param {Object} qrCode - QR code data { code, imagePath, verificationUrl }
    * @param {Object} checklistData - Aggregated checklist data { q1: true/false/null, ... }
    */
-  generatePage1(doc, desaData, kecamatanConfig, proposals, timVerifikasi, qrCode = null, checklistData = null, optionalItems = null) {
+  generatePage1(doc, desaData, kecamatanConfig, proposals, timVerifikasi, qrCode = null, checklistData = null, optionalItems = null, tanggal = null) {
     const pageWidth = doc.page.width;
     const marginLeft = doc.page.margins.left;
     const marginRight = doc.page.margins.right;
@@ -444,7 +444,7 @@ class BeritaAcaraService {
     });
     
     // Generate current date first for tahun anggaran
-    const today = new Date();
+    const today = tanggal ? new Date(tanggal) : new Date();
     const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
     const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
     const dayName = dayNames[today.getDay()];
@@ -1199,7 +1199,7 @@ class BeritaAcaraService {
    * @param {string} params.nomorSurat - Nomor surat
    * @returns {Promise<string>} - Path to generated PDF
    */
-  async generateSuratPengantar({ proposalId, kecamatanId, nomorSurat }) {
+  async generateSuratPengantar({ proposalId, kecamatanId, nomorSurat, tanggal = null }) {
     try {
       // Fetch data
       const [proposalData, kecamatanConfig] = await Promise.all([
@@ -1233,7 +1233,7 @@ class BeritaAcaraService {
       doc.pipe(stream);
 
       // Generate content
-      this.generateSuratPengantarContent(doc, proposalData, kecamatanConfig);
+      this.generateSuratPengantarContent(doc, proposalData, kecamatanConfig, tanggal);
 
       doc.end();
 
@@ -1274,7 +1274,7 @@ class BeritaAcaraService {
   /**
    * Generate Surat Pengantar content
    */
-  generateSuratPengantarContent(doc, proposalData, kecamatanConfig) {
+  generateSuratPengantarContent(doc, proposalData, kecamatanConfig, tanggal = null) {
     const pageWidth = doc.page.width;
     const marginLeft = doc.page.margins.left;
     const marginRight = doc.page.margins.right;
@@ -1373,7 +1373,7 @@ class BeritaAcaraService {
 
     // Date - right aligned
     let yPos = lineY + 25;
-    const today = new Date();
+    const today = tanggal ? new Date(tanggal) : new Date();
     const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
     const dateStr = `${kecamatanConfig.nama_kecamatan || '.....................'}, ${today.getDate()} ${monthNames[today.getMonth()]} ${today.getFullYear()}`;
     

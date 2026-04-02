@@ -49,6 +49,24 @@ function saveBase64Photo(base64Data, userId, type) {
   return `uploads/absensi/${filename}`;
 }
 
+/**
+ * Convert UTC Date to WIB (UTC+7) components
+ * VPS runs in UTC, but all absensi times must be in WIB
+ */
+function getWIB(date = new Date()) {
+  const wib = new Date(date.getTime() + 7 * 60 * 60 * 1000);
+  return {
+    hours: wib.getUTCHours(),
+    minutes: wib.getUTCMinutes(),
+    seconds: wib.getUTCSeconds(),
+    year: wib.getUTCFullYear(),
+    month: wib.getUTCMonth() + 1,
+    day: wib.getUTCDate(),
+    timeString: `${String(wib.getUTCHours()).padStart(2, '0')}:${String(wib.getUTCMinutes()).padStart(2, '0')}:${String(wib.getUTCSeconds()).padStart(2, '0')}`,
+    dateString: `${wib.getUTCFullYear()}-${String(wib.getUTCMonth() + 1).padStart(2, '0')}-${String(wib.getUTCDate()).padStart(2, '0')}`,
+  };
+}
+
 const absensiController = {
   /**
    * Clock in - Absen masuk
@@ -113,12 +131,10 @@ const absensiController = {
         });
       }
 
-      // Gunakan tanggal hari ini secara explisit (UTC) untuk konsistensi dengan MySQL DATE
+      // Gunakan WIB (UTC+7) untuk tanggal dan waktu
       const now = new Date();
-      const y = now.getUTCFullYear();
-      const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-      const d = String(now.getUTCDate()).padStart(2, '0');
-      const todayStr = `${y}-${m}-${d}`;
+      const wib = getWIB(now);
+      const todayStr = wib.dateString;
       const today = new Date(`${todayStr}T00:00:00.000Z`);
 
       // Check if already clocked in
@@ -145,8 +161,8 @@ const absensiController = {
       // Simpan foto
       const fotoPath = saveBase64Photo(foto, userId.toString(), 'masuk');
 
-      // jam_masuk: pakai time string dari waktu saat ini (HH:mm:ss)
-      const jamMasuk = new Date(`1970-01-01T${now.toTimeString().slice(0, 8)}`);
+      // jam_masuk: pakai WIB time string (bukan UTC)
+      const jamMasuk = new Date(`1970-01-01T${wib.timeString}`);
 
       const data = {
         jam_masuk: jamMasuk,
@@ -180,7 +196,7 @@ const absensiController = {
 
       const modeLabel = { hadir: 'Hadir', dinas_luar: 'Dinas Luar', wfh: 'WFH', wfa: 'WFA' };
 
-      // Calculate late info
+      // Calculate late info (semua dalam WIB)
       const settingsRows = await prisma.absensi_settings.findMany();
       const settingsMap = {};
       settingsRows.forEach(s => { settingsMap[s.key] = s.value; });
@@ -190,7 +206,7 @@ const absensiController = {
       const batasMasuk = new Date('1970-01-01T00:00:00');
       batasMasuk.setHours(jmH, jmM + toleransi, 0, 0);
       const masukTime = new Date('1970-01-01T00:00:00');
-      masukTime.setHours(now.getUTCHours(), now.getUTCMinutes(), 0, 0);
+      masukTime.setHours(wib.hours, wib.minutes, 0, 0);
       const telatMenit = Math.max(0, Math.floor((masukTime - batasMasuk) / 60000));
 
       let message = `Absen masuk ${modeLabel[absensiMode]} berhasil (jarak: ${Math.round(jarak)}m)`;
@@ -242,12 +258,10 @@ const absensiController = {
       // Hitung jarak
       const jarak = calculateDistance(parseFloat(latitude), parseFloat(longitude), KANTOR_LAT, KANTOR_LNG);
 
-      // Gunakan UTC date yang sama dengan clockIn untuk konsistensi
+      // Gunakan WIB date yang sama dengan clockIn untuk konsistensi
       const now = new Date();
-      const y = now.getUTCFullYear();
-      const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-      const d = String(now.getUTCDate()).padStart(2, '0');
-      const today = new Date(`${y}-${m}-${d}T00:00:00.000Z`);
+      const wib = getWIB(now);
+      const today = new Date(`${wib.dateString}T00:00:00.000Z`);
 
       const existing = await prisma.absensi_pegawai.findUnique({
         where: { user_id_tanggal: { user_id: userId, tanggal: today } }
@@ -271,7 +285,7 @@ const absensiController = {
 
       const fotoPath = saveBase64Photo(foto, userId.toString(), 'keluar');
 
-      const jamKeluar = new Date(`1970-01-01T${now.toTimeString().slice(0, 8)}`);
+      const jamKeluar = new Date(`1970-01-01T${wib.timeString}`);
 
       const result = await prisma.absensi_pegawai.update({
         where: { id: existing.id },
@@ -304,12 +318,10 @@ const absensiController = {
   async getToday(req, res) {
     try {
       const userId = BigInt(req.user.id);
-      // Gunakan UTC date untuk konsistensi dengan clockIn/clockOut
+      // Gunakan WIB date untuk konsistensi dengan clockIn/clockOut
       const now = new Date();
-      const y = now.getUTCFullYear();
-      const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-      const d = String(now.getUTCDate()).padStart(2, '0');
-      const today = new Date(`${y}-${m}-${d}T00:00:00.000Z`);
+      const wib = getWIB(now);
+      const today = new Date(`${wib.dateString}T00:00:00.000Z`);
 
       const absensi = await prisma.absensi_pegawai.findUnique({
         where: { user_id_tanggal: { user_id: userId, tanggal: today } }
@@ -492,11 +504,8 @@ const absensiController = {
         const endDate = new Date(Date.UTC(parseInt(tahun), parseInt(bulan), 0));
         where.tanggal = { gte: startDate, lte: endDate };
       } else {
-        const now = new Date();
-        const y = now.getUTCFullYear();
-        const m = String(now.getUTCMonth() + 1).padStart(2, '0');
-        const d = String(now.getUTCDate()).padStart(2, '0');
-        where.tanggal = new Date(`${y}-${m}-${d}T00:00:00.000Z`);
+        const wibNow = getWIB();
+        where.tanggal = new Date(`${wibNow.dateString}T00:00:00.000Z`);
       }
 
       const records = await prisma.absensi_pegawai.findMany({

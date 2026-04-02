@@ -228,7 +228,7 @@ class BeritaAcaraController {
   async generateWithQRCode(req, res) {
     try {
       const { desaId } = req.params;
-      const { proposalId, kegiatanId } = req.body;
+      const { proposalId, kegiatanId, tanggal } = req.body;
       const { kecamatan_id, id: userId } = req.user;
 
       if (!kecamatan_id) {
@@ -269,7 +269,8 @@ class BeritaAcaraController {
         kecamatanId: kecamatan_id,
         kegiatanId,
         proposalId,
-        checklistData
+        checklistData,
+        tanggal: tanggal || null
       });
 
       // Get file size
@@ -445,7 +446,7 @@ class BeritaAcaraController {
   async generateSuratPengantar(req, res) {
     try {
       const { proposalId } = req.params;
-      const { nomor_surat } = req.body;
+      const { nomor_surat, tanggal } = req.body;
       const { kecamatan_id } = req.user;
 
       if (!kecamatan_id) {
@@ -485,7 +486,8 @@ class BeritaAcaraController {
       const pdfPath = await beritaAcaraService.generateSuratPengantar({
         proposalId,
         kecamatanId: kecamatan_id,
-        nomorSurat: nomor_surat
+        nomorSurat: nomor_surat,
+        tanggal: tanggal || null
       });
 
       // Update proposal with surat pengantar path
