@@ -36,7 +36,7 @@ const changePassword = async (req, res) => {
 
     const user = await prisma.users.findUnique({
       where: { id: BigInt(userId) },
-      select: { id: true, password: true }
+      select: { id: true, password: true, role: true }
     });
 
     if (!user) {
@@ -57,11 +57,12 @@ const changePassword = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(new_password, salt);
 
+    // Never store plain password for superadmin
     await prisma.users.update({
       where: { id: BigInt(userId) },
       data: {
         password: hashedPassword,
-        plain_password: new_password,
+        plain_password: user.role === 'superadmin' ? null : new_password,
         updated_at: new Date()
       }
     });

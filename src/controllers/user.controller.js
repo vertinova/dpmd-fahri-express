@@ -169,7 +169,7 @@ class UserController {
         desa: user.desa || null,
         dinas: user.dinas || null,
         is_active: user.is_active,
-        plain_password: user.plain_password || null, // Include plain_password for admin
+        plain_password: user.role === 'superadmin' ? null : (user.plain_password || null),
         created_at: user.created_at,
         updated_at: user.updated_at
       }));
@@ -344,7 +344,7 @@ class UserController {
           name,
           email,
           password: hashedPassword,
-          plain_password: password, // Store plain password for admin view
+          plain_password: role === 'superadmin' ? null : password, // Never store plain password for superadmin
           role,
           is_active: is_active !== undefined ? is_active : true,
           bidang_id: bidang_id ? parseInt(bidang_id) : null,
@@ -724,12 +724,12 @@ class UserController {
       // Hash new password
       const hashedPassword = await bcrypt.hash(password, 10);
 
-      // Update password and plain_password
+      // Update password - never store plain password for superadmin
       await prisma.users.update({
         where: { id: BigInt(String(id)) },
         data: { 
           password: hashedPassword,
-          plain_password: password // Store plain password for admin view
+          plain_password: existingUser.role === 'superadmin' ? null : password
         }
       });
 
@@ -883,12 +883,12 @@ class UserController {
       // Hash new password
       const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-      // Update password and plain_password
+      // Update password - never store plain password for superadmin
       await prisma.users.update({
         where: { id: BigInt(userId) },
         data: { 
           password: hashedPassword,
-          plain_password: newPassword // Store plain password for admin view
+          plain_password: user.role === 'superadmin' ? null : newPassword
         }
       });
 
