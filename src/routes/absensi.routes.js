@@ -19,6 +19,9 @@ router.post('/register-device', auth, absensiController.registerDevice);
 router.get('/success-messages', auth, absensiController.getSuccessMessages);
 
 // Admin routes (superadmin + bidang Sekretariat)
+router.get('/admin/dashboard-hari-ini', auth, checkAbsensiAdmin, absensiController.getDashboardHariIni);
+router.get('/admin/rekap-pegawai', auth, checkAbsensiAdmin, absensiController.getRekapPegawai);
+router.get('/admin/history/:userId', auth, checkAbsensiAdmin, absensiController.getHistoryPerUser);
 router.get('/admin/rekap', auth, checkAbsensiAdmin, absensiController.getRekapAdmin);
 router.get('/admin/pegawai-absensi', auth, checkAbsensiAdmin, absensiController.getPegawaiAbsensi);
 router.get('/admin/settings', auth, checkAbsensiAdmin, absensiController.getSettings);

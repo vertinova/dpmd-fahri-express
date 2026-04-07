@@ -824,6 +824,259 @@ const absensiController = {
   },
 
   // ═══════════════════════════════════════════════════════════
+  // ─── Dashboard & Rekap Per Pegawai ────────────────────────
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Admin: Dashboard hari ini — siapa saja per status
+   * GET /api/absensi/admin/dashboard-hari-ini?periode=hari|minggu|bulan|tahun
+   * Default: hari ini
+   */
+  async getDashboardHariIni(req, res) {
+    try {
+      const { periode = 'hari', tanggal, bulan, tahun } = req.query;
+      const wibNow = getWIB();
+      let where = {};
+
+      if (periode === 'minggu') {
+        // Minggu ini (Senin - Minggu)
+        const refDate = tanggal ? new Date(tanggal) : new Date(`${wibNow.dateString}T00:00:00.000Z`);
+        const day = refDate.getUTCDay(); // 0=Sun, 1=Mon
+        const mondayOffset = day === 0 ? -6 : 1 - day;
+        const monday = new Date(refDate);
+        monday.setUTCDate(refDate.getUTCDate() + mondayOffset);
+        monday.setUTCHours(0, 0, 0, 0);
+        const sunday = new Date(monday);
+        sunday.setUTCDate(monday.getUTCDate() + 6);
+        where.tanggal = { gte: monday, lte: sunday };
+      } else if (periode === 'bulan') {
+        const m = bulan ? parseInt(bulan) : wibNow.month;
+        const y = tahun ? parseInt(tahun) : wibNow.year;
+        where.tanggal = { gte: new Date(Date.UTC(y, m - 1, 1)), lte: new Date(Date.UTC(y, m, 0)) };
+      } else if (periode === 'tahun') {
+        const y = tahun ? parseInt(tahun) : wibNow.year;
+        where.tanggal = { gte: new Date(Date.UTC(y, 0, 1)), lte: new Date(Date.UTC(y, 11, 31)) };
+      } else {
+        // Default: hari ini
+        const todayStr = tanggal || wibNow.dateString;
+        where.tanggal = new Date(`${todayStr}T00:00:00.000Z`);
+      }
+
+      const records = await prisma.absensi_pegawai.findMany({
+        where,
+        include: {
+          user: {
+            select: {
+              id: true, name: true, avatar: true,
+              pegawai: { select: { nama_pegawai: true, jabatan: true, status_kepegawaian: true } }
+            }
+          }
+        },
+        orderBy: [{ tanggal: 'desc' }, { jam_masuk: 'asc' }]
+      });
+
+      // Group by status
+      const grouped = {};
+      const allStatuses = ['hadir', 'izin', 'sakit', 'alpha', 'cuti', 'dinas_luar', 'wfh', 'wfa'];
+      allStatuses.forEach(s => { grouped[s] = []; });
+      records.forEach(r => {
+        if (grouped[r.status]) grouped[r.status].push(r);
+      });
+
+      // Summary counts
+      const summary = {};
+      allStatuses.forEach(s => { summary[s] = grouped[s].length; });
+      summary.total = records.length;
+
+      // If hari ini, also show belum absen (eligible users without record today)
+      let belumAbsen = [];
+      if (periode === 'hari') {
+        const allEligible = await prisma.users.findMany({
+          where: {
+            is_active: true,
+            pegawai: { status_kepegawaian: { in: ABSENSI_REQUIRED_STATUS } }
+          },
+          select: {
+            id: true, name: true, avatar: true,
+            pegawai: { select: { nama_pegawai: true, jabatan: true, status_kepegawaian: true } }
+          }
+        });
+        const recordedUserIds = new Set(records.map(r => r.user_id.toString()));
+        belumAbsen = allEligible.filter(u => !recordedUserIds.has(u.id.toString()));
+      }
+
+      return res.json({
+        success: true,
+        data: { grouped, summary, belum_absen: belumAbsen, total_records: records.length, periode }
+      });
+    } catch (error) {
+      console.error('[Absensi] Dashboard error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal memuat dashboard', error: error.message });
+    }
+  },
+
+  /**
+   * Admin: Rekap per pegawai — semua user dengan ringkasan presensi
+   * GET /api/absensi/admin/rekap-pegawai?periode=minggu|bulan|tahun&bulan=4&tahun=2026&tanggal=2026-04-07
+   */
+  async getRekapPegawai(req, res) {
+    try {
+      const { periode = 'bulan', bulan, tahun, tanggal } = req.query;
+      const wibNow = getWIB();
+      let where = {};
+      let periodeLabel = '';
+
+      if (periode === 'minggu') {
+        const refDate = tanggal ? new Date(tanggal) : new Date(`${wibNow.dateString}T00:00:00.000Z`);
+        const day = refDate.getUTCDay();
+        const mondayOffset = day === 0 ? -6 : 1 - day;
+        const monday = new Date(refDate);
+        monday.setUTCDate(refDate.getUTCDate() + mondayOffset);
+        monday.setUTCHours(0, 0, 0, 0);
+        const sunday = new Date(monday);
+        sunday.setUTCDate(monday.getUTCDate() + 6);
+        where.tanggal = { gte: monday, lte: sunday };
+        periodeLabel = `${monday.toISOString().split('T')[0]} s/d ${sunday.toISOString().split('T')[0]}`;
+      } else if (periode === 'tahun') {
+        const y = tahun ? parseInt(tahun) : wibNow.year;
+        where.tanggal = { gte: new Date(Date.UTC(y, 0, 1)), lte: new Date(Date.UTC(y, 11, 31)) };
+        periodeLabel = `Tahun ${y}`;
+      } else {
+        // Default: bulan
+        const m = bulan ? parseInt(bulan) : wibNow.month;
+        const y = tahun ? parseInt(tahun) : wibNow.year;
+        where.tanggal = { gte: new Date(Date.UTC(y, m - 1, 1)), lte: new Date(Date.UTC(y, m, 0)) };
+        const monthNames = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+        periodeLabel = `${monthNames[m - 1]} ${y}`;
+      }
+
+      // Get all eligible users
+      const allUsers = await prisma.users.findMany({
+        where: {
+          is_active: true,
+          pegawai: { status_kepegawaian: { in: ABSENSI_REQUIRED_STATUS } }
+        },
+        select: {
+          id: true, name: true, avatar: true,
+          pegawai: { select: { nama_pegawai: true, jabatan: true, status_kepegawaian: true, nip: true } }
+        },
+        orderBy: { name: 'asc' }
+      });
+
+      // Get all records for the period
+      const records = await prisma.absensi_pegawai.findMany({
+        where,
+        select: { user_id: true, status: true, tanggal: true, jam_masuk: true, jam_keluar: true }
+      });
+
+      // Group records by user
+      const userRecordMap = {};
+      records.forEach(r => {
+        const uid = r.user_id.toString();
+        if (!userRecordMap[uid]) userRecordMap[uid] = [];
+        userRecordMap[uid].push(r);
+      });
+
+      const allStatuses = ['hadir', 'izin', 'sakit', 'alpha', 'cuti', 'dinas_luar', 'wfh', 'wfa'];
+
+      // Build per-user summary
+      const pegawaiRekap = allUsers.map(u => {
+        const uid = u.id.toString();
+        const userRecords = userRecordMap[uid] || [];
+        const summary = {};
+        allStatuses.forEach(s => { summary[s] = 0; });
+        userRecords.forEach(r => { if (summary[r.status] !== undefined) summary[r.status]++; });
+        summary.total = userRecords.length;
+        return {
+          user: u,
+          summary,
+          total_records: userRecords.length,
+        };
+      });
+
+      // Global summary
+      const globalSummary = {};
+      allStatuses.forEach(s => { globalSummary[s] = records.filter(r => r.status === s).length; });
+      globalSummary.total = records.length;
+
+      return res.json({
+        success: true,
+        data: {
+          pegawai: pegawaiRekap,
+          global_summary: globalSummary,
+          periode,
+          periode_label: periodeLabel,
+          total_pegawai: allUsers.length,
+        }
+      });
+    } catch (error) {
+      console.error('[Absensi] Rekap pegawai error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal memuat rekap pegawai', error: error.message });
+    }
+  },
+
+  /**
+   * Admin: History detail per user
+   * GET /api/absensi/admin/history/:userId?periode=minggu|bulan&bulan=4&tahun=2026&tanggal=2026-04-07
+   */
+  async getHistoryPerUser(req, res) {
+    try {
+      const userId = BigInt(req.params.userId);
+      const { periode = 'bulan', bulan, tahun, tanggal } = req.query;
+      const wibNow = getWIB();
+      let where = { user_id: userId };
+
+      if (periode === 'minggu') {
+        const refDate = tanggal ? new Date(tanggal) : new Date(`${wibNow.dateString}T00:00:00.000Z`);
+        const day = refDate.getUTCDay();
+        const mondayOffset = day === 0 ? -6 : 1 - day;
+        const monday = new Date(refDate);
+        monday.setUTCDate(refDate.getUTCDate() + mondayOffset);
+        monday.setUTCHours(0, 0, 0, 0);
+        const sunday = new Date(monday);
+        sunday.setUTCDate(monday.getUTCDate() + 6);
+        where.tanggal = { gte: monday, lte: sunday };
+      } else {
+        // Default: bulan
+        const m = bulan ? parseInt(bulan) : wibNow.month;
+        const y = tahun ? parseInt(tahun) : wibNow.year;
+        where.tanggal = { gte: new Date(Date.UTC(y, m - 1, 1)), lte: new Date(Date.UTC(y, m, 0)) };
+      }
+
+      const user = await prisma.users.findUnique({
+        where: { id: userId },
+        select: {
+          id: true, name: true, avatar: true,
+          pegawai: { select: { nama_pegawai: true, jabatan: true, status_kepegawaian: true, nip: true } }
+        }
+      });
+
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
+      }
+
+      const records = await prisma.absensi_pegawai.findMany({
+        where,
+        orderBy: { tanggal: 'desc' }
+      });
+
+      const allStatuses = ['hadir', 'izin', 'sakit', 'alpha', 'cuti', 'dinas_luar', 'wfh', 'wfa'];
+      const summary = {};
+      allStatuses.forEach(s => { summary[s] = 0; });
+      records.forEach(r => { if (summary[r.status] !== undefined) summary[r.status]++; });
+      summary.total = records.length;
+
+      return res.json({
+        success: true,
+        data: { user, records, summary, periode }
+      });
+    } catch (error) {
+      console.error('[Absensi] History per user error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal memuat history', error: error.message });
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════
   // ─── Success Messages (Popup setelah absen berhasil) ──────
   // ═══════════════════════════════════════════════════════════
 
