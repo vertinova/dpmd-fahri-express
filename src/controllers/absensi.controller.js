@@ -119,6 +119,50 @@ function getWIB(date = new Date()) {
   };
 }
 
+/**
+ * Fetch absensi settings and return parsed values
+ */
+async function getAbsensiSettings() {
+  const rows = await prisma.absensi_settings.findMany();
+  const map = {};
+  rows.forEach(s => { map[s.key] = s.value; });
+  return {
+    jamMasuk: map.jam_masuk || '08:00',
+    jamPulang: map.jam_pulang || '16:00',
+    toleransi: parseInt(map.toleransi_terlambat || '15', 10),
+  };
+}
+
+/**
+ * Hitung telat masuk menit untuk sebuah record absensi
+ * @param {Date|string|null} jamMasukRecord - jam_masuk dari record (Time stored as Date)
+ * @param {string} jamMasukSetting - e.g. "08:00"
+ * @param {number} toleransi - menit toleransi
+ * @returns {number} menit telat (0 jika tidak telat)
+ */
+function hitungTelatMenit(jamMasukRecord, jamMasukSetting, toleransi) {
+  if (!jamMasukRecord) return 0;
+  const masuk = new Date(jamMasukRecord);
+  const [jmH, jmM] = jamMasukSetting.split(':').map(Number);
+  const batas = new Date('1970-01-01T00:00:00');
+  batas.setHours(jmH, jmM + toleransi, 0, 0);
+  const masukTime = new Date('1970-01-01T00:00:00');
+  masukTime.setHours(masuk.getUTCHours(), masuk.getUTCMinutes(), 0, 0);
+  return Math.max(0, Math.floor((masukTime - batas) / 60000));
+}
+
+/**
+ * Enrich records array with telat_masuk_menit field
+ * Only records with jam_masuk get telat calculation
+ */
+function enrichRecordsWithTelat(records, jamMasukSetting, toleransi) {
+  return records.map(r => {
+    const rec = typeof r.toJSON === 'function' ? r.toJSON() : { ...r };
+    rec.telat_masuk_menit = rec.jam_masuk ? hitungTelatMenit(rec.jam_masuk, jamMasukSetting, toleransi) : 0;
+    return rec;
+  });
+}
+
 const absensiController = {
   /**
    * Clock in - Absen masuk
@@ -565,7 +609,8 @@ const absensiController = {
         where.tanggal = new Date(`${wibNow.dateString}T00:00:00.000Z`);
       }
 
-      const records = await prisma.absensi_pegawai.findMany({
+      const settings = await getAbsensiSettings();
+      const rawRecords = await prisma.absensi_pegawai.findMany({
         where,
         include: {
           user: {
@@ -580,7 +625,9 @@ const absensiController = {
         orderBy: [{ tanggal: 'desc' }, { jam_masuk: 'asc' }]
       });
 
-      return res.json({ success: true, data: records });
+      const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk, settings.toleransi);
+
+      return res.json({ success: true, data: records, settings: { jam_masuk: settings.jamMasuk, toleransi_terlambat: settings.toleransi } });
     } catch (error) {
       console.error('[Absensi] Admin rekap error:', error);
       return res.status(500).json({ success: false, message: 'Gagal mengambil rekap absensi', error: error.message });
@@ -862,7 +909,8 @@ const absensiController = {
         where.tanggal = new Date(`${todayStr}T00:00:00.000Z`);
       }
 
-      const records = await prisma.absensi_pegawai.findMany({
+      const settings = await getAbsensiSettings();
+      const rawRecords = await prisma.absensi_pegawai.findMany({
         where,
         include: {
           user: {
@@ -874,6 +922,8 @@ const absensiController = {
         },
         orderBy: [{ tanggal: 'desc' }, { jam_masuk: 'asc' }]
       });
+
+      const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk, settings.toleransi);
 
       // Group by status
       const grouped = {};
@@ -887,6 +937,7 @@ const absensiController = {
       const summary = {};
       allStatuses.forEach(s => { summary[s] = grouped[s].length; });
       summary.total = records.length;
+      summary.telat = records.filter(r => r.telat_masuk_menit > 0).length;
 
       // If hari ini, also show belum absen (eligible users without record today)
       let belumAbsen = [];
@@ -907,7 +958,7 @@ const absensiController = {
 
       return res.json({
         success: true,
-        data: { grouped, summary, belum_absen: belumAbsen, total_records: records.length, periode }
+        data: { grouped, summary, belum_absen: belumAbsen, total_records: records.length, periode, settings: { jam_masuk: settings.jamMasuk, toleransi_terlambat: settings.toleransi } }
       });
     } catch (error) {
       console.error('[Absensi] Dashboard error:', error);
@@ -964,10 +1015,13 @@ const absensiController = {
       });
 
       // Get all records for the period
-      const records = await prisma.absensi_pegawai.findMany({
+      const settings = await getAbsensiSettings();
+      const rawRecords = await prisma.absensi_pegawai.findMany({
         where,
         select: { user_id: true, status: true, tanggal: true, jam_masuk: true, jam_keluar: true }
       });
+
+      const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk, settings.toleransi);
 
       // Group records by user
       const userRecordMap = {};
@@ -987,6 +1041,7 @@ const absensiController = {
         allStatuses.forEach(s => { summary[s] = 0; });
         userRecords.forEach(r => { if (summary[r.status] !== undefined) summary[r.status]++; });
         summary.total = userRecords.length;
+        summary.telat = userRecords.filter(r => r.telat_masuk_menit > 0).length;
         return {
           user: u,
           summary,
@@ -998,6 +1053,7 @@ const absensiController = {
       const globalSummary = {};
       allStatuses.forEach(s => { globalSummary[s] = records.filter(r => r.status === s).length; });
       globalSummary.total = records.length;
+      globalSummary.telat = records.filter(r => r.telat_masuk_menit > 0).length;
 
       return res.json({
         success: true,
@@ -1055,20 +1111,24 @@ const absensiController = {
         return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
       }
 
-      const records = await prisma.absensi_pegawai.findMany({
+      const settings = await getAbsensiSettings();
+      const rawRecords = await prisma.absensi_pegawai.findMany({
         where,
         orderBy: { tanggal: 'desc' }
       });
+
+      const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk, settings.toleransi);
 
       const allStatuses = ['hadir', 'izin', 'sakit', 'alpha', 'cuti', 'dinas_luar', 'wfh', 'wfa'];
       const summary = {};
       allStatuses.forEach(s => { summary[s] = 0; });
       records.forEach(r => { if (summary[r.status] !== undefined) summary[r.status]++; });
       summary.total = records.length;
+      summary.telat = records.filter(r => r.telat_masuk_menit > 0).length;
 
       return res.json({
         success: true,
-        data: { user, records, summary, periode }
+        data: { user, records, summary, periode, settings: { jam_masuk: settings.jamMasuk, toleransi_terlambat: settings.toleransi } }
       });
     } catch (error) {
       console.error('[Absensi] History per user error:', error);
