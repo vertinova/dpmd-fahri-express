@@ -36,6 +36,25 @@ model activity_logs {
   @@index([user_id], map: "idx_user_id")
 }
 
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model login_histories {
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id     BigInt    @db.UnsignedBigInt
+  ip_address  String?   @db.VarChar(45)
+  user_agent  String?   @db.VarChar(500)
+  device_id   String?   @db.VarChar(100)
+  device_type String?   @db.VarChar(50)
+  browser     String?   @db.VarChar(100)
+  os          String?   @db.VarChar(100)
+  status      String    @default("success") @db.VarChar(20)
+  created_at  DateTime? @default(now()) @db.Timestamp(0)
+  users       users     @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_login_histories_user_id")
+
+  @@index([user_id], map: "idx_login_histories_user_id")
+  @@index([created_at], map: "idx_login_histories_created_at")
+  @@index([ip_address], map: "idx_login_histories_ip_address")
+}
+
 model aparatur_desa {
   id                         String                      @id @db.Char(36)
   desa_id                    BigInt                      @db.UnsignedBigInt
@@ -1263,6 +1282,7 @@ model users {
   pegawai_id                                                     BigInt?                     @db.UnsignedBigInt
   plain_password                                                 String?                     @db.VarChar(255)
   device_id                                                      String?                     @db.VarChar(100)
+  last_active_at                                                 DateTime?                   @db.Timestamp(0)
   absensi_pegawai                                                absensi_pegawai[]
   activity_logs                                                  activity_logs[]
   app_settings                                                   app_settings[]
@@ -1286,6 +1306,7 @@ model users {
   perjadin_grup                                                  perjadin_grup[]
   perjadin_pegawai                                               perjadin_pegawai[]
   push_subscriptions                                             push_subscriptions[]
+  login_histories                                                login_histories[]
   surat_masuk                                                    surat_masuk[]
   pegawai                                                        pegawai?                    @relation(fields: [pegawai_id], references: [id_pegawai], onDelete: Cascade, onUpdate: NoAction, map: "users_pegawai_id_foreign")
 

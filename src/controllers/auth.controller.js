@@ -75,6 +75,9 @@ const login = async (req, res) => {
 
     logger.info(`✅ Login successful: ${user.email} (${user.role})`);
 
+    // Record success login history (fire-and-forget)
+    recordLoginHistory(req, user.id, 'success');
+
     // Auto-register device_id if provided
     const { device_id } = req.body;
     if (device_id) {
@@ -225,6 +228,66 @@ const login = async (req, res) => {
       success: false,
       message: 'Internal server error'
     });
+  }
+};
+
+/**
+ * Parse user-agent string into device info
+ */
+const parseUserAgent = (ua) => {
+  if (!ua) return { device_type: 'unknown', browser: 'unknown', os: 'unknown' };
+
+  // Detect device type
+  let device_type = 'desktop';
+  if (/mobile|android|iphone|ipod|blackberry|opera mini|iemobile/i.test(ua)) device_type = 'mobile';
+  else if (/tablet|ipad|playbook|silk/i.test(ua)) device_type = 'tablet';
+
+  // Detect browser
+  let browser = 'unknown';
+  if (/edg\//i.test(ua)) browser = 'Edge';
+  else if (/opr\//i.test(ua) || /opera/i.test(ua)) browser = 'Opera';
+  else if (/chrome|crios/i.test(ua)) browser = 'Chrome';
+  else if (/firefox|fxios/i.test(ua)) browser = 'Firefox';
+  else if (/safari/i.test(ua) && !/chrome/i.test(ua)) browser = 'Safari';
+
+  // Detect OS
+  let os = 'unknown';
+  if (/windows/i.test(ua)) os = 'Windows';
+  else if (/macintosh|mac os/i.test(ua)) os = 'macOS';
+  else if (/linux/i.test(ua) && !/android/i.test(ua)) os = 'Linux';
+  else if (/android/i.test(ua)) os = 'Android';
+  else if (/iphone|ipad|ipod/i.test(ua)) os = 'iOS';
+
+  return { device_type, browser, os };
+};
+
+/**
+ * Record login history (fire-and-forget, no await needed)
+ */
+const recordLoginHistory = (req, userId, status = 'success') => {
+  try {
+    const ip = req.headers['x-forwarded-for']?.split(',')[0].trim()
+      || req.headers['x-real-ip']
+      || req.connection?.remoteAddress
+      || req.socket?.remoteAddress
+      || null;
+    const ua = req.headers['user-agent'] || null;
+    const { device_type, browser, os } = parseUserAgent(ua);
+
+    prisma.login_histories.create({
+      data: {
+        user_id: BigInt(userId),
+        ip_address: ip,
+        user_agent: ua ? ua.substring(0, 500) : null,
+        device_id: req.body.device_id || null,
+        device_type,
+        browser,
+        os,
+        status
+      }
+    }).catch(err => logger.error('Failed to record login history:', err));
+  } catch (err) {
+    logger.error('recordLoginHistory error:', err);
   }
 };
 

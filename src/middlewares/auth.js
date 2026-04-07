@@ -1,8 +1,24 @@
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
+const prisma = require('../config/prisma');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
+
+// Throttle last_active_at updates: max once per 60s per user
+const lastActiveCache = new Map();
+const ACTIVE_THROTTLE_MS = 60 * 1000;
+
+const updateLastActive = (userId) => {
+  const now = Date.now();
+  const last = lastActiveCache.get(userId);
+  if (last && now - last < ACTIVE_THROTTLE_MS) return;
+  lastActiveCache.set(userId, now);
+  prisma.users.update({
+    where: { id: BigInt(userId) },
+    data: { last_active_at: new Date() }
+  }).catch(() => {}); // fire-and-forget
+};
 
 // Express JWT Auth Middleware (Independent from Laravel)
 const auth = async (req, res, next) => {
@@ -55,6 +71,9 @@ const auth = async (req, res, next) => {
     
     logger.info(`✅ Auth successful: User ${req.user.id} (${req.user.role}) - Bidang: ${req.user.bidang_id} - Kecamatan: ${req.user.kecamatan_id}`);
     
+    // Update last_active_at (throttled, fire-and-forget)
+    updateLastActive(req.user.id);
+
     next();
   } catch (error) {
     if (error.name === 'JsonWebTokenError') {
