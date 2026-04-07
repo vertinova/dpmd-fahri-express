@@ -299,6 +299,9 @@ app.use('/api/bhprd-t1', bhprdT1Routes); // BHPRD Tahap 1
 app.use('/api/bhprd-t2', bhprdT2Routes); // BHPRD Tahap 2
 app.use('/api/bhprd-t3', bhprdT3Routes); // BHPRD Tahap 3
 
+// Chatbot smart search routes
+app.use('/api/chatbot', require('./routes/chatbot.routes'));
+
 // External API Proxy routes (DPMD Bogorkab)
 app.use('/api/external', externalApiRoutes);
 

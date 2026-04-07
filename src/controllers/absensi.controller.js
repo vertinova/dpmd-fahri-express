@@ -262,7 +262,12 @@ const absensiController = {
       const telatMenit = Math.max(0, Math.floor((masukTime - batasMasuk) / 60000));
 
       let message = `Absen masuk ${modeLabel[absensiMode]} berhasil (jarak: ${Math.round(jarak)}m)`;
-      if (telatMenit > 0) message += ` — Telat ${telatMenit} menit`;
+      if (telatMenit > 0) {
+        const jam = Math.floor(telatMenit / 60);
+        const menit = telatMenit % 60;
+        const telatStr = jam > 0 ? `${jam} jam ${menit} menit` : `${menit} menit`;
+        message += ` — Telat ${telatStr} (batas masuk: ${jamMasukSetting} + ${toleransi} menit toleransi)`;
+      }
 
       return res.status(201).json({
         success: true,
@@ -479,7 +484,7 @@ const absensiController = {
         return res.status(400).json({ success: false, message: 'Tanggal dan status wajib diisi' });
       }
 
-      if (!['izin', 'sakit', 'cuti'].includes(status)) {
+      if (!['izin', 'sakit', 'cuti', 'wfh', 'wfa'].includes(status)) {
         return res.status(400).json({ success: false, message: 'Status tidak valid' });
       }
 
@@ -495,18 +500,18 @@ const absensiController = {
       });
 
       if (existing) {
-        // Jika sudah clock-in (hadir/dinas_luar/wfh/wfa), tolak izin
+        // Jika sudah clock-in (hadir/dinas_luar/wfh/wfa), tolak
         if (existing.jam_masuk) {
           return res.status(400).json({
             success: false,
-            message: 'Anda sudah melakukan absen masuk hari ini. Tidak bisa submit izin/sakit/cuti.'
+            message: 'Anda sudah melakukan absen masuk hari ini. Tidak bisa mengubah status.'
           });
         }
-        // Jika sudah submit izin/sakit/cuti sebelumnya, tolak
-        if (['izin', 'sakit', 'cuti'].includes(existing.status)) {
+        // Jika sudah submit sebelumnya, tolak
+        if (['izin', 'sakit', 'cuti', 'wfh', 'wfa'].includes(existing.status)) {
           return res.status(400).json({
             success: false,
-            message: 'Anda sudah submit izin/sakit/cuti hari ini. Hanya bisa 1x absensi per hari.'
+            message: `Anda sudah submit ${existing.status.toUpperCase()} hari ini. Hanya bisa 1x absensi per hari.`
           });
         }
         const updated = await prisma.absensi_pegawai.update({
