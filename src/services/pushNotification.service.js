@@ -426,6 +426,99 @@ class PushNotificationService {
 			return { success: false, error: error.message };
 		}
 	}
+	/**
+	 * Send birthday notification to all DPMD staff
+	 * Checks pegawai with today's birthday (matching day & month)
+	 */
+	async sendBirthdayNotifications() {
+		try {
+			const today = new Date();
+			const month = today.getMonth() + 1;
+			const day = today.getDate();
+
+			// Find pegawai with birthday today (match day and month)
+			const birthdayPegawai = await prisma.$queryRaw`
+				SELECT p.id_pegawai, p.nama_pegawai, p.jabatan, p.tanggal_lahir,
+					   b.nama as bidang_nama,
+					   u.id as user_id, u.name as user_name, u.avatar
+				FROM pegawai p
+				LEFT JOIN bidangs b ON p.id_bidang = b.id
+				LEFT JOIN users u ON u.pegawai_id = p.id_pegawai
+				WHERE MONTH(p.tanggal_lahir) = ${month}
+				  AND DAY(p.tanggal_lahir) = ${day}
+			`;
+
+			if (!birthdayPegawai || birthdayPegawai.length === 0) {
+				console.log('🎂 No birthdays today');
+				return { success: true, birthdayCount: 0 };
+			}
+
+			const names = birthdayPegawai.map(p => p.nama_pegawai);
+			const nameList = names.length <= 2 
+				? names.join(' dan ') 
+				: `${names.slice(0, 2).join(', ')} dan ${names.length - 2} lainnya`;
+
+			const sweetMessages = [
+				'Semoga sehat selalu dan sukses dalam berkarya! 🌟',
+				'Semoga selalu diberkahi dan bahagia! ✨',
+				'Semoga panjang umur dan sehat selalu! 🙏',
+				'Semoga tahun ini membawa kebahagiaan! 🎉',
+			];
+			const randomMsg = sweetMessages[Math.floor(Math.random() * sweetMessages.length)];
+
+			const notification = {
+				title: '🎂 Selamat Ulang Tahun!',
+				body: `Hari ini ${nameList} berulang tahun. ${randomMsg}`,
+				icon: '/logo-192.png',
+				badge: '/logo-96.png',
+				path: 'dashboard',
+				data: {
+					type: 'birthday',
+					birthdayPeople: birthdayPegawai.map(p => ({
+						id: Number(p.id_pegawai),
+						nama: p.nama_pegawai,
+						jabatan: p.jabatan,
+						bidang: p.bidang_nama,
+						avatar: p.avatar,
+						tanggal_lahir: p.tanggal_lahir,
+					}))
+				},
+				actions: [
+					{ action: 'view', title: 'Lihat' },
+					{ action: 'close', title: 'Tutup' }
+				]
+			};
+
+			// Also create in-app notifications for all DPMD staff
+			const dpmRoles = ['superadmin', 'kepala_dinas', 'sekretaris_dinas', 'kepala_bidang', 'ketua_tim', 'pegawai'];
+			const staffUsers = await prisma.users.findMany({
+				where: { role: { in: dpmRoles }, is_active: true },
+				select: { id: true }
+			});
+
+			// Batch create in-app notifications
+			if (staffUsers.length > 0) {
+				await prisma.notifications.createMany({
+					data: staffUsers.map(u => ({
+						user_id: u.id,
+						title: notification.title,
+						message: notification.body,
+						type: 'birthday',
+						data: notification.data,
+					}))
+				});
+			}
+
+			// Send push notification
+			const result = await this.sendToRoles(dpmRoles, notification);
+
+			console.log(`🎂 Birthday notifications sent for: ${names.join(', ')}`);
+			return { ...result, birthdayCount: birthdayPegawai.length, names };
+		} catch (error) {
+			console.error('Error sending birthday notifications:', error);
+			return { success: false, error: error.message };
+		}
+	}
 }
 
 module.exports = new PushNotificationService();

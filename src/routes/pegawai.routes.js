@@ -7,6 +7,42 @@ const router = express.Router();
 const prisma = require('../config/prisma');
 const { auth } = require('../middlewares/auth');
 
+// Get pegawai with birthday today
+router.get('/birthdays/today', auth, async (req, res) => {
+  try {
+    const today = new Date();
+    const month = today.getMonth() + 1;
+    const day = today.getDate();
+
+    const birthdayPegawai = await prisma.$queryRaw`
+      SELECT p.id_pegawai, p.nama_pegawai, p.jabatan, p.tanggal_lahir,
+             b.nama as bidang_nama,
+             u.id as user_id, u.name as user_name, u.avatar
+      FROM pegawai p
+      LEFT JOIN bidangs b ON p.id_bidang = b.id
+      LEFT JOIN users u ON u.pegawai_id = p.id_pegawai
+      WHERE MONTH(p.tanggal_lahir) = ${month}
+        AND DAY(p.tanggal_lahir) = ${day}
+    `;
+
+    // Serialize BigInt values
+    const data = (birthdayPegawai || []).map(p => ({
+      id: Number(p.id_pegawai),
+      nama: p.nama_pegawai,
+      jabatan: p.jabatan || '-',
+      bidang: p.bidang_nama || '-',
+      avatar: p.avatar || null,
+      tanggal_lahir: p.tanggal_lahir,
+      user_id: p.user_id ? Number(p.user_id) : null,
+    }));
+
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Error fetching birthdays:', error);
+    res.status(500).json({ success: false, message: 'Failed to fetch birthdays' });
+  }
+});
+
 // Get all pegawai
 router.get('/', auth, async (req, res) => {
   try {

@@ -573,6 +573,21 @@ router.post('/notifications/mark-read', auth, async (req, res) => {
   }
 });
 
+/**
+ * POST /api/push-notification/trigger-birthday
+ * Manual trigger for birthday notification (superadmin only)
+ */
+router.post('/trigger-birthday', auth, checkRole('superadmin'), async (req, res) => {
+  try {
+    const schedulerService = require('../services/scheduler.service');
+    const result = await schedulerService.triggerBirthdayCheck();
+    res.json({ success: true, data: result });
+  } catch (error) {
+    console.error('Error triggering birthday:', error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+
 // Helper function to format time ago
 function formatTimeAgo(date) {
   const now = new Date();

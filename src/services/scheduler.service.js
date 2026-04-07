@@ -45,9 +45,24 @@ class SchedulerService {
       timezone: "Asia/Jakarta"
     });
 
+    // Birthday notification at 7:15 AM every day
+    this.jobs.birthdayReminder = cron.schedule('15 7 * * *', async () => {
+      console.log('🎂 Running birthday check job at 7:15 AM');
+      try {
+        const result = await pushNotificationService.sendBirthdayNotifications();
+        console.log(`🎂 Birthday check done: ${result.birthdayCount || 0} birthdays`);
+      } catch (error) {
+        console.error('❌ Error sending birthday notifications:', error);
+      }
+    }, {
+      scheduled: true,
+      timezone: "Asia/Jakarta"
+    });
+
     console.log('✅ Scheduler service initialized');
     console.log('📅 Morning reminder: Every day at 7:00 AM (WIB)');
     console.log('🌙 Evening reminder: Every day at 9:00 PM (WIB)');
+    console.log('🎂 Birthday check: Every day at 7:15 AM (WIB)');
   }
 
   /**
@@ -87,6 +102,14 @@ class SchedulerService {
   async triggerEveningReminder() {
     console.log('🔧 Manual trigger: Evening reminder');
     return await pushNotificationService.sendTomorrowScheduleReminder();
+  }
+
+  /**
+   * Manual trigger for birthday notifications
+   */
+  async triggerBirthdayCheck() {
+    console.log('🔧 Manual trigger: Birthday check');
+    return await pushNotificationService.sendBirthdayNotifications();
   }
 }
 

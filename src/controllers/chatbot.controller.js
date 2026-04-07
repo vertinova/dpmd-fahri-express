@@ -12,34 +12,32 @@ const prisma = require('../config/prisma');
 
 /**
  * Build Prisma OR conditions for fuzzy matching.
- * Splits the query into individual words and creates LIKE conditions
- * for each word across all specified fields.
+ * Splits the query into individual words and creates LIKE conditions.
  * 
- * "bumdes bina" → each field must contain ALL words
- * This handles partial/fuzzy matches naturally with MySQL LIKE
+ * Strategy:
+ * - Single word → OR across all fields (simple contains)
+ * - Multi-word → AND logic: each word must appear in at least one field
+ *   This prevents "bumdes bina" from matching records that only contain "bina"
  */
 function buildFuzzyWhere(fields, searchTerm) {
   const words = searchTerm.toLowerCase().split(/\s+/).filter(w => w.length >= 2);
   
   if (words.length === 0) return undefined;
   
-  // Strategy: OR across fields, each field must match at least one word
-  // This way "bumdes bina" will find anything where ANY field contains "bina"
-  const conditions = [];
-  
-  // 1. Exact full-phrase match on each field (highest priority - handled in scoring)
-  for (const field of fields) {
-    conditions.push({ [field]: { contains: searchTerm } });
+  if (words.length === 1) {
+    // Single word: OR across all fields
+    return {
+      OR: fields.map(field => ({ [field]: { contains: words[0] } }))
+    };
   }
   
-  // 2. Individual word matches - each word on each field
-  for (const word of words) {
-    for (const field of fields) {
-      conditions.push({ [field]: { contains: word } });
-    }
-  }
-  
-  return { OR: conditions };
+  // Multi-word: AND logic — each word must match at least one field
+  // "bumdes bina" → record must contain "bumdes" in some field AND "bina" in some field
+  return {
+    AND: words.map(word => ({
+      OR: fields.map(field => ({ [field]: { contains: word } }))
+    }))
+  };
 }
 
 /**
@@ -751,8 +749,35 @@ class ChatbotController {
       // Sort by score descending
       results.sort((a, b) => b._score - a._score);
 
+      // --- Relevance Filtering ---
+      // 1. Remove results with very low scores (noise)
+      const minScore = 10;
+      let filtered = results.filter(r => r._score >= minScore);
+
+      // 2. Smart category suppression: if top results have high scores in specific
+      //    categories, suppress low-scoring results from other categories
+      if (filtered.length > 0) {
+        const topScore = filtered[0]._score;
+        const threshold = topScore * 0.25; // results must be at least 25% of top score
+        
+        // Find which categories have strong matches (score >= 50% of top)
+        const strongCategories = new Set();
+        for (const r of filtered) {
+          if (r._score >= topScore * 0.5) {
+            strongCategories.add(r.type);
+          }
+        }
+        
+        // If there are strong categories, filter out weak results from other categories
+        if (strongCategories.size > 0 && strongCategories.size < 5) {
+          filtered = filtered.filter(r => 
+            strongCategories.has(r.type) || r._score >= threshold
+          );
+        }
+      }
+
       // Remove internal score from output
-      const cleanResults = results.slice(0, 50).map(({ _score, ...rest }) => rest);
+      const cleanResults = filtered.slice(0, 50).map(({ _score, ...rest }) => rest);
 
       // Build smart summary
       const typeCounts = {};
@@ -766,7 +791,7 @@ class ChatbotController {
         success: true,
         data: {
           results: cleanResults,
-          totalResults: results.length,
+          totalResults: filtered.length,
           query: searchTerm,
           summary,
         }
