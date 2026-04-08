@@ -34,12 +34,12 @@ const upload = multer({
 /**
  * @route   POST /api/dd/upload
  * @desc    Upload and replace dd2025.json file
- * @access  Private - superadmin, sarana_prasarana only
+ * @access  Private - superadmin, sarana_prasarana, kekayaan_keuangan
  */
 router.post(
   '/upload',
   auth,
-  checkRole('superadmin', 'sarana_prasarana'),
+  checkRole('superadmin', 'sarana_prasarana', 'kekayaan_keuangan'),
   upload.single('file'),
   ddController.uploadDdData
 );
@@ -69,12 +69,12 @@ router.get(
 /**
  * @route   GET /api/dd/backups
  * @desc    Get list of backup files
- * @access  Private - superadmin, sarana_prasarana only
+ * @access  Private - superadmin, sarana_prasarana, kekayaan_keuangan
  */
 router.get(
   '/backups',
   auth,
-  checkRole('superadmin', 'sarana_prasarana'),
+  checkRole('superadmin', 'sarana_prasarana', 'kekayaan_keuangan'),
   ddController.getBackupList
 );
 

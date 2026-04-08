@@ -33,6 +33,6 @@ const upload = multer({
 router.post('/upload', auth, checkRole('superadmin', 'sarana_prasarana', 'kekayaan_keuangan', 'kepala_bidang'), upload.single('file'), ddNonEarmarkedT1Controller.uploadDdNonEarmarkedT1Data);
 router.get('/data', auth, ddNonEarmarkedT1Controller.getDdNonEarmarkedT1Data);
 router.get('/info', auth, ddNonEarmarkedT1Controller.getDdNonEarmarkedT1Info);
-router.get('/backups', auth, checkRole('superadmin', 'sarana_prasarana'), ddNonEarmarkedT1Controller.getDdNonEarmarkedT1BackupList);
+router.get('/backups', auth, checkRole('superadmin', 'sarana_prasarana', 'kekayaan_keuangan'), ddNonEarmarkedT1Controller.getDdNonEarmarkedT1BackupList);
 
 module.exports = router;

@@ -54,7 +54,7 @@ router.get(
 router.get(
   '/backups',
   auth,
-  checkRole('superadmin', 'sarana_prasarana', 'kepala_bidang'),
+  checkRole('superadmin', 'sarana_prasarana', 'kekayaan_keuangan'),
   ddEarmarkedT1Controller.getDdEarmarkedT1BackupList
 );
 

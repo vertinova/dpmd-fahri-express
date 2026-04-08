@@ -101,6 +101,16 @@ const auth = async (req, res, next) => {
 };
 
 // Role-based middleware
+// Supports both direct role checks AND bidang-based pseudo-roles.
+// Some routes specify bidang names as roles (e.g., 'kekayaan_keuangan', 'sarana_prasarana').
+// These don't match any actual user.role — they map to bidang_id instead.
+const BIDANG_ROLE_MAP = {
+  'sarana_prasarana': 3,    // Bidang Sarana Prasarana Kewilayahan dan Ekonomi Desa
+  'kekayaan_keuangan': 4,   // Bidang Kekayaan dan Keuangan Desa
+  'pemberdayaan_masyarakat': 5, // Bidang Pemberdayaan Masyarakat Desa
+  'pemerintahan_desa': 6,   // Bidang Pemerintahan Desa
+};
+
 const checkRole = (...roles) => {
   return (req, res, next) => {
     if (!req.user) {
@@ -125,22 +135,34 @@ const checkRole = (...roles) => {
     const flatRoles = roles.flat();
     const allowedRoles = flatRoles.map(r => String(r).trim().toLowerCase());
 
-    logger.info(`🔐 Role check - User: ${req.user.email} | User role: "${userRole}" | Allowed roles: [${allowedRoles.join(', ')}]`);
+    logger.info(`🔐 Role check - User: ${req.user.email} | User role: "${userRole}" | bidang_id: ${req.user.bidang_id} | Allowed roles: [${allowedRoles.join(', ')}]`);
 
-    if (!allowedRoles.includes(userRole)) {
-      logger.warn(`❌ Access forbidden - User ${req.user.email} with role "${userRole}" not in [${allowedRoles.join(', ')}]`);
-      return res.status(403).json({
-        success: false,
-        message: `Access forbidden - Role "${req.user.role}" not authorized`,
-        debug: {
-          userRole: req.user.role,
-          allowedRoles: roles
-        }
-      });
+    // 1. Direct role match
+    if (allowedRoles.includes(userRole)) {
+      logger.info(`✅ Role check passed (direct) - User ${req.user.email} (${userRole}) authorized`);
+      return next();
     }
 
-    logger.info(`✅ Role check passed - User ${req.user.email} (${userRole}) authorized`);
-    next();
+    // 2. Bidang-based match: check if user's bidang_id matches any bidang pseudo-role
+    if (req.user.bidang_id) {
+      const userBidangId = parseInt(req.user.bidang_id);
+      for (const role of allowedRoles) {
+        if (BIDANG_ROLE_MAP[role] && BIDANG_ROLE_MAP[role] === userBidangId) {
+          logger.info(`✅ Role check passed (bidang) - User ${req.user.email} (role: ${userRole}, bidang_id: ${userBidangId}) authorized via bidang "${role}"`);
+          return next();
+        }
+      }
+    }
+
+    logger.warn(`❌ Access forbidden - User ${req.user.email} with role "${userRole}" (bidang_id: ${req.user.bidang_id}) not authorized`);
+    return res.status(403).json({
+      success: false,
+      message: `Access forbidden - Role "${req.user.role}" not authorized`,
+      debug: {
+        userRole: req.user.role,
+        allowedRoles: roles
+      }
+    });
   };
 };
 

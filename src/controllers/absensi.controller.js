@@ -130,35 +130,39 @@ async function getAbsensiSettings() {
     jamMasuk: map.jam_masuk || '08:00',
     jamPulang: map.jam_pulang || '16:00',
     toleransi: parseInt(map.toleransi_terlambat || '15', 10),
+    jamBukaAbsen: map.jam_buka_absen || '06:00',
+    jamTutupAbsen: map.jam_tutup_absen || '17:00',
   };
 }
 
 /**
  * Hitung telat masuk menit untuk sebuah record absensi
- * @param {Date|string|null} jamMasukRecord - jam_masuk dari record (Time stored as Date)
+ * jam_masuk disimpan sebagai Date('1970-01-01T{WIB}+07:00'), jadi UTC = WIB - 7.
+ * Untuk extract WIB kembali, gunakan getWIB() yang menambah 7 jam ke UTC.
+ * Telat dihitung dari jam_masuk setting (tanpa toleransi).
+ * @param {Date|string|null} jamMasukRecord - jam_masuk dari record
  * @param {string} jamMasukSetting - e.g. "08:00"
- * @param {number} toleransi - menit toleransi
  * @returns {number} menit telat (0 jika tidak telat)
  */
-function hitungTelatMenit(jamMasukRecord, jamMasukSetting, toleransi) {
+function hitungTelatMenit(jamMasukRecord, jamMasukSetting) {
   if (!jamMasukRecord) return 0;
   const masuk = new Date(jamMasukRecord);
+  // Extract WIB time from stored +07:00 date
+  const wibMasuk = getWIB(masuk);
+  const masukMinutes = wibMasuk.hours * 60 + wibMasuk.minutes;
   const [jmH, jmM] = jamMasukSetting.split(':').map(Number);
-  const batas = new Date('1970-01-01T00:00:00');
-  batas.setHours(jmH, jmM + toleransi, 0, 0);
-  const masukTime = new Date('1970-01-01T00:00:00');
-  masukTime.setHours(masuk.getUTCHours(), masuk.getUTCMinutes(), 0, 0);
-  return Math.max(0, Math.floor((masukTime - batas) / 60000));
+  const batasMinutes = jmH * 60 + jmM;
+  return Math.max(0, masukMinutes - batasMinutes);
 }
 
 /**
  * Enrich records array with telat_masuk_menit field
  * Only records with jam_masuk get telat calculation
  */
-function enrichRecordsWithTelat(records, jamMasukSetting, toleransi) {
+function enrichRecordsWithTelat(records, jamMasukSetting) {
   return records.map(r => {
     const rec = typeof r.toJSON === 'function' ? r.toJSON() : { ...r };
-    rec.telat_masuk_menit = rec.jam_masuk ? hitungTelatMenit(rec.jam_masuk, jamMasukSetting, toleransi) : 0;
+    rec.telat_masuk_menit = rec.jam_masuk ? hitungTelatMenit(rec.jam_masuk, jamMasukSetting) : 0;
     return rec;
   });
 }
@@ -233,6 +237,28 @@ const absensiController = {
       const todayStr = wib.dateString;
       const today = new Date(`${todayStr}T00:00:00.000Z`);
 
+      // Cek jam buka/tutup absensi dari settings sekretariat
+      const absensiSettings = await getAbsensiSettings();
+      const currentMinutes = wib.hours * 60 + wib.minutes;
+      const [bukaH, bukaM] = absensiSettings.jamBukaAbsen.split(':').map(Number);
+      const [tutupH, tutupM] = absensiSettings.jamTutupAbsen.split(':').map(Number);
+      const bukaMinutes = bukaH * 60 + bukaM;
+      const tutupMinutes = tutupH * 60 + tutupM;
+
+      if (currentMinutes < bukaMinutes) {
+        return res.status(400).json({
+          success: false,
+          message: `Absensi belum dibuka. Jam buka absensi: ${absensiSettings.jamBukaAbsen} WIB`
+        });
+      }
+
+      if (currentMinutes > tutupMinutes) {
+        return res.status(400).json({
+          success: false,
+          message: `Absensi sudah ditutup. Jam tutup absensi: ${absensiSettings.jamTutupAbsen} WIB`
+        });
+      }
+
       // Check if already clocked in
       const existing = await prisma.absensi_pegawai.findUnique({
         where: { user_id_tanggal: { user_id: userId, tanggal: today } }
@@ -292,25 +318,19 @@ const absensiController = {
 
       const modeLabel = { hadir: 'Hadir', dinas_luar: 'Dinas Luar', wfh: 'WFH', wfa: 'WFA' };
 
-      // Calculate late info (semua dalam WIB)
-      const settingsRows = await prisma.absensi_settings.findMany();
-      const settingsMap = {};
-      settingsRows.forEach(s => { settingsMap[s.key] = s.value; });
-      const jamMasukSetting = settingsMap.jam_masuk || '08:00';
-      const toleransi = parseInt(settingsMap.toleransi_terlambat || '15', 10);
+      // Calculate late info (semua dalam WIB) — telat dihitung dari jam_masuk tanpa toleransi
+      const jamMasukSetting = absensiSettings.jamMasuk;
       const [jmH, jmM] = jamMasukSetting.split(':').map(Number);
-      const batasMasuk = new Date('1970-01-01T00:00:00');
-      batasMasuk.setHours(jmH, jmM + toleransi, 0, 0);
-      const masukTime = new Date('1970-01-01T00:00:00');
-      masukTime.setHours(wib.hours, wib.minutes, 0, 0);
-      const telatMenit = Math.max(0, Math.floor((masukTime - batasMasuk) / 60000));
+      const batasMinutes = jmH * 60 + jmM;
+      const masukMinutes = wib.hours * 60 + wib.minutes;
+      const telatMenit = Math.max(0, masukMinutes - batasMinutes);
 
       let message = `Absen masuk ${modeLabel[absensiMode]} berhasil (jarak: ${Math.round(jarak)}m)`;
       if (telatMenit > 0) {
         const jam = Math.floor(telatMenit / 60);
         const menit = telatMenit % 60;
         const telatStr = jam > 0 ? `${jam} jam ${menit} menit` : `${menit} menit`;
-        message += ` — Telat ${telatStr} (batas masuk: ${jamMasukSetting} + ${toleransi} menit toleransi)`;
+        message += ` — Telat ${telatStr} (batas masuk: ${jamMasukSetting} WIB)`;
       }
 
       return res.status(201).json({
@@ -435,37 +455,37 @@ const absensiController = {
       const jamMasukSetting = settings.jam_masuk || '08:00';
       const jamPulangSetting = settings.jam_pulang || '16:00';
       const toleransi = parseInt(settings.toleransi_terlambat || '15', 10);
+      const jamBukaAbsen = settings.jam_buka_absen || '06:00';
+      const jamTutupAbsen = settings.jam_tutup_absen || '17:00';
 
       let telat_masuk_menit = 0;
       let telat_pulang_menit = 0;
       let pulang_lebih_awal_menit = 0;
 
       if (absensi?.jam_masuk) {
-        const masuk = new Date(absensi.jam_masuk);
-        const [jmH, jmM] = jamMasukSetting.split(':').map(Number);
-        const batasMasuk = new Date('1970-01-01T00:00:00');
-        batasMasuk.setHours(jmH, jmM + toleransi, 0, 0);
-        const masukTime = new Date('1970-01-01T00:00:00');
-        masukTime.setHours(masuk.getUTCHours(), masuk.getUTCMinutes(), 0, 0);
-        const diffMasuk = Math.floor((masukTime - batasMasuk) / 60000);
-        if (diffMasuk > 0) telat_masuk_menit = diffMasuk;
+        telat_masuk_menit = hitungTelatMenit(absensi.jam_masuk, jamMasukSetting);
       }
 
       if (absensi?.jam_keluar) {
         const keluar = new Date(absensi.jam_keluar);
+        const wibKeluar = getWIB(keluar);
+        const keluarMinutes = wibKeluar.hours * 60 + wibKeluar.minutes;
         const [jpH, jpM] = jamPulangSetting.split(':').map(Number);
-        const batasPulang = new Date('1970-01-01T00:00:00');
-        batasPulang.setHours(jpH, jpM, 0, 0);
-        const keluarTime = new Date('1970-01-01T00:00:00');
-        keluarTime.setHours(keluar.getUTCHours(), keluar.getUTCMinutes(), 0, 0);
-        const diffPulang = Math.floor((batasPulang - keluarTime) / 60000);
+        const pulangMinutes = jpH * 60 + jpM;
+        const diffPulang = pulangMinutes - keluarMinutes;
         if (diffPulang > 0) pulang_lebih_awal_menit = diffPulang;
       }
 
       return res.json({
         success: true,
         data: absensi || null,
-        settings: { jam_masuk: jamMasukSetting, jam_pulang: jamPulangSetting, toleransi_terlambat: toleransi },
+        settings: {
+          jam_masuk: jamMasukSetting,
+          jam_pulang: jamPulangSetting,
+          toleransi_terlambat: toleransi,
+          jam_buka_absen: jamBukaAbsen,
+          jam_tutup_absen: jamTutupAbsen,
+        },
         telat_masuk_menit,
         pulang_lebih_awal_menit,
       });
@@ -625,7 +645,7 @@ const absensiController = {
         orderBy: [{ tanggal: 'desc' }, { jam_masuk: 'asc' }]
       });
 
-      const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk, settings.toleransi);
+      const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk);
 
       return res.json({ success: true, data: records, settings: { jam_masuk: settings.jamMasuk, toleransi_terlambat: settings.toleransi } });
     } catch (error) {
@@ -767,6 +787,8 @@ const absensiController = {
       if (!result.jam_masuk) result.jam_masuk = '08:00';
       if (!result.jam_pulang) result.jam_pulang = '16:00';
       if (!result.toleransi_terlambat) result.toleransi_terlambat = '15';
+      if (!result.jam_buka_absen) result.jam_buka_absen = '06:00';
+      if (!result.jam_tutup_absen) result.jam_tutup_absen = '17:00';
 
       return res.json({ success: true, data: result });
     } catch (error) {
@@ -782,13 +804,15 @@ const absensiController = {
    */
   async updateSettings(req, res) {
     try {
-      const { jam_masuk, jam_pulang, toleransi_terlambat } = req.body;
+      const { jam_masuk, jam_pulang, toleransi_terlambat, jam_buka_absen, jam_tutup_absen } = req.body;
       const userId = BigInt(req.user.id);
 
       const settingsToUpdate = [];
       if (jam_masuk !== undefined) settingsToUpdate.push({ key: 'jam_masuk', value: jam_masuk, description: 'Jam masuk kantor' });
       if (jam_pulang !== undefined) settingsToUpdate.push({ key: 'jam_pulang', value: jam_pulang, description: 'Jam pulang kantor' });
       if (toleransi_terlambat !== undefined) settingsToUpdate.push({ key: 'toleransi_terlambat', value: String(toleransi_terlambat), description: 'Toleransi terlambat (menit)' });
+      if (jam_buka_absen !== undefined) settingsToUpdate.push({ key: 'jam_buka_absen', value: jam_buka_absen, description: 'Jam buka absensi' });
+      if (jam_tutup_absen !== undefined) settingsToUpdate.push({ key: 'jam_tutup_absen', value: jam_tutup_absen, description: 'Jam tutup absensi' });
 
       for (const setting of settingsToUpdate) {
         await prisma.absensi_settings.upsert({
@@ -923,7 +947,7 @@ const absensiController = {
         orderBy: [{ tanggal: 'desc' }, { jam_masuk: 'asc' }]
       });
 
-      const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk, settings.toleransi);
+      const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk);
 
       // Group by status
       const grouped = {};
@@ -958,7 +982,7 @@ const absensiController = {
 
       return res.json({
         success: true,
-        data: { grouped, summary, belum_absen: belumAbsen, total_records: records.length, periode, settings: { jam_masuk: settings.jamMasuk, toleransi_terlambat: settings.toleransi } }
+        data: { grouped, summary, belum_absen: belumAbsen, total_records: records.length, periode, settings: { jam_masuk: settings.jamMasuk, toleransi_terlambat: settings.toleransi, jam_buka_absen: settings.jamBukaAbsen, jam_tutup_absen: settings.jamTutupAbsen } }
       });
     } catch (error) {
       console.error('[Absensi] Dashboard error:', error);
@@ -1021,7 +1045,7 @@ const absensiController = {
         select: { user_id: true, status: true, tanggal: true, jam_masuk: true, jam_keluar: true }
       });
 
-      const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk, settings.toleransi);
+      const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk);
 
       // Group records by user
       const userRecordMap = {};
@@ -1117,7 +1141,7 @@ const absensiController = {
         orderBy: { tanggal: 'desc' }
       });
 
-      const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk, settings.toleransi);
+      const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk);
 
       const allStatuses = ['hadir', 'izin', 'sakit', 'alpha', 'cuti', 'dinas_luar', 'wfh', 'wfa'];
       const summary = {};

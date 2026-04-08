@@ -33,6 +33,6 @@ const upload = multer({
 router.post('/upload', auth, checkRole('superadmin', 'sarana_prasarana', 'kekayaan_keuangan'), upload.single('file'), insentifDdController.uploadInsentifDdData);
 router.get('/data', auth, insentifDdController.getInsentifDdData);
 router.get('/info', auth, insentifDdController.getInsentifDdInfo);
-router.get('/backups', auth, checkRole('superadmin', 'sarana_prasarana'), insentifDdController.getInsentifDdBackupList);
+router.get('/backups', auth, checkRole('superadmin', 'sarana_prasarana', 'kekayaan_keuangan'), insentifDdController.getInsentifDdBackupList);
 
 module.exports = router;
