@@ -80,6 +80,11 @@ class UserController {
                 id_bidang: true,
                 nip: true,
                 jabatan: true,
+                eselon: true,
+                unit_kerja: true,
+                tmt_jabatan: true,
+                pangkat: true,
+                golongan: true,
                 tempat_lahir: true,
                 tanggal_lahir: true,
                 status_kepegawaian: true,
@@ -159,6 +164,11 @@ class UserController {
         pegawai_id: user.pegawai_id,
         nip: user.pegawai?.nip || null,
         jabatan: user.pegawai?.jabatan || null,
+        eselon: user.pegawai?.eselon || null,
+        unit_kerja: user.pegawai?.unit_kerja || null,
+        tmt_jabatan: user.pegawai?.tmt_jabatan || null,
+        pangkat: user.pegawai?.pangkat || null,
+        golongan: user.pegawai?.golongan || null,
         tempat_lahir: user.pegawai?.tempat_lahir || null,
         tanggal_lahir: user.pegawai?.tanggal_lahir || null,
         status_kepegawaian: user.pegawai?.status_kepegawaian || null,
@@ -224,6 +234,11 @@ class UserController {
               id_bidang: true,
               nip: true,
               jabatan: true,
+              eselon: true,
+              unit_kerja: true,
+              tmt_jabatan: true,
+              pangkat: true,
+              golongan: true,
               tempat_lahir: true,
               tanggal_lahir: true,
               status_kepegawaian: true,
@@ -408,7 +423,10 @@ class UserController {
         tempat_lahir,
         jabatan,
         nip,
-        status_kepegawaian
+        status_kepegawaian,
+        eselon,
+        unit_kerja,
+        tmt_jabatan
       } = req.body;
 
       // Convert id to BigInt for proper comparison
@@ -469,7 +487,7 @@ class UserController {
       }
 
       // Update tanggal_lahir, jabatan, nip on pegawai table
-      const hasPegawaiFields = [tanggal_lahir, tempat_lahir, jabatan, nip, status_kepegawaian].some(v => v !== undefined);
+      const hasPegawaiFields = [tanggal_lahir, tempat_lahir, jabatan, nip, status_kepegawaian, eselon, unit_kerja, tmt_jabatan].some(v => v !== undefined);
       
       if (existingUser.pegawai_id) {
         const pegawaiUpdate = {};
@@ -478,6 +496,9 @@ class UserController {
         if (jabatan !== undefined) pegawaiUpdate.jabatan = jabatan || null;
         if (nip !== undefined) pegawaiUpdate.nip = nip || null;
         if (status_kepegawaian !== undefined) pegawaiUpdate.status_kepegawaian = status_kepegawaian || null;
+        if (eselon !== undefined) pegawaiUpdate.eselon = eselon || null;
+        if (unit_kerja !== undefined) pegawaiUpdate.unit_kerja = unit_kerja || null;
+        if (tmt_jabatan !== undefined) pegawaiUpdate.tmt_jabatan = tmt_jabatan ? new Date(tmt_jabatan) : null;
         
         if (Object.keys(pegawaiUpdate).length > 0) {
           await prisma.pegawai.update({
@@ -505,6 +526,9 @@ class UserController {
             jabatan: jabatan || null,
             nip: nip || null,
             status_kepegawaian: status_kepegawaian || null,
+            eselon: eselon || null,
+            unit_kerja: unit_kerja || null,
+            tmt_jabatan: tmt_jabatan ? new Date(tmt_jabatan) : null,
             created_at: new Date(),
             updated_at: new Date(),
           }
@@ -554,6 +578,11 @@ class UserController {
               id_bidang: true,
               nip: true,
               jabatan: true,
+              eselon: true,
+              unit_kerja: true,
+              tmt_jabatan: true,
+              pangkat: true,
+              golongan: true,
               tempat_lahir: true,
               tanggal_lahir: true,
               status_kepegawaian: true,

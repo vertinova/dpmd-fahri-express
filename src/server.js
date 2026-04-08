@@ -77,6 +77,8 @@ const bankeuMasterKegiatanRoutes = require('./routes/bankeuMasterKegiatan.routes
 const dinasRoutes = require('./routes/dinas.routes');
 const dinasVerificationRoutes = require('./routes/dinasVerification.routes');
 const dpmdVerificationRoutes = require('./routes/dpmdVerification.routes');
+const bankeuLpjRoutes = require('./routes/bankeuLpj.routes');
+const dpmdBankeuLpjRoutes = require('./routes/dpmdBankeuLpj.routes');
 const dinasVerifikatorRoutes = require('./routes/dinasVerifikator.routes');
 const verifikatorAksesDesaRoutes = require('./routes/verifikatorAksesDesa.routes');
 const beritaAcaraRoutes = require('./routes/beritaAcara.routes');
@@ -84,6 +86,7 @@ const perjadinRoutes = require('./routes/perjadin.routes');
 const externalApiRoutes = require('./routes/externalApi.routes');
 const pemdesAparaturRoutes = require('./routes/pemdes-aparatur.routes');
 const pemdesProfilDesaRoutes = require('./routes/pemdes-profil-desa.routes');
+const chatbotRoutes = require('./routes/chatbot.routes');
 
 const app = express();
 
@@ -204,6 +207,20 @@ app.get('/storage/uploads/bankeu/resolve/:filename', (req, res) => {
   }
 });
 
+// Serve bankeu LPJ files
+app.get('/storage/uploads/bankeu_lpj/:filename', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+  const filename = path.basename(req.params.filename); // sanitize
+  const filePath = path.join(__dirname, '../storage/uploads/bankeu_lpj', filename);
+  
+  if (fs.existsSync(filePath)) {
+    return res.sendFile(filePath);
+  } else {
+    return res.status(404).json({ success: false, message: 'File tidak ditemukan' });
+  }
+});
+
 // Serve public files (bankeu2025.json, etc)
 app.use('/public', (req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
@@ -235,9 +252,6 @@ app.use('/api', locationRoutes); // Kecamatan & Desa routes
 // App Settings routes (for edit mode, etc.)
 app.use('/api/app-settings', require('./routes/appSettings.routes'));
 
-// Settings routes (password change, database backup)
-app.use('/api/settings', require('./routes/settings.routes'));
-
 // Printer routes (for thermal printer)
 app.use('/api/printer', require('./routes/printer.routes'));
 
@@ -265,6 +279,8 @@ app.use('/api/kecamatan/bankeu/surat', kecamatanBankeuSuratRoutes); // Kecamatan
 app.use('/api/kecamatan/bankeu', bankeuVerificationRoutes); // Bankeu verification routes for kecamatan
 app.use('/api/dinas/bankeu', dinasVerificationRoutes); // Bankeu verification routes for dinas terkait
 app.use('/api/dpmd/bankeu', dpmdVerificationRoutes); // Bankeu verification routes for DPMD/SPKED
+app.use('/api/desa/bankeu-lpj', bankeuLpjRoutes); // Bankeu LPJ upload routes for desa
+app.use('/api/dpmd/bankeu-lpj', dpmdBankeuLpjRoutes); // Bankeu LPJ monitoring routes for DPMD/SPKED
 app.use('/api/bankeu/master-kegiatan', bankeuMasterKegiatanRoutes); // Master kegiatan CRUD
 app.use('/api/master/dinas', dinasRoutes); // Dinas master data CRUD
 app.use('/api/dinas', require('./routes/dinasConfig.routes')); // Dinas configuration (TTD + PIC)
@@ -302,9 +318,6 @@ app.use('/api/bhprd-t1', bhprdT1Routes); // BHPRD Tahap 1
 app.use('/api/bhprd-t2', bhprdT2Routes); // BHPRD Tahap 2
 app.use('/api/bhprd-t3', bhprdT3Routes); // BHPRD Tahap 3
 
-// Chatbot smart search routes
-app.use('/api/chatbot', require('./routes/chatbot.routes'));
-
 // External API Proxy routes (DPMD Bogorkab)
 app.use('/api/external', externalApiRoutes);
 
@@ -319,6 +332,9 @@ app.use('/api/pemdes/produk-hukum', require('./routes/pemdes-produk-hukum.routes
 
 // Video Meeting routes
 app.use('/api/video-meetings', require('./routes/videoMeeting.routes'));
+
+// Chatbot Smart Search routes
+app.use('/api/chatbot', chatbotRoutes);
 
 // 404 handler
 app.use((req, res) => {

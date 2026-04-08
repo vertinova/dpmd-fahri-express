@@ -135,6 +135,26 @@ model bankeu_proposal_kegiatan {
   @@index([proposal_id], map: "idx_proposal_id")
 }
 
+model bankeu_lpj {
+  id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  desa_id         BigInt   @db.UnsignedBigInt
+  tahun_anggaran  Int      @default(2025) @db.Year
+  nama_file       String   @db.VarChar(255)
+  file_path       String   @db.VarChar(500)
+  file_size       Int?     @db.UnsignedInt
+  keterangan      String?  @db.Text
+  uploaded_by     BigInt   @db.UnsignedBigInt
+  created_at      DateTime @default(now()) @db.Timestamp(0)
+  updated_at      DateTime @default(now()) @db.Timestamp(0)
+
+  desas           desas    @relation(fields: [desa_id], references: [id], onDelete: Cascade, map: "fk_bankeu_lpj_desa")
+  users           users    @relation(fields: [uploaded_by], references: [id], onDelete: Cascade, map: "fk_bankeu_lpj_user")
+
+  @@unique([desa_id, tahun_anggaran], map: "uk_bankeu_lpj_desa_tahun")
+  @@index([desa_id], map: "idx_bankeu_lpj_desa_id")
+  @@index([tahun_anggaran], map: "idx_bankeu_lpj_tahun")
+}
+
 model bankeu_proposals {
   id                                                  BigInt                               @id @default(autoincrement()) @db.UnsignedBigInt
   desa_id                                             BigInt                               @db.UnsignedBigInt
@@ -429,6 +449,7 @@ model desas {
   created_at                DateTime?                   @db.Timestamp(0)
   updated_at                DateTime?                   @db.Timestamp(0)
   aparatur_desa             aparatur_desa[]
+  bankeu_lpj                bankeu_lpj[]
   bankeu_proposals          bankeu_proposals[]
   berita_acara_history      berita_acara_history[]
   desa_bankeu_surat         desa_bankeu_surat[]
@@ -1291,6 +1312,7 @@ model users {
   bankeu_proposals_bankeu_proposals_created_byTousers            bankeu_proposals[]          @relation("bankeu_proposals_created_byTousers")
   bankeu_proposals_bankeu_proposals_verified_byTousers           bankeu_proposals[]          @relation("bankeu_proposals_verified_byTousers")
   bankeu_proposals_bankeu_proposals_troubleshoot_byTousers       bankeu_proposals[]          @relation("bankeu_proposals_troubleshoot_byTousers")
+  bankeu_lpj                                                     bankeu_lpj[]
   berita_acara_history                                           berita_acara_history[]
   desa_bankeu_surat                                              desa_bankeu_surat[]
   disposisi_disposisi_dari_user_idTousers                        disposisi[]                 @relation("disposisi_dari_user_idTousers")

@@ -367,6 +367,34 @@ const uploadProfilDesa = multer({
   }
 });
 
+// Storage configuration for BANKEU LPJ (PDF only)
+const storageBankeuLpj = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = 'storage/uploads/bankeu_lpj';
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    const nameWithoutExt = path.basename(file.originalname, ext)
+      .replace(/[^a-zA-Z0-9]/g, '_')
+      .substring(0, 50);
+    const filename = `lpj_${timestamp}_${nameWithoutExt}${ext}`;
+    cb(null, filename);
+  }
+});
+
+const uploadBankeuLpj = multer({
+  storage: storageBankeuLpj,
+  fileFilter: pdfFilter,
+  limits: {
+    fileSize: 30 * 1024 * 1024 // 30MB for LPJ
+  }
+});
+
 // Storage configuration for BANKEU PROPOSAL
 const storageBankeuProposal = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -490,5 +518,6 @@ module.exports = {
   uploadProfilDesa,
   uploadInformasi,
   bankeuProposal: uploadBankeuProposal.single('file'),
+  bankeuLpj: uploadBankeuLpj.single('file'),
   contohProposalUpload: uploadContohProposal.single('file')
 };
