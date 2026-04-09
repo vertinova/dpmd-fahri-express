@@ -10,4 +10,7 @@ router.use(checkRole('kepala_dinas', 'sarana_prasarana', 'pegawai', 'kepala_bida
 // Get all LPJ submissions grouped by kecamatan
 router.get('/', bankeuLpjController.getAllLpj);
 
+// Verify LPJ (approve/reject/revision)
+router.put('/:id/verify', bankeuLpjController.verifyLpj);
+
 module.exports = router;

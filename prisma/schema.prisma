@@ -136,23 +136,28 @@ model bankeu_proposal_kegiatan {
 }
 
 model bankeu_lpj {
-  id              BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  desa_id         BigInt   @db.UnsignedBigInt
-  tahun_anggaran  Int      @default(2025) @db.Year
-  nama_file       String   @db.VarChar(255)
-  file_path       String   @db.VarChar(500)
-  file_size       Int?     @db.UnsignedInt
-  keterangan      String?  @db.Text
-  uploaded_by     BigInt   @db.UnsignedBigInt
-  created_at      DateTime @default(now()) @db.Timestamp(0)
-  updated_at      DateTime @default(now()) @db.Timestamp(0)
+  id               BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
+  desa_id          BigInt              @db.UnsignedBigInt
+  tahun_anggaran   Int                 @default(2025) @db.Year
+  nama_file        String              @db.VarChar(255)
+  file_path        String              @db.VarChar(500)
+  file_size        Int?                @db.UnsignedInt
+  keterangan       String?             @db.Text
+  status           bankeu_lpj_status   @default(pending)
+  dpmd_catatan     String?             @db.Text
+  dpmd_verified_by BigInt?             @db.UnsignedBigInt
+  dpmd_verified_at DateTime?           @db.Timestamp(0)
+  uploaded_by      BigInt              @db.UnsignedBigInt
+  created_at       DateTime            @default(now()) @db.Timestamp(0)
+  updated_at       DateTime            @default(now()) @db.Timestamp(0)
 
-  desas           desas    @relation(fields: [desa_id], references: [id], onDelete: Cascade, map: "fk_bankeu_lpj_desa")
-  users           users    @relation(fields: [uploaded_by], references: [id], onDelete: Cascade, map: "fk_bankeu_lpj_user")
+  desas            desas               @relation(fields: [desa_id], references: [id], onDelete: Cascade, map: "fk_bankeu_lpj_desa")
+  users            users               @relation(fields: [uploaded_by], references: [id], onDelete: Cascade, map: "fk_bankeu_lpj_user")
 
   @@unique([desa_id, tahun_anggaran], map: "uk_bankeu_lpj_desa_tahun")
   @@index([desa_id], map: "idx_bankeu_lpj_desa_id")
   @@index([tahun_anggaran], map: "idx_bankeu_lpj_tahun")
+  @@index([status], map: "idx_bankeu_lpj_status")
 }
 
 model bankeu_proposals {
@@ -1835,6 +1840,13 @@ enum bankeu_proposals_kecamatan_status {
 enum bankeu_proposals_dpmd_status {
   pending
   in_review
+  approved
+  rejected
+  revision
+}
+
+enum bankeu_lpj_status {
+  pending
   approved
   rejected
   revision

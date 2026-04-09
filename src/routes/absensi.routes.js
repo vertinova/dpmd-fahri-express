@@ -16,6 +16,7 @@ router.post('/clock-in', auth, absensiController.clockIn);
 router.post('/clock-out', auth, absensiController.clockOut);
 router.post('/izin', auth, absensiController.submitIzin);
 router.post('/register-device', auth, absensiController.registerDevice);
+router.delete('/remove-device', auth, absensiController.removeDevice);
 router.get('/success-messages', auth, absensiController.getSuccessMessages);
 
 // Admin routes (superadmin + bidang Sekretariat)

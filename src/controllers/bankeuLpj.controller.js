@@ -99,7 +99,7 @@ class BankeuLpjController {
           fs.unlinkSync(oldFilePath);
         }
 
-        // Update existing record
+        // Update existing record (reset verification status on re-upload)
         const updated = await prisma.bankeu_lpj.update({
           where: { id: existing.id },
           data: {
@@ -108,6 +108,10 @@ class BankeuLpjController {
             file_size: req.file.size,
             keterangan,
             uploaded_by: BigInt(userId),
+            status: 'pending',
+            dpmd_catatan: null,
+            dpmd_verified_by: null,
+            dpmd_verified_at: null,
             updated_at: new Date()
           }
         });
@@ -192,6 +196,14 @@ class BankeuLpjController {
         });
       }
 
+      // Cannot delete if approved
+      if (lpj.status === 'approved') {
+        return res.status(400).json({
+          success: false,
+          message: 'LPJ yang sudah disetujui tidak dapat dihapus'
+        });
+      }
+
       // Delete file
       const filePath = path.join(__dirname, '../../storage/uploads/bankeu_lpj', lpj.file_path);
       if (fs.existsSync(filePath)) {
@@ -240,14 +252,20 @@ class BankeuLpjController {
           l.file_path,
           l.file_size,
           l.keterangan,
+          l.status as lpj_status,
+          l.dpmd_catatan,
+          l.dpmd_verified_by,
+          l.dpmd_verified_at,
           l.uploaded_by,
           l.created_at as lpj_created_at,
           l.updated_at as lpj_updated_at,
-          u.name as uploaded_by_name
+          u.name as uploaded_by_name,
+          v.name as verified_by_name
         FROM desas d
         JOIN kecamatans k ON d.kecamatan_id = k.id
         LEFT JOIN bankeu_lpj l ON l.desa_id = d.id AND l.tahun_anggaran = :tahun
         LEFT JOIN users u ON l.uploaded_by = u.id
+        LEFT JOIN users v ON l.dpmd_verified_by = v.id
         WHERE d.status_pemerintahan = 'desa'
         ORDER BY k.nama, d.nama
       `, {
@@ -258,6 +276,12 @@ class BankeuLpjController {
       const grouped = {};
       let totalDesa = 0;
       let totalUploaded = 0;
+
+      // Count verification statuses
+      let totalApproved = 0;
+      let totalRejected = 0;
+      let totalRevision = 0;
+      let totalPending = 0;
 
       rows.forEach(row => {
         if (!grouped[row.kecamatan_id]) {
@@ -281,6 +305,11 @@ class BankeuLpjController {
             file_path: row.file_path,
             file_size: row.file_size,
             keterangan: row.keterangan,
+            status: row.lpj_status || 'pending',
+            dpmd_catatan: row.dpmd_catatan,
+            dpmd_verified_by: row.dpmd_verified_by,
+            dpmd_verified_at: row.dpmd_verified_at,
+            verified_by_name: row.verified_by_name,
             uploaded_by: row.uploaded_by,
             uploaded_by_name: row.uploaded_by_name,
             created_at: row.lpj_created_at,
@@ -295,6 +324,10 @@ class BankeuLpjController {
         if (row.lpj_id) {
           grouped[row.kecamatan_id].uploaded_count++;
           totalUploaded++;
+          if (row.lpj_status === 'approved') totalApproved++;
+          else if (row.lpj_status === 'rejected') totalRejected++;
+          else if (row.lpj_status === 'revision') totalRevision++;
+          else totalPending++;
         }
       });
 
@@ -306,6 +339,10 @@ class BankeuLpjController {
             total_desa: totalDesa,
             total_uploaded: totalUploaded,
             total_belum: totalDesa - totalUploaded,
+            total_approved: totalApproved,
+            total_rejected: totalRejected,
+            total_revision: totalRevision,
+            total_pending: totalPending,
             persentase: totalDesa > 0 ? Math.round((totalUploaded / totalDesa) * 100) : 0
           },
           kecamatan: Object.values(grouped)
@@ -316,6 +353,73 @@ class BankeuLpjController {
       res.status(500).json({
         success: false,
         message: 'Gagal mengambil data LPJ',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * DPMD: Verify LPJ (approve/reject/revision)
+   * PUT /api/dpmd/bankeu-lpj/:id/verify
+   * Body: { action: 'approved'|'rejected'|'revision', catatan?: string }
+   */
+  async verifyLpj(req, res) {
+    try {
+      const lpjId = BigInt(req.params.id);
+      const userId = BigInt(req.user.id);
+      const { action, catatan } = req.body;
+
+      if (!['approved', 'rejected', 'revision'].includes(action)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Action tidak valid. Gunakan: approved, rejected, atau revision'
+        });
+      }
+
+      // Catatan wajib untuk reject/revision
+      if (['rejected', 'revision'].includes(action) && !catatan?.trim()) {
+        return res.status(400).json({
+          success: false,
+          message: 'Catatan wajib diisi untuk penolakan atau revisi'
+        });
+      }
+
+      const lpj = await prisma.bankeu_lpj.findUnique({
+        where: { id: lpjId },
+        include: { desas: { select: { nama: true } } }
+      });
+
+      if (!lpj) {
+        return res.status(404).json({
+          success: false,
+          message: 'Data LPJ tidak ditemukan'
+        });
+      }
+
+      const updated = await prisma.bankeu_lpj.update({
+        where: { id: lpjId },
+        data: {
+          status: action,
+          dpmd_catatan: catatan?.trim() || null,
+          dpmd_verified_by: userId,
+          dpmd_verified_at: new Date(),
+          updated_at: new Date()
+        }
+      });
+
+      const actionLabels = { approved: 'disetujui', rejected: 'ditolak', revision: 'perlu revisi' };
+      logger.info(`LPJ Bankeu verified: id=${lpjId}, desa=${lpj.desas?.nama}, action=${action}, by=${userId}`);
+
+      res.json({
+        success: true,
+        message: `LPJ Desa ${lpj.desas?.nama || ''} berhasil ${actionLabels[action]}`,
+        data: updated
+      });
+    } catch (error) {
+      logger.error('Error verifying LPJ:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Gagal memverifikasi LPJ',
         error: error.message
       });
     }
