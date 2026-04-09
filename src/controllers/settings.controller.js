@@ -275,6 +275,9 @@ const getOnlineUsers = async (req, res) => {
           role: true,
           avatar: true,
           last_active_at: true,
+          desa_id: true,
+          kecamatan_id: true,
+          dinas_id: true,
           login_histories: {
             orderBy: { created_at: 'desc' },
             take: 1,
@@ -295,6 +298,21 @@ const getOnlineUsers = async (req, res) => {
       })
     ]);
 
+    // Collect unique IDs for batch lookup
+    const desaIds = [...new Set(users.map(u => u.desa_id).filter(Boolean))];
+    const kecIds = [...new Set(users.map(u => u.kecamatan_id).filter(Boolean))];
+    const dinasIds = [...new Set(users.map(u => u.dinas_id).filter(Boolean))];
+
+    const [desaList, kecList, dinasList] = await Promise.all([
+      desaIds.length ? prisma.desas.findMany({ where: { id: { in: desaIds } }, select: { id: true, nama: true } }) : [],
+      kecIds.length ? prisma.kecamatans.findMany({ where: { id: { in: kecIds } }, select: { id: true, nama: true } }) : [],
+      dinasIds.length ? prisma.dinas.findMany({ where: { id: { in: dinasIds } }, select: { id: true, nama_dinas: true } }) : [],
+    ]);
+
+    const desaMap = Object.fromEntries(desaList.map(d => [d.id.toString(), d]));
+    const kecMap = Object.fromEntries(kecList.map(k => [k.id.toString(), k]));
+    const dinasMap = Object.fromEntries(dinasList.map(d => [d.id.toString(), d]));
+
     return res.json({
       success: true,
       data: {
@@ -305,7 +323,10 @@ const getOnlineUsers = async (req, res) => {
           role: u.role,
           avatar: u.avatar,
           last_active_at: u.last_active_at,
-          last_login: u.login_histories[0] || null
+          last_login: u.login_histories[0] || null,
+          desa: u.desa_id ? (desaMap[u.desa_id.toString()] || null) : null,
+          kecamatan: u.kecamatan_id ? (kecMap[u.kecamatan_id.toString()] || null) : null,
+          dinas: u.dinas_id ? (dinasMap[u.dinas_id.toString()] || null) : null,
         })),
         pagination: {
           page,
