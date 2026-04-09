@@ -12,7 +12,9 @@ class ActivityLogController {
    */
   async getAllActivityLogs(req, res) {
     try {
-      const { limit = 50, module, action, search, bidang_id } = req.query;
+      const { limit = 100, page = 1, module, action, search, bidang_id } = req.query;
+      const take = Math.min(parseInt(limit), 1000); // cap at 1000
+      const skip = (parseInt(page) - 1) * take;
       
       // Build where clause
       const where = {};
@@ -35,7 +37,8 @@ class ActivityLogController {
         orderBy: {
           created_at: 'desc'
         },
-        take: parseInt(limit),
+        take,
+        skip,
         select: {
           id: true,
           user_name: true,
