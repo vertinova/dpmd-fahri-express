@@ -306,7 +306,7 @@ const getOnlineUsers = async (req, res) => {
     const [desaList, kecList, dinasList] = await Promise.all([
       desaIds.length ? prisma.desas.findMany({ where: { id: { in: desaIds } }, select: { id: true, nama: true } }) : [],
       kecIds.length ? prisma.kecamatans.findMany({ where: { id: { in: kecIds } }, select: { id: true, nama: true } }) : [],
-      dinasIds.length ? prisma.dinas.findMany({ where: { id: { in: dinasIds } }, select: { id: true, nama_dinas: true } }) : [],
+      dinasIds.length ? prisma.dinas.findMany({ where: { id: { in: dinasIds } }, select: { id: true, nama: true } }) : [],
     ]);
 
     const desaMap = Object.fromEntries(desaList.map(d => [d.id.toString(), d]));
@@ -326,7 +326,7 @@ const getOnlineUsers = async (req, res) => {
           last_login: u.login_histories[0] || null,
           desa: u.desa_id ? (desaMap[u.desa_id.toString()] || null) : null,
           kecamatan: u.kecamatan_id ? (kecMap[u.kecamatan_id.toString()] || null) : null,
-          dinas: u.dinas_id ? (dinasMap[u.dinas_id.toString()] || null) : null,
+          dinas: u.dinas_id ? (dinasMap[u.dinas_id.toString()] ? { nama_dinas: dinasMap[u.dinas_id.toString()].nama } : null) : null,
         })),
         pagination: {
           page,
