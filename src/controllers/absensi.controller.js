@@ -203,7 +203,7 @@ const absensiController = {
       // Validasi: device_id harus cocok dengan yang terdaftar
       const user = await prisma.users.findUnique({
         where: { id: userId },
-        select: { device_id: true, device_type: true }
+        select: { device_id: true }
       });
 
       if (!user.device_id) {
@@ -217,8 +217,7 @@ const absensiController = {
         return res.status(403).json({
           success: false,
           code: 'DEVICE_MISMATCH',
-          message: 'Absensi hanya bisa dilakukan dari perangkat yang terdaftar.',
-          registered_device: user.device_type || 'Perangkat tidak dikenal'
+          message: 'Absensi hanya bisa dilakukan dari perangkat yang terdaftar.'
         });
       }
 
@@ -375,15 +374,14 @@ const absensiController = {
       // Validasi device
       const user = await prisma.users.findUnique({
         where: { id: userId },
-        select: { device_id: true, device_type: true }
+        select: { device_id: true }
       });
 
       if (!user.device_id || user.device_id !== device_id) {
         return res.status(403).json({
           success: false,
           code: 'DEVICE_MISMATCH',
-          message: 'Absensi hanya bisa dilakukan dari perangkat yang terdaftar.',
-          registered_device: user.device_type || 'Perangkat tidak dikenal'
+          message: 'Absensi hanya bisa dilakukan dari perangkat yang terdaftar.'
         });
       }
 
@@ -741,7 +739,7 @@ const absensiController = {
   async registerDevice(req, res) {
     try {
       const userId = BigInt(req.user.id);
-      const { device_id, device_type } = req.body;
+      const { device_id } = req.body;
 
       if (!device_id) {
         return res.status(400).json({ success: false, message: 'Device ID wajib diisi' });
@@ -749,10 +747,7 @@ const absensiController = {
 
       await prisma.users.update({
         where: { id: userId },
-        data: {
-          device_id,
-          device_type: device_type || null
-        }
+        data: { device_id }
       });
 
       return res.json({ success: true, message: 'Device berhasil didaftarkan' });
@@ -772,7 +767,7 @@ const absensiController = {
 
       await prisma.users.update({
         where: { id: userId },
-        data: { device_id: null, device_type: null }
+        data: { device_id: null }
       });
 
       return res.json({ success: true, message: 'Perangkat berhasil dihapus. Silakan refresh halaman untuk mendaftarkan perangkat baru.' });
