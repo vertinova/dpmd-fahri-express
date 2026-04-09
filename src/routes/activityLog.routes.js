@@ -33,4 +33,16 @@ router.get(
   (req, res) => activityLogController.getStats(req, res)
 );
 
+/**
+ * @route   GET /api/activity-logs/module-stats
+ * @desc    Get per-module activity breakdown
+ * @access  Private (Superadmin only)
+ */
+router.get(
+  '/module-stats',
+  auth,
+  requireSuperadmin,
+  (req, res) => activityLogController.getModuleStats(req, res)
+);
+
 module.exports = router;

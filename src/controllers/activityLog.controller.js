@@ -141,6 +141,38 @@ class ActivityLogController {
       });
     }
   }
+
+  /**
+   * Get per-module statistics breakdown
+   */
+  async getModuleStats(req, res) {
+    try {
+      const moduleGroups = await prisma.$queryRaw`
+        SELECT module, COUNT(*) as count 
+        FROM activity_logs 
+        WHERE module IS NOT NULL AND module != ''
+        GROUP BY module 
+        ORDER BY count DESC
+      `;
+
+      const data = moduleGroups.map(row => ({
+        module: row.module,
+        count: Number(row.count)
+      }));
+
+      res.json({
+        success: true,
+        data
+      });
+    } catch (error) {
+      console.error('Error getting module stats:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Gagal memuat statistik modul',
+        error: error.message
+      });
+    }
+  }
 }
 
 module.exports = new ActivityLogController();
