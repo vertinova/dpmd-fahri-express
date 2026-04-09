@@ -2,10 +2,10 @@ const prisma = require('../config/prisma');
 const path = require('path');
 const fs = require('fs');
 
-// Koordinat kantor DPMD Bogor
-const KANTOR_LAT = -6.47553948391432;
-const KANTOR_LNG = 106.8276556221009;
-const MAX_DISTANCE_METERS = 500;
+// Default koordinat kantor DPMD Bogor (bisa di-override via settings)
+const DEFAULT_KANTOR_LAT = -6.47553948391432;
+const DEFAULT_KANTOR_LNG = 106.8276556221009;
+const DEFAULT_MAX_DISTANCE_METERS = 500;
 
 // Status kepegawaian yang wajib absen (Prisma enum keys)
 const ABSENSI_REQUIRED_STATUS = [
@@ -132,6 +132,9 @@ async function getAbsensiSettings() {
     toleransi: parseInt(map.toleransi_terlambat || '15', 10),
     jamBukaAbsen: map.jam_buka_absen || '06:00',
     jamTutupAbsen: map.jam_tutup_absen || '17:00',
+    kantorLat: parseFloat(map.kantor_lat) || DEFAULT_KANTOR_LAT,
+    kantorLng: parseFloat(map.kantor_lng) || DEFAULT_KANTOR_LNG,
+    maxDistance: parseInt(map.max_distance_meters || String(DEFAULT_MAX_DISTANCE_METERS), 10),
   };
 }
 
@@ -190,9 +193,15 @@ const absensiController = {
         return res.status(400).json({ success: false, message: 'Foto selfie wajib diambil' });
       }
 
-      // Validasi: harus ada koordinat
+      // Validasi: harus ada koordinat dan format valid
       if (latitude == null || longitude == null) {
         return res.status(400).json({ success: false, message: 'Lokasi GPS wajib diaktifkan' });
+      }
+
+      const parsedLat = parseFloat(latitude);
+      const parsedLng = parseFloat(longitude);
+      if (isNaN(parsedLat) || isNaN(parsedLng)) {
+        return res.status(400).json({ success: false, message: 'Koordinat GPS tidak valid' });
       }
 
       // Validasi dinas luar: harus ada tujuan
@@ -205,6 +214,10 @@ const absensiController = {
         where: { id: userId },
         select: { device_id: true, device_type: true }
       });
+
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
+      }
 
       if (!user.device_id) {
         return res.status(403).json({
@@ -222,14 +235,17 @@ const absensiController = {
         });
       }
 
-      // Hitung jarak dari kantor
-      const jarak = calculateDistance(parseFloat(latitude), parseFloat(longitude), KANTOR_LAT, KANTOR_LNG);
+      // Ambil settings (termasuk koordinat kantor dinamis)
+      const absensiSettings = await getAbsensiSettings();
+
+      // Hitung jarak dari kantor (gunakan koordinat dari settings)
+      const jarak = calculateDistance(parsedLat, parsedLng, absensiSettings.kantorLat, absensiSettings.kantorLng);
 
       // Cek jarak hanya untuk mode 'hadir' (WFH/WFA/dinas luar bebas lokasi)
-      if (absensiMode === 'hadir' && jarak > MAX_DISTANCE_METERS) {
+      if (absensiMode === 'hadir' && jarak > absensiSettings.maxDistance) {
         return res.status(400).json({
           success: false,
-          message: `Anda berada ${Math.round(jarak)} meter dari kantor. Maksimal jarak absensi adalah ${MAX_DISTANCE_METERS} meter.`
+          message: `Anda berada ${Math.round(jarak)} meter dari kantor. Maksimal jarak absensi adalah ${absensiSettings.maxDistance} meter.`
         });
       }
 
@@ -240,7 +256,6 @@ const absensiController = {
       const today = new Date(`${todayStr}T00:00:00.000Z`);
 
       // Cek jam buka/tutup absensi dari settings sekretariat
-      const absensiSettings = await getAbsensiSettings();
       const currentMinutes = wib.hours * 60 + wib.minutes;
       const [bukaH, bukaM] = absensiSettings.jamBukaAbsen.split(':').map(Number);
       const [tutupH, tutupM] = absensiSettings.jamTutupAbsen.split(':').map(Number);
@@ -292,10 +307,10 @@ const absensiController = {
         jam_masuk: jamMasuk,
         status: absensiMode,
         foto_masuk: fotoPath,
-        latitude_masuk: parseFloat(latitude),
-        longitude_masuk: parseFloat(longitude),
+        latitude_masuk: parsedLat,
+        longitude_masuk: parsedLng,
         jarak_masuk: Math.round(jarak),
-        lokasi_masuk: `${latitude},${longitude}`,
+        lokasi_masuk: `${parsedLat},${parsedLng}`,
         device_id: device_id,
         tujuan_dinas: absensiMode === 'dinas_luar' ? tujuan_dinas : null,
         updated_at: new Date(),
@@ -365,11 +380,21 @@ const absensiController = {
         return res.status(400).json({ success: false, message: 'Lokasi GPS wajib diaktifkan' });
       }
 
+      const parsedLat = parseFloat(latitude);
+      const parsedLng = parseFloat(longitude);
+      if (isNaN(parsedLat) || isNaN(parsedLng)) {
+        return res.status(400).json({ success: false, message: 'Koordinat GPS tidak valid' });
+      }
+
       // Validasi device
       const user = await prisma.users.findUnique({
         where: { id: userId },
         select: { device_id: true, device_type: true }
       });
+
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
+      }
 
       if (!user.device_id || user.device_id !== device_id) {
         return res.status(403).json({
@@ -380,8 +405,11 @@ const absensiController = {
         });
       }
 
+      // Ambil settings (termasuk koordinat kantor dinamis)
+      const absensiSettings = await getAbsensiSettings();
+
       // Hitung jarak
-      const jarak = calculateDistance(parseFloat(latitude), parseFloat(longitude), KANTOR_LAT, KANTOR_LNG);
+      const jarak = calculateDistance(parsedLat, parsedLng, absensiSettings.kantorLat, absensiSettings.kantorLng);
 
       // Gunakan WIB date yang sama dengan clockIn untuk konsistensi
       const now = new Date();
@@ -401,10 +429,10 @@ const absensiController = {
       }
 
       // Cek jarak hanya jika clock-in mode adalah 'hadir'
-      if (existing.status === 'hadir' && jarak > MAX_DISTANCE_METERS) {
+      if (existing.status === 'hadir' && jarak > absensiSettings.maxDistance) {
         return res.status(400).json({
           success: false,
-          message: `Anda berada ${Math.round(jarak)} meter dari kantor. Maksimal jarak absensi adalah ${MAX_DISTANCE_METERS} meter.`
+          message: `Anda berada ${Math.round(jarak)} meter dari kantor. Maksimal jarak absensi adalah ${absensiSettings.maxDistance} meter.`
         });
       }
 
@@ -417,10 +445,10 @@ const absensiController = {
         data: {
           jam_keluar: jamKeluar,
           foto_keluar: fotoPath,
-          latitude_keluar: parseFloat(latitude),
-          longitude_keluar: parseFloat(longitude),
+          latitude_keluar: parsedLat,
+          longitude_keluar: parsedLng,
           jarak_keluar: Math.round(jarak),
-          lokasi_keluar: `${latitude},${longitude}`,
+          lokasi_keluar: `${parsedLat},${parsedLng}`,
           updated_at: new Date(),
         }
       });
@@ -816,6 +844,9 @@ const absensiController = {
       if (!result.toleransi_terlambat) result.toleransi_terlambat = '15';
       if (!result.jam_buka_absen) result.jam_buka_absen = '06:00';
       if (!result.jam_tutup_absen) result.jam_tutup_absen = '17:00';
+      if (!result.kantor_lat) result.kantor_lat = String(DEFAULT_KANTOR_LAT);
+      if (!result.kantor_lng) result.kantor_lng = String(DEFAULT_KANTOR_LNG);
+      if (!result.max_distance_meters) result.max_distance_meters = String(DEFAULT_MAX_DISTANCE_METERS);
 
       return res.json({ success: true, data: result });
     } catch (error) {
@@ -831,7 +862,7 @@ const absensiController = {
    */
   async updateSettings(req, res) {
     try {
-      const { jam_masuk, jam_pulang, toleransi_terlambat, jam_buka_absen, jam_tutup_absen } = req.body;
+      const { jam_masuk, jam_pulang, toleransi_terlambat, jam_buka_absen, jam_tutup_absen, kantor_lat, kantor_lng, max_distance_meters } = req.body;
       const userId = BigInt(req.user.id);
 
       const settingsToUpdate = [];
@@ -840,6 +871,9 @@ const absensiController = {
       if (toleransi_terlambat !== undefined) settingsToUpdate.push({ key: 'toleransi_terlambat', value: String(toleransi_terlambat), description: 'Toleransi terlambat (menit)' });
       if (jam_buka_absen !== undefined) settingsToUpdate.push({ key: 'jam_buka_absen', value: jam_buka_absen, description: 'Jam buka absensi' });
       if (jam_tutup_absen !== undefined) settingsToUpdate.push({ key: 'jam_tutup_absen', value: jam_tutup_absen, description: 'Jam tutup absensi' });
+      if (kantor_lat !== undefined) settingsToUpdate.push({ key: 'kantor_lat', value: String(kantor_lat), description: 'Latitude titik lokasi kantor' });
+      if (kantor_lng !== undefined) settingsToUpdate.push({ key: 'kantor_lng', value: String(kantor_lng), description: 'Longitude titik lokasi kantor' });
+      if (max_distance_meters !== undefined) settingsToUpdate.push({ key: 'max_distance_meters', value: String(max_distance_meters), description: 'Radius maksimal absensi (meter)' });
 
       for (const setting of settingsToUpdate) {
         await prisma.absensi_settings.upsert({
