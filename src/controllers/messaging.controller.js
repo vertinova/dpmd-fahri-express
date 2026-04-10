@@ -7,7 +7,7 @@ const fs = require('fs');
 const pushService = PushNotificationService;
 
 // Role groupings for conversation type resolution
-const DPMD_ROLES = ['superadmin', 'kepala_dinas', 'sekretaris_dinas', 'kepala_bidang', 'ketua_tim', 'pegawai'];
+const DPMD_ROLES = ['superadmin', 'admin', 'kepala_dinas', 'sekretaris_dinas', 'kepala_bidang', 'ketua_tim', 'pegawai', 'sarpras', 'sekretariat'];
 const DESA_ROLES = ['desa'];
 const KECAMATAN_ROLES = ['kecamatan'];
 const DINAS_ROLES = ['dinas_terkait', 'verifikator_dinas'];
@@ -31,6 +31,29 @@ function resolveConversationType(senderRole, receiverRole) {
 
 	// Same group chat (dpmd internal, etc) - default to dpmd_desa
 	return 'dpmd_desa';
+}
+
+// User select fields (without nested desas/kecamatans - resolved separately via enrichUserNames)
+const USER_SELECT = { id: true, name: true, role: true, avatar: true, desa_id: true, kecamatan_id: true, dinas_id: true, last_active_at: true };
+
+// Enrich user objects with desa/kecamatan names (batch lookup)
+async function enrichUserNames(...users) {
+	const desaIds = new Set();
+	const kecIds = new Set();
+	for (const u of users) {
+		if (u?.desa_id) desaIds.add(Number(u.desa_id));
+		if (u?.kecamatan_id) kecIds.add(Number(u.kecamatan_id));
+	}
+	const [desas, kecamatans] = await Promise.all([
+		desaIds.size > 0 ? prisma.desas.findMany({ where: { id: { in: [...desaIds].map(BigInt) } }, select: { id: true, nama: true } }) : [],
+		kecIds.size > 0 ? prisma.kecamatans.findMany({ where: { id: { in: [...kecIds].map(BigInt) } }, select: { id: true, nama: true } }) : [],
+	]);
+	const desaMap = Object.fromEntries(desas.map(d => [Number(d.id), d.nama]));
+	const kecMap = Object.fromEntries(kecamatans.map(k => [Number(k.id), k.nama]));
+	for (const u of users) {
+		if (u?.desa_id) u.desas = { nama: desaMap[Number(u.desa_id)] || null };
+		if (u?.kecamatan_id) u.kecamatans = { nama: kecMap[Number(u.kecamatan_id)] || null };
+	}
 }
 
 function serializeUser(user) {
@@ -129,12 +152,8 @@ class MessagingController {
 			const conversations = await prisma.conversations.findMany({
 				where,
 				include: {
-					participant_one: {
-						select: { id: true, name: true, role: true, avatar: true, desa_id: true, kecamatan_id: true, dinas_id: true, last_active_at: true, desas: { select: { nama: true } }, kecamatans: { select: { nama: true } } }
-					},
-					participant_two: {
-						select: { id: true, name: true, role: true, avatar: true, desa_id: true, kecamatan_id: true, dinas_id: true, last_active_at: true, desas: { select: { nama: true } }, kecamatans: { select: { nama: true } } }
-					},
+					participant_one: { select: USER_SELECT },
+					participant_two: { select: USER_SELECT },
 					messages: {
 						orderBy: { created_at: 'desc' },
 						take: 1,
@@ -155,6 +174,10 @@ class MessagingController {
 				},
 				orderBy: { last_message_at: 'desc' },
 			});
+
+			// Enrich users with desa/kecamatan names
+			const allUsers = conversations.flatMap(c => [c.participant_one, c.participant_two].filter(Boolean));
+			await enrichUserNames(...allUsers);
 
 			const currentUserId = Number(userId);
 
@@ -196,7 +219,7 @@ class MessagingController {
 			// Get both users to determine conversation type
 			const [currentUser, targetUser] = await Promise.all([
 				prisma.users.findUnique({ where: { id: userId }, select: { id: true, role: true } }),
-				prisma.users.findUnique({ where: { id: targetId }, select: { id: true, name: true, role: true, avatar: true, desa_id: true, kecamatan_id: true, dinas_id: true, last_active_at: true, desas: { select: { nama: true } }, kecamatans: { select: { nama: true } } } }),
+				prisma.users.findUnique({ where: { id: targetId }, select: USER_SELECT }),
 			]);
 
 			if (!targetUser) {
@@ -216,12 +239,8 @@ class MessagingController {
 					type: convType,
 				},
 				include: {
-					participant_one: {
-						select: { id: true, name: true, role: true, avatar: true, desa_id: true, kecamatan_id: true, dinas_id: true, last_active_at: true, desas: { select: { nama: true } }, kecamatans: { select: { nama: true } } }
-					},
-					participant_two: {
-						select: { id: true, name: true, role: true, avatar: true, desa_id: true, kecamatan_id: true, dinas_id: true, last_active_at: true, desas: { select: { nama: true } }, kecamatans: { select: { nama: true } } }
-					},
+					participant_one: { select: USER_SELECT },
+					participant_two: { select: USER_SELECT },
 					messages: {
 						orderBy: { created_at: 'desc' },
 						take: 1,
@@ -245,12 +264,8 @@ class MessagingController {
 						participant_two_id: p2,
 					},
 					include: {
-						participant_one: {
-							select: { id: true, name: true, role: true, avatar: true, desa_id: true, kecamatan_id: true, dinas_id: true, last_active_at: true, desas: { select: { nama: true } }, kecamatans: { select: { nama: true } } }
-						},
-						participant_two: {
-							select: { id: true, name: true, role: true, avatar: true, desa_id: true, kecamatan_id: true, dinas_id: true, last_active_at: true, desas: { select: { nama: true } }, kecamatans: { select: { nama: true } } }
-						},
+						participant_one: { select: USER_SELECT },
+						participant_two: { select: USER_SELECT },
 						messages: {
 							orderBy: { created_at: 'desc' },
 							take: 1,
@@ -265,6 +280,9 @@ class MessagingController {
 					},
 				});
 			}
+
+			// Enrich user names
+			await enrichUserNames(conversation.participant_one, conversation.participant_two);
 
 			res.json({
 				success: true,
@@ -608,15 +626,13 @@ class MessagingController {
 
 			const contacts = await prisma.users.findMany({
 				where,
-				select: {
-					id: true, name: true, role: true, avatar: true,
-					desa_id: true, kecamatan_id: true, dinas_id: true,
-					desas: { select: { nama: true } },
-					kecamatans: { select: { nama: true } },
-				},
+				select: USER_SELECT,
 				orderBy: [{ role: 'asc' }, { name: 'asc' }],
 				take: 100,
 			});
+
+			// Enrich all contacts with desa/kecamatan names
+			await enrichUserNames(...contacts);
 
 			res.json({
 				success: true,
@@ -784,7 +800,7 @@ class MessagingController {
 
 			const [currentUser, targetUser] = await Promise.all([
 				prisma.users.findUnique({ where: { id: userId }, select: { id: true, role: true } }),
-				prisma.users.findUnique({ where: { id: targetId }, select: { id: true, name: true, role: true, avatar: true, desa_id: true, kecamatan_id: true, dinas_id: true, last_active_at: true, desas: { select: { nama: true } }, kecamatans: { select: { nama: true } } } }),
+				prisma.users.findUnique({ where: { id: targetId }, select: USER_SELECT }),
 			]);
 
 			if (!targetUser) {
@@ -794,13 +810,11 @@ class MessagingController {
 			const convType = resolveConversationType(currentUser.role, targetUser.role);
 			const [p1, p2] = userId < targetId ? [userId, targetId] : [targetId, userId];
 
-			const userSelect = { id: true, name: true, role: true, avatar: true, desa_id: true, kecamatan_id: true, dinas_id: true, last_active_at: true, desas: { select: { nama: true } }, kecamatans: { select: { nama: true } } };
-
 			let conversation = await prisma.conversations.findFirst({
 				where: { participant_one_id: p1, participant_two_id: p2, reference_type, reference_id: refId },
 				include: {
-					participant_one: { select: userSelect },
-					participant_two: { select: userSelect },
+					participant_one: { select: USER_SELECT },
+					participant_two: { select: USER_SELECT },
 					messages: { orderBy: { created_at: 'desc' }, take: 1, include: { sender: { select: { id: true, name: true, role: true, avatar: true } } } },
 					_count: { select: { messages: { where: { is_read: false, sender_id: { not: userId } } } } },
 				},
@@ -810,14 +824,16 @@ class MessagingController {
 				conversation = await prisma.conversations.create({
 					data: { type: convType, reference_type, reference_id: refId, participant_one_id: p1, participant_two_id: p2 },
 					include: {
-						participant_one: { select: userSelect },
-						participant_two: { select: userSelect },
+						participant_one: { select: USER_SELECT },
+						participant_two: { select: USER_SELECT },
 						messages: { orderBy: { created_at: 'desc' }, take: 1 },
 						_count: { select: { messages: { where: { is_read: false, sender_id: { not: userId } } } } },
 					},
 				});
 			}
 
+			// Enrich user names
+			await enrichUserNames(conversation.participant_one, conversation.participant_two);
 			conversation._reference_label = await buildReferenceLabel(reference_type, refId);
 
 			res.json({ success: true, data: serializeConversation(conversation, Number(userId)) });
@@ -846,13 +862,17 @@ class MessagingController {
 					],
 				},
 				include: {
-					participant_one: { select: { id: true, name: true, role: true, avatar: true, desa_id: true, kecamatan_id: true, dinas_id: true, last_active_at: true, desas: { select: { nama: true } }, kecamatans: { select: { nama: true } } } },
-					participant_two: { select: { id: true, name: true, role: true, avatar: true, desa_id: true, kecamatan_id: true, dinas_id: true, last_active_at: true, desas: { select: { nama: true } }, kecamatans: { select: { nama: true } } } },
+					participant_one: { select: USER_SELECT },
+					participant_two: { select: USER_SELECT },
 					messages: { orderBy: { created_at: 'desc' }, take: 1, include: { sender: { select: { id: true, name: true, role: true, avatar: true } } } },
 					_count: { select: { messages: { where: { is_read: false, sender_id: { not: userId } } } } },
 				},
 				orderBy: { last_message_at: 'desc' },
 			});
+
+			// Enrich all participant names
+			const allUsers = conversations.flatMap(c => [c.participant_one, c.participant_two]);
+			await enrichUserNames(...allUsers);
 
 			const currentUserId = Number(userId);
 			const results = [];
@@ -901,14 +921,14 @@ async function createVerificationChat(reviewerId, desaUserId, reviewerRole, desa
 			});
 		}
 
-		// Send system message with the revision notes
+		// Send revision notes as a text message from the reviewer
 		if (systemMessage) {
 			const msg = await prisma.messages.create({
 				data: {
 					conversation_id: conversation.id,
 					sender_id: rId,
 					content: systemMessage,
-					message_type: 'system',
+					message_type: 'text',
 					created_at: now,
 					updated_at: now,
 				},
