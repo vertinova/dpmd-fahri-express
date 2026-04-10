@@ -18,6 +18,8 @@ const REPOS = {
       '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npx prisma generate',
       '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npx prisma db push --accept-data-loss',
       '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/node /var/www/backend/database-express/auto-migrate.js',
+      '/bin/cp -f /var/www/backend/nginx-dpmdbogorkab.conf /etc/nginx/sites-available/dpmdbogorkab.id || true',
+      '/usr/sbin/nginx -t && /usr/sbin/nginx -s reload || true',
       '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 restart dpmd-api'
     ]
   },

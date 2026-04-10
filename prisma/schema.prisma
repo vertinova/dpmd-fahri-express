@@ -154,7 +154,7 @@ model bankeu_lpj {
   desas            desas               @relation(fields: [desa_id], references: [id], onDelete: Cascade, map: "fk_bankeu_lpj_desa")
   users            users               @relation(fields: [uploaded_by], references: [id], onDelete: Cascade, map: "fk_bankeu_lpj_user")
 
-  @@unique([desa_id, tahun_anggaran], map: "uk_bankeu_lpj_desa_tahun")
+  @@index([desa_id, tahun_anggaran], map: "idx_bankeu_lpj_desa_tahun")
   @@index([desa_id], map: "idx_bankeu_lpj_desa_id")
   @@index([tahun_anggaran], map: "idx_bankeu_lpj_tahun")
   @@index([status], map: "idx_bankeu_lpj_status")
@@ -1336,6 +1336,9 @@ model users {
   login_histories                                                login_histories[]
   surat_masuk                                                    surat_masuk[]
   pegawai                                                        pegawai?                    @relation(fields: [pegawai_id], references: [id_pegawai], onDelete: Cascade, onUpdate: NoAction, map: "users_pegawai_id_foreign")
+  conversations_as_one                                           conversations[]             @relation("conv_participant_one")
+  conversations_as_two                                           conversations[]             @relation("conv_participant_two")
+  messages_sent                                                  messages[]                  @relation("msg_sender")
 
   @@index([pegawai_id], map: "users_pegawai_id_index")
 }
@@ -1909,4 +1912,75 @@ enum video_meetings_status {
   active
   ended
   cancelled
+}
+
+// ============================================
+// MESSAGING SYSTEM
+// ============================================
+
+model conversations {
+  id                BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
+  type              conversations_type
+  reference_type    conversations_reference_type?
+  reference_id      BigInt?            @db.UnsignedBigInt
+  participant_one_id BigInt             @db.UnsignedBigInt
+  participant_two_id BigInt             @db.UnsignedBigInt
+  last_message_id   BigInt?            @db.UnsignedBigInt
+  last_message_at   DateTime?          @db.Timestamp(0)
+  created_at        DateTime           @default(now()) @db.Timestamp(0)
+  updated_at        DateTime           @default(now()) @db.Timestamp(0)
+
+  participant_one   users              @relation("conv_participant_one", fields: [participant_one_id], references: [id], onDelete: Cascade, map: "fk_conv_participant_one")
+  participant_two   users              @relation("conv_participant_two", fields: [participant_two_id], references: [id], onDelete: Cascade, map: "fk_conv_participant_two")
+  messages          messages[]
+
+  @@unique([participant_one_id, participant_two_id, reference_type, reference_id], map: "uk_conversation_context")
+  @@index([participant_one_id], map: "idx_conv_participant_one")
+  @@index([participant_two_id], map: "idx_conv_participant_two")
+  @@index([last_message_at], map: "idx_conv_last_message_at")
+  @@index([type], map: "idx_conv_type")
+  @@index([reference_type, reference_id], map: "idx_conv_reference")
+}
+
+model messages {
+  id                BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
+  conversation_id   BigInt             @db.UnsignedBigInt
+  sender_id         BigInt             @db.UnsignedBigInt
+  content           String             @db.Text
+  message_type      messages_message_type @default(text)
+  file_path         String?            @db.VarChar(500)
+  file_name         String?            @db.VarChar(255)
+  file_size         Int?               @db.UnsignedInt
+  is_read           Boolean            @default(false)
+  read_at           DateTime?          @db.Timestamp(0)
+  created_at        DateTime           @default(now()) @db.Timestamp(0)
+  updated_at        DateTime           @default(now()) @db.Timestamp(0)
+
+  conversation      conversations      @relation(fields: [conversation_id], references: [id], onDelete: Cascade, map: "fk_msg_conversation")
+  sender            users              @relation("msg_sender", fields: [sender_id], references: [id], onDelete: Cascade, map: "fk_msg_sender")
+
+  @@index([conversation_id], map: "idx_msg_conversation")
+  @@index([sender_id], map: "idx_msg_sender")
+  @@index([created_at], map: "idx_msg_created_at")
+  @@index([is_read], map: "idx_msg_is_read")
+}
+
+enum conversations_type {
+  dpmd_desa
+  dinas_desa
+  kecamatan_desa
+  dpmd_dinas
+  dpmd_kecamatan
+}
+
+enum conversations_reference_type {
+  bankeu_lpj
+  bankeu_proposal
+}
+
+enum messages_message_type {
+  text
+  file
+  image
+  system
 }

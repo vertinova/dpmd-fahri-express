@@ -391,7 +391,7 @@ const uploadBankeuLpj = multer({
   storage: storageBankeuLpj,
   fileFilter: pdfFilter,
   limits: {
-    fileSize: 30 * 1024 * 1024 // 30MB for LPJ
+    fileSize: 100 * 1024 * 1024 // 100MB for LPJ
   }
 });
 
@@ -518,6 +518,6 @@ module.exports = {
   uploadProfilDesa,
   uploadInformasi,
   bankeuProposal: uploadBankeuProposal.single('file'),
-  bankeuLpj: uploadBankeuLpj.single('file'),
+  bankeuLpj: uploadBankeuLpj.array('files', 10),
   contohProposalUpload: uploadContohProposal.single('file')
 };

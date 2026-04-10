@@ -27,18 +27,17 @@ class BankeuLpjController {
         });
       }
 
-      const lpj = await prisma.bankeu_lpj.findUnique({
+      const lpjList = await prisma.bankeu_lpj.findMany({
         where: {
-          desa_id_tahun_anggaran: {
-            desa_id: user.desa_id,
-            tahun_anggaran: tahun
-          }
-        }
+          desa_id: user.desa_id,
+          tahun_anggaran: tahun
+        },
+        orderBy: { created_at: 'desc' }
       });
 
       res.json({
         success: true,
-        data: lpj
+        data: lpjList
       });
     } catch (error) {
       logger.error('Error fetching LPJ:', error);
@@ -51,7 +50,7 @@ class BankeuLpjController {
   }
 
   /**
-   * Upload or replace LPJ file
+   * Upload LPJ file(s) - supports multiple files
    * POST /api/desa/bankeu-lpj/upload
    */
   async uploadLpj(req, res) {
@@ -60,10 +59,12 @@ class BankeuLpjController {
       const tahun = parseInt(req.body.tahun_anggaran) || 2025;
       const keterangan = req.body.keterangan || null;
 
-      if (!req.file) {
+      const files = req.files;
+      if (!files || files.length === 0) {
         return res.status(400).json({
           success: false,
-          message: 'File LPJ harus diupload'
+          message: 'File LPJ harus diupload. Pilih minimal satu file PDF.',
+          error_code: 'NO_FILE'
         });
       }
 
@@ -74,86 +75,47 @@ class BankeuLpjController {
       });
 
       if (!user || !user.desa_id) {
-        // Remove uploaded file
-        if (req.file?.path) fs.unlinkSync(req.file.path);
+        // Remove uploaded files
+        files.forEach(f => { try { if (f.path) fs.unlinkSync(f.path); } catch (e) {} });
         return res.status(403).json({
           success: false,
           message: 'User tidak terkait dengan desa manapun'
         });
       }
 
-      // Check if LPJ already exists for this desa+tahun
-      const existing = await prisma.bankeu_lpj.findUnique({
-        where: {
-          desa_id_tahun_anggaran: {
-            desa_id: user.desa_id,
-            tahun_anggaran: tahun
-          }
-        }
-      });
-
-      if (existing) {
-        // Delete old file
-        const oldFilePath = path.join(__dirname, '../../storage/uploads/bankeu_lpj', existing.file_path);
-        if (fs.existsSync(oldFilePath)) {
-          fs.unlinkSync(oldFilePath);
-        }
-
-        // Update existing record (reset verification status on re-upload)
-        const updated = await prisma.bankeu_lpj.update({
-          where: { id: existing.id },
+      // Create records for each uploaded file
+      const createdLpjs = [];
+      for (const file of files) {
+        const lpj = await prisma.bankeu_lpj.create({
           data: {
-            nama_file: req.file.originalname,
-            file_path: req.file.filename,
-            file_size: req.file.size,
+            desa_id: user.desa_id,
+            tahun_anggaran: tahun,
+            nama_file: file.originalname,
+            file_path: file.filename,
+            file_size: file.size,
             keterangan,
-            uploaded_by: BigInt(userId),
-            status: 'pending',
-            dpmd_catatan: null,
-            dpmd_verified_by: null,
-            dpmd_verified_at: null,
-            updated_at: new Date()
+            uploaded_by: BigInt(userId)
           }
         });
-
-        logger.info(`LPJ Bankeu updated: desa_id=${user.desa_id}, tahun=${tahun}, file=${req.file.filename}`);
-
-        return res.json({
-          success: true,
-          message: 'File LPJ berhasil diperbarui',
-          data: updated
-        });
+        createdLpjs.push(lpj);
       }
 
-      // Create new record
-      const lpj = await prisma.bankeu_lpj.create({
-        data: {
-          desa_id: user.desa_id,
-          tahun_anggaran: tahun,
-          nama_file: req.file.originalname,
-          file_path: req.file.filename,
-          file_size: req.file.size,
-          keterangan,
-          uploaded_by: BigInt(userId)
-        }
-      });
-
-      logger.info(`LPJ Bankeu created: desa_id=${user.desa_id}, tahun=${tahun}, file=${req.file.filename}`);
+      logger.info(`LPJ Bankeu uploaded: desa_id=${user.desa_id}, tahun=${tahun}, files=${files.length}`);
 
       res.status(201).json({
         success: true,
-        message: 'File LPJ berhasil diupload',
-        data: lpj
+        message: `${files.length} file LPJ berhasil diupload`,
+        data: createdLpjs
       });
     } catch (error) {
-      // Remove uploaded file on error
-      if (req.file?.path) {
-        try { fs.unlinkSync(req.file.path); } catch (e) {}
+      // Remove uploaded files on error
+      if (req.files) {
+        req.files.forEach(f => { try { if (f.path) fs.unlinkSync(f.path); } catch (e) {} });
       }
       logger.error('Error uploading LPJ:', error);
       res.status(500).json({
         success: false,
-        message: 'Gagal mengupload LPJ',
+        message: 'Gagal mengupload LPJ. Silakan coba lagi.',
         error: error.message
       });
     }
@@ -239,7 +201,7 @@ class BankeuLpjController {
     try {
       const tahun = parseInt(req.query.tahun) || 2025;
 
-      // Get all desa with their kecamatan, and left join LPJ data
+      // Get all desa with their kecamatan, and left join LPJ data (multiple per desa)
       const [rows] = await sequelize.query(`
         SELECT 
           d.id as desa_id,
@@ -267,13 +229,14 @@ class BankeuLpjController {
         LEFT JOIN users u ON l.uploaded_by = u.id
         LEFT JOIN users v ON l.dpmd_verified_by = v.id
         WHERE d.status_pemerintahan = 'desa'
-        ORDER BY k.nama, d.nama
+        ORDER BY k.nama, d.nama, l.created_at DESC
       `, {
         replacements: { tahun }
       });
 
-      // Group by kecamatan
+      // Group by kecamatan, then by desa (handle multiple LPJ per desa)
       const grouped = {};
+      const desaTracker = {}; // track unique desa
       let totalDesa = 0;
       let totalUploaded = 0;
 
@@ -294,12 +257,28 @@ class BankeuLpjController {
           };
         }
 
-        const desaItem = {
-          desa_id: row.desa_id,
-          desa_nama: row.desa_nama,
-          desa_kode: row.desa_kode,
-          has_lpj: !!row.lpj_id,
-          lpj: row.lpj_id ? {
+        const desaKey = `${row.kecamatan_id}_${row.desa_id}`;
+        if (!desaTracker[desaKey]) {
+          desaTracker[desaKey] = {
+            desa_id: row.desa_id,
+            desa_nama: row.desa_nama,
+            desa_kode: row.desa_kode,
+            has_lpj: false,
+            lpj_files: []
+          };
+          grouped[row.kecamatan_id].desa_list.push(desaTracker[desaKey]);
+          grouped[row.kecamatan_id].total_desa++;
+          totalDesa++;
+        }
+
+        if (row.lpj_id) {
+          if (!desaTracker[desaKey].has_lpj) {
+            desaTracker[desaKey].has_lpj = true;
+            grouped[row.kecamatan_id].uploaded_count++;
+            totalUploaded++;
+          }
+
+          const lpjItem = {
             id: row.lpj_id,
             nama_file: row.nama_file,
             file_path: row.file_path,
@@ -314,16 +293,9 @@ class BankeuLpjController {
             uploaded_by_name: row.uploaded_by_name,
             created_at: row.lpj_created_at,
             updated_at: row.lpj_updated_at
-          } : null
-        };
+          };
+          desaTracker[desaKey].lpj_files.push(lpjItem);
 
-        grouped[row.kecamatan_id].desa_list.push(desaItem);
-        grouped[row.kecamatan_id].total_desa++;
-        totalDesa++;
-
-        if (row.lpj_id) {
-          grouped[row.kecamatan_id].uploaded_count++;
-          totalUploaded++;
           if (row.lpj_status === 'approved') totalApproved++;
           else if (row.lpj_status === 'rejected') totalRejected++;
           else if (row.lpj_status === 'revision') totalRevision++;
@@ -407,6 +379,24 @@ class BankeuLpjController {
         }
       });
 
+      // Auto-create chat conversation when revision is requested
+      if (action === 'revision') {
+        try {
+          const { createVerificationChat } = require('./messaging.controller');
+          await createVerificationChat(
+            userId,                          // reviewer (DPMD staff)
+            lpj.uploaded_by,                 // desa user who uploaded
+            req.user.role || 'pegawai',      // reviewer role
+            'desa',                          // desa role
+            'bankeu_lpj',                    // reference type
+            lpjId,                           // reference id
+            `📋 Revisi LPJ Bankeu - ${lpj.desas?.nama || 'Desa'}\n\nCatatan: ${catatan?.trim()}`
+          );
+        } catch (chatErr) {
+          logger.error('Failed to create verification chat:', chatErr.message);
+        }
+      }
+
       const actionLabels = { approved: 'disetujui', rejected: 'ditolak', revision: 'perlu revisi' };
       logger.info(`LPJ Bankeu verified: id=${lpjId}, desa=${lpj.desas?.nama}, action=${action}, by=${userId}`);
 
@@ -420,6 +410,54 @@ class BankeuLpjController {
       res.status(500).json({
         success: false,
         message: 'Gagal memverifikasi LPJ',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * DPMD/Admin: Delete LPJ file (admin bidang SPKED)
+   * DELETE /api/dpmd/bankeu-lpj/:id
+   */
+  async adminDeleteLpj(req, res) {
+    try {
+      const lpjId = BigInt(req.params.id);
+      const userId = req.user.id;
+
+      const lpj = await prisma.bankeu_lpj.findUnique({
+        where: { id: lpjId },
+        include: { desas: { select: { nama: true } } }
+      });
+
+      if (!lpj) {
+        return res.status(404).json({
+          success: false,
+          message: 'Data LPJ tidak ditemukan'
+        });
+      }
+
+      // Delete physical file
+      const filePath = path.join(__dirname, '../../storage/uploads/bankeu_lpj', lpj.file_path);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+
+      // Delete record
+      await prisma.bankeu_lpj.delete({
+        where: { id: lpjId }
+      });
+
+      logger.info(`LPJ Bankeu admin-deleted: id=${lpjId}, desa=${lpj.desas?.nama}, by=${userId}`);
+
+      res.json({
+        success: true,
+        message: `LPJ Desa ${lpj.desas?.nama || ''} berhasil dihapus`
+      });
+    } catch (error) {
+      logger.error('Error admin deleting LPJ:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Gagal menghapus LPJ',
         error: error.message
       });
     }

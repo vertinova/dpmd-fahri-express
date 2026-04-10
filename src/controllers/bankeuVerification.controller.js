@@ -219,6 +219,26 @@ class BankeuVerificationController {
 
         logger.info(`✅ Proposal ${id} dikembalikan ke Desa dengan status ${action}`);
 
+        // Auto-create contextual chat when revision is requested
+        if (action === 'revision' && proposal.created_by) {
+          try {
+            const { createVerificationChat } = require('./messaging.controller');
+            const systemMsg = `📋 Revisi Proposal Bankeu #${id}\n\n${catatan ? `Catatan: ${catatan}` : 'Silakan perbaiki proposal sesuai arahan.'}`;
+            await createVerificationChat(
+              userId,
+              Number(proposal.created_by),
+              req.user.role,
+              'desa',
+              'bankeu_proposal',
+              parseInt(id),
+              systemMsg
+            );
+            logger.info(`[Kecamatan] Chat created for proposal #${id} revision`);
+          } catch (chatErr) {
+            console.error('[Kecamatan] Failed to create chat:', chatErr.message);
+          }
+        }
+
         // Activity Log - deduplicate: update existing same-action log instead of creating new
         const kecLogAction = action === 'rejected' ? 'reject' : 'revision';
         try {

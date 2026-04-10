@@ -708,6 +708,26 @@ const submitVerification = async (req, res) => {
       message = 'Verifikasi perlu revisi. Proposal dikembalikan ke Desa.';
     }
 
+    // Auto-create contextual chat when revision is requested
+    if (action === 'revision' && proposal.created_by) {
+      try {
+        const { createVerificationChat } = require('./messaging.controller');
+        const systemMsg = `📋 Revisi Proposal Bankeu #${proposalId}\n\n${catatan_umum ? `Catatan: ${catatan_umum}` : 'Silakan perbaiki proposal sesuai arahan.'}`;
+        await createVerificationChat(
+          parseInt(user_id),
+          Number(proposal.created_by),
+          role,
+          'desa',
+          'bankeu_proposal',
+          parseInt(proposalId),
+          systemMsg
+        );
+        console.log(`[Dinas Verification] Chat created for proposal #${proposalId} revision`);
+      } catch (chatErr) {
+        console.error('[Dinas Verification] Failed to create chat:', chatErr.message);
+      }
+    }
+
     // Activity Log - deduplicate: if same user did same action on same proposal, update instead of creating new
     const actionMap = { approved: 'approve', rejected: 'reject', revision: 'revision' };
     const logAction = actionMap[action] || action;

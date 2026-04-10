@@ -14,6 +14,9 @@ let io;
 // Chat rate limiter: Map<socketId, { count, resetTime }>
 const chatRateLimits = new Map();
 
+// Online users tracker: Map<userId, Set<socketId>>
+const onlineUsers = new Map();
+
 /**
  * Safe callback helper - prevents crash if callback is not a function
  */
@@ -121,6 +124,52 @@ function initSocketServer(httpServer) {
   // Handle connections  // Handle connections
   io.on('connection', (socket) => {
     console.log(`[Socket] User connected: ${socket.user.name} (${socket.id})`);
+
+    // Auto-join user's personal room for messaging
+    if (!socket.user.isGuest && socket.user.id) {
+      const userRoom = `user_${socket.user.id}`;
+      socket.join(userRoom);
+      console.log(`[Socket] ${socket.user.name} joined personal room ${userRoom}`);
+
+      // Track online status
+      const uid = socket.user.id.toString();
+      if (!onlineUsers.has(uid)) onlineUsers.set(uid, new Set());
+      onlineUsers.get(uid).add(socket.id);
+      // Broadcast online status
+      socket.broadcast.emit('user_online', { user_id: uid });
+
+      // Update last_active_at in DB (fire & forget)
+      prisma.users.update({
+        where: { id: BigInt(uid) },
+        data: { last_active_at: new Date() }
+      }).catch(() => {});
+    }
+
+    // Get online users list
+    socket.on('get_online_users', (callback) => {
+      const ids = Array.from(onlineUsers.keys());
+      if (typeof callback === 'function') callback(ids);
+    });
+
+    // Typing indicator for messaging
+    socket.on('typing', (data) => {
+      if (data.conversation_id && data.receiver_id) {
+        io.to(`user_${data.receiver_id}`).emit('typing', {
+          conversation_id: data.conversation_id,
+          user_id: socket.user.id,
+          user_name: socket.user.name,
+        });
+      }
+    });
+
+    socket.on('stop_typing', (data) => {
+      if (data.conversation_id && data.receiver_id) {
+        io.to(`user_${data.receiver_id}`).emit('stop_typing', {
+          conversation_id: data.conversation_id,
+          user_id: socket.user.id,
+        });
+      }
+    });
 
     // Join meeting room
     socket.on('join-room', async (data, callback) => {
@@ -621,6 +670,25 @@ function initSocketServer(httpServer) {
     socket.on('disconnect', async () => {
       console.log(`[Socket] User disconnected: ${socket.user.name}`);
       chatRateLimits.delete(socket.id);
+
+      // Update online status tracking
+      if (!socket.user.isGuest && socket.user.id) {
+        const uid = socket.user.id.toString();
+        const sockets = onlineUsers.get(uid);
+        if (sockets) {
+          sockets.delete(socket.id);
+          if (sockets.size === 0) {
+            onlineUsers.delete(uid);
+            // User is fully offline - broadcast & update last_active_at
+            socket.broadcast.emit('user_offline', { user_id: uid, last_active_at: new Date().toISOString() });
+            prisma.users.update({
+              where: { id: BigInt(uid) },
+              data: { last_active_at: new Date() }
+            }).catch(() => {});
+          }
+        }
+      }
+
       await handlePeerLeave(socket);
     });
   });

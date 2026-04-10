@@ -337,6 +337,9 @@ app.use('/api/video-meetings', require('./routes/videoMeeting.routes'));
 // Chatbot Smart Search routes
 app.use('/api/chatbot', chatbotRoutes);
 
+// Messaging / Chat routes
+app.use('/api/messaging', require('./routes/messaging.routes'));
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({

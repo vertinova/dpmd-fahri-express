@@ -50,9 +50,34 @@ const errorHandler = (err, req, res, next) => {
 
   // Multer errors
   if (err.code === 'LIMIT_FILE_SIZE') {
+    return res.status(413).json({
+      success: false,
+      message: 'Ukuran file terlalu besar. Silakan kompres file terlebih dahulu.',
+      error_code: 'FILE_TOO_LARGE'
+    });
+  }
+
+  if (err.code === 'LIMIT_FILE_COUNT') {
     return res.status(400).json({
       success: false,
-      message: 'File too large (max 5MB)'
+      message: 'Jumlah file melebihi batas maksimal yang diperbolehkan.',
+      error_code: 'TOO_MANY_FILES'
+    });
+  }
+
+  if (err.code === 'LIMIT_UNEXPECTED_FILE') {
+    return res.status(400).json({
+      success: false,
+      message: 'Field upload file tidak sesuai.',
+      error_code: 'UNEXPECTED_FIELD'
+    });
+  }
+
+  if (err.message && err.message.includes('Hanya file PDF')) {
+    return res.status(400).json({
+      success: false,
+      message: 'Format file tidak didukung. Hanya file PDF yang diperbolehkan.',
+      error_code: 'INVALID_FILE_TYPE'
     });
   }
 

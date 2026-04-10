@@ -13,4 +13,7 @@ router.get('/', bankeuLpjController.getAllLpj);
 // Verify LPJ (approve/reject/revision)
 router.put('/:id/verify', bankeuLpjController.verifyLpj);
 
+// Admin delete LPJ
+router.delete('/:id', bankeuLpjController.adminDeleteLpj);
+
 module.exports = router;
