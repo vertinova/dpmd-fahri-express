@@ -1294,11 +1294,34 @@ class SummaryController {
       const verificationScope = ['verified', 'unverified', 'ditolak', 'all'].includes(requestedScope)
         ? requestedScope
         : 'verified';
+      const typeAliases = {
+        rw: ['rw', 'rws'],
+        rws: ['rw', 'rws'],
+        rt: ['rt', 'rts'],
+        rts: ['rt', 'rts'],
+        posyandu: ['posyandu', 'posyandus'],
+        posyandus: ['posyandu', 'posyandus'],
+        karang_taruna: ['karang_taruna', 'karang_tarunas'],
+        karang_tarunas: ['karang_taruna', 'karang_tarunas'],
+        lpm: ['lpm', 'lpms'],
+        lpms: ['lpm', 'lpms'],
+        pkk: ['pkk', 'pkks'],
+        pkks: ['pkk', 'pkks'],
+        satlinmas: ['satlinmas'],
+        'lembaga-lainnya': ['lembaga-lainnya', 'lembaga_lainnyas'],
+        lembaga_lainnyas: ['lembaga-lainnya', 'lembaga_lainnyas'],
+      };
 
       // Build where clause
       const where = { status_jabatan: 'aktif' };
       if (desa_id) where.desa_id = BigInt(desa_id);
-      if (pengurusable_type) where.pengurusable_type = pengurusable_type;
+      if (pengurusable_type) {
+        const normalizedType = String(pengurusable_type).trim();
+        const allowedTypes = typeAliases[normalizedType] || [normalizedType];
+        where.pengurusable_type = allowedTypes.length === 1
+          ? allowedTypes[0]
+          : { in: allowedTypes };
+      }
       if (search) {
         where.OR = [
           { nama_lengkap: { contains: search } },
