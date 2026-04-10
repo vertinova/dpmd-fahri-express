@@ -186,6 +186,10 @@ class RWController {
 
       const { nomor, alamat, produk_hukum_id } = req.body;
 
+      if (!produk_hukum_id) {
+        return res.status(400).json({ success: false, message: 'Produk hukum wajib dipilih untuk membuat RW' });
+      }
+
       // Check if RW with same nomor already exists
       const existing = await prisma.rws.findFirst({
         where: { nomor: String(nomor), desa_id: desaId }

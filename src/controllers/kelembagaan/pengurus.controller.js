@@ -194,6 +194,13 @@ class PengurusController {
         });
       }
 
+      if (!produk_hukum_id) {
+        return res.status(400).json({ 
+          success: false, 
+          message: 'Produk hukum (SK) wajib dipilih untuk menambah pengurus' 
+        });
+      }
+
       // Handle avatar upload if exists
       const avatarPath = req.file ? `uploads/pengurus_files/${req.file.filename}` : null;
 

@@ -94,6 +94,10 @@ function createSingletonController(type, tableName, displayName) {
 
         const { nama, alamat, produk_hukum_id } = req.body;
 
+        if (!produk_hukum_id) {
+          return res.status(400).json({ success: false, message: `Produk hukum wajib dipilih untuk membuat ${displayName}` });
+        }
+
         // Check if already exists (singleton)
         const existing = await prisma[tableName].findFirst({
           where: { desa_id: desaId }

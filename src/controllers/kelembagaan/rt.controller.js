@@ -124,6 +124,10 @@ class RTController {
 
       const { nomor, rw_id, alamat, produk_hukum_id, jumlah_jiwa, jumlah_kk } = req.body;
 
+      if (!produk_hukum_id) {
+        return res.status(400).json({ success: false, message: 'Produk hukum wajib dipilih untuk membuat RT' });
+      }
+
       // Validate RW exists and belongs to same desa
       const rw = await prisma.rws.findFirst({
         where: { id: String(rw_id), desa_id: desaId }

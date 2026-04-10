@@ -118,6 +118,10 @@ class LembagaLainnyaController {
         return res.status(400).json({ success: false, message: 'Nama lembaga wajib diisi' });
       }
 
+      if (!produk_hukum_id) {
+        return res.status(400).json({ success: false, message: 'Produk hukum wajib dipilih untuk membuat lembaga' });
+      }
+
       const data = {
         id: uuidv4(),
         nama: toUpper(String(nama).trim()),

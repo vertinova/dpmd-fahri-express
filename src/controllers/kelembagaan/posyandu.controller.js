@@ -114,6 +114,10 @@ class PosyanduController {
 
       const { nama, alamat, produk_hukum_id } = req.body;
 
+      if (!produk_hukum_id) {
+        return res.status(400).json({ success: false, message: 'Produk hukum wajib dipilih untuk membuat Posyandu' });
+      }
+
       // Check if Posyandu with same nama already exists
       const existing = await prisma.posyandus.findFirst({
         where: { nama: String(nama), desa_id: desaId }
