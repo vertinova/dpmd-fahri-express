@@ -207,11 +207,27 @@ app.get('/storage/uploads/bankeu/resolve/:filename', (req, res) => {
   }
 });
 
-// Serve bankeu LPJ files
+// Serve bankeu LPJ files (supports nested kecamatan/desa folder structure)
+app.get('/storage/uploads/bankeu_lpj/:kecamatanId/:desaId/:filename', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+  const kecamatanId = path.basename(req.params.kecamatanId);
+  const desaId = path.basename(req.params.desaId);
+  const filename = path.basename(req.params.filename);
+  const filePath = path.join(__dirname, '../storage/uploads/bankeu_lpj', kecamatanId, desaId, filename);
+  
+  if (fs.existsSync(filePath)) {
+    return res.sendFile(filePath);
+  } else {
+    return res.status(404).json({ success: false, message: 'File tidak ditemukan' });
+  }
+});
+
+// Backward compatibility: serve old flat bankeu LPJ files
 app.get('/storage/uploads/bankeu_lpj/:filename', (req, res) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Cross-Origin-Resource-Policy', 'cross-origin');
-  const filename = path.basename(req.params.filename); // sanitize
+  const filename = path.basename(req.params.filename);
   const filePath = path.join(__dirname, '../storage/uploads/bankeu_lpj', filename);
   
   if (fs.existsSync(filePath)) {

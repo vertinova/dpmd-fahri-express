@@ -367,10 +367,10 @@ const uploadProfilDesa = multer({
   }
 });
 
-// Storage configuration for BANKEU LPJ (PDF only)
+// Storage configuration for BANKEU LPJ (PDF only) - uploads to temp, moved to kecamatan/desa folder in controller
 const storageBankeuLpj = multer.diskStorage({
   destination: function (req, file, cb) {
-    const dir = 'storage/uploads/bankeu_lpj';
+    const dir = 'storage/uploads/bankeu_lpj/temp';
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }

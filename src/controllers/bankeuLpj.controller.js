@@ -68,7 +68,7 @@ class BankeuLpjController {
         });
       }
 
-      // Get desa_id from user
+      // Get desa_id and kecamatan_id from user
       const user = await prisma.users.findUnique({
         where: { id: BigInt(userId) },
         select: { desa_id: true }
@@ -83,15 +83,41 @@ class BankeuLpjController {
         });
       }
 
-      // Create records for each uploaded file
+      // Get kecamatan_id from desa
+      const desa = await prisma.desas.findUnique({
+        where: { id: user.desa_id },
+        select: { kecamatan_id: true }
+      });
+
+      if (!desa || !desa.kecamatan_id) {
+        files.forEach(f => { try { if (f.path) fs.unlinkSync(f.path); } catch (e) {} });
+        return res.status(403).json({
+          success: false,
+          message: 'Desa tidak terkait dengan kecamatan manapun'
+        });
+      }
+
+      // Create target directory: bankeu_lpj/{kecamatan_id}/{desa_id}/
+      const targetDir = path.join(__dirname, '../../storage/uploads/bankeu_lpj', String(desa.kecamatan_id), String(user.desa_id));
+      if (!fs.existsSync(targetDir)) {
+        fs.mkdirSync(targetDir, { recursive: true });
+      }
+
+      // Move files from temp to target directory and create records
       const createdLpjs = [];
       for (const file of files) {
+        const targetPath = path.join(targetDir, file.filename);
+        fs.renameSync(file.path, targetPath);
+
+        // Store relative path: {kecamatan_id}/{desa_id}/{filename}
+        const relativePath = `${desa.kecamatan_id}/${user.desa_id}/${file.filename}`;
+
         const lpj = await prisma.bankeu_lpj.create({
           data: {
             desa_id: user.desa_id,
             tahun_anggaran: tahun,
             nama_file: file.originalname,
-            file_path: file.filename,
+            file_path: relativePath,
             file_size: file.size,
             keterangan,
             uploaded_by: BigInt(userId)
@@ -100,7 +126,7 @@ class BankeuLpjController {
         createdLpjs.push(lpj);
       }
 
-      logger.info(`LPJ Bankeu uploaded: desa_id=${user.desa_id}, tahun=${tahun}, files=${files.length}`);
+      logger.info(`LPJ Bankeu uploaded: desa_id=${user.desa_id}, kecamatan_id=${desa.kecamatan_id}, tahun=${tahun}, files=${files.length}`);
 
       res.status(201).json({
         success: true,
