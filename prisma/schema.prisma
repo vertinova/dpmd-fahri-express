@@ -1971,6 +1971,7 @@ enum conversations_type {
   kecamatan_desa
   dpmd_dinas
   dpmd_kecamatan
+  dpmd_internal
 }
 
 enum conversations_reference_type {

@@ -28,8 +28,9 @@ function resolveConversationType(senderRole, receiverRole) {
 	if ((senderIsKecamatan && receiverIsDesa) || (senderIsDesa && receiverIsKecamatan)) return 'kecamatan_desa';
 	if ((senderIsDpmd && receiverIsDinas) || (senderIsDinas && receiverIsDpmd)) return 'dpmd_dinas';
 	if ((senderIsDpmd && receiverIsKecamatan) || (senderIsKecamatan && receiverIsDpmd)) return 'dpmd_kecamatan';
+	if (senderIsDpmd && receiverIsDpmd) return 'dpmd_internal';
 
-	// Same group chat (dpmd internal, etc) - default to dpmd_desa
+	// Fallback
 	return 'dpmd_desa';
 }
 
@@ -585,8 +586,8 @@ class MessagingController {
 			// Determine which roles this user can chat with
 			let allowedRoles = [];
 			if (DPMD_ROLES.includes(currentUser.role)) {
-				// DPMD staff can chat with desa, kecamatan, and dinas
-				allowedRoles = [...DESA_ROLES, ...KECAMATAN_ROLES, ...DINAS_ROLES];
+				// DPMD staff can chat with other DPMD staff, desa, kecamatan, and dinas
+				allowedRoles = [...DPMD_ROLES, ...DESA_ROLES, ...KECAMATAN_ROLES, ...DINAS_ROLES];
 			} else if (DESA_ROLES.includes(currentUser.role)) {
 				// Desa can chat with DPMD, their kecamatan, and dinas
 				allowedRoles = [...DPMD_ROLES, ...KECAMATAN_ROLES, ...DINAS_ROLES];
