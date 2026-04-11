@@ -432,7 +432,7 @@ const uploadBankeuProposal = multer({
   storage: storageBankeuProposal,
   fileFilter: bankeuFileFilter,
   limits: {
-    fileSize: 10 * 1024 * 1024 // 10MB for proposals
+    fileSize: 100 * 1024 * 1024 // 100MB for proposals
   }
 });
 
