@@ -90,9 +90,9 @@ const chatbotRoutes = require('./routes/chatbot.routes');
 
 const app = express();
 
-// Trust proxy for Nginx reverse proxy (fixes X-Forwarded-For header issues)
-// Use 1 for single reverse proxy (Nginx), not true to avoid rate-limit bypass
-app.set('trust proxy', 1);
+// Trust proxy for reverse proxy chain (OpenResty/CDN -> Nginx -> Express)
+// Use 2 for two reverse proxies to get real client IP for rate limiting
+app.set('trust proxy', 2);
 
 // Security middleware - Configure helmet to allow PDF embedding via object tag
 app.use(helmet({
