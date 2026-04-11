@@ -30,9 +30,23 @@ function safeCallback(callback, data) {
  * Initialize Socket.io server
  */
 function initSocketServer(httpServer) {
+  // Use same CORS origins as Express (from CORS_ORIGIN env var)
+  const allowedOrigins = process.env.CORS_ORIGIN
+    ? process.env.CORS_ORIGIN.split(',').map(o => o.trim())
+    : [
+        'http://localhost:5173',
+        'http://localhost:5174',
+        'http://127.0.0.1:5173',
+        'http://127.0.0.1:5174',
+        'https://dpmdbogorkab.id',
+        'http://dpmdbogorkab.id',
+        'https://dpmd.bogorkab.go.id',
+        'http://dpmd.bogorkab.go.id'
+      ];
+
   io = new Server(httpServer, {
     cors: {
-      origin: process.env.FRONTEND_URL || 'http://localhost:5173',
+      origin: allowedOrigins,
       methods: ['GET', 'POST'],
       credentials: true
     },
