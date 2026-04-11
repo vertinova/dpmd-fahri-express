@@ -68,6 +68,9 @@ router.get('/contacts', auth, (req, res) => messagingController.getContacts(req,
 // Get unread message count
 router.get('/unread-count', auth, (req, res) => messagingController.getUnreadCount(req, res));
 
+// Delete a conversation and all its messages
+router.delete('/conversations/:id', auth, (req, res) => messagingController.deleteConversation(req, res));
+
 // Delete a message (own messages only)
 router.delete('/messages/:id', auth, (req, res) => messagingController.deleteMessage(req, res));
 

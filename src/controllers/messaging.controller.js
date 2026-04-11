@@ -719,6 +719,68 @@ class MessagingController {
 	}
 
 	/**
+	 * DELETE /api/messaging/conversations/:id
+	 * Delete a conversation and all its messages (for current user)
+	 */
+	async deleteConversation(req, res) {
+		try {
+			const userId = BigInt(req.user.id);
+			const conversationId = BigInt(req.params.id);
+
+			const conversation = await prisma.conversations.findFirst({
+				where: {
+					id: conversationId,
+					OR: [
+						{ participant_one_id: userId },
+						{ participant_two_id: userId },
+					],
+				},
+			});
+
+			if (!conversation) {
+				return res.status(404).json({ success: false, message: 'Percakapan tidak ditemukan' });
+			}
+
+			// Delete all messages with files
+			const messagesWithFiles = await prisma.messages.findMany({
+				where: { conversation_id: conversationId, file_path: { not: null } },
+				select: { file_path: true },
+			});
+			for (const msg of messagesWithFiles) {
+				if (msg.file_path) {
+					const fullPath = path.resolve(msg.file_path);
+					if (fs.existsSync(fullPath)) {
+						try { fs.unlinkSync(fullPath); } catch {}
+					}
+				}
+			}
+
+			// Delete messages then conversation
+			await prisma.messages.deleteMany({ where: { conversation_id: conversationId } });
+			await prisma.conversations.delete({ where: { id: conversationId } });
+
+			// Notify other user
+			const io = getIO();
+			if (io) {
+				const otherUserId = Number(conversation.participant_one_id) === Number(userId)
+					? Number(conversation.participant_two_id)
+					: Number(conversation.participant_one_id);
+				io.to(`user_${otherUserId}`).emit('conversation_deleted', {
+					conversation_id: Number(conversationId),
+				});
+				io.to(`user_${Number(userId)}`).emit('conversation_deleted', {
+					conversation_id: Number(conversationId),
+				});
+			}
+
+			res.json({ success: true, message: 'Percakapan berhasil dihapus' });
+		} catch (error) {
+			console.error('Error deleting conversation:', error);
+			res.status(500).json({ success: false, message: 'Gagal menghapus percakapan', error: error.message });
+		}
+	}
+
+	/**
 	 * DELETE /api/messaging/messages/:id
 	 * Delete a message (only own messages)
 	 */
