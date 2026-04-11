@@ -16,18 +16,18 @@ const copyFileToReference = async (fileName, sourceDir = 'bankeu', destDir = 'ba
       throw new Error('Filename is required');
     }
 
-    // Build absolute paths
+    // Build absolute paths (fileName may contain nested dirs like "17/182/file.pdf")
     const storageRoot = path.join(__dirname, '../../storage/uploads');
     const sourcePath = path.join(storageRoot, sourceDir, fileName);
-    const destDirPath = path.join(storageRoot, destDir);
-    const destPath = path.join(destDirPath, fileName);
+    const destPath = path.join(storageRoot, destDir, fileName);
+    const destDirPath = path.dirname(destPath);
 
     // Check if source file exists
     if (!fs.existsSync(sourcePath)) {
       throw new Error(`Source file not found: ${sourcePath}`);
     }
 
-    // Create destination directory if not exists
+    // Create destination directory (including nested subdirs) if not exists
     if (!fs.existsSync(destDirPath)) {
       fs.mkdirSync(destDirPath, { recursive: true });
     }
