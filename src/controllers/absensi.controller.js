@@ -1,6 +1,7 @@
 const prisma = require('../config/prisma');
 const path = require('path');
 const fs = require('fs');
+const PushNotificationService = require('../services/pushNotificationService');
 
 // Koordinat kantor DPMD Bogor
 const KANTOR_LAT = -6.47553948391432;
@@ -14,6 +15,9 @@ const ABSENSI_REQUIRED_STATUS = [
   'Tenaga_Keamanan',
   'Tenaga_Kebersihan',
 ];
+
+// Status kepegawaian yang TIDAK dihitung terlambat
+const NO_TELAT_STATUS = ['Tenaga_Keamanan', 'Tenaga_Kebersihan'];
 
 // Hari Libur Nasional Indonesia 2026 (format: MM-DD)
 const HOLIDAYS_2026 = {
@@ -158,13 +162,109 @@ function hitungTelatMenit(jamMasukRecord, jamMasukSetting) {
 /**
  * Enrich records array with telat_masuk_menit field
  * Only records with jam_masuk get telat calculation
+ * Tenaga_Keamanan & Tenaga_Kebersihan tidak dihitung terlambat
  */
 function enrichRecordsWithTelat(records, jamMasukSetting) {
   return records.map(r => {
     const rec = typeof r.toJSON === 'function' ? r.toJSON() : { ...r };
-    rec.telat_masuk_menit = rec.jam_masuk ? hitungTelatMenit(rec.jam_masuk, jamMasukSetting) : 0;
+    const statusKepegawaian = rec.user?.pegawai?.status_kepegawaian || null;
+    if (statusKepegawaian && NO_TELAT_STATUS.includes(statusKepegawaian)) {
+      rec.telat_masuk_menit = 0;
+    } else {
+      rec.telat_masuk_menit = rec.jam_masuk ? hitungTelatMenit(rec.jam_masuk, jamMasukSetting) : 0;
+    }
     return rec;
   });
+}
+
+/**
+ * Cek apakah semua Tenaga Keamanan sudah absen hari ini, jika ya kirim push notification
+ * Weekday (Sen-Jum): 3 orang, Weekend (Sab-Min): 2 orang
+ */
+async function checkAndNotifySecurityGuards(today, wib) {
+  // Cek hari (0=Minggu, 6=Sabtu)
+  const dayOfWeek = new Date(Date.UTC(wib.year, wib.month - 1, wib.day)).getUTCDay();
+  const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+  const requiredCount = isWeekend ? 2 : 3;
+
+  // Hitung petugas keamanan yang sudah absen masuk hari ini
+  const securityRecords = await prisma.absensi_pegawai.findMany({
+    where: {
+      tanggal: today,
+      jam_masuk: { not: null },
+      user: {
+        pegawai: { status_kepegawaian: 'Tenaga_Keamanan' }
+      }
+    },
+    include: {
+      user: {
+        select: { name: true, pegawai: { select: { nama_pegawai: true } } }
+      }
+    }
+  });
+
+  if (securityRecords.length < requiredCount) return;
+
+  // Cek apakah notifikasi sudah pernah dikirim hari ini (cegah duplikat)
+  const todayStr = wib.dateString;
+  const existingLog = await prisma.notification_logs.findFirst({
+    where: {
+      target_type: 'security_guard_duty',
+      created_at: { gte: new Date(`${todayStr}T00:00:00.000Z`) }
+    }
+  });
+  if (existingLog) return;
+
+  // Ambil nama-nama petugas yang bertugas
+  const guardNames = securityRecords
+    .slice(0, requiredCount)
+    .map(r => r.user?.pegawai?.nama_pegawai || r.user?.name || 'Unknown');
+
+  const hariLabel = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'][dayOfWeek];
+  const tanggalLabel = `${wib.day}/${wib.month}/${wib.year}`;
+
+  const payload = {
+    title: '🔒 Petugas Keamanan Hari Ini',
+    body: `${hariLabel}, ${tanggalLabel} — Yang bertugas jaga: ${guardNames.join(', ')}`,
+    icon: '/logo-192.png',
+    badge: '/logo-96.png',
+    tag: 'security_guard_duty',
+    data: {
+      type: 'security_guard_duty',
+      date: todayStr,
+      guards: guardNames,
+    }
+  };
+
+  // Kirim ke semua user DPMD (broadcast)
+  const result = await PushNotificationService.sendToAll(payload);
+
+  // Simpan log
+  const allUsers = await prisma.users.findMany({
+    where: { is_active: true },
+    select: { id: true }
+  });
+  await PushNotificationService.storeNotifications(
+    allUsers.map(u => Number(u.id)),
+    payload,
+    null
+  );
+
+  // Simpan ke notification_logs
+  await prisma.notification_logs.create({
+    data: {
+      title: payload.title,
+      body: payload.body,
+      target_type: 'security_guard_duty',
+      target_value: todayStr,
+      sent_count: result.sent || 0,
+      failed_count: result.failed || 0,
+      sender_id: null,
+      created_at: new Date(),
+    }
+  });
+
+  console.log(`[Absensi] Security guard notification sent: ${guardNames.join(', ')}`);
 }
 
 const absensiController = {
@@ -203,7 +303,7 @@ const absensiController = {
       // Validasi: device_id harus cocok dengan yang terdaftar
       const user = await prisma.users.findUnique({
         where: { id: userId },
-        select: { device_id: true }
+        select: { device_id: true, pegawai: { select: { status_kepegawaian: true } } }
       });
 
       if (!user.device_id) {
@@ -320,11 +420,18 @@ const absensiController = {
       const modeLabel = { hadir: 'Hadir', dinas_luar: 'Dinas Luar', wfh: 'WFH', wfa: 'WFA' };
 
       // Calculate late info (semua dalam WIB) — telat dihitung dari jam_masuk tanpa toleransi
+      // Tenaga_Keamanan & Tenaga_Kebersihan tidak dihitung terlambat
+      const userStatusKepegawaian = user.pegawai?.status_kepegawaian;
+      const isNoTelat = NO_TELAT_STATUS.includes(userStatusKepegawaian);
       const jamMasukSetting = absensiSettings.jamMasuk;
-      const [jmH, jmM] = jamMasukSetting.split(':').map(Number);
-      const batasMinutes = jmH * 60 + jmM;
-      const masukMinutes = wib.hours * 60 + wib.minutes;
-      const telatMenit = Math.max(0, masukMinutes - batasMinutes);
+      let telatMenit = 0;
+
+      if (!isNoTelat) {
+        const [jmH, jmM] = jamMasukSetting.split(':').map(Number);
+        const batasMinutes = jmH * 60 + jmM;
+        const masukMinutes = wib.hours * 60 + wib.minutes;
+        telatMenit = Math.max(0, masukMinutes - batasMinutes);
+      }
 
       let message = `Absen masuk ${modeLabel[absensiMode]} berhasil (jarak: ${Math.round(jarak)}m)`;
       if (telatMenit > 0) {
@@ -332,6 +439,13 @@ const absensiController = {
         const menit = telatMenit % 60;
         const telatStr = jam > 0 ? `${jam} jam ${menit} menit` : `${menit} menit`;
         message += ` — Telat ${telatStr} (batas masuk: ${jamMasukSetting} WIB)`;
+      }
+
+      // Push notification: jika Tenaga_Keamanan, cek apakah sudah cukup yang absen hari ini
+      if (userStatusKepegawaian === 'Tenaga_Keamanan') {
+        checkAndNotifySecurityGuards(today, wib).catch(err => {
+          console.error('[Absensi] Error sending security guard notification:', err);
+        });
       }
 
       return res.status(201).json({
@@ -457,6 +571,13 @@ const absensiController = {
         where: { user_id_tanggal: { user_id: userId, tanggal: today } }
       });
 
+      // Fetch user status_kepegawaian for telat check
+      const userInfo = await prisma.users.findUnique({
+        where: { id: userId },
+        select: { pegawai: { select: { status_kepegawaian: true } } }
+      });
+      const isNoTelat = NO_TELAT_STATUS.includes(userInfo?.pegawai?.status_kepegawaian);
+
       // Fetch settings for late calculation
       const settingsRows = await prisma.absensi_settings.findMany();
       const settings = {};
@@ -471,7 +592,7 @@ const absensiController = {
       let telat_pulang_menit = 0;
       let pulang_lebih_awal_menit = 0;
 
-      if (absensi?.jam_masuk) {
+      if (absensi?.jam_masuk && !isNoTelat) {
         telat_masuk_menit = hitungTelatMenit(absensi.jam_masuk, jamMasukSetting);
       }
 
@@ -1090,11 +1211,12 @@ const absensiController = {
       const pegawaiRekap = allUsers.map(u => {
         const uid = u.id.toString();
         const userRecords = userRecordMap[uid] || [];
+        const isNoTelatUser = NO_TELAT_STATUS.includes(u.pegawai?.status_kepegawaian);
         const summary = {};
         allStatuses.forEach(s => { summary[s] = 0; });
         userRecords.forEach(r => { if (summary[r.status] !== undefined) summary[r.status]++; });
         summary.total = userRecords.length;
-        summary.telat = userRecords.filter(r => r.telat_masuk_menit > 0).length;
+        summary.telat = isNoTelatUser ? 0 : userRecords.filter(r => r.telat_masuk_menit > 0).length;
         return {
           user: u,
           summary,
@@ -1173,11 +1295,12 @@ const absensiController = {
       const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk);
 
       const allStatuses = ['hadir', 'izin', 'sakit', 'alpha', 'cuti', 'dinas_luar', 'wfh', 'wfa'];
+      const isNoTelatUser = NO_TELAT_STATUS.includes(user.pegawai?.status_kepegawaian);
       const summary = {};
       allStatuses.forEach(s => { summary[s] = 0; });
       records.forEach(r => { if (summary[r.status] !== undefined) summary[r.status]++; });
       summary.total = records.length;
-      summary.telat = records.filter(r => r.telat_masuk_menit > 0).length;
+      summary.telat = isNoTelatUser ? 0 : records.filter(r => r.telat_masuk_menit > 0).length;
 
       return res.json({
         success: true,
@@ -1305,6 +1428,102 @@ const absensiController = {
     } catch (error) {
       console.error('[Absensi] Update success message error:', error);
       return res.status(500).json({ success: false, message: 'Gagal update', error: error.message });
+    }
+  },
+
+  // ═══════════════════════════════════════════════════════════
+  // ─── Reminder Templates (Customizable oleh Sekretariat) ───
+  // ═══════════════════════════════════════════════════════════
+
+  /**
+   * Admin: Get all reminder templates
+   * GET /api/absensi/admin/reminder-templates
+   */
+  async getReminderTemplates(req, res) {
+    try {
+      const templates = await prisma.absensi_reminder_templates.findMany({
+        orderBy: { type: 'asc' }
+      });
+
+      // Ensure both types exist (return defaults if not in DB)
+      const defaults = [
+        { type: 'reminder_masuk', title: '⏰ Waktunya Absen Masuk!', message: 'Jangan lupa absen masuk ya! Segera buka aplikasi dan lakukan absensi.', is_active: true },
+        { type: 'reminder_pulang', title: '🏠 Waktunya Absen Pulang!', message: 'Sudah waktunya pulang! Jangan lupa absen keluar sebelum meninggalkan kantor.', is_active: true },
+      ];
+
+      const result = defaults.map(d => {
+        const existing = templates.find(t => t.type === d.type);
+        return existing || d;
+      });
+
+      return res.json({ success: true, data: result });
+    } catch (error) {
+      console.error('[Absensi] Get reminder templates error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal mengambil data', error: error.message });
+    }
+  },
+
+  /**
+   * Admin: Update a reminder template
+   * PUT /api/absensi/admin/reminder-templates/:type
+   * Body: { title, message, is_active }
+   */
+  async updateReminderTemplate(req, res) {
+    try {
+      const { type } = req.params;
+      const { title, message, is_active } = req.body;
+      const userId = BigInt(req.user.id);
+
+      const validTypes = ['reminder_masuk', 'reminder_pulang'];
+      if (!validTypes.includes(type)) {
+        return res.status(400).json({ success: false, message: 'Tipe tidak valid' });
+      }
+
+      const result = await prisma.absensi_reminder_templates.upsert({
+        where: { type },
+        update: {
+          title: title !== undefined ? title : undefined,
+          message: message !== undefined ? message : undefined,
+          is_active: is_active !== undefined ? is_active : undefined,
+          updated_by: userId,
+          updated_at: new Date(),
+        },
+        create: {
+          type,
+          title: title || '',
+          message: message || '',
+          is_active: is_active !== undefined ? is_active : true,
+          updated_by: userId,
+        },
+      });
+
+      return res.json({ success: true, message: 'Template berhasil diupdate', data: result });
+    } catch (error) {
+      console.error('[Absensi] Update reminder template error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal update template', error: error.message });
+    }
+  },
+
+  /**
+   * Admin: Test send reminder notification
+   * POST /api/absensi/admin/test-reminder/:type
+   */
+  async testReminderNotification(req, res) {
+    try {
+      const { type } = req.params;
+
+      const validTypes = ['reminder_masuk', 'reminder_pulang'];
+      if (!validTypes.includes(type)) {
+        return res.status(400).json({ success: false, message: 'Tipe tidak valid' });
+      }
+
+      const schedulerService = require('../services/scheduler.service');
+      const result = await schedulerService.triggerAbsensiReminder(type);
+
+      return res.json({ success: true, message: `Test reminder ${type} terkirim`, data: result });
+    } catch (error) {
+      console.error('[Absensi] Test reminder error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal mengirim test reminder', error: error.message });
     }
   },
 };

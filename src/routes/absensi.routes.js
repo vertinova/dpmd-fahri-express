@@ -32,5 +32,8 @@ router.put('/admin/:id', auth, checkAbsensiAdmin, absensiController.adminUpdateA
 router.delete('/admin/:id', auth, checkAbsensiAdmin, absensiController.adminDeleteAbsensi);
 router.get('/admin/success-messages', auth, checkAbsensiAdmin, absensiController.getAdminSuccessMessages);
 router.put('/admin/success-messages/:type', auth, checkAbsensiAdmin, absensiController.updateSuccessMessage);
+router.get('/admin/reminder-templates', auth, checkAbsensiAdmin, absensiController.getReminderTemplates);
+router.put('/admin/reminder-templates/:type', auth, checkAbsensiAdmin, absensiController.updateReminderTemplate);
+router.post('/admin/test-reminder/:type', auth, checkAbsensiAdmin, absensiController.testReminderNotification);
 
 module.exports = router;
