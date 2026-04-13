@@ -22,9 +22,9 @@ const checkBidangAccess = (req, res, next) => {
       userId: user.id
     });
 
-    // Superadmin and Kepala Dinas have full access
-    if (user.role === 'superadmin' || user.role === 'kepala_dinas') {
-      console.log('✅ [Bidang Access] Full access granted (superadmin/kepala_dinas)');
+    // Superadmin, Kepala Dinas, dan Sekretaris Dinas punya full access ke semua bidang
+    if (user.role === 'superadmin' || user.role === 'kepala_dinas' || user.role === 'sekretaris_dinas') {
+      console.log('✅ [Bidang Access] Full access granted (superadmin/kepala_dinas/sekretaris_dinas)');
       return next();
     }
 
