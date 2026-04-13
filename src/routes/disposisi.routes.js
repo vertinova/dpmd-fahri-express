@@ -101,6 +101,17 @@ router.get(
 );
 
 /**
+ * @route GET /api/disposisi/riwayat-sekretariat
+ * @desc Riwayat disposisi yang dikirim oleh user sekretariat
+ * @access Authenticated (sekretariat)
+ */
+router.get(
+  '/riwayat-sekretariat',
+  auth,
+  disposisiController.getRiwayatSekretariat
+);
+
+/**
  * @route GET /api/disposisi/:id
  * @access All authenticated users
  */
@@ -128,6 +139,39 @@ router.put(
   '/:id/status',
   auth,
   disposisiController.updateStatus
+);
+
+/**
+ * @route PUT /api/disposisi/:id/tarik
+ * @desc Tarik kembali disposisi (recall)
+ * @access Pengirim disposisi, status pending
+ */
+router.put(
+  '/:id/tarik',
+  auth,
+  disposisiController.tarikDisposisi
+);
+
+/**
+ * @route PUT /api/disposisi/:id/edit
+ * @desc Edit disposisi yang sudah ditarik, lalu kirim ulang
+ * @access Pengirim disposisi, status ditarik
+ */
+router.put(
+  '/:id/edit',
+  auth,
+  disposisiController.editDisposisi
+);
+
+/**
+ * @route DELETE /api/disposisi/:id
+ * @desc Hapus disposisi yang sudah ditarik
+ * @access Pengirim disposisi, status ditarik
+ */
+router.delete(
+  '/:id',
+  auth,
+  disposisiController.deleteDisposisi
 );
 
 module.exports = router;

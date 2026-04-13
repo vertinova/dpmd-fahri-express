@@ -92,7 +92,7 @@ exports.createDisposisi = async (req, res, next) => {
         dari_user_id: BigInt(dari_user_id),
         ke_user_id: BigInt(ke_user_id),
         catatan,
-        instruksi: instruksi || 'biasa',
+        instruksi: instruksi || 'laksanakan',
         status: 'pending',
         level_disposisi: parseInt(level_disposisi),
       },
@@ -680,9 +680,13 @@ exports.getAvailableUsers = async (req, res, next) => {
       };
     }
     else if (currentRole === 'sekretaris_dinas') {
-      // Sekretaris Dinas → can send to Kepala Bidang
+      // Sekretaris Dinas → can send to Kepala Bidang (all bidang)
+      // AND also directly to Ketua Tim in Sekretariat (bidang_id=2) since there's no Kepala Bidang Sekretariat
       whereClause = {
-        role: 'kepala_bidang'
+        OR: [
+          { role: 'kepala_bidang' },
+          { role: 'ketua_tim', bidang_id: 2 }
+        ]
       };
     }
     else if (currentRole === 'kepala_bidang') {
@@ -871,7 +875,7 @@ exports.createSuratMasuk = async (req, res, next) => {
           dari_user_id: BigInt(user_id),
           ke_user_id: kepalaDinas.id,
           catatan: `Surat masuk dari ${asal_surat}`,
-          instruksi: 'segera',
+          instruksi: 'tindaklanjuti',
           status: 'pending',
           level_disposisi: 1,
         },
@@ -913,6 +917,261 @@ exports.createSuratMasuk = async (req, res, next) => {
       });
     }
     
+    next(error);
+  }
+};
+
+/**
+ * @route PUT /api/disposisi/:id/tarik
+ * @desc Tarik kembali (recall) disposisi yang sudah dikirim
+ * @access Pengirim disposisi, hanya jika status masih 'pending'
+ */
+exports.tarikDisposisi = async (req, res, next) => {
+  try {
+    const disposisiId = BigInt(req.params.id);
+    const userId = BigInt(req.user.id);
+
+    const disposisi = await prisma.disposisi.findUnique({
+      where: { id: disposisiId },
+      include: {
+        surat_masuk: true,
+        users_disposisi_ke_user_idTousers: {
+          select: { id: true, nama_lengkap: true, role: true }
+        }
+      }
+    });
+
+    if (!disposisi) {
+      return res.status(404).json({ success: false, message: 'Disposisi tidak ditemukan' });
+    }
+
+    if (disposisi.dari_user_id !== userId) {
+      return res.status(403).json({ success: false, message: 'Hanya pengirim yang dapat menarik disposisi' });
+    }
+
+    if (disposisi.status !== 'pending') {
+      return res.status(400).json({
+        success: false,
+        message: 'Disposisi sudah dibaca/diproses dan tidak dapat ditarik kembali'
+      });
+    }
+
+    const updated = await prisma.disposisi.update({
+      where: { id: disposisiId },
+      data: { status: 'ditarik' },
+      include: {
+        surat_masuk: true,
+        users_disposisi_ke_user_idTousers: {
+          select: { id: true, nama_lengkap: true, role: true }
+        }
+      }
+    });
+
+    console.log(`🔄 [DISPOSISI] Ditarik: ID ${disposisiId} oleh user ${userId}`);
+
+    res.json({
+      success: true,
+      message: 'Disposisi berhasil ditarik kembali',
+      data: {
+        id: updated.id,
+        surat: updated.surat_masuk,
+        ke_user: updated.users_disposisi_ke_user_idTousers,
+        status: updated.status
+      }
+    });
+  } catch (error) {
+    console.error('❌ [DISPOSISI] Error tarik:', error);
+    next(error);
+  }
+};
+
+/**
+ * @route PUT /api/disposisi/:id/edit
+ * @desc Edit disposisi yang sudah ditarik
+ * @access Pengirim disposisi, hanya jika status 'ditarik'
+ */
+exports.editDisposisi = async (req, res, next) => {
+  try {
+    const disposisiId = BigInt(req.params.id);
+    const userId = BigInt(req.user.id);
+    const { ke_user_id, catatan, instruksi } = req.body;
+
+    const disposisi = await prisma.disposisi.findUnique({
+      where: { id: disposisiId }
+    });
+
+    if (!disposisi) {
+      return res.status(404).json({ success: false, message: 'Disposisi tidak ditemukan' });
+    }
+
+    if (disposisi.dari_user_id !== userId) {
+      return res.status(403).json({ success: false, message: 'Hanya pengirim yang dapat mengedit disposisi' });
+    }
+
+    if (disposisi.status !== 'ditarik') {
+      return res.status(400).json({
+        success: false,
+        message: 'Hanya disposisi yang sudah ditarik yang dapat diedit'
+      });
+    }
+
+    const updateData = { status: 'pending' };
+    if (ke_user_id) updateData.ke_user_id = BigInt(ke_user_id);
+    if (catatan !== undefined) updateData.catatan = catatan;
+    if (instruksi) updateData.instruksi = instruksi;
+
+    const updated = await prisma.disposisi.update({
+      where: { id: disposisiId },
+      data: updateData,
+      include: {
+        surat_masuk: true,
+        users_disposisi_ke_user_idTousers: {
+          select: { id: true, nama_lengkap: true, role: true }
+        }
+      }
+    });
+
+    // Send notification to new recipient
+    try {
+      const targetId = updated.ke_user_id;
+      await PushNotificationService.sendNotification(targetId, {
+        title: '📩 Disposisi Surat',
+        body: `Anda menerima disposisi surat: ${updated.surat_masuk?.perihal || 'Surat masuk'}`,
+        data: {
+          type: 'disposisi',
+          disposisi_id: updated.id.toString(),
+          surat_id: updated.surat_id.toString()
+        }
+      });
+    } catch (pushErr) {
+      console.log('Push notification gagal (non-critical):', pushErr.message);
+    }
+
+    console.log(`✏️ [DISPOSISI] Edited & resent: ID ${disposisiId}`);
+
+    res.json({
+      success: true,
+      message: 'Disposisi berhasil diedit dan dikirim ulang',
+      data: {
+        id: updated.id,
+        surat: updated.surat_masuk,
+        ke_user: updated.users_disposisi_ke_user_idTousers,
+        catatan: updated.catatan,
+        instruksi: updated.instruksi,
+        status: updated.status
+      }
+    });
+  } catch (error) {
+    console.error('❌ [DISPOSISI] Error edit:', error);
+    next(error);
+  }
+};
+
+/**
+ * @route DELETE /api/disposisi/:id
+ * @desc Hapus disposisi yang sudah ditarik
+ * @access Pengirim disposisi, hanya jika status 'ditarik'
+ */
+exports.deleteDisposisi = async (req, res, next) => {
+  try {
+    const disposisiId = BigInt(req.params.id);
+    const userId = BigInt(req.user.id);
+
+    const disposisi = await prisma.disposisi.findUnique({
+      where: { id: disposisiId }
+    });
+
+    if (!disposisi) {
+      return res.status(404).json({ success: false, message: 'Disposisi tidak ditemukan' });
+    }
+
+    if (disposisi.dari_user_id !== userId) {
+      return res.status(403).json({ success: false, message: 'Hanya pengirim yang dapat menghapus disposisi' });
+    }
+
+    if (disposisi.status !== 'ditarik') {
+      return res.status(400).json({
+        success: false,
+        message: 'Hanya disposisi yang sudah ditarik yang dapat dihapus'
+      });
+    }
+
+    await prisma.disposisi.delete({
+      where: { id: disposisiId }
+    });
+
+    console.log(`🗑️ [DISPOSISI] Deleted: ID ${disposisiId} oleh user ${userId}`);
+
+    res.json({
+      success: true,
+      message: 'Disposisi berhasil dihapus'
+    });
+  } catch (error) {
+    console.error('❌ [DISPOSISI] Error delete:', error);
+    next(error);
+  }
+};
+
+/**
+ * @route GET /api/disposisi/riwayat-sekretariat
+ * @desc Riwayat disposisi yang dikirim oleh user sekretariat (bidang_id=2)
+ * @access Sekretariat staff only
+ */
+exports.getRiwayatSekretariat = async (req, res, next) => {
+  try {
+    const userId = BigInt(req.user.id);
+    const { status, page = 1, limit = 20 } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const whereClause = { dari_user_id: userId };
+    if (status) whereClause.status = status;
+
+    const [data, total] = await Promise.all([
+      prisma.disposisi.findMany({
+        where: whereClause,
+        include: {
+          surat_masuk: true,
+          users_disposisi_ke_user_idTousers: {
+            select: { id: true, nama_lengkap: true, role: true }
+          },
+          users_disposisi_dari_user_idTousers: {
+            select: { id: true, nama_lengkap: true, role: true }
+          }
+        },
+        orderBy: { tanggal_disposisi: 'desc' },
+        skip,
+        take: parseInt(limit)
+      }),
+      prisma.disposisi.count({ where: whereClause })
+    ]);
+
+    const formatted = data.map(d => ({
+      id: d.id,
+      surat: d.surat_masuk,
+      dari_user: d.users_disposisi_dari_user_idTousers,
+      ke_user: d.users_disposisi_ke_user_idTousers,
+      catatan: d.catatan,
+      instruksi: d.instruksi,
+      status: d.status,
+      level_disposisi: d.level_disposisi,
+      tanggal_disposisi: d.tanggal_disposisi,
+      tanggal_dibaca: d.tanggal_dibaca,
+      tanggal_selesai: d.tanggal_selesai,
+      can_recall: d.status === 'pending'
+    }));
+
+    res.json({
+      success: true,
+      data: formatted,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total,
+        totalPages: Math.ceil(total / parseInt(limit))
+      }
+    });
+  } catch (error) {
+    console.error('❌ [DISPOSISI] Error riwayat sekretariat:', error);
     next(error);
   }
 };

@@ -425,7 +425,7 @@ exports.kirimKeKepalaDinas = async (req, res, next) => {
       dari_user_id: dari_user_id,
       ke_user_id: kepala_dinas_user_id,
       catatan,
-      instruksi: instruksi || 'biasa',
+      instruksi: instruksi || 'laksanakan',
       level_disposisi: 1,
     });
 
@@ -436,7 +436,7 @@ exports.kirimKeKepalaDinas = async (req, res, next) => {
         dari_user_id: BigInt(dari_user_id),
         ke_user_id: BigInt(kepala_dinas_user_id),
         catatan,
-        instruksi: instruksi || 'biasa',
+        instruksi: instruksi || 'laksanakan',
         status: 'pending',
         level_disposisi: 1,
       },

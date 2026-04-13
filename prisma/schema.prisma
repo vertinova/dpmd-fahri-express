@@ -526,7 +526,7 @@ model disposisi {
   dari_user_id                        BigInt               @db.UnsignedBigInt
   ke_user_id                          BigInt               @db.UnsignedBigInt
   catatan                             String?              @db.Text
-  instruksi                           disposisi_instruksi? @default(biasa)
+  instruksi                           disposisi_instruksi? @default(laksanakan)
   status                              disposisi_status?    @default(pending)
   level_disposisi                     Int                  @db.UnsignedTinyInt
   tanggal_disposisi                   DateTime?            @default(now()) @db.DateTime(0)
@@ -1658,13 +1658,28 @@ enum satlinmas_status_kelembagaan {
 }
 
 enum disposisi_instruksi {
-  segera
-  penting
-  biasa
-  koordinasi
-  teliti_lapor
-  edarkan
-  simpan
+  pedomani
+  tindaklanjuti
+  fasilitasi
+  wakili
+  hadiri_tugaskan
+  tugaskan_staff
+  jadwalkan
+  catat_ingatkan
+  klarifikasi
+  menghadapi_jelaskan
+  laksanakan
+  ikuti_monitor
+  kaji_pelajari
+  koordinasikan
+  siapkan_bahan
+  sikapi
+  persiapkan
+  udk
+  ump
+  perhatikan_limit_waktu
+  monitor_hasilnya
+  lapor_hasilnya
 }
 
 enum karang_tarunas_status_verifikasi {
@@ -1727,6 +1742,7 @@ enum disposisi_status {
   proses
   selesai
   teruskan
+  ditarik
 }
 
 enum rts_status_verifikasi {

@@ -275,6 +275,7 @@ app.use('/api/printer', require('./routes/printer.routes'));
 // Disposisi Surat routes
 app.use('/api/surat-masuk', require('./routes/surat.routes'));
 app.use('/api/disposisi', require('./routes/disposisi.routes'));
+app.use('/api/bank-surat', require('./routes/bankSurat.routes'));
 
 // Push Notifications routes - Modern Web Push API
 app.use('/api/push-notification', require('./routes/pushNotification'));
