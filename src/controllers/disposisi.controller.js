@@ -936,7 +936,7 @@ exports.tarikDisposisi = async (req, res, next) => {
       include: {
         surat_masuk: true,
         users_disposisi_ke_user_idTousers: {
-          select: { id: true, nama_lengkap: true, role: true }
+          select: { id: true, name: true, role: true }
         }
       }
     });
@@ -962,7 +962,7 @@ exports.tarikDisposisi = async (req, res, next) => {
       include: {
         surat_masuk: true,
         users_disposisi_ke_user_idTousers: {
-          select: { id: true, nama_lengkap: true, role: true }
+          select: { id: true, name: true, role: true }
         }
       }
     });
@@ -1132,10 +1132,10 @@ exports.getRiwayatSekretariat = async (req, res, next) => {
         include: {
           surat_masuk: true,
           users_disposisi_ke_user_idTousers: {
-            select: { id: true, nama_lengkap: true, role: true }
+            select: { id: true, name: true, role: true }
           },
           users_disposisi_dari_user_idTousers: {
-            select: { id: true, nama_lengkap: true, role: true }
+            select: { id: true, name: true, role: true }
           }
         },
         orderBy: { tanggal_disposisi: 'desc' },

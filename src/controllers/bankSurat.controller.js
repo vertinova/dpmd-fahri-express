@@ -1,15 +1,22 @@
 /**
  * @route DELETE /api/bank-surat/:id
- * @desc Delete surat by ID (only superadmin or pegawai bidang sekretariat)
- * @access Superadmin & Pegawai Sekretariat (bidang_id=2)
+ * @desc Delete surat by ID (only superadmin or staff bidang sekretariat)
+ * @access Superadmin & Staff Sekretariat (bidang_id=2)
  */
 exports.deleteSurat = async (req, res, next) => {
   try {
     const { id } = req.params;
     const user = req.user;
-    // Only superadmin or pegawai bidang_id=2
-    if (!(user.role === 'superadmin' || (user.role === 'pegawai' && Number(user.bidang_id) === 2))) {
-      return res.status(403).json({ success: false, message: 'Hanya superadmin atau pegawai sekretariat yang dapat menghapus surat' });
+    if (!user) {
+      console.error('[BankSurat] Delete error: req.user is undefined');
+      return res.status(401).json({ success: false, message: 'User tidak terautentikasi. Silakan login ulang.' });
+    }
+    // Superadmin or any staff in bidang sekretariat (bidang_id=2)
+    const isSuperadmin = user.role === 'superadmin';
+    const isSekretariat = Number(user.bidang_id) === 2;
+    if (!isSuperadmin && !isSekretariat) {
+      console.warn(`[BankSurat] Delete forbidden: User ${user.id} (${user.role}) bidang_id=${user.bidang_id}`);
+      return res.status(403).json({ success: false, message: 'Hanya superadmin atau staff sekretariat yang dapat menghapus surat' });
     }
     // Hapus surat
     const deleted = await prisma.surat_masuk.delete({ where: { id: BigInt(id) } });
@@ -109,10 +116,10 @@ exports.getAll = async (req, res, next) => {
               level_disposisi: true,
               instruksi: true,
               users_disposisi_dari_user_idTousers: {
-                select: { id: true, name: true, role: true }
+                select: { id: true, name: true, role: true, bidang_id: true }
               },
               users_disposisi_ke_user_idTousers: {
-                select: { id: true, name: true, role: true }
+                select: { id: true, name: true, role: true, bidang_id: true }
               },
             },
             orderBy: { level_disposisi: 'asc' }
@@ -145,8 +152,8 @@ exports.getAll = async (req, res, next) => {
         total_disposisi: surat.disposisi?.length || 0,
         status_terakhir: latestDisposisi?.status || null,
         penerima_terakhir: latestDisposisi?.users_disposisi_ke_user_idTousers?.name || null,
-        penerima_terakhir_bidang_id: latestDisposisi?.users_disposisi_ke_user_idTousers?.bidang_id || null,
-        penerima_terakhir_jabatan: latestDisposisi?.users_disposisi_ke_user_idTousers?.jabatan || latestDisposisi?.users_disposisi_ke_user_idTousers?.role || null,
+        penerima_terakhir_bidang_id: latestDisposisi?.users_disposisi_ke_user_idTousers?.bidang_id ?? null,
+        penerima_terakhir_jabatan: latestDisposisi?.users_disposisi_ke_user_idTousers?.role || null,
         instruksi_terakhir: latestDisposisi?.instruksi || null,
       };
     });
@@ -226,7 +233,7 @@ exports.exportData = async (req, res, next) => {
             level_disposisi: true,
             instruksi: true,
             users_disposisi_ke_user_idTousers: {
-              select: { name: true, role: true }
+              select: { name: true, role: true, bidang_id: true }
             },
           },
           orderBy: { level_disposisi: 'asc' }

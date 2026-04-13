@@ -7,29 +7,27 @@ const { auth, checkRole } = require('../middlewares/auth');
 
 
 /**
- * @route DELETE /api/bank-surat/:id
- * @desc Delete surat by ID (only superadmin or pegawai sekretariat)
- */
-router.delete('/:id', bankSuratController.deleteSurat);
-
-
-
-/**
  * @route GET /api/bank-surat
  * @desc Get all archived surat with search & pagination
  */
-router.get('/', bankSuratController.getAll);
+router.get('/', auth, bankSuratController.getAll);
 
 /**
  * @route GET /api/bank-surat/export
  * @desc Export surat data for Excel
  */
-router.get('/export', bankSuratController.exportData);
+router.get('/export', auth, bankSuratController.exportData);
 
 /**
  * @route GET /api/bank-surat/statistik
  * @desc Get surat statistics
  */
-router.get('/statistik', bankSuratController.getStatistik);
+router.get('/statistik', auth, bankSuratController.getStatistik);
+
+/**
+ * @route DELETE /api/bank-surat/:id
+ * @desc Delete surat by ID (only superadmin or staff sekretariat)
+ */
+router.delete('/:id', auth, bankSuratController.deleteSurat);
 
 module.exports = router;
