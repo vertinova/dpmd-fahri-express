@@ -1,3 +1,24 @@
+/**
+ * @route DELETE /api/bank-surat/:id
+ * @desc Delete surat by ID (only superadmin or pegawai bidang sekretariat)
+ * @access Superadmin & Pegawai Sekretariat (bidang_id=2)
+ */
+exports.deleteSurat = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const user = req.user;
+    // Only superadmin or pegawai bidang_id=2
+    if (!(user.role === 'superadmin' || (user.role === 'pegawai' && Number(user.bidang_id) === 2))) {
+      return res.status(403).json({ success: false, message: 'Hanya superadmin atau pegawai sekretariat yang dapat menghapus surat' });
+    }
+    // Hapus surat
+    const deleted = await prisma.surat_masuk.delete({ where: { id: BigInt(id) } });
+    res.json({ success: true, message: 'Surat berhasil dihapus', data: deleted });
+  } catch (error) {
+    console.error('[BankSurat] Delete error:', error);
+    next(error);
+  }
+};
 const prisma = require('../config/prisma');
 
 /**

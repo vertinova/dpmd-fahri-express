@@ -1,13 +1,18 @@
+
 const express = require('express');
 const router = express.Router();
 const bankSuratController = require('../controllers/bankSurat.controller');
 const { auth, checkRole } = require('../middlewares/auth');
 
-// All routes require auth + DPMD staff roles
-const DPMD_ROLES = ['superadmin', 'kepala_dinas', 'sekretaris_dinas', 'kepala_bidang', 'ketua_tim', 'pegawai'];
 
-router.use(auth);
-router.use(checkRole(DPMD_ROLES));
+
+/**
+ * @route DELETE /api/bank-surat/:id
+ * @desc Delete surat by ID (only superadmin or pegawai sekretariat)
+ */
+router.delete('/:id', bankSuratController.deleteSurat);
+
+
 
 /**
  * @route GET /api/bank-surat
