@@ -145,6 +145,8 @@ exports.getAll = async (req, res, next) => {
         total_disposisi: surat.disposisi?.length || 0,
         status_terakhir: latestDisposisi?.status || null,
         penerima_terakhir: latestDisposisi?.users_disposisi_ke_user_idTousers?.name || null,
+        penerima_terakhir_bidang_id: latestDisposisi?.users_disposisi_ke_user_idTousers?.bidang_id || null,
+        penerima_terakhir_jabatan: latestDisposisi?.users_disposisi_ke_user_idTousers?.jabatan || latestDisposisi?.users_disposisi_ke_user_idTousers?.role || null,
         instruksi_terakhir: latestDisposisi?.instruksi || null,
       };
     });
