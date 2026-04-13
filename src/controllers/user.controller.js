@@ -79,6 +79,7 @@ class UserController {
                 id_pegawai: true,
                 nama_pegawai: true,
                 id_bidang: true,
+                sub_bidang: true,
                 nip: true,
                 jabatan: true,
                 eselon: true,
@@ -174,6 +175,7 @@ class UserController {
         tempat_lahir: user.pegawai?.tempat_lahir || null,
         tanggal_lahir: user.pegawai?.tanggal_lahir || null,
         status_kepegawaian: user.pegawai?.status_kepegawaian || null,
+        sub_bidang: user.pegawai?.sub_bidang || null,
         device_id: user.device_id || null,
         // Bidang from pegawai relation OR fallback to deprecated bidang_id
         bidang: user.bidang || null,
@@ -234,6 +236,7 @@ class UserController {
               id_pegawai: true,
               nama_pegawai: true,
               id_bidang: true,
+              sub_bidang: true,
               nip: true,
               jabatan: true,
               eselon: true,
@@ -416,6 +419,7 @@ class UserController {
         password, 
         role, 
         bidang_id,  // This will update pegawai.id_bidang, not users.bidang_id
+        sub_bidang,
         kecamatan_id, 
         desa_id,
         dinas_id,
@@ -489,7 +493,7 @@ class UserController {
       }
 
       // Update tanggal_lahir, jabatan, nip on pegawai table
-      const hasPegawaiFields = [tanggal_lahir, tempat_lahir, jabatan, nip, status_kepegawaian, eselon, unit_kerja, tmt_jabatan].some(v => v !== undefined);
+      const hasPegawaiFields = [tanggal_lahir, tempat_lahir, jabatan, nip, status_kepegawaian, eselon, unit_kerja, tmt_jabatan, sub_bidang].some(v => v !== undefined);
       
       if (existingUser.pegawai_id) {
         const pegawaiUpdate = {};
@@ -501,6 +505,7 @@ class UserController {
         if (eselon !== undefined) pegawaiUpdate.eselon = eselon || null;
         if (unit_kerja !== undefined) pegawaiUpdate.unit_kerja = unit_kerja || null;
         if (tmt_jabatan !== undefined) pegawaiUpdate.tmt_jabatan = tmt_jabatan ? new Date(tmt_jabatan) : null;
+        if (sub_bidang !== undefined) pegawaiUpdate.sub_bidang = sub_bidang || null;
         
         if (Object.keys(pegawaiUpdate).length > 0) {
           await prisma.pegawai.update({
@@ -523,6 +528,7 @@ class UserController {
           data: {
             nama_pegawai: existingUser.name,
             id_bidang: BigInt(String(resolvedBidangId)),
+            sub_bidang: sub_bidang || null,
             tanggal_lahir: tanggal_lahir ? new Date(tanggal_lahir) : null,
             tempat_lahir: tempat_lahir || null,
             jabatan: jabatan || null,
@@ -578,6 +584,7 @@ class UserController {
             select: {
               id_pegawai: true,
               id_bidang: true,
+              sub_bidang: true,
               nip: true,
               jabatan: true,
               eselon: true,

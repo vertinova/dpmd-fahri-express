@@ -36,6 +36,7 @@ const login = async (req, res) => {
           select: {
             id_pegawai: true,
             id_bidang: true,
+            sub_bidang: true,
             nama_pegawai: true,
             nip: true,
             jabatan: true,
@@ -139,7 +140,8 @@ const login = async (req, res) => {
       tanggal_lahir: user.pegawai?.tanggal_lahir || null,
       status_kepegawaian: user.pegawai?.status_kepegawaian?.replace(/_/g, ' ') || null,
       pangkat: user.pegawai?.pangkat || null,
-      golongan: user.pegawai?.golongan || null
+      golongan: user.pegawai?.golongan || null,
+      sub_bidang: user.pegawai?.sub_bidang || null
     };
 
     // If user has desa_id, fetch related desa and kecamatan
@@ -317,6 +319,7 @@ const verifyToken = async (req, res) => {
           select: {
             id_pegawai: true,
             id_bidang: true,
+            sub_bidang: true,
             nip: true,
             jabatan: true,
             tanggal_lahir: true,
@@ -366,7 +369,8 @@ const verifyToken = async (req, res) => {
       tanggal_lahir: user.pegawai?.tanggal_lahir || null,
       status_kepegawaian: user.pegawai?.status_kepegawaian?.replace(/_/g, ' ') || null,
       pangkat: user.pegawai?.pangkat || null,
-      golongan: user.pegawai?.golongan || null
+      golongan: user.pegawai?.golongan || null,
+      sub_bidang: user.pegawai?.sub_bidang || null
     };
 
     // If user has desa_id, fetch desa data with kecamatan
@@ -476,6 +480,7 @@ const getProfile = async (req, res) => {
           select: {
             id_pegawai: true,
             id_bidang: true,
+            sub_bidang: true,
             nip: true,
             jabatan: true,
             tanggal_lahir: true,
@@ -525,7 +530,8 @@ const getProfile = async (req, res) => {
       tanggal_lahir: user.pegawai?.tanggal_lahir || null,
       status_kepegawaian: user.pegawai?.status_kepegawaian?.replace(/_/g, ' ') || null,
       pangkat: user.pegawai?.pangkat || null,
-      golongan: user.pegawai?.golongan || null
+      golongan: user.pegawai?.golongan || null,
+      sub_bidang: user.pegawai?.sub_bidang || null
     };
 
     // If user has desa_id, fetch desa data with kecamatan

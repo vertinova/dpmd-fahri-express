@@ -178,6 +178,12 @@ const checkAbsensiAdmin = async (req, res, next) => {
     return next();
   }
 
+  // Sekretaris dinas always allowed (inherits sekretariat access)
+  if (req.user.role === 'sekretaris_dinas') {
+    logger.info(`✅ Absensi admin check passed - User ${req.user.email} is sekretaris_dinas`);
+    return next();
+  }
+
   // Check if user's bidang is Sekretariat
   if (req.user.bidang_id) {
     try {
