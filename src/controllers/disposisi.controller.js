@@ -59,130 +59,123 @@ exports.createDisposisi = async (req, res, next) => {
       level_disposisi
     });
 
-    // Validate ke_user exists
-    const keUser = await prisma.users.findUnique({
-      where: { id: BigInt(ke_user_id) }
+    // Normalize ke_user_id to an array
+    const ke_user_ids = Array.isArray(ke_user_id) ? ke_user_id : [ke_user_id];
+    
+    // Validate that ALL target users exist
+    const keUsers = await prisma.users.findMany({
+      where: { id: { in: ke_user_ids.map(id => BigInt(id)) } }
     });
 
-    if (!keUser) {
+    if (keUsers.length !== ke_user_ids.length) {
       return res.status(404).json({
         success: false,
-        message: 'User tujuan tidak ditemukan',
+        message: 'Salah satu user tujuan tidak ditemukan',
       });
+    }
+
+    // Normalize instruksi to a string (stringify if it's an array)
+    let finalInstruksi = 'laksanakan';
+    if (Array.isArray(instruksi)) {
+      finalInstruksi = JSON.stringify(instruksi);
+    } else if (instruksi) {
+      finalInstruksi = String(instruksi);
     }
 
     console.log('📊 [WORKFLOW VALIDATION]', {
       from: { id: dari_user_id.toString(), role: dari_user_role },
-      to: { id: ke_user_id.toString(), role: keUser.role }
+      targets_count: keUsers.length
     });
 
-    // Validate workflow hierarchy (simple role-based)
-    const workflowValidation = validateWorkflowTransition(dari_user_role, keUser.role);
-    if (!workflowValidation.valid) {
-      return res.status(400).json({
-        success: false,
-        message: workflowValidation.message,
-      });
+    // Validate workflow hierarchy for ALL target users
+    for (const keUser of keUsers) {
+      const workflowValidation = validateWorkflowTransition(dari_user_role, keUser.role);
+      if (!workflowValidation.valid) {
+        return res.status(400).json({
+          success: false,
+          message: `Validasi workflow gagal untuk user ${keUser.name}: ${workflowValidation.message}`,
+        });
+      }
     }
 
-    // Create disposisi
-    const disposisi = await prisma.disposisi.create({
-      data: {
-        surat_id: BigInt(surat_id),
-        dari_user_id: BigInt(dari_user_id),
-        ke_user_id: BigInt(ke_user_id),
-        catatan,
-        instruksi: instruksi || 'laksanakan',
-        status: 'pending',
-        level_disposisi: parseInt(level_disposisi),
-      },
-      include: {
-        surat_masuk: {
-          select: {
-            id: true,
-            nomor_surat: true,
-            perihal: true,
-            pengirim: true,
-            tanggal_surat: true,
-          },
-        },
-        users_disposisi_dari_user_idTousers: {
-          select: { 
-            id: true, 
-            name: true, 
-            email: true, 
-            role: true
-          },
-        },
-        users_disposisi_ke_user_idTousers: {
-          select: { 
-            id: true, 
-            name: true, 
-            email: true, 
-            role: true
-          },
-        },
-      },
-    });
+    const createdDisposisis = [];
 
-    // Send push notification to recipient
-    console.log('\n📨 [DISPOSISI] Starting push notification process...');
-    try {
-      console.log('📋 [PUSH] Notification data preparation:', {
-        disposisi_id: disposisi.id.toString(),
-        ke_user_id: ke_user_id.toString(),
-        dari_user: disposisi.users_disposisi_dari_user_idTousers?.name,
-        perihal: disposisi.surat_masuk?.perihal
+    // Create a disposisi record sequentially for each target user
+    for (const keUser of keUsers) {
+      const disposisi = await prisma.disposisi.create({
+        data: {
+          surat_id: BigInt(surat_id),
+          dari_user_id: BigInt(dari_user_id),
+          ke_user_id: BigInt(keUser.id),
+          catatan,
+          instruksi: finalInstruksi,
+          status: 'pending',
+          level_disposisi: parseInt(level_disposisi),
+        },
+        include: {
+          surat_masuk: {
+            select: {
+              id: true,
+              nomor_surat: true,
+              perihal: true,
+              pengirim: true,
+              tanggal_surat: true,
+            },
+          },
+          users_disposisi_dari_user_idTousers: {
+            select: { id: true, name: true, email: true, role: true },
+          },
+          users_disposisi_ke_user_idTousers: {
+            select: { id: true, name: true, email: true, role: true },
+          },
+        },
       });
 
-      const notificationData = {
-        id: disposisi.id,
-        perihal: disposisi.surat_masuk?.perihal || 'Disposisi baru',
-        nomor_surat: disposisi.surat_masuk?.nomor_surat,
-        dari_user: disposisi.users_disposisi_dari_user_idTousers?.name,
-        instruksi: disposisi.instruksi,
-        catatan: disposisi.catatan
-      };
-      
-      console.log('📤 [PUSH] Calling PushNotificationService.notifyNewDisposisi...');
-      console.log('📤 [PUSH] Target user IDs:', [Number(ke_user_id)]);
+      createdDisposisis.push(disposisi);
 
-      const result = await PushNotificationService.notifyNewDisposisi(
-        notificationData,
-        [Number(ke_user_id)]
-      );
-      
-      console.log('✅ [PUSH] Notification sent! Result:', JSON.stringify(result, null, 2));
-      console.log('═══════════════════════════════════════\n');
-    } catch (notifError) {
-      console.error('\n❌ [PUSH] ERROR sending push notification!');
-      console.error('Error message:', notifError.message);
-      console.error('Error stack:', notifError.stack);
-      console.error('═══════════════════════════════════════\n');
-      // Don't fail the request if notification fails
+      // Send push notification to recipient
+      console.log(`\n📨 [DISPOSISI] Starting push notification process for ${keUser.name}...`);
+      try {
+        const notificationData = {
+          id: disposisi.id,
+          perihal: disposisi.surat_masuk?.perihal || 'Disposisi baru',
+          nomor_surat: disposisi.surat_masuk?.nomor_surat,
+          dari_user: disposisi.users_disposisi_dari_user_idTousers?.name,
+          instruksi: disposisi.instruksi,
+          catatan: disposisi.catatan
+        };
+        
+        await PushNotificationService.notifyNewDisposisi(
+          notificationData,
+          [Number(keUser.id)]
+        );
+        console.log('✅ [PUSH] Notification sent to recipient ID:', Number(keUser.id));
+      } catch (notifError) {
+        console.error('\n❌ [PUSH] ERROR sending push notification:', notifError.message);
+      }
+
+      // Log activity
+      await ActivityLogger.log({
+        userId: req.user.id,
+        userName: req.user.nama || req.user.name || req.user.email,
+        userRole: req.user.role,
+        bidangId: 2, // Sekretariat
+        module: 'disposisi',
+        action: 'create',
+        entityType: 'disposisi',
+        entityId: Number(disposisi.id),
+        entityName: disposisi.surat_masuk?.perihal || `Disposisi #${disposisi.id}`,
+        description: `${req.user.nama || req.user.name || req.user.email} membuat disposisi ke ${keUser.name}: ${disposisi.surat_masuk?.perihal || 'Surat'}`,
+        newValue: { instruksi: finalInstruksi, catatan, ke_user: keUser.name },
+        ipAddress: ActivityLogger.getIpFromRequest(req),
+        userAgent: ActivityLogger.getUserAgentFromRequest(req)
+      });
     }
-
-    // Log activity
-    await ActivityLogger.log({
-      userId: req.user.id,
-      userName: req.user.nama || req.user.name || req.user.email,
-      userRole: req.user.role,
-      bidangId: 2, // Sekretariat
-      module: 'disposisi',
-      action: 'create',
-      entityType: 'disposisi',
-      entityId: Number(disposisi.id),
-      entityName: disposisi.surat_masuk?.perihal || `Disposisi #${disposisi.id}`,
-      description: `${req.user.nama || req.user.name || req.user.email} membuat disposisi ke ${keUser.name}: ${disposisi.surat_masuk?.perihal || 'Surat'}`,
-      newValue: { instruksi, catatan, ke_user: keUser.name },
-      ipAddress: ActivityLogger.getIpFromRequest(req),
-      userAgent: ActivityLogger.getUserAgentFromRequest(req)
-    });
 
     res.status(201).json({
       success: true,
-      message: 'Disposisi berhasil dibuat',
-      data: disposisi,
+      message: 'Disposisi berhasil dibuat dan diteruskan',
+      data: createdDisposisis,
     });
   } catch (error) {
     next(error);

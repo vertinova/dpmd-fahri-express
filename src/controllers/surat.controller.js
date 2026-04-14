@@ -403,106 +403,113 @@ exports.deleteSuratMasuk = async (req, res, next) => {
  */
 exports.kirimKeKepalaDinas = async (req, res, next) => {
   try {
+    console.log('\n═══════════════════════════════════════');
+    console.log('📨 [SURAT] KIRIM KE KEPALA DINAS (DRAFT)');
+    console.log('═══════════════════════════════════════');
+
     const { id } = req.params;
     const { kepala_dinas_user_id, catatan, instruksi } = req.body;
-
     const dari_user_id = req.user.id;
 
-    // Validate Kepala Dinas user
-    const kepalaDinas = await prisma.users.findUnique({
-      where: { id: BigInt(kepala_dinas_user_id) },
+    // Normalize inputs to arrays
+    const target_ids = Array.isArray(kepala_dinas_user_id) ? kepala_dinas_user_id : [kepala_dinas_user_id];
+    
+    // Normalize instruksi to string (JSON string if it's an array)
+    let finalInstruksi = 'laksanakan';
+    if (Array.isArray(instruksi)) {
+      finalInstruksi = JSON.stringify(instruksi);
+    } else if (instruksi) {
+      finalInstruksi = String(instruksi);
+    }
+
+    console.log('📋 Request Data:', {
+      surat_id: id,
+      dari_user_id: dari_user_id.toString(),
+      target_count: target_ids.length,
+      instruksi: finalInstruksi
     });
 
-    if (!kepalaDinas || kepalaDinas.role !== 'kepala_dinas') {
+    // Validate ALL target Kepala Dinas users
+    const validUsers = await prisma.users.findMany({
+      where: { 
+        id: { in: target_ids.map(id => BigInt(id)) },
+        role: 'kepala_dinas'
+      },
+    });
+
+    if (validUsers.length === 0) {
       return res.status(400).json({
         success: false,
-        message: 'User Kepala Dinas tidak valid',
+        message: 'Tidak ada user Kepala Dinas yang valid ditemukan',
       });
     }
 
-    console.log('[kirimKeKepalaDinas] Creating disposisi with data:', {
-      surat_id: id,
-      dari_user_id: dari_user_id,
-      ke_user_id: kepala_dinas_user_id,
-      catatan,
-      instruksi: instruksi || 'laksanakan',
-      level_disposisi: 1,
-    });
+    const createdDisposisis = [];
 
-    // Create disposisi
-    const disposisi = await prisma.disposisi.create({
-      data: {
-        surat_id: BigInt(id),
-        dari_user_id: BigInt(dari_user_id),
-        ke_user_id: BigInt(kepala_dinas_user_id),
-        catatan,
-        instruksi: instruksi || 'laksanakan',
-        status: 'pending',
-        level_disposisi: 1,
-      },
-      include: {
-        users_disposisi_dari_user_idTousers: {
-          select: { id: true, name: true, email: true },
+    // Use transaction if possible, but for simplicity we iterate (same pattern as disposisi.controller)
+    for (const kDinas of validUsers) {
+      const disposisi = await prisma.disposisi.create({
+        data: {
+          surat_id: BigInt(id),
+          dari_user_id: BigInt(dari_user_id),
+          ke_user_id: BigInt(kDinas.id),
+          catatan,
+          instruksi: finalInstruksi,
+          status: 'pending',
+          level_disposisi: 1,
         },
-        users_disposisi_ke_user_idTousers: {
-          select: { id: true, name: true, email: true },
+        include: {
+          users_disposisi_dari_user_idTousers: {
+            select: { id: true, name: true, email: true },
+          },
+          users_disposisi_ke_user_idTousers: {
+            select: { id: true, name: true, email: true },
+          },
+          surat_masuk: {
+            select: { id: true, nomor_surat: true, perihal: true, pengirim: true },
+          },
         },
-        surat_masuk: {
-          select: { id: true, nomor_surat: true, perihal: true, pengirim: true },
-        },
-      },
-    });
+      });
 
-    console.log('[kirimKeKepalaDinas] Disposisi created successfully:', {
-      id: disposisi.id?.toString(),
-      surat_id: disposisi.surat_id?.toString(),
-      dari_user_id: disposisi.dari_user_id?.toString(),
-      ke_user_id: disposisi.ke_user_id?.toString(),
-      status: disposisi.status,
-      level_disposisi: disposisi.level_disposisi,
-    });
+      createdDisposisis.push(disposisi);
 
-    // Update surat status
+      // Send push notification
+      try {
+        await sendDisposisiNotification(disposisi);
+      } catch (notifError) {
+        console.error(`[SURAT] Error sending push notification to ${kDinas.name}:`, notifError.message);
+      }
+
+      // Log activity for each
+      await ActivityLogger.log({
+        userId: req.user.id,
+        userName: req.user.nama || req.user.name || req.user.email,
+        userRole: req.user.role,
+        bidangId: 2, // Sekretariat
+        module: 'surat_masuk',
+        action: 'send',
+        entityType: 'disposisi',
+        entityId: Number(disposisi.id),
+        entityName: disposisi.surat_masuk?.perihal || `Surat #${id}`,
+        description: `${req.user.nama || req.user.name || req.user.email} mengirim surat ke Kepala Dinas ${kDinas.name}: ${disposisi.surat_masuk?.perihal || 'Surat'}`,
+        newValue: { kepala_dinas: kDinas.name, instruksi: finalInstruksi, catatan },
+        ipAddress: ActivityLogger.getIpFromRequest(req),
+        userAgent: ActivityLogger.getUserAgentFromRequest(req)
+      });
+    }
+
+    // Update surat status to 'dikirim' (only once)
     await prisma.surat_masuk.update({
       where: { id: BigInt(id) },
       data: { status: 'dikirim' },
     });
 
-    // Send push notification to recipient
-    try {
-      console.log('\n[SURAT] Attempting to send push notification to Kepala Dinas...');
-      console.log('[SURAT] Disposisi created with ID:', disposisi.id?.toString());
-      await sendDisposisiNotification(disposisi);
-      console.log('[SURAT] ✅ Push notification sent to Kepala Dinas\n');
-    } catch (notifError) {
-      console.error('[SURAT] ❌ Error sending push notification:', notifError);
-      console.error('[SURAT] Error stack:', notifError.stack);
-      // Don't fail the request if notification fails
-    }
-
-    // Log activity
-    await ActivityLogger.log({
-      userId: req.user.id,
-      userName: req.user.nama || req.user.name || req.user.email,
-      userRole: req.user.role,
-      bidangId: 2, // Sekretariat
-      module: 'surat_masuk',
-      action: 'send',
-      entityType: 'disposisi',
-      entityId: Number(disposisi.id),
-      entityName: disposisi.surat_masuk?.perihal || `Surat #${id}`,
-      description: `${req.user.nama || req.user.name || req.user.email} mengirim surat ke Kepala Dinas: ${disposisi.surat_masuk?.perihal || 'Surat'}`,
-      newValue: { kepala_dinas: kepalaDinas.name, instruksi, catatan },
-      ipAddress: ActivityLogger.getIpFromRequest(req),
-      userAgent: ActivityLogger.getUserAgentFromRequest(req)
-    });
-
     res.status(201).json({
       success: true,
-      message: 'Surat berhasil dikirim ke Kepala Dinas',
-      data: disposisi,
+      message: `Surat berhasil dikirim ke ${validUsers.length} Kepala Dinas`,
+      data: createdDisposisis,
     });
   } catch (error) {
     next(error);
   }
-};
+};
