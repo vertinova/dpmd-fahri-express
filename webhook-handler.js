@@ -20,7 +20,7 @@ const REPOS = {
       '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/node /var/www/backend/database-express/auto-migrate.js',
       '/bin/cp -f /var/www/backend/nginx-dpmdbogorkab.conf /etc/nginx/sites-available/dpmdbogorkab.id || true',
       '/usr/sbin/nginx -t && /usr/sbin/nginx -s reload || true',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 restart dpmd-api'
+      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 restart dpmd-backend'
     ]
   },
   'dpmd-frontend': {
@@ -29,7 +29,7 @@ const REPOS = {
     commands: [
       '/usr/bin/git fetch origin',
       '/usr/bin/git reset --hard origin/main',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npm install',
+      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npm install --include=dev',
       '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npm run build'
     ]
   }
