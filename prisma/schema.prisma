@@ -526,7 +526,7 @@ model disposisi {
   dari_user_id                        BigInt               @db.UnsignedBigInt
   ke_user_id                          BigInt               @db.UnsignedBigInt
   catatan                             String?              @db.Text
-  instruksi                           Json?
+  instruksi                           String?
   status                              disposisi_status?    @default(pending)
   level_disposisi                     Int                  @db.UnsignedTinyInt
   tanggal_disposisi                   DateTime?            @default(now()) @db.DateTime(0)
