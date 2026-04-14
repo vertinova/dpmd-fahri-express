@@ -57,6 +57,8 @@ tes
 *.bak
 *.backup
 *.tmp
+*.original
+scratch/
 
 # Scripts dan exports temporary
 scripts/export-*.js

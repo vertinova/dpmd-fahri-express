@@ -84,6 +84,12 @@ class JadwalKegiatanController {
           include: {
             bidangs: {
               select: { nama: true }
+            },
+            _count: {
+              select: { jadwal_kegiatan_views: true }
+            },
+            jadwal_kegiatan_reactions: {
+              select: { emoji: true, user_id: true }
             }
           },
           skip,
@@ -95,9 +101,20 @@ class JadwalKegiatanController {
 
       console.log('   ✅ Query result: Found', jadwals.length, 'records out of', total, 'total');
 
+      const currentUserId = BigInt(req.user.id);
+
       // Format response
-      const formattedJadwals = jadwals.map(j => ({
-        id: j.id,
+      const formattedJadwals = jadwals.map(j => {
+        // Build reaction summary
+        const reactionMap = {};
+        for (const r of j.jadwal_kegiatan_reactions) {
+          if (!reactionMap[r.emoji]) reactionMap[r.emoji] = { emoji: r.emoji, count: 0, reacted: false };
+          reactionMap[r.emoji].count++;
+          if (r.user_id === currentUserId) reactionMap[r.emoji].reacted = true;
+        }
+
+        return {
+          id: j.id,
         judul: j.judul,
         deskripsi: j.deskripsi || '-',
         bidang_id: j.bidang_id,
@@ -111,10 +128,12 @@ class JadwalKegiatanController {
         status: j.status,
         prioritas: j.prioritas,
         kategori: j.kategori,
+        view_count: j._count.jadwal_kegiatan_views,
+        reactions: Object.values(reactionMap),
         created_at: j.created_at,
         updated_at: j.updated_at
-      }));
-
+      };
+      });
       const totalPages = Math.ceil(total / parseInt(limit));
 
       res.json({
@@ -485,6 +504,156 @@ class JadwalKegiatanController {
         error: error.message
       });
     }
+  }
+
+  /**
+   * POST /api/jadwal-kegiatan/:id/view
+   * Track that current user viewed this jadwal
+   */
+  async trackView(req, res) {
+    try {
+      const jadwalId = parseInt(req.params.id);
+      const userId = BigInt(req.user.id);
+
+      await prisma.jadwal_kegiatan_views.upsert({
+        where: { uk_jadwal_view: { jadwal_kegiatan_id: jadwalId, user_id: userId } },
+        update: { viewed_at: new Date() },
+        create: { jadwal_kegiatan_id: jadwalId, user_id: userId }
+      });
+
+      const viewCount = await prisma.jadwal_kegiatan_views.count({
+        where: { jadwal_kegiatan_id: jadwalId }
+      });
+
+      res.json({ success: true, data: { view_count: viewCount } });
+    } catch (error) {
+      console.error('❌ [Jadwal] Error in trackView:', error);
+      res.status(500).json({ success: false, message: 'Gagal mencatat view', error: error.message });
+    }
+  }
+
+  /**
+   * GET /api/jadwal-kegiatan/:id/viewers
+   * Get list of users who viewed this jadwal
+   */
+  async getViewers(req, res) {
+    try {
+      const jadwalId = parseInt(req.params.id);
+
+      const viewers = await prisma.jadwal_kegiatan_views.findMany({
+        where: { jadwal_kegiatan_id: jadwalId },
+        include: {
+          users: { select: { id: true, name: true, role: true, avatar: true } }
+        },
+        orderBy: { viewed_at: 'desc' }
+      });
+
+      res.json({
+        success: true,
+        data: viewers.map(v => ({
+          id: v.users.id,
+          name: v.users.name,
+          role: v.users.role,
+          avatar: v.users.avatar,
+          viewed_at: v.viewed_at
+        }))
+      });
+    } catch (error) {
+      console.error('❌ [Jadwal] Error in getViewers:', error);
+      res.status(500).json({ success: false, message: 'Gagal memuat viewers', error: error.message });
+    }
+  }
+
+  /**
+   * POST /api/jadwal-kegiatan/:id/reactions
+   * Add emoji reaction to jadwal
+   */
+  async addReaction(req, res) {
+    try {
+      const jadwalId = parseInt(req.params.id);
+      const userId = BigInt(req.user.id);
+      const { emoji } = req.body;
+
+      if (!emoji || emoji.length > 10) {
+        return res.status(400).json({ success: false, message: 'Emoji tidak valid' });
+      }
+
+      await prisma.jadwal_kegiatan_reactions.upsert({
+        where: { uk_jadwal_reaction: { jadwal_kegiatan_id: jadwalId, user_id: userId, emoji } },
+        update: {},
+        create: { jadwal_kegiatan_id: jadwalId, user_id: userId, emoji }
+      });
+
+      const reactions = await this._getReactionsSummary(jadwalId);
+      res.json({ success: true, data: reactions });
+    } catch (error) {
+      console.error('❌ [Jadwal] Error in addReaction:', error);
+      res.status(500).json({ success: false, message: 'Gagal menambahkan reaksi', error: error.message });
+    }
+  }
+
+  /**
+   * DELETE /api/jadwal-kegiatan/:id/reactions
+   * Remove emoji reaction from jadwal
+   */
+  async removeReaction(req, res) {
+    try {
+      const jadwalId = parseInt(req.params.id);
+      const userId = BigInt(req.user.id);
+      const { emoji } = req.body;
+
+      if (!emoji) {
+        return res.status(400).json({ success: false, message: 'Emoji diperlukan' });
+      }
+
+      await prisma.jadwal_kegiatan_reactions.deleteMany({
+        where: { jadwal_kegiatan_id: jadwalId, user_id: userId, emoji }
+      });
+
+      const reactions = await this._getReactionsSummary(jadwalId);
+      res.json({ success: true, data: reactions });
+    } catch (error) {
+      console.error('❌ [Jadwal] Error in removeReaction:', error);
+      res.status(500).json({ success: false, message: 'Gagal menghapus reaksi', error: error.message });
+    }
+  }
+
+  /**
+   * GET /api/jadwal-kegiatan/:id/reactions
+   * Get all reactions for a jadwal
+   */
+  async getReactions(req, res) {
+    try {
+      const jadwalId = parseInt(req.params.id);
+      const reactions = await this._getReactionsSummary(jadwalId);
+      res.json({ success: true, data: reactions });
+    } catch (error) {
+      console.error('❌ [Jadwal] Error in getReactions:', error);
+      res.status(500).json({ success: false, message: 'Gagal memuat reaksi', error: error.message });
+    }
+  }
+
+  /**
+   * Internal: Get reactions summary grouped by emoji with user list
+   */
+  async _getReactionsSummary(jadwalId) {
+    const reactions = await prisma.jadwal_kegiatan_reactions.findMany({
+      where: { jadwal_kegiatan_id: jadwalId },
+      include: {
+        users: { select: { id: true, name: true } }
+      },
+      orderBy: { created_at: 'asc' }
+    });
+
+    // Group by emoji
+    const grouped = {};
+    for (const r of reactions) {
+      if (!grouped[r.emoji]) grouped[r.emoji] = { emoji: r.emoji, count: 0, users: [] };
+      grouped[r.emoji].count++;
+      grouped[r.emoji].users.push({ id: r.users.id, name: r.users.name });
+    }
+
+    return Object.values(grouped);
   }
 }
 

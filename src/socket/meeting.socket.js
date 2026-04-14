@@ -168,11 +168,21 @@ function initSocketServer(httpServer) {
     // Typing indicator for messaging
     socket.on('typing', (data) => {
       if (data.conversation_id && data.receiver_id) {
+        // 1-on-1: emit to specific user
         io.to(`user_${data.receiver_id}`).emit('typing', {
           conversation_id: data.conversation_id,
           user_id: socket.user.id,
           user_name: socket.user.name,
         });
+      } else if (data.conversation_id && data.receiver_ids && Array.isArray(data.receiver_ids)) {
+        // Group: emit to all receiver IDs
+        for (const rid of data.receiver_ids) {
+          io.to(`user_${rid}`).emit('typing', {
+            conversation_id: data.conversation_id,
+            user_id: socket.user.id,
+            user_name: socket.user.name,
+          });
+        }
       }
     });
 
@@ -182,6 +192,13 @@ function initSocketServer(httpServer) {
           conversation_id: data.conversation_id,
           user_id: socket.user.id,
         });
+      } else if (data.conversation_id && data.receiver_ids && Array.isArray(data.receiver_ids)) {
+        for (const rid of data.receiver_ids) {
+          io.to(`user_${rid}`).emit('stop_typing', {
+            conversation_id: data.conversation_id,
+            user_id: socket.user.id,
+          });
+        }
       }
     });
 

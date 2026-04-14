@@ -74,4 +74,46 @@ router.delete('/conversations/:id', auth, (req, res) => messagingController.dele
 // Delete a message (own messages only)
 router.delete('/messages/:id', auth, (req, res) => messagingController.deleteMessage(req, res));
 
+// Toggle emoji reaction on a message
+router.post('/messages/:id/reactions', auth, (req, res) => messagingController.toggleReaction(req, res));
+
+// ── Group Chat Routes ──
+// Create a new group
+router.post('/groups', auth, (req, res) => messagingController.createGroup(req, res));
+
+// Update group (name)
+router.put('/groups/:id', auth, (req, res) => messagingController.updateGroup(req, res));
+
+// Update group avatar
+const groupAvatarDir = 'storage/uploads/group_avatars';
+if (!fs.existsSync(groupAvatarDir)) {
+	fs.mkdirSync(groupAvatarDir, { recursive: true });
+}
+const groupAvatarStorage = multer.diskStorage({
+	destination: (req, file, cb) => cb(null, groupAvatarDir),
+	filename: (req, file, cb) => {
+		const ext = path.extname(file.originalname).toLowerCase();
+		cb(null, 'group-' + req.params.id + '-' + Date.now() + ext);
+	}
+});
+const groupAvatarUpload = multer({
+	storage: groupAvatarStorage,
+	limits: { fileSize: 5 * 1024 * 1024 },
+	fileFilter: (req, file, cb) => {
+		const allowed = ['.jpg', '.jpeg', '.png', '.webp'];
+		const ext = path.extname(file.originalname).toLowerCase();
+		cb(null, allowed.includes(ext));
+	}
+});
+router.put('/groups/:id/avatar', auth, groupAvatarUpload.single('avatar'), (req, res) => messagingController.updateGroupAvatar(req, res));
+
+// Get group members
+router.get('/groups/:id/members', auth, (req, res) => messagingController.getGroupMembers(req, res));
+
+// Add members to group
+router.post('/groups/:id/members', auth, (req, res) => messagingController.addMembers(req, res));
+
+// Remove member from group (or leave group if own ID)
+router.delete('/groups/:id/members/:userId', auth, (req, res) => messagingController.removeMember(req, res));
+
 module.exports = router;

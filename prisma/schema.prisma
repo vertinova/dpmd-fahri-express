@@ -526,7 +526,7 @@ model disposisi {
   dari_user_id                        BigInt               @db.UnsignedBigInt
   ke_user_id                          BigInt               @db.UnsignedBigInt
   catatan                             String?              @db.Text
-  instruksi                           String?
+  instruksi                           String?              @db.VarChar(255)
   status                              disposisi_status?    @default(pending)
   level_disposisi                     Int                  @db.UnsignedTinyInt
   tanggal_disposisi                   DateTime?            @default(now()) @db.DateTime(0)
@@ -583,6 +583,8 @@ model jadwal_kegiatan {
   bidangs                                  bidangs?                  @relation(fields: [bidang_id], references: [id], onUpdate: NoAction, map: "fk_jadwal_kegiatan_bidang")
   users_jadwal_kegiatan_created_byTousers  users                     @relation("jadwal_kegiatan_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_jadwal_kegiatan_created_by")
   jadwal_kegiatan_bidang                   jadwal_kegiatan_bidang[]
+  jadwal_kegiatan_views                    jadwal_kegiatan_views[]
+  jadwal_kegiatan_reactions                jadwal_kegiatan_reactions[]
 
   @@index([approved_by], map: "idx_jadwal_kegiatan_approved_by")
   @@index([bidang_id], map: "idx_jadwal_kegiatan_bidang_id")
@@ -605,6 +607,32 @@ model jadwal_kegiatan_bidang {
   @@unique([jadwal_kegiatan_id, bidang_id], map: "uk_jadwal_bidang")
   @@index([jadwal_kegiatan_id], map: "idx_jadwal_kegiatan_bidang_jadwal")
   @@index([bidang_id], map: "idx_jadwal_kegiatan_bidang_bidang")
+}
+
+model jadwal_kegiatan_views {
+  id                 BigInt          @id @default(autoincrement()) @db.UnsignedBigInt
+  jadwal_kegiatan_id BigInt          @db.UnsignedBigInt
+  user_id            BigInt          @db.UnsignedBigInt
+  viewed_at          DateTime?       @default(now()) @db.Timestamp(0)
+  jadwal_kegiatan    jadwal_kegiatan @relation(fields: [jadwal_kegiatan_id], references: [id], onDelete: Cascade, map: "fk_jkv_jadwal")
+  users              users           @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_jkv_user")
+
+  @@unique([jadwal_kegiatan_id, user_id], map: "uk_jadwal_view")
+  @@index([user_id], map: "idx_jkv_user")
+}
+
+model jadwal_kegiatan_reactions {
+  id                 BigInt          @id @default(autoincrement()) @db.UnsignedBigInt
+  jadwal_kegiatan_id BigInt          @db.UnsignedBigInt
+  user_id            BigInt          @db.UnsignedBigInt
+  emoji              String          @db.VarChar(10)
+  created_at         DateTime?       @default(now()) @db.Timestamp(0)
+  jadwal_kegiatan    jadwal_kegiatan @relation(fields: [jadwal_kegiatan_id], references: [id], onDelete: Cascade, map: "fk_jkr_jadwal")
+  users              users           @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_jkr_user")
+
+  @@unique([jadwal_kegiatan_id, user_id, emoji], map: "uk_jadwal_reaction")
+  @@index([user_id], map: "idx_jkr_user")
+  @@index([emoji], map: "idx_jkr_emoji")
 }
 
 model karang_tarunas {
@@ -1337,6 +1365,8 @@ model users {
   informasi                                                      informasi[]
   jadwal_kegiatan_jadwal_kegiatan_approved_byTousers             jadwal_kegiatan[]           @relation("jadwal_kegiatan_approved_byTousers")
   jadwal_kegiatan_jadwal_kegiatan_created_byTousers              jadwal_kegiatan[]           @relation("jadwal_kegiatan_created_byTousers")
+  jadwal_kegiatan_views                                          jadwal_kegiatan_views[]
+  jadwal_kegiatan_reactions                                      jadwal_kegiatan_reactions[]
   kelembagaan_activity_logs                                      kelembagaan_activity_logs[]
   lampiran_surat                                                 lampiran_surat[]
   notification_logs                                              notification_logs[]
@@ -1351,6 +1381,10 @@ model users {
   conversations_as_one                                           conversations[]             @relation("conv_participant_one")
   conversations_as_two                                           conversations[]             @relation("conv_participant_two")
   messages_sent                                                  messages[]                  @relation("msg_sender")
+  conversation_memberships                                       conversation_participants[]
+  message_reactions                                              message_reactions[]
+  user_statuses                                                  user_statuses[]
+  status_views                                                   status_views[]
 
   @@index([pegawai_id], map: "users_pegawai_id_index")
 }
@@ -1558,6 +1592,33 @@ model video_meetings {
   @@index([room_id], map: "idx_room_id")
   @@index([scheduled_start], map: "idx_scheduled_start")
   @@index([status], map: "idx_status")
+}
+
+model user_statuses {
+  id               BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id          BigInt        @db.UnsignedBigInt
+  content          String        @db.Text
+  background_color String?       @default("#059669") @db.VarChar(20)
+  media_path       String?       @db.VarChar(500)
+  created_at       DateTime?     @default(now()) @db.Timestamp(0)
+  expires_at       DateTime      @db.DateTime(0)
+  users            users         @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_us_user")
+  status_views     status_views[]
+
+  @@index([user_id], map: "idx_us_user")
+  @@index([expires_at], map: "idx_us_expires")
+}
+
+model status_views {
+  id            BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
+  status_id     BigInt        @db.UnsignedBigInt
+  viewer_id     BigInt        @db.UnsignedBigInt
+  viewed_at     DateTime?     @default(now()) @db.Timestamp(0)
+  user_statuses user_statuses @relation(fields: [status_id], references: [id], onDelete: Cascade, map: "fk_sv_status")
+  users         users         @relation(fields: [viewer_id], references: [id], onDelete: Cascade, map: "fk_sv_viewer")
+
+  @@unique([status_id, viewer_id], map: "uk_status_view")
+  @@index([viewer_id], map: "idx_sv_viewer")
 }
 
 enum pegawai_jenis_kelamin {
@@ -1949,18 +2010,23 @@ enum video_meetings_status {
 model conversations {
   id                BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
   type              conversations_type
+  is_group          Boolean            @default(false)
+  group_name        String?            @db.VarChar(100)
+  group_avatar      String?            @db.VarChar(500)
+  created_by        BigInt?            @db.UnsignedBigInt
   reference_type    conversations_reference_type?
   reference_id      BigInt?            @db.UnsignedBigInt
-  participant_one_id BigInt             @db.UnsignedBigInt
-  participant_two_id BigInt             @db.UnsignedBigInt
+  participant_one_id BigInt?            @db.UnsignedBigInt
+  participant_two_id BigInt?            @db.UnsignedBigInt
   last_message_id   BigInt?            @db.UnsignedBigInt
   last_message_at   DateTime?          @db.Timestamp(0)
   created_at        DateTime           @default(now()) @db.Timestamp(0)
   updated_at        DateTime           @default(now()) @db.Timestamp(0)
 
-  participant_one   users              @relation("conv_participant_one", fields: [participant_one_id], references: [id], onDelete: Cascade, map: "fk_conv_participant_one")
-  participant_two   users              @relation("conv_participant_two", fields: [participant_two_id], references: [id], onDelete: Cascade, map: "fk_conv_participant_two")
+  participant_one   users?             @relation("conv_participant_one", fields: [participant_one_id], references: [id], onDelete: Cascade, map: "fk_conv_participant_one")
+  participant_two   users?             @relation("conv_participant_two", fields: [participant_two_id], references: [id], onDelete: Cascade, map: "fk_conv_participant_two")
   messages          messages[]
+  participants      conversation_participants[]
 
   @@unique([participant_one_id, participant_two_id, reference_type, reference_id], map: "uk_conversation_context")
   @@index([participant_one_id], map: "idx_conv_participant_one")
@@ -1968,12 +2034,14 @@ model conversations {
   @@index([last_message_at], map: "idx_conv_last_message_at")
   @@index([type], map: "idx_conv_type")
   @@index([reference_type, reference_id], map: "idx_conv_reference")
+  @@index([is_group], map: "idx_conv_is_group")
 }
 
 model messages {
   id                BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
   conversation_id   BigInt             @db.UnsignedBigInt
   sender_id         BigInt             @db.UnsignedBigInt
+  reply_to_id       BigInt?            @db.UnsignedBigInt
   content           String             @db.Text
   message_type      messages_message_type @default(text)
   file_path         String?            @db.VarChar(500)
@@ -1986,11 +2054,51 @@ model messages {
 
   conversation      conversations      @relation(fields: [conversation_id], references: [id], onDelete: Cascade, map: "fk_msg_conversation")
   sender            users              @relation("msg_sender", fields: [sender_id], references: [id], onDelete: Cascade, map: "fk_msg_sender")
+  reply_to          messages?          @relation("msg_reply", fields: [reply_to_id], references: [id], onDelete: SetNull, map: "fk_msg_reply_to")
+  replies           messages[]         @relation("msg_reply")
+  reactions         message_reactions[]
 
   @@index([conversation_id], map: "idx_msg_conversation")
   @@index([sender_id], map: "idx_msg_sender")
+  @@index([reply_to_id], map: "idx_msg_reply_to")
   @@index([created_at], map: "idx_msg_created_at")
   @@index([is_read], map: "idx_msg_is_read")
+}
+
+model message_reactions {
+  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  message_id  BigInt   @db.UnsignedBigInt
+  user_id     BigInt   @db.UnsignedBigInt
+  emoji       String   @db.VarChar(32)
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+
+  message     messages @relation(fields: [message_id], references: [id], onDelete: Cascade, map: "fk_msg_reaction_message")
+  user        users    @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_msg_reaction_user")
+
+  @@unique([message_id, user_id, emoji], map: "uk_msg_reaction_user_emoji")
+  @@index([message_id], map: "idx_msg_reaction_message")
+  @@index([user_id], map: "idx_msg_reaction_user")
+}
+
+model conversation_participants {
+  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  conversation_id BigInt    @db.UnsignedBigInt
+  user_id         BigInt    @db.UnsignedBigInt
+  role            conversation_participants_role @default(member)
+  joined_at       DateTime  @default(now()) @db.Timestamp(0)
+  last_read_at    DateTime? @db.Timestamp(0)
+
+  conversation    conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade, map: "fk_cp_conversation")
+  user            users         @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_cp_user")
+
+  @@unique([conversation_id, user_id], map: "uk_cp_conv_user")
+  @@index([user_id], map: "idx_cp_user")
+  @@index([conversation_id], map: "idx_cp_conversation")
+}
+
+enum conversation_participants_role {
+  admin
+  member
 }
 
 enum conversations_type {
@@ -2000,6 +2108,7 @@ enum conversations_type {
   dpmd_dinas
   dpmd_kecamatan
   dpmd_internal
+  group
 }
 
 enum conversations_reference_type {
@@ -2012,4 +2121,5 @@ enum messages_message_type {
   file
   image
   system
+  status_reply
 }

@@ -25,4 +25,13 @@ router.put('/:id', jadwalKegiatanController.updateJadwal);
 // Delete jadwal
 router.delete('/:id', jadwalKegiatanController.deleteJadwal);
 
+// View tracking
+router.post('/:id/view', (req, res) => jadwalKegiatanController.trackView(req, res));
+router.get('/:id/viewers', (req, res) => jadwalKegiatanController.getViewers(req, res));
+
+// Emoji reactions
+router.get('/:id/reactions', (req, res) => jadwalKegiatanController.getReactions(req, res));
+router.post('/:id/reactions', (req, res) => jadwalKegiatanController.addReaction(req, res));
+router.delete('/:id/reactions', (req, res) => jadwalKegiatanController.removeReaction(req, res));
+
 module.exports = router;
