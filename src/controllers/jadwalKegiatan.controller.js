@@ -85,6 +85,9 @@ class JadwalKegiatanController {
             bidangs: {
               select: { nama: true }
             },
+            jadwal_kegiatan_bidang: {
+              include: { bidangs: { select: { id: true, nama: true } } }
+            },
             _count: {
               select: { jadwal_kegiatan_views: true }
             },
@@ -113,26 +116,29 @@ class JadwalKegiatanController {
           if (r.user_id === currentUserId) reactionMap[r.emoji].reacted = true;
         }
 
+        const bidangMulti = j.jadwal_kegiatan_bidang || [];
         return {
           id: j.id,
-        judul: j.judul,
-        deskripsi: j.deskripsi || '-',
-        bidang_id: j.bidang_id,
-        bidang_nama: j.bidangs?.nama || null,
-        tanggal_mulai: j.tanggal_mulai,
-        tanggal_selesai: j.tanggal_selesai,
-        lokasi: j.lokasi || '-',
-        asal_kegiatan: j.asal_kegiatan || '-',
-        pic_name: j.pic_name || '-',
-        pic_contact: j.pic_contact || '-',
-        status: j.status,
-        prioritas: j.prioritas,
-        kategori: j.kategori,
-        view_count: j._count.jadwal_kegiatan_views,
-        reactions: Object.values(reactionMap),
-        created_at: j.created_at,
-        updated_at: j.updated_at
-      };
+          judul: j.judul,
+          deskripsi: j.deskripsi || '-',
+          bidang_id: j.bidang_id,
+          bidang_nama: j.bidangs?.nama || null,
+          bidang_ids: bidangMulti.map(jkb => Number(jkb.bidang_id)),
+          bidang_names: bidangMulti.map(jkb => jkb.bidangs?.nama).filter(Boolean),
+          tanggal_mulai: j.tanggal_mulai,
+          tanggal_selesai: j.tanggal_selesai,
+          lokasi: j.lokasi || '-',
+          asal_kegiatan: j.asal_kegiatan || '-',
+          pic_name: j.pic_name || '-',
+          pic_contact: j.pic_contact || '-',
+          status: j.status,
+          prioritas: j.prioritas,
+          kategori: j.kategori,
+          view_count: j._count.jadwal_kegiatan_views,
+          reactions: Object.values(reactionMap),
+          created_at: j.created_at,
+          updated_at: j.updated_at
+        };
       });
       const totalPages = Math.ceil(total / parseInt(limit));
 
@@ -219,6 +225,7 @@ class JadwalKegiatanController {
         judul,
         deskripsi,
         bidang_id,
+        bidang_ids,
         tanggal_mulai,
         tanggal_selesai,
         lokasi,
@@ -256,10 +263,15 @@ class JadwalKegiatanController {
       console.log('   ✓ Authorization passed: User can create jadwal');
 
       // Determine bidang_id for jadwal
+      // Support both single bidang_id and bidang_ids[] (multi-select)
       // null = untuk semua pegawai (lintas bidang)
       let finalBidangId = null;
-      
-      if (bidang_id) {
+      const parsedBidangIds = Array.isArray(bidang_ids) ? bidang_ids.map(Number).filter(Boolean) : [];
+
+      if (parsedBidangIds.length === 1) {
+        finalBidangId = parsedBidangIds[0];
+        console.log('   ✓ Using single bidang_id from bidang_ids:', finalBidangId);
+      } else if (bidang_id) {
         finalBidangId = Number(bidang_id);
         console.log('   ✓ Using specified bidang_id:', finalBidangId);
       } else {
@@ -284,6 +296,18 @@ class JadwalKegiatanController {
           created_by: req.user.id
         }
       });
+
+      // Save multiple bidang relationships
+      if (parsedBidangIds.length > 0) {
+        await prisma.jadwal_kegiatan_bidang.createMany({
+          data: parsedBidangIds.map(bid => ({
+            jadwal_kegiatan_id: jadwal.id,
+            bidang_id: BigInt(bid)
+          })),
+          skipDuplicates: true
+        });
+        console.log('   ✓ Saved', parsedBidangIds.length, 'bidang relations');
+      }
 
       console.log('   ✅ Jadwal created with ID:', jadwal.id, '- Bidang:', finalBidangId || 'ALL');
 
@@ -330,6 +354,7 @@ class JadwalKegiatanController {
       const { id } = req.params;
       const {
         judul,
+        bidang_ids,
         tanggal_mulai,
         tanggal_selesai,
         lokasi,
@@ -393,6 +418,30 @@ class JadwalKegiatanController {
           ...(prioritas && { prioritas })
         }
       });
+
+      // Update multiple bidang relationships
+      if (Array.isArray(bidang_ids)) {
+        const parsedBidangIds = bidang_ids.map(Number).filter(Boolean);
+        await prisma.jadwal_kegiatan_bidang.deleteMany({
+          where: { jadwal_kegiatan_id: BigInt(id) }
+        });
+        if (parsedBidangIds.length > 0) {
+          await prisma.jadwal_kegiatan_bidang.createMany({
+            data: parsedBidangIds.map(bid => ({
+              jadwal_kegiatan_id: BigInt(id),
+              bidang_id: BigInt(bid)
+            })),
+            skipDuplicates: true
+          });
+        }
+        // Update primary bidang_id
+        const primaryBidangId = parsedBidangIds.length === 1 ? parsedBidangIds[0] : null;
+        await prisma.jadwal_kegiatan.update({
+          where: { id: parseInt(id) },
+          data: { bidang_id: primaryBidangId }
+        });
+        console.log('   ✓ Updated', parsedBidangIds.length, 'bidang relations');
+      }
 
       console.log('   ✅ Jadwal updated');
 
