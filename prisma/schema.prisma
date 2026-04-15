@@ -1385,6 +1385,7 @@ model users {
   message_reactions                                              message_reactions[]
   user_statuses                                                  user_statuses[]
   status_views                                                   status_views[]
+  nomor_surat_requests                                           nomor_surat_requests[]
 
   @@index([pegawai_id], map: "users_pegawai_id_index")
 }
@@ -1914,6 +1915,43 @@ enum bankeu_proposals_dinas_status {
   approved
   rejected
   revision
+}
+
+model klasifikasi_arsip {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  kode       String    @unique @db.VarChar(20)
+  nama       String    @db.VarChar(500)
+  parent_kode String?  @db.VarChar(20)
+  level      Int       @default(1) @db.UnsignedTinyInt
+  is_active  Boolean   @default(true)
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+
+  @@index([parent_kode], map: "idx_parent")
+  @@index([level], map: "idx_level")
+}
+
+model nomor_surat_requests {
+  id                    BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  klasifikasi_kode      String    @db.VarChar(20)
+  nomor_registrasi      Int       @db.UnsignedInt
+  nomor_surat_generated String    @db.VarChar(255)
+  perihal               String    @db.VarChar(500)
+  bidang_id             Int       @db.UnsignedInt
+  bidang_nama           String    @db.VarChar(100)
+  requested_by          BigInt    @db.UnsignedBigInt
+  requested_by_name     String    @db.VarChar(255)
+  catatan               String?   @db.Text
+  tahun                 Int       @db.UnsignedSmallInt
+  created_at            DateTime? @default(now()) @db.Timestamp(0)
+  updated_at            DateTime? @default(now()) @db.Timestamp(0)
+  users                 users     @relation(fields: [requested_by], references: [id], onDelete: Cascade, map: "fk_nomorsurat_user")
+
+  @@unique([nomor_registrasi, klasifikasi_kode, tahun], map: "uq_nomor_tahun")
+  @@index([klasifikasi_kode], map: "idx_klasifikasi")
+  @@index([bidang_id], map: "idx_nomorsurat_bidang")
+  @@index([requested_by], map: "idx_nomorsurat_requested_by")
+  @@index([tahun], map: "idx_nomorsurat_tahun")
+  @@index([tahun, klasifikasi_kode], map: "idx_tahun_kode")
 }
 
 enum aparatur_desa_status {
