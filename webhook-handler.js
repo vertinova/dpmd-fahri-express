@@ -69,14 +69,12 @@ function executeCommands(commands, cwd, callback) {
     }
     const cmd = commands[index++];
     log('Executing: ' + cmd);
-    exec(cmd, { cwd, maxBuffer: 10 * 1024 * 1024, env: execEnv, shell: '/bin/bash' }, (error, stdout, stderr) => {
-      if (error) {
-        log('Error: ' + error.message);
-        callback(error);
-        return;
-      }
+    exec(cmd, { cwd, maxBuffer: 10 * 1024 * 1024, env: execEnv, shell: '/bin/bash', timeout: 120000 }, (error, stdout, stderr) => {
       if (stdout) log('stdout: ' + stdout.substring(0, 500));
       if (stderr) log('stderr: ' + stderr.substring(0, 500));
+      if (error) {
+        log('Error (continuing): ' + error.message);
+      }
       next();
     });
   }
@@ -84,6 +82,34 @@ function executeCommands(commands, cwd, callback) {
 }
 
 const server = http.createServer((req, res) => {
+  // GET /webhook/logs - view last deployment logs
+  if (req.method === 'GET' && req.url === '/webhook/logs') {
+    try {
+      const logs = fs.readFileSync(LOG_FILE, 'utf-8');
+      const lines = logs.trim().split('\n').slice(-50).join('\n');
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end(lines);
+    } catch (e) {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('No logs found');
+    }
+    return;
+  }
+
+  // GET /webhook/status - check pm2 status
+  if (req.method === 'GET' && req.url === '/webhook/status') {
+    exec('/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 jlist', { env: { ...process.env, HOME: '/root' } }, (err, stdout) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      if (err) { res.end(JSON.stringify({ error: err.message })); return; }
+      try {
+        const list = JSON.parse(stdout);
+        const summary = list.map(p => ({ name: p.name, status: p.pm2_env?.status, restarts: p.pm2_env?.restart_time, uptime: p.pm2_env?.pm_uptime }));
+        res.end(JSON.stringify({ processes: summary }));
+      } catch { res.end(stdout.substring(0, 2000)); }
+    });
+    return;
+  }
+
   if (req.method !== 'POST' || req.url !== '/webhook') {
     res.writeHead(404);
     res.end('Not Found');
