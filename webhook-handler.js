@@ -14,13 +14,14 @@ const REPOS = {
     commands: [
       '/usr/bin/git fetch origin',
       '/usr/bin/git reset --hard origin/main',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npm install',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npx prisma generate',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npx prisma db push --accept-data-loss',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/node /var/www/backend/database-express/auto-migrate.js',
+      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npm install || true',
+      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npx prisma generate || true',
+      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npx prisma db push --accept-data-loss || true',
+      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/node /var/www/backend/database-express/auto-migrate.js || true',
       '/bin/cp -f /var/www/backend/nginx-dpmdbogorkab.conf /etc/nginx/sites-available/dpmdbogorkab.id || true',
       '/usr/sbin/nginx -t && /usr/sbin/nginx -s reload || true',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 restart dpmd-backend'
+      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 restart dpmd-backend || /root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 start /var/www/backend/src/server.js --name dpmd-backend',
+      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 restart webhook-handler || true'
     ]
   },
   'dpmd-frontend': {
