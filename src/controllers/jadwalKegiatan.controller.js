@@ -92,7 +92,7 @@ class JadwalKegiatanController {
               select: { jadwal_kegiatan_views: true }
             },
             jadwal_kegiatan_reactions: {
-              select: { emoji: true, user_id: true }
+              select: { emoji: true, user_id: true, users: { select: { id: true, name: true } } }
             }
           },
           skip,
@@ -111,9 +111,10 @@ class JadwalKegiatanController {
         // Build reaction summary
         const reactionMap = {};
         for (const r of j.jadwal_kegiatan_reactions) {
-          if (!reactionMap[r.emoji]) reactionMap[r.emoji] = { emoji: r.emoji, count: 0, reacted: false };
+          if (!reactionMap[r.emoji]) reactionMap[r.emoji] = { emoji: r.emoji, count: 0, reacted: false, users: [] };
           reactionMap[r.emoji].count++;
           if (r.user_id === currentUserId) reactionMap[r.emoji].reacted = true;
+          if (r.users) reactionMap[r.emoji].users.push({ id: Number(r.users.id), name: r.users.name });
         }
 
         const bidangMulti = j.jadwal_kegiatan_bidang || [];
@@ -619,7 +620,7 @@ class JadwalKegiatanController {
    */
   async addReaction(req, res) {
     try {
-      const jadwalId = parseInt(req.params.id);
+      const jadwalId = BigInt(req.params.id);
       const userId = BigInt(req.user.id);
       const { emoji } = req.body;
 
@@ -628,7 +629,13 @@ class JadwalKegiatanController {
       }
 
       await prisma.jadwal_kegiatan_reactions.upsert({
-        where: { uk_jadwal_reaction: { jadwal_kegiatan_id: jadwalId, user_id: userId, emoji } },
+        where: { 
+          jadwal_kegiatan_id_user_id_emoji: { 
+            jadwal_kegiatan_id: jadwalId, 
+            user_id: userId, 
+            emoji 
+          } 
+        },
         update: {},
         create: { jadwal_kegiatan_id: jadwalId, user_id: userId, emoji }
       });
@@ -647,7 +654,7 @@ class JadwalKegiatanController {
    */
   async removeReaction(req, res) {
     try {
-      const jadwalId = parseInt(req.params.id);
+      const jadwalId = BigInt(req.params.id);
       const userId = BigInt(req.user.id);
       const { emoji } = req.body;
 
@@ -673,7 +680,7 @@ class JadwalKegiatanController {
    */
   async getReactions(req, res) {
     try {
-      const jadwalId = parseInt(req.params.id);
+      const jadwalId = BigInt(req.params.id);
       const reactions = await this._getReactionsSummary(jadwalId);
       res.json({ success: true, data: reactions });
     } catch (error) {
