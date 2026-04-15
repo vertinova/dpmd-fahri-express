@@ -585,6 +585,7 @@ model jadwal_kegiatan {
   jadwal_kegiatan_bidang                   jadwal_kegiatan_bidang[]
   jadwal_kegiatan_views                    jadwal_kegiatan_views[]
   jadwal_kegiatan_reactions                jadwal_kegiatan_reactions[]
+  jadwal_kegiatan_comments                 jadwal_kegiatan_comments[]
 
   @@index([approved_by], map: "idx_jadwal_kegiatan_approved_by")
   @@index([bidang_id], map: "idx_jadwal_kegiatan_bidang_id")
@@ -633,6 +634,20 @@ model jadwal_kegiatan_reactions {
   @@unique([jadwal_kegiatan_id, user_id, emoji], map: "uk_jadwal_reaction")
   @@index([user_id], map: "idx_jkr_user")
   @@index([emoji], map: "idx_jkr_emoji")
+}
+
+model jadwal_kegiatan_comments {
+  id                 BigInt          @id @default(autoincrement()) @db.UnsignedBigInt
+  jadwal_kegiatan_id BigInt          @db.UnsignedBigInt
+  user_id            BigInt          @db.UnsignedBigInt
+  content            String          @db.Text
+  created_at         DateTime?       @default(now()) @db.Timestamp(0)
+  updated_at         DateTime?       @default(now()) @db.Timestamp(0)
+  jadwal_kegiatan    jadwal_kegiatan @relation(fields: [jadwal_kegiatan_id], references: [id], onDelete: Cascade, map: "fk_jkc_jadwal")
+  users              users           @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_jkc_user")
+
+  @@index([jadwal_kegiatan_id], map: "idx_jkc_jadwal")
+  @@index([user_id], map: "idx_jkc_user")
 }
 
 model karang_tarunas {
@@ -1367,6 +1382,7 @@ model users {
   jadwal_kegiatan_jadwal_kegiatan_created_byTousers              jadwal_kegiatan[]           @relation("jadwal_kegiatan_created_byTousers")
   jadwal_kegiatan_views                                          jadwal_kegiatan_views[]
   jadwal_kegiatan_reactions                                      jadwal_kegiatan_reactions[]
+  jadwal_kegiatan_comments                                       jadwal_kegiatan_comments[]
   kelembagaan_activity_logs                                      kelembagaan_activity_logs[]
   lampiran_surat                                                 lampiran_surat[]
   notification_logs                                              notification_logs[]

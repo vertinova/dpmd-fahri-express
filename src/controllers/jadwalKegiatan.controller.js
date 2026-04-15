@@ -92,7 +92,7 @@ class JadwalKegiatanController {
               select: { jadwal_kegiatan_views: true }
             },
             jadwal_kegiatan_reactions: {
-              select: { emoji: true, user_id: true, users: { select: { id: true, name: true } } }
+              select: { emoji: true, user_id: true, users: { select: { id: true, name: true, role: true, avatar: true } } }
             }
           },
           skip,
@@ -114,7 +114,7 @@ class JadwalKegiatanController {
           if (!reactionMap[r.emoji]) reactionMap[r.emoji] = { emoji: r.emoji, count: 0, reacted: false, users: [] };
           reactionMap[r.emoji].count++;
           if (r.user_id === currentUserId) reactionMap[r.emoji].reacted = true;
-          if (r.users) reactionMap[r.emoji].users.push({ id: Number(r.users.id), name: r.users.name });
+          if (r.users) reactionMap[r.emoji].users.push({ id: Number(r.users.id), name: r.users.name, role: r.users.role, avatar: r.users.avatar });
         }
 
         const bidangMulti = j.jadwal_kegiatan_bidang || [];
@@ -696,7 +696,7 @@ class JadwalKegiatanController {
     const reactions = await prisma.jadwal_kegiatan_reactions.findMany({
       where: { jadwal_kegiatan_id: jadwalId },
       include: {
-        users: { select: { id: true, name: true } }
+        users: { select: { id: true, name: true, role: true, avatar: true } }
       },
       orderBy: { created_at: 'asc' }
     });
@@ -704,12 +704,131 @@ class JadwalKegiatanController {
     // Group by emoji
     const grouped = {};
     for (const r of reactions) {
+      if (!r.users) continue;
       if (!grouped[r.emoji]) grouped[r.emoji] = { emoji: r.emoji, count: 0, users: [] };
       grouped[r.emoji].count++;
-      grouped[r.emoji].users.push({ id: r.users.id, name: r.users.name });
+      grouped[r.emoji].users.push({ id: Number(r.users.id), name: r.users.name, role: r.users.role, avatar: r.users.avatar });
     }
 
     return Object.values(grouped);
+  }
+
+  // ════════════════════════════════════════════════════════════
+  // COMMENTS
+  // ════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/jadwal-kegiatan/:id/comments
+   * Get all comments for a jadwal
+   */
+  async getComments(req, res) {
+    try {
+      const jadwalId = BigInt(req.params.id);
+
+      const comments = await prisma.jadwal_kegiatan_comments.findMany({
+        where: { jadwal_kegiatan_id: jadwalId },
+        include: {
+          users: { select: { id: true, name: true, role: true, avatar: true } }
+        },
+        orderBy: { created_at: 'asc' }
+      });
+
+      const data = comments.map(c => ({
+        id: Number(c.id),
+        content: c.content,
+        created_at: c.created_at,
+        updated_at: c.updated_at,
+        user: c.users ? { id: Number(c.users.id), name: c.users.name, role: c.users.role, avatar: c.users.avatar } : null
+      }));
+
+      res.json({ success: true, data });
+    } catch (error) {
+      console.error('❌ [Jadwal] Error in getComments:', error);
+      res.status(500).json({ success: false, message: 'Gagal memuat komentar', error: error.message });
+    }
+  }
+
+  /**
+   * POST /api/jadwal-kegiatan/:id/comments
+   * Add a comment to a jadwal
+   */
+  async addComment(req, res) {
+    try {
+      const jadwalId = BigInt(req.params.id);
+      const userId = BigInt(req.user.id);
+      const { content } = req.body;
+
+      if (!content || !content.trim()) {
+        return res.status(400).json({ success: false, message: 'Komentar tidak boleh kosong' });
+      }
+
+      if (content.length > 2000) {
+        return res.status(400).json({ success: false, message: 'Komentar maksimal 2000 karakter' });
+      }
+
+      // Verify jadwal exists
+      const jadwal = await prisma.jadwal_kegiatan.findUnique({ where: { id: jadwalId } });
+      if (!jadwal) {
+        return res.status(404).json({ success: false, message: 'Jadwal tidak ditemukan' });
+      }
+
+      const comment = await prisma.jadwal_kegiatan_comments.create({
+        data: {
+          jadwal_kegiatan_id: jadwalId,
+          user_id: userId,
+          content: content.trim(),
+        },
+        include: {
+          users: { select: { id: true, name: true, role: true, avatar: true } }
+        }
+      });
+
+      res.status(201).json({
+        success: true,
+        data: {
+          id: Number(comment.id),
+          content: comment.content,
+          created_at: comment.created_at,
+          updated_at: comment.updated_at,
+          user: comment.users ? { id: Number(comment.users.id), name: comment.users.name, role: comment.users.role, avatar: comment.users.avatar } : null
+        }
+      });
+    } catch (error) {
+      console.error('❌ [Jadwal] Error in addComment:', error);
+      res.status(500).json({ success: false, message: 'Gagal menambahkan komentar', error: error.message });
+    }
+  }
+
+  /**
+   * DELETE /api/jadwal-kegiatan/:id/comments/:commentId
+   * Delete a comment (only own comment or admin)
+   */
+  async deleteComment(req, res) {
+    try {
+      const jadwalId = BigInt(req.params.id);
+      const commentId = BigInt(req.params.commentId);
+      const userId = BigInt(req.user.id);
+
+      const comment = await prisma.jadwal_kegiatan_comments.findFirst({
+        where: { id: commentId, jadwal_kegiatan_id: jadwalId }
+      });
+
+      if (!comment) {
+        return res.status(404).json({ success: false, message: 'Komentar tidak ditemukan' });
+      }
+
+      // Only comment owner or superadmin can delete
+      if (Number(comment.user_id) !== Number(userId) && req.user.role !== 'superadmin') {
+        return res.status(403).json({ success: false, message: 'Anda tidak dapat menghapus komentar ini' });
+      }
+
+      await prisma.jadwal_kegiatan_comments.delete({ where: { id: commentId } });
+
+      res.json({ success: true, message: 'Komentar dihapus' });
+    } catch (error) {
+      console.error('❌ [Jadwal] Error in deleteComment:', error);
+      res.status(500).json({ success: false, message: 'Gagal menghapus komentar', error: error.message });
+    }
   }
 }
 

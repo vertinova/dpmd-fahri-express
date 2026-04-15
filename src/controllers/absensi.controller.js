@@ -834,6 +834,13 @@ const absensiController = {
       // Cek hari libur
       const holidayInfo = checkHoliday(new Date());
 
+      // Tenaga Keamanan & Kebersihan tetap masuk di weekend (Sabtu/Minggu)
+      // Mereka hanya libur di hari libur nasional (tanggal merah)
+      const isWeekendOnly = holidayInfo.isHoliday && (holidayInfo.reason === 'Hari Sabtu' || holidayInfo.reason === 'Hari Minggu');
+      const isNoHolidayWeekend = NO_TELAT_STATUS.includes(statusKepegawaian);
+      const effectiveHoliday = isNoHolidayWeekend && isWeekendOnly ? false : holidayInfo.isHoliday;
+      const effectiveReason = effectiveHoliday ? holidayInfo.reason : null;
+
       return res.json({
         success: true,
         data: {
@@ -842,8 +849,8 @@ const absensiController = {
           nama: user?.pegawai?.nama_pegawai || user?.name,
           jabatan: user?.pegawai?.jabatan || null,
           device_registered: !!user?.device_id,
-          is_holiday: holidayInfo.isHoliday,
-          holiday_reason: holidayInfo.reason,
+          is_holiday: effectiveHoliday,
+          holiday_reason: effectiveReason,
         }
       });
     } catch (error) {

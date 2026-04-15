@@ -34,4 +34,9 @@ router.get('/:id/reactions', (req, res) => jadwalKegiatanController.getReactions
 router.post('/:id/reactions', (req, res) => jadwalKegiatanController.addReaction(req, res));
 router.delete('/:id/reactions', (req, res) => jadwalKegiatanController.removeReaction(req, res));
 
+// Comments
+router.get('/:id/comments', (req, res) => jadwalKegiatanController.getComments(req, res));
+router.post('/:id/comments', (req, res) => jadwalKegiatanController.addComment(req, res));
+router.delete('/:id/comments/:commentId', (req, res) => jadwalKegiatanController.deleteComment(req, res));
+
 module.exports = router;

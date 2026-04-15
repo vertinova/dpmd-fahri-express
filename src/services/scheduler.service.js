@@ -69,7 +69,7 @@ class SchedulerService {
       timezone: "Asia/Jakarta"
     });
 
-    // Absensi reminder - check every minute for dynamic jam_masuk/jam_pulang + 5 min
+    // Absensi reminder - check every minute for dynamic jam_masuk/jam_pulang from settings
     this.jobs.absensiReminder = cron.schedule('* * * * *', async () => {
       try {
         await this.checkAbsensiReminder();
@@ -85,11 +85,11 @@ class SchedulerService {
     console.log('📅 Morning reminder: Every day at 7:00 AM (WIB)');
     console.log('🌙 Evening reminder: Every day at 9:00 PM (WIB)');
     console.log('🎂 Birthday check: Every day at 7:15 AM (WIB)');
-    console.log('⏰ Absensi reminder: Every minute (checks jam_masuk/jam_pulang + 5 min)');
+    console.log('⏰ Absensi reminder: Every minute (checks jam_masuk/jam_pulang from settings)');
   }
 
   /**
-   * Check if it's time to send absensi reminder (5 minutes after jam_masuk or jam_pulang)
+   * Check if it's time to send absensi reminder (at jam_masuk or jam_pulang from settings)
    */
   async checkAbsensiReminder() {
     const now = new Date();
@@ -108,8 +108,8 @@ class SchedulerService {
 
     const [masukH, masukM] = jamMasuk.split(':').map(Number);
     const [pulangH, pulangM] = jamPulang.split(':').map(Number);
-    const masukMinutes = masukH * 60 + masukM + 5; // 5 minutes after
-    const pulangMinutes = pulangH * 60 + pulangM + 5; // 5 minutes after
+    const masukMinutes = masukH * 60 + masukM; // tepat pada jam masuk
+    const pulangMinutes = pulangH * 60 + pulangM; // tepat pada jam pulang
 
     let reminderType = null;
     if (currentMinutes === masukMinutes) {
@@ -132,11 +132,21 @@ class SchedulerService {
       ? 'Jangan lupa absen masuk ya! Segera buka aplikasi dan lakukan absensi.'
       : 'Sudah waktunya pulang! Jangan lupa absen keluar sebelum meninggalkan kantor.');
 
+    // Cek apakah hari ini weekend (Sabtu/Minggu)
+    const dayOfWeek = wib.getUTCDay();
+    const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
+
+    // Di weekend, hanya kirim ke Tenaga Keamanan & Tenaga Kebersihan
+    // Di hari kerja, kirim ke semua pegawai yang wajib absen
+    const statusFilter = isWeekend
+      ? ['Tenaga_Keamanan', 'Tenaga_Kebersihan']
+      : ABSENSI_REQUIRED_STATUS;
+
     // Get eligible user IDs
     const eligibleUsers = await prisma.users.findMany({
       where: {
         is_active: true,
-        pegawai: { status_kepegawaian: { in: ABSENSI_REQUIRED_STATUS } }
+        pegawai: { status_kepegawaian: { in: statusFilter } }
       },
       select: { id: true }
     });
