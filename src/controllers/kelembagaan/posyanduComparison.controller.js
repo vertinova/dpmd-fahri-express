@@ -109,6 +109,38 @@ class PosyanduComparisonController {
       const addData = Array.from(addDataMap.values());
 
       // 5. Build comparison per desa
+      // Normalize desa name for matching: remove spaces, "KELURAHAN " prefix, fix known aliases
+      const normalizeDesa = (name) => {
+        let n = name.toUpperCase().trim();
+        n = n.replace(/^KELURAHAN\s+/, '');
+        // Normalize spaces: remove all internal spaces for comparison
+        n = n.replace(/\s+/g, '');
+        return n;
+      };
+
+      // Known desa name aliases (normalized Gema name -> normalized DB name)
+      const desaAliases = {
+        'CADASGAMPAR': 'CADASNGAMPAR',
+        'CIARUTENUDIK': 'CIARUTEUNUDIK',
+        'CIARUTENILIR': 'CIARUTEUNILIR',
+        'CIHIDEUNGILIR': 'CIHIDEUNGHILIR',
+        'KLAPANUNGGL': 'KLAPANUNGGAL',
+        'TEGALEGA': 'TEGALLEGA',
+        'KALONG1': 'KALONGI',
+        'KALONG2': 'KALONGII',
+        'PANGKALANJAYA': 'PANGKALJAYA',
+        'CIBENTENG': 'CIBANTENG',       // Ciampea
+        'CIMULUNG': 'CIMULANG',         // Ranca Bungur
+        'KARANGASAMBARAT': 'KARANGASEMBARAT',
+        'WARAGAJAYA': 'WARGAJAYA',      // Sukamakmur
+        'PEMAGARSARI': 'PAMEGARSARI',   // Parung
+        'PANGASINAN': 'PENGASINAN',     // Gunung Sindur
+        'RANGASJAJAR': 'RENGASJAJAR',   // Cigudeg
+        'CIPAYUNGDATAR': 'CIPAYUNG',    // Megamendung
+        'PUTUTNUTUG': 'PUTATNUTUG',     // Ciseeng
+        'SUKAMAJAYA': 'SUKMAJAYA',      // Tajurhalang
+      };
+
       // Index database posyandu by desa_id
       const dbPosyanduByDesa = {};
       allPosyandu.forEach((p) => {
@@ -116,18 +148,37 @@ class PosyanduComparisonController {
         dbPosyanduByDesa[p.desa_id].push(p);
       });
 
-      // Index gema by desa name
-      const gemaByDesa = {};
-      gemaData.forEach((g) => {
-        if (!gemaByDesa[g.desa]) gemaByDesa[g.desa] = [];
-        gemaByDesa[g.desa].push(g);
+      // Build normalized desa name -> DB desa mapping
+      const dbDesaByNorm = {};
+      allDesa.forEach((d) => {
+        const norm = normalizeDesa(d.nama);
+        dbDesaByNorm[norm] = d;
       });
 
-      // Index add by desa name
-      const addByDesa = {};
+      // Index gema by normalized desa name, then map to DB desa
+      const gemaByDesaId = {};
+      gemaData.forEach((g) => {
+        let norm = normalizeDesa(g.desa);
+        if (desaAliases[norm]) norm = desaAliases[norm];
+        const dbDesa = dbDesaByNorm[norm];
+        if (dbDesa) {
+          const id = dbDesa.id.toString();
+          if (!gemaByDesaId[id]) gemaByDesaId[id] = [];
+          gemaByDesaId[id].push(g);
+        }
+      });
+
+      // Index add by normalized desa name, then map to DB desa
+      const addByDesaId = {};
       addData.forEach((a) => {
-        if (!addByDesa[a.desa]) addByDesa[a.desa] = [];
-        addByDesa[a.desa].push(a);
+        let norm = normalizeDesa(a.desa);
+        if (desaAliases[norm]) norm = desaAliases[norm];
+        const dbDesa = dbDesaByNorm[norm];
+        if (dbDesa) {
+          const id = dbDesa.id.toString();
+          if (!addByDesaId[id]) addByDesaId[id] = [];
+          addByDesaId[id].push(a);
+        }
       });
 
       // Roman numeral to arabic number mapping
@@ -210,19 +261,19 @@ class PosyanduComparisonController {
       };
 
       const comparison = allDesa.map((desa) => {
-        const desaNamaUpper = desa.nama.toUpperCase();
+        const desaIdStr = desa.id.toString();
         const dbList = (dbPosyanduByDesa[desa.id] || []).map((p) => ({
           id: p.id,
           nama: p.nama,
           normalized: normalize(p.nama),
           status: p.status_kelembagaan,
         }));
-        const gemaList = (gemaByDesa[desaNamaUpper] || []).map((g) => ({
+        const gemaList = (gemaByDesaId[desaIdStr] || []).map((g) => ({
           nama: g.posyandu,
           normalized: normalize(g.posyandu),
           kecamatan: g.kecamatan,
         }));
-        const addList = (addByDesa[desaNamaUpper] || []).map((a) => ({
+        const addList = (addByDesaId[desaIdStr] || []).map((a) => ({
           nama: a.posyandu,
           normalized: normalize(a.posyandu),
           nilai: a.nilai,
@@ -365,6 +416,15 @@ class PosyanduComparisonController {
         };
       });
 
+      // Collect Gema desa names that didn't match any DB desa
+      const unmatchedGemaDesa = [];
+      const gemaDesaNames = [...new Set(gemaData.map(g => g.desa))];
+      gemaDesaNames.forEach((name) => {
+        let norm = normalizeDesa(name);
+        if (desaAliases[norm]) norm = desaAliases[norm];
+        if (!dbDesaByNorm[norm]) unmatchedGemaDesa.push(name);
+      });
+
       // Summary stats
       const summary = {
         totalDesa: allDesa.length,
@@ -376,6 +436,7 @@ class PosyanduComparisonController {
         totalOnlyGema: comparison.reduce((acc, d) => acc + d.onlyGema, 0),
         totalOnlyAdd: comparison.reduce((acc, d) => acc + d.onlyAdd, 0),
         totalOnlyDb: comparison.reduce((acc, d) => acc + d.onlyDb, 0),
+        unmatchedGemaDesa,
       };
 
       res.json({
