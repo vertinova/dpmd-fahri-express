@@ -20,7 +20,7 @@ const REPOS = {
       '/bin/cp -f /var/www/backend/nginx-dpmdbogorkab.conf /etc/nginx/sites-available/dpmdbogorkab.id || true',
       '/usr/sbin/nginx -t && /usr/sbin/nginx -s reload || true',
       '/bin/cp -f /var/www/backend/webhook-handler.js /var/www/webhook/webhook-handler.js || true',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 restart dpmd-backend --update-env || /root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 start /var/www/backend/src/server.js --name dpmd-backend',
+      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 reload dpmd-backend --wait-ready --listen-timeout 15000 --update-env || /root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 start /var/www/backend/src/server.js --name dpmd-backend',
       '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 restart github-webhook || true'
     ]
   },

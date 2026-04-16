@@ -410,6 +410,11 @@ function startServer() {
 
     // Initialize scheduler for push notifications
     schedulerService.init();
+
+    // Signal PM2 that the app is ready (enables --wait-ready graceful reload)
+    if (process.send) {
+      process.send('ready');
+    }
   });
 }
 
