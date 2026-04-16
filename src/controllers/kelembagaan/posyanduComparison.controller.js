@@ -68,7 +68,15 @@ class PosyanduComparisonController {
       const addWorkbook = XLSX.readFile(addPath);
       const addRaw = XLSX.utils.sheet_to_json(addWorkbook.Sheets['Sheet1']);
 
-      // Get unique desa-posyandu pairs, clean posyandu name
+      // Helper to convert Excel serial date to YYYY-MM-DD string
+      const excelDateToStr = (serial) => {
+        if (!serial || typeof serial !== 'number') return String(serial || '');
+        const utcDays = Math.floor(serial - 25569);
+        const d = new Date(utcDays * 86400000);
+        return d.toISOString().slice(0, 10);
+      };
+
+      // Get unique desa-posyandu pairs, keep detail records per posyandu
       const addDataMap = new Map();
       addRaw.forEach((row) => {
         if (row.Nm_Desa && row.Nm_Penerima) {
@@ -76,18 +84,25 @@ class PosyanduComparisonController {
           let posyandu = String(row.Nm_Penerima).trim().toUpperCase();
           // Remove "POSYANDU " prefix if present
           posyandu = posyandu.replace(/^POSYANDU\s+/, '');
+          const detail = {
+            noSpp: row.No_SPP || '',
+            tglBukti: excelDateToStr(row.Tgl_Bukti),
+            keterangan: row.Keterangan || '',
+            nilai: row[' Nilai'] || 0,
+          };
           const key = `${desa}|${posyandu}`;
           if (!addDataMap.has(key)) {
             addDataMap.set(key, {
               desa,
               posyandu,
               kodeDesa: row.Kd_Desa || '',
-              nilai: row[' Nilai'] || 0,
+              nilai: detail.nilai,
+              details: [detail],
             });
           } else {
-            // Sum values for duplicate entries
             const existing = addDataMap.get(key);
-            existing.nilai += (row[' Nilai'] || 0);
+            existing.nilai += detail.nilai;
+            existing.details.push(detail);
           }
         }
       });
@@ -211,6 +226,7 @@ class PosyanduComparisonController {
           nama: a.posyandu,
           normalized: normalize(a.posyandu),
           nilai: a.nilai,
+          details: a.details || [],
         }));
 
         // --- Fuzzy matching: merge across different sources only ---
@@ -301,6 +317,9 @@ class PosyanduComparisonController {
           const addItem = entry.addItems[0] || null;
           const totalNilai = entry.addItems.reduce((sum, a) => sum + (a.nilai || 0), 0);
 
+          // Collect all ADD detail records (termin) for this posyandu
+          const addDetails = entry.addItems.flatMap((a) => a.details || []);
+
           // Collect per-source original names
           const dbNames = [...new Set(entry.dbItems.map((d) => d.nama))];
           const gemaNames = [...new Set(entry.gemaItems.map((g) => g.nama))];
@@ -320,6 +339,7 @@ class PosyanduComparisonController {
             dbId: dbItem?.id || null,
             dbStatus: dbItem?.status || null,
             addNilai: totalNilai,
+            addDetails: addDetails.length > 0 ? addDetails : [],
           });
         });
 
