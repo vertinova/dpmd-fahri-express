@@ -387,9 +387,9 @@ const PORT = process.env.PORT || 3001;
 // Create HTTP server
 const server = http.createServer(app);
 
-// Video Meeting (mediasoup + Socket.io) - DISABLED during maintenance
-// const { initSocketServer } = require('./socket/meeting.socket');
-// const mediasoupService = require('./services/mediasoup.service');
+// Socket.io for messaging (re-enabled) - mediasoup/video meeting stays DISABLED
+const { initSocketServer } = require('./socket/meeting.socket');
+// mediasoupService intentionally NOT initialized (video meeting maintenance)
 
 // Start server
 function startServer() {
@@ -403,6 +403,10 @@ function startServer() {
     logger.info(`📝 Environment: ${process.env.NODE_ENV}`);
     logger.info(`🔗 CORS enabled for: ${process.env.CORS_ORIGIN}`);
     logger.info('🔧 Video Meeting: DISABLED (maintenance mode)');
+
+    // Initialize Socket.io for messaging (no mediasoup workers)
+    initSocketServer(server);
+    logger.info('🔌 Socket.io initialized (messaging only)');
 
     // Initialize scheduler for push notifications
     schedulerService.init();

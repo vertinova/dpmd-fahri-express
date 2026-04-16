@@ -80,6 +80,10 @@ class MediasoupService {
    * Create or get existing room
    */
   async getOrCreateRoom(roomId) {
+    if (this.workers.length === 0) {
+      throw new Error('Mediasoup not initialized (maintenance mode)');
+    }
+
     let room = this.rooms.get(roomId);
 
     if (!room) {
