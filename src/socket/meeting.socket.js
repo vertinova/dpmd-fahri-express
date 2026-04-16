@@ -694,7 +694,16 @@ function initSocketServer(httpServer) {
 
     // Leave room
     socket.on('leave-room', async () => {
-      await handlePeerLeave(socket);
+      try {
+        await handlePeerLeave(socket);
+      } catch (err) {
+        console.error('[Socket] Error in leave-room:', err);
+      }
+    });
+
+    // Handle socket errors
+    socket.on('error', (err) => {
+      console.error(`[Socket] Error for ${socket.user?.name}:`, err);
     });
 
     // Handle disconnect
@@ -779,6 +788,11 @@ async function handlePeerLeave(socket) {
  * Get Socket.io instance
  */
 function getIO() {
+  if (!io) {
+    console.warn('[Socket] getIO() called but Socket.IO not initialized yet');
+    // Return a safe no-op object to prevent crashes
+    return { to: () => ({ emit: () => {} }), emit: () => {} };
+  }
   return io;
 }
 

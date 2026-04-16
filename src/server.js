@@ -14,6 +14,16 @@ BigInt.prototype.toJSON = function() {
   return this.toString();
 };
 
+// Global error handlers - prevent process crash on unhandled errors
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[Process] Unhandled Rejection:', reason);
+});
+
+process.on('uncaughtException', (error) => {
+  console.error('[Process] Uncaught Exception:', error);
+  // Don't exit - let PM2 handle if truly fatal
+});
+
 // Initialize Sequelize models FIRST before any routes
 const { sequelize } = require('./models');
 

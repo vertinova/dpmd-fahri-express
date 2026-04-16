@@ -42,8 +42,22 @@ class MediasoupService {
       });
 
       worker.on('died', () => {
-        console.error(`[Mediasoup] Worker ${worker.pid} died, exiting...`);
-        setTimeout(() => process.exit(1), 2000);
+        console.error(`[Mediasoup] Worker ${worker.pid} died, recreating...`);
+        // Remove dead worker and create a replacement
+        const idx = this.workers.indexOf(worker);
+        if (idx !== -1) this.workers.splice(idx, 1);
+        mediasoup.createWorker({
+          logLevel: config.worker.logLevel,
+          logTags: config.worker.logTags,
+          rtcMinPort: config.worker.rtcMinPort,
+          rtcMaxPort: config.worker.rtcMaxPort
+        }).then(newWorker => {
+          newWorker.on('died', worker.listeners('died')[0]); // reuse same handler
+          this.workers.push(newWorker);
+          console.log(`[Mediasoup] Replacement worker ${newWorker.pid} created`);
+        }).catch(err => {
+          console.error('[Mediasoup] Failed to recreate worker:', err);
+        });
       });
 
       this.workers.push(worker);
