@@ -16,7 +16,7 @@ async function autoMigrate() {
 
 	try {
 		const dbUrl = process.env.DATABASE_URL;
-		const match = dbUrl.match(/mysql:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)/);
+		const match = dbUrl.match(/mysql:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/([^?]+)/);
 		if (!match) throw new Error("Invalid DATABASE_URL format");
 
 		const [, user, password, host, port, database] = match;
