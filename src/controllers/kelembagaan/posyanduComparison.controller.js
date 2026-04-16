@@ -138,6 +138,9 @@ class PosyanduComparisonController {
         'CIPAYUNGDATAR': 'CIPAYUNG',    // Megamendung
         'PUTUTNUTUG': 'PUTATNUTUG',     // Ciseeng
         'SUKAMAJAYA': 'SUKMAJAYA',      // Tajurhalang
+        'LEUWINUTUNG': 'LEUWINUTUG',    // ADD typo
+        'BASIRBUNCIR': 'PASIRBUNCIR',   // ADD typo: "BASIR BUNCIR"
+        'CIHOE': 'CIHOWE',             // ADD typo
       };
 
       // Index database posyandu by desa_id
