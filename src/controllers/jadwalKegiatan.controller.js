@@ -355,6 +355,7 @@ class JadwalKegiatanController {
       const { id } = req.params;
       const {
         judul,
+        deskripsi,
         bidang_ids,
         tanggal_mulai,
         tanggal_selesai,
@@ -363,7 +364,8 @@ class JadwalKegiatanController {
         pic_name,
         pic_contact,
         status,
-        prioritas
+        prioritas,
+        kategori
       } = req.body;
 
       console.log('\n📝 [Jadwal] UPDATE Request for ID:', id);
@@ -409,6 +411,7 @@ class JadwalKegiatanController {
         where: { id: parseInt(id) },
         data: {
           ...(judul && { judul }),
+          ...(deskripsi !== undefined && { deskripsi: deskripsi || '-' }),
           ...(tanggal_mulai && { tanggal_mulai: new Date(tanggal_mulai) }),
           ...(tanggal_selesai && { tanggal_selesai: new Date(tanggal_selesai) }),
           ...(lokasi !== undefined && { lokasi: lokasi || '-' }),
@@ -416,7 +419,8 @@ class JadwalKegiatanController {
           ...(pic_name !== undefined && { pic_name: pic_name || '-' }),
           ...(pic_contact !== undefined && { pic_contact: pic_contact || '-' }),
           ...(status && { status }),
-          ...(prioritas && { prioritas })
+          ...(prioritas && { prioritas }),
+          ...(kategori && { kategori })
         }
       });
 

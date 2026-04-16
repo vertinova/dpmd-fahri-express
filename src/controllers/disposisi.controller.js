@@ -41,7 +41,8 @@ exports.createDisposisi = async (req, res, next) => {
     
     const {
       surat_id,
-      ke_user_id,
+      ke_user_id,        // single (backward compat)
+      ke_user_ids,       // array (multi-recipient)
       catatan,
       instruksi,
       level_disposisi,
@@ -49,132 +50,119 @@ exports.createDisposisi = async (req, res, next) => {
 
     const dari_user_id = req.user.id;
     const dari_user_role = req.user.role;
-    
+
+    // Normalize recipients into array — also handle comma-joined strings like ['461,467,470']
+    let recipientIds = [];
+    if (Array.isArray(ke_user_ids) && ke_user_ids.length > 0) {
+      recipientIds = ke_user_ids.flatMap(id => String(id).split(',').map(s => s.trim()).filter(Boolean));
+    } else if (ke_user_id) {
+      recipientIds = String(ke_user_id).split(',').map(s => s.trim()).filter(Boolean);
+    }
+
+    // Normalize instruksi — accept array or string
+    const instruksiNorm = Array.isArray(instruksi) ? instruksi[0] : (instruksi || 'laksanakan');
+
+    if (recipientIds.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Minimal satu penerima disposisi harus dipilih',
+      });
+    }
+
     console.log('📋 Request Data:', {
       surat_id,
       dari_user_id: dari_user_id.toString(),
       dari_user_role,
-      ke_user_id: ke_user_id.toString(),
+      recipientIds,
       instruksi,
       level_disposisi
     });
 
-    // Normalize ke_user_id to an array
-    const ke_user_ids = Array.isArray(ke_user_id) ? ke_user_id : [ke_user_id];
-    
-    // Validate that ALL target users exist
-    const keUsers = await prisma.users.findMany({
-      where: { id: { in: ke_user_ids.map(id => BigInt(id)) } }
+    // Validate each recipient and workflow
+    const recipientUsers = await prisma.users.findMany({
+      where: { id: { in: recipientIds.map(id => BigInt(id)) } },
+      select: { id: true, name: true, role: true }
     });
 
-    if (keUsers.length !== ke_user_ids.length) {
+    if (recipientUsers.length !== recipientIds.length) {
       return res.status(404).json({
         success: false,
-        message: 'Salah satu user tujuan tidak ditemukan',
+        message: 'Satu atau lebih user tujuan tidak ditemukan',
       });
     }
 
-    // Normalize instruksi to a string (stringify if it's an array)
-    let finalInstruksi = 'laksanakan';
-    if (Array.isArray(instruksi)) {
-      finalInstruksi = JSON.stringify(instruksi);
-    } else if (instruksi) {
-      finalInstruksi = String(instruksi);
-    }
-
-    console.log('📊 [WORKFLOW VALIDATION]', {
-      from: { id: dari_user_id.toString(), role: dari_user_role },
-      targets_count: keUsers.length
-    });
-
-    // Validate workflow hierarchy for ALL target users
-    for (const keUser of keUsers) {
-      const workflowValidation = validateWorkflowTransition(dari_user_role, keUser.role);
+    for (const rUser of recipientUsers) {
+      const workflowValidation = validateWorkflowTransition(dari_user_role, rUser.role);
       if (!workflowValidation.valid) {
         return res.status(400).json({
           success: false,
-          message: `Validasi workflow gagal untuk user ${keUser.name}: ${workflowValidation.message}`,
+          message: `${workflowValidation.message} (${rUser.name})`,
         });
       }
     }
 
-    const createdDisposisis = [];
+    // Fetch surat_masuk for notification data
+    const suratData = await prisma.surat_masuk.findUnique({
+      where: { id: BigInt(surat_id) },
+      select: { perihal: true, nomor_surat: true }
+    });
 
-    // Create a disposisi record sequentially for each target user
-    for (const keUser of keUsers) {
+    const senderName = req.user.nama || req.user.name || req.user.email;
+
+    // Create one disposisi per recipient
+    const createdDisposisis = [];
+    for (const rUser of recipientUsers) {
       const disposisi = await prisma.disposisi.create({
         data: {
           surat_id: BigInt(surat_id),
           dari_user_id: BigInt(dari_user_id),
-          ke_user_id: BigInt(keUser.id),
+          ke_user_id: rUser.id,
           catatan,
-          instruksi: finalInstruksi,
+          instruksi: instruksiNorm,
           status: 'pending',
-          level_disposisi: parseInt(level_disposisi),
-        },
-        include: {
-          surat_masuk: {
-            select: {
-              id: true,
-              nomor_surat: true,
-              perihal: true,
-              pengirim: true,
-              tanggal_surat: true,
-            },
-          },
-          users_disposisi_dari_user_idTousers: {
-            select: { id: true, name: true, email: true, role: true },
-          },
-          users_disposisi_ke_user_idTousers: {
-            select: { id: true, name: true, email: true, role: true },
-          },
+          level_disposisi: parseInt(level_disposisi) || getRoleLevel(rUser.role),
         },
       });
-
       createdDisposisis.push(disposisi);
 
-      // Send push notification to recipient
-      console.log(`\n📨 [DISPOSISI] Starting push notification process for ${keUser.name}...`);
+      // Push notification per recipient
       try {
         const notificationData = {
           id: disposisi.id,
-          perihal: disposisi.surat_masuk?.perihal || 'Disposisi baru',
-          nomor_surat: disposisi.surat_masuk?.nomor_surat,
-          dari_user: disposisi.users_disposisi_dari_user_idTousers?.name,
-          instruksi: disposisi.instruksi,
-          catatan: disposisi.catatan
+          perihal: suratData?.perihal || 'Disposisi baru',
+          nomor_surat: suratData?.nomor_surat,
+          dari_user: senderName,
+          instruksi: instruksiNorm,
+          catatan
         };
-        
-        await PushNotificationService.notifyNewDisposisi(
-          notificationData,
-          [Number(keUser.id)]
-        );
-        console.log('✅ [PUSH] Notification sent to recipient ID:', Number(keUser.id));
+        await PushNotificationService.notifyNewDisposisi(notificationData, [Number(rUser.id)]);
       } catch (notifError) {
-        console.error('\n❌ [PUSH] ERROR sending push notification:', notifError.message);
+        console.error('❌ [PUSH] Error:', notifError.message);
       }
 
-      // Log activity
+      // Activity log per recipient
       await ActivityLogger.log({
         userId: req.user.id,
-        userName: req.user.nama || req.user.name || req.user.email,
+        userName: senderName,
         userRole: req.user.role,
-        bidangId: 2, // Sekretariat
+        bidangId: 2,
         module: 'disposisi',
         action: 'create',
         entityType: 'disposisi',
         entityId: Number(disposisi.id),
-        entityName: disposisi.surat_masuk?.perihal || `Disposisi #${disposisi.id}`,
-        description: `${req.user.nama || req.user.name || req.user.email} membuat disposisi ke ${keUser.name}: ${disposisi.surat_masuk?.perihal || 'Surat'}`,
-        newValue: { instruksi: finalInstruksi, catatan, ke_user: keUser.name },
+        entityName: suratData?.perihal || `Disposisi #${disposisi.id}`,
+        description: `${senderName} membuat disposisi ke ${rUser.name}: ${suratData?.perihal || 'Surat'}`,
+        newValue: { instruksi, catatan, ke_user: rUser.name },
         ipAddress: ActivityLogger.getIpFromRequest(req),
         userAgent: ActivityLogger.getUserAgentFromRequest(req)
       });
     }
 
+    console.log(`✅ [DISPOSISI] Created ${createdDisposisis.length} disposisi records`);
+
     res.status(201).json({
       success: true,
-      message: 'Disposisi berhasil dibuat dan diteruskan',
+      message: `Disposisi berhasil diteruskan ke ${createdDisposisis.length} penerima`,
       data: createdDisposisis,
     });
   } catch (error) {
@@ -667,9 +655,9 @@ exports.getAvailableUsers = async (req, res, next) => {
 
     // Role-based filtering (simplified)
     if (currentRole === 'kepala_dinas') {
-      // Kepala Dinas → can send to Sekretaris Dinas
+      // Kepala Dinas → dapat meneruskan ke semua level di bawahnya
       whereClause = {
-        role: 'sekretaris_dinas'
+        role: { in: ['sekretaris_dinas', 'kepala_bidang', 'ketua_tim'] }
       };
     }
     else if (currentRole === 'sekretaris_dinas') {
