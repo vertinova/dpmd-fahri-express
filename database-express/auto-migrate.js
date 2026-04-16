@@ -75,6 +75,15 @@ async function autoMigrate() {
 				console.log(`✅ Done: ${file}`);
 				ranCount++;
 			} catch (err) {
+				// Duplicate column/index/table errors = already applied manually
+				if ([1060, 1061, 1050, 1068].includes(err.errno)) {
+					console.log(`⏭️  Skipped (already applied): ${file} - ${err.message}`);
+					await connection.query(
+						"INSERT INTO `_migration_history` (filename) VALUES (?)",
+						[file]
+					);
+					continue;
+				}
 				console.error(`❌ Failed: ${file}`);
 				console.error(err.message);
 				process.exit(1);
