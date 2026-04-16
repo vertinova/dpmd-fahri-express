@@ -109,11 +109,10 @@ class PosyanduComparisonController {
       const addData = Array.from(addDataMap.values());
 
       // 5. Build comparison per desa
-      // Normalize desa name for matching: remove spaces, "KELURAHAN " prefix, fix known aliases
+      // Normalize name for matching: remove spaces, "KELURAHAN " prefix
       const normalizeDesa = (name) => {
         let n = name.toUpperCase().trim();
         n = n.replace(/^KELURAHAN\s+/, '');
-        // Normalize spaces: remove all internal spaces for comparison
         n = n.replace(/\s+/g, '');
         return n;
       };
@@ -148,19 +147,41 @@ class PosyanduComparisonController {
         dbPosyanduByDesa[p.desa_id].push(p);
       });
 
-      // Build normalized desa name -> DB desa mapping
-      const dbDesaByNorm = {};
+      // Build composite key (kecamatan+desa normalized) -> DB desa mapping
+      // This handles duplicate desa names across different kecamatan (e.g. NAGRAK in Gunung Putri & Sukaraja)
+      const dbDesaByComposite = {};  // "KECNORM|DESANORM" -> desa
+      const dbDesaByDesa = {};       // "DESANORM" -> [desa, ...] (fallback for non-ambiguous)
       allDesa.forEach((d) => {
-        const norm = normalizeDesa(d.nama);
-        dbDesaByNorm[norm] = d;
+        const desaNorm = normalizeDesa(d.nama);
+        const kecNorm = normalizeDesa(d.kecamatans.nama);
+        dbDesaByComposite[`${kecNorm}|${desaNorm}`] = d;
+        if (!dbDesaByDesa[desaNorm]) dbDesaByDesa[desaNorm] = [];
+        dbDesaByDesa[desaNorm].push(d);
       });
 
-      // Index gema by normalized desa name, then map to DB desa
+      // Resolve a desa from Gema/ADD name (+optional kecamatan) to a DB desa
+      const resolveDbDesa = (desaName, kecName) => {
+        let desaNorm = normalizeDesa(desaName);
+        if (desaAliases[desaNorm]) desaNorm = desaAliases[desaNorm];
+
+        // Try composite key first (kecamatan + desa)
+        if (kecName) {
+          const kecNorm = normalizeDesa(kecName);
+          const composite = `${kecNorm}|${desaNorm}`;
+          if (dbDesaByComposite[composite]) return dbDesaByComposite[composite];
+        }
+
+        // Fallback: match by desa name only (works if name is unique)
+        const candidates = dbDesaByDesa[desaNorm];
+        if (candidates && candidates.length === 1) return candidates[0];
+
+        return null;
+      };
+
+      // Index gema by DB desa id (using kecamatan+desa composite match)
       const gemaByDesaId = {};
       gemaData.forEach((g) => {
-        let norm = normalizeDesa(g.desa);
-        if (desaAliases[norm]) norm = desaAliases[norm];
-        const dbDesa = dbDesaByNorm[norm];
+        const dbDesa = resolveDbDesa(g.desa, g.kecamatan);
         if (dbDesa) {
           const id = dbDesa.id.toString();
           if (!gemaByDesaId[id]) gemaByDesaId[id] = [];
@@ -168,12 +189,27 @@ class PosyanduComparisonController {
         }
       });
 
-      // Index add by normalized desa name, then map to DB desa
+      // For ADD, extract kecamatan code from Kd_Desa (e.g. "04.2005." -> kec code "04")
+      // Build kecamatan code -> kecamatan name mapping from DB
+      const kecByCode = {};
+      allDesa.forEach((d) => {
+        // DB kode format: "32.01.XX.YYYY" where XX is kecamatan code
+        const parts = d.kecamatans.kode ? d.kecamatans.kode.split('.') : [];
+        if (parts.length >= 3) {
+          kecByCode[parts[2]] = d.kecamatans.nama;
+        }
+      });
+
+      // Index add by DB desa id
       const addByDesaId = {};
       addData.forEach((a) => {
-        let norm = normalizeDesa(a.desa);
-        if (desaAliases[norm]) norm = desaAliases[norm];
-        const dbDesa = dbDesaByNorm[norm];
+        // Try to extract kecamatan from Kd_Desa (format: "XX.YYYY.")
+        let kecName = null;
+        if (a.kodeDesa) {
+          const kecCode = String(a.kodeDesa).split('.')[0];
+          if (kecCode && kecByCode[kecCode]) kecName = kecByCode[kecCode];
+        }
+        const dbDesa = resolveDbDesa(a.desa, kecName);
         if (dbDesa) {
           const id = dbDesa.id.toString();
           if (!addByDesaId[id]) addByDesaId[id] = [];
@@ -418,11 +454,11 @@ class PosyanduComparisonController {
 
       // Collect Gema desa names that didn't match any DB desa
       const unmatchedGemaDesa = [];
-      const gemaDesaNames = [...new Set(gemaData.map(g => g.desa))];
-      gemaDesaNames.forEach((name) => {
-        let norm = normalizeDesa(name);
-        if (desaAliases[norm]) norm = desaAliases[norm];
-        if (!dbDesaByNorm[norm]) unmatchedGemaDesa.push(name);
+      const gemaDesaSet = new Set();
+      gemaData.forEach(g => gemaDesaSet.add(`${g.kecamatan}|${g.desa}`));
+      gemaDesaSet.forEach((key) => {
+        const [kec, desa] = key.split('|');
+        if (!resolveDbDesa(desa, kec)) unmatchedGemaDesa.push(`${desa} (${kec})`);
       });
 
       // Summary stats
