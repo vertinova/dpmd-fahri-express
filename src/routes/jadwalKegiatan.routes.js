@@ -13,6 +13,9 @@ router.use(auth);
 // Get all jadwal (with role-based filtering)
 router.get('/', jadwalKegiatanController.getAllJadwal);
 
+// Get disposisi data for jadwal display (must be before /:id)
+router.get('/disposisi-jadwal', (req, res) => jadwalKegiatanController.getDisposisiForJadwal(req, res));
+
 // Get single jadwal by ID
 router.get('/:id', jadwalKegiatanController.getJadwalById);
 

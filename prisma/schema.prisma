@@ -572,6 +572,8 @@ model jadwal_kegiatan {
   status                                   jadwal_kegiatan_status    @default(draft)
   prioritas                                jadwal_kegiatan_prioritas @default(sedang)
   kategori                                 jadwal_kegiatan_kategori  @default(lainnya)
+  surat_masuk_id                           BigInt?                   @db.UnsignedBigInt
+  sub_bidang_pelaksana                     String?                   @db.VarChar(500)
   anggaran                                 Decimal?                  @db.Decimal(15, 2)
   catatan_approval                         String?                   @db.Text
   created_by                               BigInt                    @db.UnsignedBigInt
@@ -582,6 +584,7 @@ model jadwal_kegiatan {
   users_jadwal_kegiatan_approved_byTousers users?                    @relation("jadwal_kegiatan_approved_byTousers", fields: [approved_by], references: [id], onUpdate: NoAction, map: "fk_jadwal_kegiatan_approved_by")
   bidangs                                  bidangs?                  @relation(fields: [bidang_id], references: [id], onUpdate: NoAction, map: "fk_jadwal_kegiatan_bidang")
   users_jadwal_kegiatan_created_byTousers  users                     @relation("jadwal_kegiatan_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_jadwal_kegiatan_created_by")
+  surat_masuk                              surat_masuk?              @relation(fields: [surat_masuk_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_jk_surat_masuk")
   jadwal_kegiatan_bidang                   jadwal_kegiatan_bidang[]
   jadwal_kegiatan_views                    jadwal_kegiatan_views[]
   jadwal_kegiatan_reactions                jadwal_kegiatan_reactions[]
@@ -593,6 +596,7 @@ model jadwal_kegiatan {
   @@index([kategori], map: "idx_jadwal_kegiatan_kategori")
   @@index([prioritas], map: "idx_jadwal_kegiatan_prioritas")
   @@index([status], map: "idx_jadwal_kegiatan_status")
+  @@index([surat_masuk_id], map: "idx_jk_surat_masuk")
   @@index([tanggal_mulai], map: "idx_jadwal_kegiatan_tanggal_mulai")
   @@index([tanggal_selesai], map: "idx_jadwal_kegiatan_tanggal_selesai")
 }
@@ -1298,11 +1302,15 @@ model surat_masuk {
   jenis_surat    surat_masuk_jenis_surat? @default(biasa)
   file_path      String?                  @db.VarChar(500)
   keterangan     String?                  @db.Text
+  jam_kegiatan      String?               @db.VarChar(10)
+  lokasi_kegiatan   String?               @db.VarChar(255)
+  tanggal_kegiatan  DateTime?             @db.Date
   status         surat_masuk_status?      @default(draft)
   created_by     BigInt                   @db.UnsignedBigInt
   created_at     DateTime?                @default(now()) @db.Timestamp(0)
   updated_at     DateTime?                @default(now()) @db.Timestamp(0)
   disposisi      disposisi[]
+  jadwal_kegiatan jadwal_kegiatan[]
   lampiran_surat lampiran_surat[]
   users          users                    @relation(fields: [created_by], references: [id])
 

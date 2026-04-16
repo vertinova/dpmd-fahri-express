@@ -59,8 +59,10 @@ exports.createDisposisi = async (req, res, next) => {
       recipientIds = String(ke_user_id).split(',').map(s => s.trim()).filter(Boolean);
     }
 
-    // Normalize instruksi — accept array or string
-    const instruksiNorm = Array.isArray(instruksi) ? instruksi[0] : (instruksi || 'laksanakan');
+    // Normalize instruksi — accept array or comma-separated string
+    const instruksiNorm = Array.isArray(instruksi)
+      ? instruksi.filter(Boolean).join(',')
+      : (instruksi || 'laksanakan');
 
     if (recipientIds.length === 0) {
       return res.status(400).json({
@@ -81,7 +83,10 @@ exports.createDisposisi = async (req, res, next) => {
     // Validate each recipient and workflow
     const recipientUsers = await prisma.users.findMany({
       where: { id: { in: recipientIds.map(id => BigInt(id)) } },
-      select: { id: true, name: true, role: true }
+      select: {
+        id: true, name: true, role: true, bidang_id: true,
+        pegawai: { select: { id_bidang: true, sub_bidang: true } }
+      }
     });
 
     if (recipientUsers.length !== recipientIds.length) {
@@ -159,6 +164,67 @@ exports.createDisposisi = async (req, res, next) => {
     }
 
     console.log(`✅ [DISPOSISI] Created ${createdDisposisis.length} disposisi records`);
+
+    // When kepala_dinas forwards, update jadwal_kegiatan bidang from recipient's bidang
+    if (dari_user_role === 'kepala_dinas') {
+      try {
+        // Find jadwal linked to this surat
+        const jadwal = await prisma.jadwal_kegiatan.findFirst({
+          where: { surat_masuk_id: BigInt(surat_id) }
+        });
+
+        if (jadwal) {
+          // Collect unique bidang_ids from recipients
+          const bidangIds = new Set();
+          const subBidangNames = [];
+
+          for (const rUser of recipientUsers) {
+            const bidangId = rUser.pegawai?.id_bidang || (rUser.bidang_id ? BigInt(rUser.bidang_id) : null);
+            if (bidangId) bidangIds.add(bidangId.toString());
+
+            // Track sub_bidang for ketua_tim
+            if (rUser.role === 'ketua_tim' && rUser.pegawai?.sub_bidang) {
+              subBidangNames.push(rUser.pegawai.sub_bidang);
+            }
+          }
+
+          if (bidangIds.size > 0) {
+            // Remove existing bidang links
+            await prisma.jadwal_kegiatan_bidang.deleteMany({
+              where: { jadwal_kegiatan_id: jadwal.id }
+            });
+
+            // Create new bidang links
+            for (const bId of bidangIds) {
+              await prisma.jadwal_kegiatan_bidang.create({
+                data: {
+                  jadwal_kegiatan_id: jadwal.id,
+                  bidang_id: BigInt(bId)
+                }
+              });
+            }
+
+            // Also set main bidang_id (first one)
+            const firstBidangId = BigInt([...bidangIds][0]);
+            const updateData = { bidang_id: firstBidangId };
+
+            // If ketua_tim, store sub_bidang info
+            if (subBidangNames.length > 0) {
+              updateData.sub_bidang_pelaksana = subBidangNames.join(', ');
+            }
+
+            await prisma.jadwal_kegiatan.update({
+              where: { id: jadwal.id },
+              data: updateData
+            });
+
+            console.log(`✅ [JADWAL] Updated bidang for jadwal #${jadwal.id}: bidang_ids=[${[...bidangIds]}], sub_bidang=[${subBidangNames}]`);
+          }
+        }
+      } catch (jadwalError) {
+        console.error('❌ [JADWAL] Error updating bidang from disposisi:', jadwalError);
+      }
+    }
 
     res.status(201).json({
       success: true,
@@ -723,6 +789,7 @@ exports.getAvailableUsers = async (req, res, next) => {
           select: {
             id_pegawai: true,
             nama_pegawai: true,
+            sub_bidang: true,
             bidangs: {
               select: {
                 id: true,
@@ -757,7 +824,7 @@ exports.createSuratMasuk = async (req, res, next) => {
     console.log('📨 [SURAT MASUK] CREATE REQUEST');
     console.log('═══════════════════════════════════════');
 
-    const { asal_surat, nomor_surat, perihal_surat, tanggal_diterima, ringkasan_isi } = req.body;
+    const { asal_surat, nomor_surat, perihal_surat, tanggal_diterima, ringkasan_isi, jam_kegiatan, lokasi_kegiatan, tanggal_kegiatan } = req.body;
     const user_id = req.user.id;
     const user_role = req.user.role;
     const bidang_id = req.user.bidang_id;
@@ -812,6 +879,9 @@ exports.createSuratMasuk = async (req, res, next) => {
         tanggal_surat: new Date(tanggal_diterima),
         tanggal_terima: new Date(),
         keterangan: ringkasan_isi,
+        jam_kegiatan: jam_kegiatan || null,
+        lokasi_kegiatan: lokasi_kegiatan || null,
+        tanggal_kegiatan: tanggal_kegiatan ? new Date(tanggal_kegiatan) : null,
         file_path,
         status: 'dikirim',
         created_by: BigInt(user_id),
@@ -837,6 +907,36 @@ exports.createSuratMasuk = async (req, res, next) => {
       userAgent: ActivityLogger.getUserAgentFromRequest(req)
     });
 
+    // Auto-create jadwal_kegiatan if kegiatan fields are filled
+    if (tanggal_kegiatan) {
+      try {
+        const tglKegiatan = new Date(tanggal_kegiatan);
+        const jam = jam_kegiatan || '08:00';
+        const [hours, minutes] = jam.split(':').map(Number);
+        const tanggalMulai = new Date(tglKegiatan);
+        tanggalMulai.setHours(hours || 8, minutes || 0, 0, 0);
+
+        const jadwal = await prisma.jadwal_kegiatan.create({
+          data: {
+            judul: perihal_surat,
+            deskripsi: ringkasan_isi || perihal_surat,
+            tanggal_mulai: tanggalMulai,
+            tanggal_selesai: tglKegiatan,
+            lokasi: lokasi_kegiatan || null,
+            asal_kegiatan: asal_surat,
+            surat_masuk_id: suratMasuk.id,
+            status: 'draft',
+            prioritas: 'sedang',
+            kategori: 'lainnya',
+            created_by: BigInt(user_id),
+          },
+        });
+        console.log('✅ [JADWAL] Auto-created from surat masuk:', jadwal.id.toString());
+      } catch (jadwalError) {
+        console.error('❌ [JADWAL] Error auto-creating:', jadwalError);
+      }
+    }
+
     // Auto-create disposisi to Kepala Dinas
     // Find user with role 'kepala_dinas'
     const kepalaDinas = await prisma.users.findFirst({
@@ -856,7 +956,7 @@ exports.createSuratMasuk = async (req, res, next) => {
           dari_user_id: BigInt(user_id),
           ke_user_id: kepalaDinas.id,
           catatan: `Surat masuk dari ${asal_surat}`,
-          instruksi: 'tindaklanjuti',
+          instruksi: '',
           status: 'pending',
           level_disposisi: 1,
         },

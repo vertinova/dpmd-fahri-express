@@ -126,6 +126,7 @@ class JadwalKegiatanController {
           bidang_nama: j.bidangs?.nama || null,
           bidang_ids: bidangMulti.map(jkb => Number(jkb.bidang_id)),
           bidang_names: bidangMulti.map(jkb => jkb.bidangs?.nama).filter(Boolean),
+          sub_bidang_pelaksana: j.sub_bidang_pelaksana || null,
           tanggal_mulai: j.tanggal_mulai,
           tanggal_selesai: j.tanggal_selesai,
           lokasi: j.lokasi || '-',
@@ -174,7 +175,10 @@ class JadwalKegiatanController {
       const jadwal = await prisma.jadwal_kegiatan.findUnique({
         where: { id: parseInt(id) },
         include: {
-          bidangs: { select: { nama: true } }
+          bidangs: { select: { nama: true } },
+          jadwal_kegiatan_bidang: {
+            include: { bidangs: { select: { id: true, nama: true } } }
+          }
         }
       });
 
@@ -185,6 +189,7 @@ class JadwalKegiatanController {
         });
       }
 
+      const bidangMulti = jadwal.jadwal_kegiatan_bidang || [];
       res.json({
         success: true,
         data: {
@@ -193,6 +198,9 @@ class JadwalKegiatanController {
           deskripsi: jadwal.deskripsi || '-',
           bidang_id: jadwal.bidang_id,
           bidang_nama: jadwal.bidangs?.nama || null,
+          bidang_ids: bidangMulti.map(jkb => Number(jkb.bidang_id)),
+          bidang_names: bidangMulti.map(jkb => jkb.bidangs?.nama).filter(Boolean),
+          sub_bidang_pelaksana: jadwal.sub_bidang_pelaksana || null,
           tanggal_mulai: jadwal.tanggal_mulai,
           tanggal_selesai: jadwal.tanggal_selesai,
           lokasi: jadwal.lokasi || '-',
@@ -570,7 +578,7 @@ class JadwalKegiatanController {
       const userId = BigInt(req.user.id);
 
       await prisma.jadwal_kegiatan_views.upsert({
-        where: { uk_jadwal_view: { jadwal_kegiatan_id: jadwalId, user_id: userId } },
+        where: { jadwal_kegiatan_id_user_id: { jadwal_kegiatan_id: jadwalId, user_id: userId } },
         update: { viewed_at: new Date() },
         create: { jadwal_kegiatan_id: jadwalId, user_id: userId }
       });
@@ -832,6 +840,89 @@ class JadwalKegiatanController {
     } catch (error) {
       console.error('❌ [Jadwal] Error in deleteComment:', error);
       res.status(500).json({ success: false, message: 'Gagal menghapus komentar', error: error.message });
+    }
+  }
+
+  /**
+   * Get disposisi data for jadwal kegiatan display (sekretariat/superadmin only)
+   * Shows surat_masuk that have been disposisi'd by kepala_dinas with jadwal info
+   */
+  async getDisposisiForJadwal(req, res) {
+    try {
+      const SEKRETARIAT_BIDANG_ID = 2;
+      const userBidangId = Number(req.user.bidang_id);
+
+      if (req.user.role !== 'superadmin' && userBidangId !== SEKRETARIAT_BIDANG_ID) {
+        return res.status(403).json({ success: false, message: 'Hanya Sekretariat yang dapat mengakses fitur ini' });
+      }
+
+      const { search, limit = 20 } = req.query;
+
+      // Get surat_masuk that have disposisi from kepala_dinas
+      const where = {
+        disposisi: {
+          some: {
+            users_disposisi_dari_user_idTousers: {
+              role: 'kepala_dinas'
+            }
+          }
+        }
+      };
+
+      if (search) {
+        where.OR = [
+          { perihal: { contains: search } },
+          { pengirim: { contains: search } },
+          { nomor_surat: { contains: search } }
+        ];
+      }
+
+      const suratList = await prisma.surat_masuk.findMany({
+        where,
+        select: {
+          id: true,
+          nomor_surat: true,
+          tanggal_surat: true,
+          pengirim: true,
+          perihal: true,
+          jenis_surat: true,
+          keterangan: true,
+          jam_kegiatan: true,
+          lokasi_kegiatan: true,
+          tanggal_kegiatan: true,
+          disposisi: {
+            where: {
+              users_disposisi_dari_user_idTousers: {
+                role: 'kepala_dinas'
+              }
+            },
+            select: {
+              instruksi: true,
+              catatan: true,
+              tanggal_disposisi: true,
+              users_disposisi_ke_user_idTousers: {
+                select: { name: true, role: true }
+              }
+            },
+            orderBy: { tanggal_disposisi: 'desc' },
+            take: 1
+          }
+        },
+        orderBy: { tanggal_surat: 'desc' },
+        take: parseInt(limit)
+      });
+
+      // Flatten disposisi info
+      const data = suratList.map(s => ({
+        ...s,
+        disposisi_kepdin: s.disposisi[0] || null,
+        disposisi: undefined
+      }));
+
+      res.json({ success: true, data });
+    } catch (error) {
+      console.error('❌ [Jadwal] Error in getDisposisiForJadwal:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil data disposisi', error: error.message });
     }
   }
 }
