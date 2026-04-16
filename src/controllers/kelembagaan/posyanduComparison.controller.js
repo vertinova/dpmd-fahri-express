@@ -393,11 +393,17 @@ class PosyanduComparisonController {
           const isFuzzy = allOrigNames.size > 1;
 
           let status;
-          if (hasGema && hasAdd) {
-            status = 'matched';
-          } else if (hasGema && !hasAdd) {
+          if (hasDb && hasGema && hasAdd) {
+            status = 'all_three';
+          } else if (hasDb && hasGema && !hasAdd) {
+            status = 'db_gema';
+          } else if (hasDb && !hasGema && hasAdd) {
+            status = 'db_add';
+          } else if (!hasDb && hasGema && hasAdd) {
+            status = 'gema_add';
+          } else if (!hasDb && hasGema && !hasAdd) {
             status = 'only_gema';
-          } else if (!hasGema && hasAdd) {
+          } else if (!hasDb && !hasGema && hasAdd) {
             status = 'only_add';
           } else {
             status = 'only_db';
@@ -433,8 +439,8 @@ class PosyanduComparisonController {
           });
         });
 
-        // Sort: matched first, then only_gema, then only_add, then only_db
-        const statusOrder = { matched: 0, only_gema: 1, only_add: 2, only_db: 3 };
+        // Sort: all_three first, then pairs, then singles
+        const statusOrder = { all_three: 0, db_gema: 1, db_add: 2, gema_add: 3, only_gema: 4, only_add: 5, only_db: 6 };
         items.sort((a, b) => statusOrder[a.status] - statusOrder[b.status] || a.nama.localeCompare(b.nama));
 
         return {
@@ -446,8 +452,11 @@ class PosyanduComparisonController {
           totalDb: dbList.length,
           totalGema: gemaList.length,
           totalAdd: addList.length,
-          matched: items.filter((i) => i.status === 'matched').length,
-          fuzzyMatched: items.filter((i) => i.status === 'matched' && i.isFuzzy).length,
+          allThree: items.filter((i) => i.status === 'all_three').length,
+          dbGema: items.filter((i) => i.status === 'db_gema').length,
+          dbAdd: items.filter((i) => i.status === 'db_add').length,
+          gemaAdd: items.filter((i) => i.status === 'gema_add').length,
+          fuzzyMatched: items.filter((i) => i.isFuzzy).length,
           onlyGema: items.filter((i) => i.status === 'only_gema').length,
           onlyAdd: items.filter((i) => i.status === 'only_add').length,
           onlyDb: items.filter((i) => i.status === 'only_db').length,
@@ -484,6 +493,9 @@ class PosyanduComparisonController {
       const totalGemaDesaRaw = gemaDesaSet.size;
       const totalAddDesaRaw = addDesaSet.size;
 
+      // Count desa that have at least 1 DB posyandu
+      const totalDesaWithDb = comparison.filter(d => d.totalDb > 0).length;
+
       // Desa in DB that have NO Gema data
       const desaWithoutGema = comparison
         .filter(d => d.totalGema === 0)
@@ -494,9 +506,15 @@ class PosyanduComparisonController {
         .filter(d => d.totalAdd === 0)
         .map(d => `${d.desaNama} (${d.kecamatanNama})`);
 
+      // Desa in DB that have NO DB posyandu data
+      const desaWithoutDb = comparison
+        .filter(d => d.totalDb === 0)
+        .map(d => `${d.desaNama} (${d.kecamatanNama})`);
+
       // Summary stats
       const summary = {
         totalDesa: allDesa.length,
+        totalDesaWithDb,
         totalDbPosyandu: allPosyandu.length,
         totalGemaPosyandu: gemaData.length,
         totalAddPosyandu: addData.length,
@@ -504,7 +522,10 @@ class PosyanduComparisonController {
         totalAddDesa: totalAddDesaRaw,
         totalGemaDesaMatched: totalGemaDesaRaw - unmatchedGemaDesa.length,
         totalAddDesaMatched: totalAddDesaRaw - unmatchedAddDesa.length,
-        totalMatched: comparison.reduce((acc, d) => acc + d.matched, 0),
+        totalAllThree: comparison.reduce((acc, d) => acc + d.allThree, 0),
+        totalDbGema: comparison.reduce((acc, d) => acc + d.dbGema, 0),
+        totalDbAdd: comparison.reduce((acc, d) => acc + d.dbAdd, 0),
+        totalGemaAdd: comparison.reduce((acc, d) => acc + d.gemaAdd, 0),
         totalFuzzyMatched: comparison.reduce((acc, d) => acc + d.fuzzyMatched, 0),
         totalOnlyGema: comparison.reduce((acc, d) => acc + d.onlyGema, 0),
         totalOnlyAdd: comparison.reduce((acc, d) => acc + d.onlyAdd, 0),
@@ -513,6 +534,7 @@ class PosyanduComparisonController {
         unmatchedAddDesa,
         desaWithoutGema,
         desaWithoutAdd,
+        desaWithoutDb,
       };
 
       res.json({
