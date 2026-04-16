@@ -164,8 +164,9 @@ class PosyanduComparisonController {
       const isFuzzyMatch = (a, b) => {
         if (a === b) return true;
         // Split into base name and trailing number/letter suffix
+        // Handles: "MELATI 1", "MELATI 1A", "AGUNG A", "AGUNG B"
         const splitNameNum = (s) => {
-          const match = s.match(/^(.+?)\s*(\d+\s*[A-Z]?)$/);
+          const match = s.match(/^(.+?)\s+(\d+\s*[A-Z]?|[A-Z])$/);
           if (match) return { base: match[1].trim(), suffix: match[2].trim() };
           return { base: s, suffix: '' };
         };
@@ -241,12 +242,13 @@ class PosyanduComparisonController {
         });
 
         // Add add items: try exact match first, then fuzzy match to keys from other sources
+        // Only fuzzy-merge if the target key doesn't already have items from the same source
         addList.forEach((a) => {
           if (canonMap.has(a.normalized)) {
             canonMap.get(a.normalized).addItems.push(a);
           } else {
             const fuzzyKey = findFuzzyFromOtherSource(a.normalized, 'add');
-            if (fuzzyKey) {
+            if (fuzzyKey && canonMap.get(fuzzyKey).addItems.length === 0) {
               canonMap.get(fuzzyKey).addItems.push(a);
             } else {
               getOrCreate(a.normalized).addItems.push(a);
@@ -255,12 +257,13 @@ class PosyanduComparisonController {
         });
 
         // Add db items: try exact match first, then fuzzy match to keys from other sources
+        // Only fuzzy-merge if the target key doesn't already have items from the same source
         dbList.forEach((d) => {
           if (canonMap.has(d.normalized)) {
             canonMap.get(d.normalized).dbItems.push(d);
           } else {
             const fuzzyKey = findFuzzyFromOtherSource(d.normalized, 'db');
-            if (fuzzyKey) {
+            if (fuzzyKey && canonMap.get(fuzzyKey).dbItems.length === 0) {
               canonMap.get(fuzzyKey).dbItems.push(d);
             } else {
               getOrCreate(d.normalized).dbItems.push(d);
