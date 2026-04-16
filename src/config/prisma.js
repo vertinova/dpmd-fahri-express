@@ -13,14 +13,13 @@ const prisma = new PrismaClient({
     : ['warn', 'error'],
 });
 
-// Test connection
+// Test connection (non-fatal - Prisma will auto-reconnect on first query)
 prisma.$connect()
   .then(() => {
     logger.info('✅ Prisma Client connected to database');
   })
   .catch((err) => {
-    logger.error('❌ Prisma Client connection failed:', err);
-    process.exit(1);
+    logger.error('❌ Prisma Client initial connection failed (will retry on first query):', err);
   });
 
 // Graceful shutdown

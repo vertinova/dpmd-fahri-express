@@ -391,28 +391,31 @@ const mediasoupService = require('./services/mediasoup.service');
 
 // Start server
 async function startServer() {
+  // Initialize mediasoup workers (non-fatal - video meetings disabled if fails)
   try {
-    // Initialize mediasoup workers
     await mediasoupService.init();
     logger.info('📹 Mediasoup workers initialized');
 
     // Initialize Socket.io signaling server
     initSocketServer(server);
     logger.info('🔌 Socket.io signaling server initialized');
-
-    server.listen(PORT, () => {
-      logger.info(`🚀 Server running on port ${PORT}`);
-      logger.info(`📝 Environment: ${process.env.NODE_ENV}`);
-      logger.info(`🔗 CORS enabled for: ${process.env.CORS_ORIGIN}`);
-      logger.info(`📹 Video Meeting: WebRTC + mediasoup ready`);
-      
-      // Initialize scheduler for push notifications
-      schedulerService.init();
-    });
   } catch (error) {
-    logger.error('❌ Failed to start server:', error);
-    process.exit(1);
+    logger.error('⚠️  Mediasoup/Socket.io init failed (video meetings unavailable, API continues):', error);
   }
+
+  server.listen(PORT, () => {
+    logger.info(`🚀 Server running on port ${PORT}`);
+    logger.info(`📝 Environment: ${process.env.NODE_ENV}`);
+    logger.info(`🔗 CORS enabled for: ${process.env.CORS_ORIGIN}`);
+
+    // Initialize scheduler for push notifications
+    schedulerService.init();
+  });
+
+  server.on('error', (error) => {
+    logger.error('❌ Server listen error:', error);
+    process.exit(1);
+  });
 }
 
 startServer();
