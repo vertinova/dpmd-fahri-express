@@ -461,18 +461,55 @@ class PosyanduComparisonController {
         if (!resolveDbDesa(desa, kec)) unmatchedGemaDesa.push(`${desa} (${kec})`);
       });
 
+      // Collect ADD desa names that didn't match any DB desa
+      const unmatchedAddDesa = [];
+      const addDesaSet = new Set();
+      addData.forEach(a => {
+        let kecName = null;
+        if (a.kodeDesa) {
+          const kecCode = String(a.kodeDesa).split('.')[0];
+          if (kecCode && kecByCode[kecCode]) kecName = kecByCode[kecCode];
+        }
+        addDesaSet.add(`${kecName || ''}|${a.desa}`);
+      });
+      addDesaSet.forEach((key) => {
+        const [kec, desa] = key.split('|');
+        if (!resolveDbDesa(desa, kec || null)) unmatchedAddDesa.push(kec ? `${desa} (${kec})` : desa);
+      });
+
+      // Count unique desa in Gema and ADD data
+      const totalGemaDesaRaw = gemaDesaSet.size;
+      const totalAddDesaRaw = addDesaSet.size;
+
+      // Desa in DB that have NO Gema data
+      const desaWithoutGema = comparison
+        .filter(d => d.totalGema === 0)
+        .map(d => `${d.desaNama} (${d.kecamatanNama})`);
+
+      // Desa in DB that have NO ADD data
+      const desaWithoutAdd = comparison
+        .filter(d => d.totalAdd === 0)
+        .map(d => `${d.desaNama} (${d.kecamatanNama})`);
+
       // Summary stats
       const summary = {
         totalDesa: allDesa.length,
         totalDbPosyandu: allPosyandu.length,
         totalGemaPosyandu: gemaData.length,
         totalAddPosyandu: addData.length,
+        totalGemaDesa: totalGemaDesaRaw,
+        totalAddDesa: totalAddDesaRaw,
+        totalGemaDesaMatched: totalGemaDesaRaw - unmatchedGemaDesa.length,
+        totalAddDesaMatched: totalAddDesaRaw - unmatchedAddDesa.length,
         totalMatched: comparison.reduce((acc, d) => acc + d.matched, 0),
         totalFuzzyMatched: comparison.reduce((acc, d) => acc + d.fuzzyMatched, 0),
         totalOnlyGema: comparison.reduce((acc, d) => acc + d.onlyGema, 0),
         totalOnlyAdd: comparison.reduce((acc, d) => acc + d.onlyAdd, 0),
         totalOnlyDb: comparison.reduce((acc, d) => acc + d.onlyDb, 0),
         unmatchedGemaDesa,
+        unmatchedAddDesa,
+        desaWithoutGema,
+        desaWithoutAdd,
       };
 
       res.json({
