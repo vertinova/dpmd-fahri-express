@@ -390,19 +390,13 @@ const { initSocketServer } = require('./socket/meeting.socket');
 const mediasoupService = require('./services/mediasoup.service');
 
 // Start server
-async function startServer() {
-  // Initialize mediasoup workers (non-fatal - video meetings disabled if fails)
-  try {
-    await mediasoupService.init();
-    logger.info('📹 Mediasoup workers initialized');
+function startServer() {
+  server.on('error', (error) => {
+    logger.error('❌ Server listen error:', error);
+    process.exit(1);
+  });
 
-    // Initialize Socket.io signaling server
-    initSocketServer(server);
-    logger.info('🔌 Socket.io signaling server initialized');
-  } catch (error) {
-    logger.error('⚠️  Mediasoup/Socket.io init failed (video meetings unavailable, API continues):', error);
-  }
-
+  // Listen immediately - don't wait for mediasoup (reduces 502 window during deploys)
   server.listen(PORT, () => {
     logger.info(`🚀 Server running on port ${PORT}`);
     logger.info(`📝 Environment: ${process.env.NODE_ENV}`);
@@ -410,11 +404,18 @@ async function startServer() {
 
     // Initialize scheduler for push notifications
     schedulerService.init();
-  });
 
-  server.on('error', (error) => {
-    logger.error('❌ Server listen error:', error);
-    process.exit(1);
+    // Initialize mediasoup + Socket.io in background (non-fatal)
+    (async () => {
+      try {
+        await mediasoupService.init();
+        logger.info('📹 Mediasoup workers initialized');
+        initSocketServer(server);
+        logger.info('🔌 Socket.io signaling server initialized');
+      } catch (error) {
+        logger.error('⚠️  Mediasoup/Socket.io init failed (video meetings unavailable, API continues):', error);
+      }
+    })();
   });
 }
 

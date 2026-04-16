@@ -51,7 +51,7 @@ class ActivityLogger {
           action,
           entity_type: entityType,
           entity_id: entityId ? BigInt(entityId) : null,
-          entity_name: entityName,
+          entity_name: entityName ? String(entityName).substring(0, 255) : null,
           description,
           old_value: oldValue ? JSON.stringify(oldValue) : null,
           new_value: newValue ? JSON.stringify(newValue) : null,
