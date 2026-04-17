@@ -6,6 +6,10 @@ const fs = require('fs');
 const PORT = 9000;
 const SECRET = 'dpmd-webhook-secret-2026';
 const LOG_FILE = '/var/www/webhook/webhook.log';
+const NODE_BIN = '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin';
+
+// Deployment lock - prevent concurrent deployments
+const deployLock = {};
 
 const REPOS = {
   'dpmd-fahri-express': {
@@ -14,14 +18,15 @@ const REPOS = {
     commands: [
       '/usr/bin/git fetch origin',
       '/usr/bin/git reset --hard origin/main',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npm install || true',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npx prisma generate || true',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/node /var/www/backend/database-express/auto-migrate.js || true',
+      `${NODE_BIN}/npm install --production || true`,
+      `${NODE_BIN}/npx prisma generate || true`,
+      `${NODE_BIN}/node /var/www/backend/database-express/auto-migrate.js || true`,
       '/bin/cp -f /var/www/backend/nginx-dpmdbogorkab.conf /etc/nginx/sites-available/dpmdbogorkab.id || true',
       '/usr/sbin/nginx -t && /usr/sbin/nginx -s reload || true',
       '/bin/cp -f /var/www/backend/webhook-handler.js /var/www/webhook/webhook-handler.js || true',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 reload dpmd-backend --wait-ready --listen-timeout 15000 --update-env || /root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 start /var/www/backend/src/server.js --name dpmd-backend',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 restart github-webhook || true'
+      // Restart backend: try restart first (works if process exists), then start as fallback
+      `${NODE_BIN}/pm2 restart dpmd-backend --update-env || ${NODE_BIN}/pm2 start /var/www/backend/src/server.js --name dpmd-backend`
+      // NOTE: Do NOT restart github-webhook here - it kills the current deployment process
     ]
   },
   'dpmd-frontend': {
@@ -30,8 +35,8 @@ const REPOS = {
     commands: [
       '/usr/bin/git fetch origin',
       '/usr/bin/git reset --hard origin/main',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npm install --include=dev',
-      '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/npm run build'
+      `${NODE_BIN}/npm install --include=dev || true`,
+      `${NODE_BIN}/npm run build`
     ]
   }
 };
@@ -54,23 +59,24 @@ function verifySignature(payload, signature) {
   }
 }
 
+// Env untuk memastikan shell dan node tersedia
+const execEnv = {
+  ...process.env,
+  PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:' + NODE_BIN,
+  HOME: '/root',
+  SHELL: '/bin/bash'
+};
+
 function executeCommands(commands, cwd, callback) {
   let index = 0;
-  // Env untuk memastikan shell dan node tersedia
-  const execEnv = {
-    ...process.env,
-    PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/root/.local/share/fnm/node-versions/v20.20.0/installation/bin',
-    HOME: '/root',
-    SHELL: '/bin/bash'
-  };
   function next() {
     if (index >= commands.length) {
       callback(null, 'All commands completed');
       return;
     }
     const cmd = commands[index++];
-    log('Executing: ' + cmd);
-    exec(cmd, { cwd, maxBuffer: 10 * 1024 * 1024, env: execEnv, shell: '/bin/bash', timeout: 120000 }, (error, stdout, stderr) => {
+    log('[' + index + '/' + commands.length + '] Executing: ' + cmd);
+    exec(cmd, { cwd, maxBuffer: 10 * 1024 * 1024, env: execEnv, shell: '/bin/bash', timeout: 180000 }, (error, stdout, stderr) => {
       if (stdout) log('stdout: ' + stdout.substring(0, 500));
       if (stderr) log('stderr: ' + stderr.substring(0, 500));
       if (error) {
@@ -99,14 +105,24 @@ const server = http.createServer((req, res) => {
 
   // GET /webhook/status - check pm2 status
   if (req.method === 'GET' && req.url === '/webhook/status') {
-    exec('/root/.local/share/fnm/node-versions/v20.20.0/installation/bin/pm2 jlist', { env: { ...process.env, HOME: '/root' } }, (err, stdout) => {
+    exec(NODE_BIN + '/pm2 jlist', { env: execEnv }, (err, stdout) => {
       res.writeHead(200, { 'Content-Type': 'application/json' });
       if (err) { res.end(JSON.stringify({ error: err.message })); return; }
       try {
         const list = JSON.parse(stdout);
         const summary = list.map(p => ({ name: p.name, status: p.pm2_env?.status, restarts: p.pm2_env?.restart_time, uptime: p.pm2_env?.pm_uptime }));
-        res.end(JSON.stringify({ processes: summary }));
-      } catch { res.end(stdout.substring(0, 2000)); }
+        res.end(JSON.stringify({ processes: summary, deployLocks: Object.keys(deployLock) }));
+      } catch (e) { res.end(stdout.substring(0, 2000)); }
+    });
+    return;
+  }
+
+  // GET /webhook/restart-backend - manual restart endpoint
+  if (req.method === 'GET' && req.url === '/webhook/restart-backend') {
+    log('Manual backend restart requested');
+    exec(NODE_BIN + '/pm2 restart dpmd-backend --update-env', { env: execEnv }, (err, stdout, stderr) => {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ success: !err, stdout: (stdout || '').substring(0, 500), stderr: (stderr || '').substring(0, 500) }));
     });
     return;
   }
@@ -168,11 +184,25 @@ const server = http.createServer((req, res) => {
       return;
     }
 
+    // Deployment lock - skip if already deploying this repo
+    if (deployLock[repoName]) {
+      log('Deployment already in progress for ' + repoName + ', skipping');
+      res.writeHead(200);
+      res.end('Deployment already in progress, skipped');
+      return;
+    }
+
     res.writeHead(200);
     res.end('Webhook received, deploying...');
 
+    // Set lock
+    deployLock[repoName] = true;
+
     log('Starting deployment for ' + repoName + '...');
     executeCommands(config.commands, config.path, (error) => {
+      // Release lock
+      delete deployLock[repoName];
+
       if (error) {
         log('Deployment failed for ' + repoName + ': ' + error.message);
       } else {
