@@ -128,6 +128,39 @@ function normalizePendidikan(val) {
   return 'TIDAK DIKETAHUI';
 }
 
+/** Normalize jabatan to standard values based on kelembagaan type */
+function normalizeJabatan(rawJabatan, kelembagaanType) {
+  const s = String(rawJabatan ?? '').trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!s || s === '-' || s === '0') {
+    return kelembagaanType === 'rts' ? 'KETUA RT' : 'KETUA RW';
+  }
+  // Strip trailing numbers, dots, RW refs: "KETUA RT 002 RW 02" → "KETUA RT"
+  // "Ketua RT.001" → "KETUA RT", "KETUA RT.003" → "KETUA RT"
+  let cleaned = s
+    .replace(/[\s.]+\d+.*$/g, '')  // strip ".001" or " 002 RW 02" etc
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) cleaned = s;
+
+  // Fix common typos
+  if (cleaned === 'KETAU RW') return 'KETUA RW';
+  if (cleaned === 'KETAU RT') return 'KETUA RT';
+  if (cleaned === 'KETUA RTW') return 'KETUA RW';
+  if (cleaned === 'KET. RW' || cleaned === 'KET RW') return 'KETUA RW';
+  if (cleaned === 'KET. RT' || cleaned === 'KET RT') return 'KETUA RT';
+
+  // Bare "KETUA" → append type
+  if (cleaned === 'KETUA') {
+    return kelembagaanType === 'rts' ? 'KETUA RT' : 'KETUA RW';
+  }
+  // Bare "RW" → KETUA RW
+  if (cleaned === 'RW') return 'KETUA RW';
+  // Bare "RT" → KETUA RT
+  if (cleaned === 'RT') return 'KETUA RT';
+
+  return cleaned;
+}
+
 /** Parse jenis kelamin: L → "Laki-laki", P → "Perempuan", else null */
 function parseGender(lp) {
   const v = String(lp ?? '').trim().toUpperCase();
@@ -229,7 +262,7 @@ function analyzeSheet(rows) {
  * 21=NO_HP, 22=BANK, 23=NO_REK, 24=NAMA_REK
  */
 function parseFormatA(row, bankCol) {
-  const jabatan   = String(row[8]  ?? '').trim().toUpperCase();
+  const rawJabatan = String(row[8]  ?? '').trim().toUpperCase();
   const rwColVal  = String(row[9]  ?? '').trim();
   const rtColVal  = String(row[10] ?? '').trim();
 
@@ -237,7 +270,7 @@ function parseFormatA(row, bankCol) {
   // CISARUA anomaly: Ketua RW has RW# in col[10] instead of col[9]
   // KEMANG correct: Ketua RW has RW# in col[9], col[10] empty
   let rwNomor, rtNomor, kelembagaanType;
-  if (jabatan.includes('RW') && !jabatan.includes('RT')) {
+  if (rawJabatan.includes('RW') && !rawJabatan.includes('RT')) {
     // Ketua RW: take whichever is non-empty
     rwNomor = normalizeNomor(rwColVal || rtColVal);
     rtNomor = null;
@@ -249,6 +282,7 @@ function parseFormatA(row, bankCol) {
     kelembagaanType = rtNomor ? 'rts' : 'rws';
   }
 
+  const jabatan = normalizeJabatan(rawJabatan, kelembagaanType);
   const bk = bankCol > 0 ? bankCol : 22;
 
   return {
@@ -288,12 +322,12 @@ function parseFormatA(row, bankCol) {
  * BANK/NO_REK/NAMA_REK = last 3 meaningful cols
  */
 function parseFormatB(row, bankCol) {
-  const jabatan  = String(row[6] ?? '').trim().toUpperCase();
+  const rawJabatan = String(row[6] ?? '').trim().toUpperCase();
   const rwColVal = String(row[7] ?? '').trim();
   const rtColVal = String(row[8] ?? '').trim();
 
   let rwNomor, rtNomor, kelembagaanType;
-  if (jabatan.includes('RW') && !jabatan.includes('RT')) {
+  if (rawJabatan.includes('RW') && !rawJabatan.includes('RT')) {
     rwNomor = normalizeNomor(rwColVal || rtColVal);
     rtNomor = null;
     kelembagaanType = 'rws';
@@ -303,6 +337,7 @@ function parseFormatB(row, bankCol) {
     kelembagaanType = rtNomor ? 'rts' : 'rws';
   }
 
+  const jabatan = normalizeJabatan(rawJabatan, kelembagaanType);
   const bk = bankCol > 0 ? bankCol : 21;
 
   return {
