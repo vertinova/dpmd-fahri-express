@@ -1433,7 +1433,7 @@ class SummaryController {
         orderBy: [{ created_at: 'desc' }]
       });
 
-      // Sort by kecamatan kode + desa kode for export
+      // Sort by kecamatan kode + desa kode + lembaga nomor for export
       if (export_all === '1' || export_all === 'true') {
         allPengurus.sort((a, b) => {
           const kecA = a.desas?.kecamatans?.kode || '';
@@ -1441,7 +1441,13 @@ class SummaryController {
           if (kecA !== kecB) return kecA.localeCompare(kecB);
           const desA = a.desas?.kode || '';
           const desB = b.desas?.kode || '';
-          return desA.localeCompare(desB);
+          if (desA !== desB) return desA.localeCompare(desB);
+          // Sort RW before RT, then by pengurusable_type + pengurusable_id
+          const typeOrder = { rw: 0, rws: 0, rt: 1, rts: 1 };
+          const tA = typeOrder[a.pengurusable_type] ?? 2;
+          const tB = typeOrder[b.pengurusable_type] ?? 2;
+          if (tA !== tB) return tA - tB;
+          return String(a.pengurusable_id).localeCompare(String(b.pengurusable_id));
         });
       }
 
@@ -1590,11 +1596,30 @@ class SummaryController {
           if (!cfg || !prisma[cfg.model]) continue;
           const idArr = [...ids];
           try {
-            const records = await prisma[cfg.model].findMany({
-              where: { id: { in: idArr } },
-              select: { id: true, [cfg.field]: true },
-            });
-            records.forEach(r => { lembagaMap[r.id] = r[cfg.field]; });
+            if (cfg.model === 'rts') {
+              // For RT, also fetch parent RW nomor
+              const records = await prisma.rts.findMany({
+                where: { id: { in: idArr } },
+                select: { id: true, nomor: true, rws: { select: { nomor: true } } },
+              });
+              records.forEach(r => {
+                const rtNomor = r.nomor;
+                const rwNomor = r.rws?.nomor;
+                lembagaMap[r.id] = rwNomor ? `RT ${rtNomor}/RW ${rwNomor}` : `RT ${rtNomor}`;
+              });
+            } else if (cfg.model === 'rws') {
+              const records = await prisma.rws.findMany({
+                where: { id: { in: idArr } },
+                select: { id: true, nomor: true },
+              });
+              records.forEach(r => { lembagaMap[r.id] = `RW ${r.nomor}`; });
+            } else {
+              const records = await prisma[cfg.model].findMany({
+                where: { id: { in: idArr } },
+                select: { id: true, [cfg.field]: true },
+              });
+              records.forEach(r => { lembagaMap[r.id] = r[cfg.field]; });
+            }
           } catch { /* skip if model not found */ }
         }
         // Batch fetch produk_hukum
