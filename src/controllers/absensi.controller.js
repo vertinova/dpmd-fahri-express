@@ -844,6 +844,17 @@ const absensiController = {
       const effectiveHoliday = isWeekendWorker && isWeekendOnly ? false : holidayInfo.isHoliday;
       const effectiveReason = effectiveHoliday ? holidayInfo.reason : null;
 
+      // Debug log untuk troubleshoot weekend issue
+      console.log('[Absensi] checkEligible debug:', {
+        userId: userId.toString(),
+        statusKepegawaian,
+        holidayInfo,
+        isWeekendOnly,
+        isWeekendWorker,
+        effectiveHoliday,
+        WEEKEND_WORK_STATUS,
+      });
+
       return res.json({
         success: true,
         data: {
@@ -854,6 +865,14 @@ const absensiController = {
           device_registered: !!user?.device_id,
           is_holiday: effectiveHoliday,
           holiday_reason: effectiveReason,
+          // Temporary debug info
+          _debug: {
+            holidayInfo,
+            isWeekendOnly,
+            isWeekendWorker,
+            effectiveHoliday,
+            statusKepegawaian,
+          }
         }
       });
     } catch (error) {
