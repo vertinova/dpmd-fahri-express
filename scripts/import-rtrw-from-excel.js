@@ -158,6 +158,10 @@ function normalizeJabatan(rawJabatan, kelembagaanType) {
   // Bare "RT" → KETUA RT
   if (cleaned === 'RT') return 'KETUA RT';
 
+  // Ensure jabatan matches kelembagaan type
+  if (kelembagaanType === 'rws' && cleaned === 'KETUA RT') return 'KETUA RW';
+  if (kelembagaanType === 'rts' && cleaned === 'KETUA RW') return 'KETUA RT';
+
   return cleaned;
 }
 
