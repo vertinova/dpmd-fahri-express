@@ -22,6 +22,9 @@ const NO_TELAT_STATUS = ['Tenaga_Keamanan', 'Tenaga_Kebersihan'];
 // Status kepegawaian yang TETAP MASUK di hari Sabtu & Minggu (khusus Tenaga Keamanan)
 const WEEKEND_WORK_STATUS = ['Tenaga_Keamanan'];
 
+// Jabatan keywords yang dianggap petugas keamanan (case-insensitive)
+const SECURITY_JABATAN_KEYWORDS = ['keamanan', 'security', 'satpam'];
+
 // Hari Libur Nasional Indonesia 2026 (format: MM-DD)
 const HOLIDAYS_2026 = {
   '01-01': 'Tahun Baru 2026',
@@ -306,7 +309,7 @@ const absensiController = {
       // Validasi: device_id harus cocok dengan yang terdaftar
       const user = await prisma.users.findUnique({
         where: { id: userId },
-        select: { device_id: true, pegawai: { select: { status_kepegawaian: true } } }
+        select: { device_id: true, pegawai: { select: { status_kepegawaian: true, jabatan: true } } }
       });
 
       if (!user.device_id) {
@@ -424,8 +427,11 @@ const absensiController = {
 
       // Calculate late info (semua dalam WIB) — telat dihitung dari jam_masuk tanpa toleransi
       // Tenaga_Keamanan & Tenaga_Kebersihan tidak dihitung terlambat
+      // Juga cek jabatan yang mengandung keyword keamanan
       const userStatusKepegawaian = user.pegawai?.status_kepegawaian;
-      const isNoTelat = NO_TELAT_STATUS.includes(userStatusKepegawaian);
+      const userJabatanLower = (user.pegawai?.jabatan || '').toLowerCase();
+      const isSecurityByJabatan = SECURITY_JABATAN_KEYWORDS.some(kw => userJabatanLower.includes(kw));
+      const isNoTelat = NO_TELAT_STATUS.includes(userStatusKepegawaian) || isSecurityByJabatan;
       const jamMasukSetting = absensiSettings.jamMasuk;
       let telatMenit = 0;
 
@@ -444,8 +450,8 @@ const absensiController = {
         message += ` — Telat ${telatStr} (batas masuk: ${jamMasukSetting} WIB)`;
       }
 
-      // Push notification: jika Tenaga_Keamanan, cek apakah sudah cukup yang absen hari ini
-      if (userStatusKepegawaian === 'Tenaga_Keamanan') {
+      // Push notification: jika petugas keamanan, cek apakah sudah cukup yang absen hari ini
+      if (userStatusKepegawaian === 'Tenaga_Keamanan' || isSecurityByJabatan) {
         checkAndNotifySecurityGuards(today, wib).catch(err => {
           console.error('[Absensi] Error sending security guard notification:', err);
         });
@@ -838,22 +844,13 @@ const absensiController = {
       const holidayInfo = checkHoliday(new Date());
 
       // Tenaga Keamanan tetap masuk di weekend (Sabtu/Minggu)
-      // Mereka hanya libur di hari libur nasional (tanggal merah)
+      // Cek berdasarkan status_kepegawaian ATAU jabatan yang mengandung keyword keamanan
       const isWeekendOnly = holidayInfo.isHoliday && (holidayInfo.reason === 'Hari Sabtu' || holidayInfo.reason === 'Hari Minggu');
-      const isWeekendWorker = WEEKEND_WORK_STATUS.includes(statusKepegawaian);
+      const jabatanLower = (user?.pegawai?.jabatan || '').toLowerCase();
+      const isWeekendWorker = WEEKEND_WORK_STATUS.includes(statusKepegawaian) ||
+        SECURITY_JABATAN_KEYWORDS.some(kw => jabatanLower.includes(kw));
       const effectiveHoliday = isWeekendWorker && isWeekendOnly ? false : holidayInfo.isHoliday;
       const effectiveReason = effectiveHoliday ? holidayInfo.reason : null;
-
-      // Debug log untuk troubleshoot weekend issue
-      console.log('[Absensi] checkEligible debug:', {
-        userId: userId.toString(),
-        statusKepegawaian,
-        holidayInfo,
-        isWeekendOnly,
-        isWeekendWorker,
-        effectiveHoliday,
-        WEEKEND_WORK_STATUS,
-      });
 
       return res.json({
         success: true,
@@ -865,14 +862,6 @@ const absensiController = {
           device_registered: !!user?.device_id,
           is_holiday: effectiveHoliday,
           holiday_reason: effectiveReason,
-          // Temporary debug info
-          _debug: {
-            holidayInfo,
-            isWeekendOnly,
-            isWeekendWorker,
-            effectiveHoliday,
-            statusKepegawaian,
-          }
         }
       });
     } catch (error) {
