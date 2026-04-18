@@ -58,8 +58,7 @@ const REPOS = {
       '/bin/cp -f /var/www/backend/webhook-handler.js /var/www/webhook/webhook-handler.js',
       // Restart backend; fallback start jika process belum ada
       `${NODE_BIN}/pm2 restart dpmd-backend --update-env || ${NODE_BIN}/pm2 start /var/www/backend/src/server.js --name dpmd-backend`,
-      // Restart webhook handler (delayed 2s agar response deploy selesai dulu)
-      `/bin/bash -c 'nohup /bin/bash -c "sleep 2 && ${NODE_BIN}/pm2 restart github-webhook --update-env" &>/dev/null &'`,
+      // Webhook handler akan self-restart setelah deploy selesai (via process.exit + pm2 auto-restart)
     ],
   },
   'dpmd-frontend': {
@@ -249,6 +248,12 @@ async function handleWebhook(req, res) {
     const results = await runCommands(config.commands, config.path);
     const failed = results.filter((r) => !r.ok).length;
     log(`=== Deployment END: ${repoName} — ${results.length - failed}/${results.length} OK ===`);
+
+    // Self-restart webhook handler jika webhook-handler.js berubah (agar load commands terbaru)
+    if (repoName === 'dpmd-fahri-express') {
+      log('Restarting github-webhook to load updated webhook-handler.js...');
+      setTimeout(() => process.exit(0), 1000); // pm2 auto-restart
+    }
   } catch (err) {
     log(`=== Deployment FAILED: ${repoName} — ${err.message} ===`);
   } finally {
