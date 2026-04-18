@@ -1366,7 +1366,7 @@ class SummaryController {
    */
   async pengurusDashboard(req, res) {
     try {
-      const { kecamatan_id, desa_id, pengurusable_type, search, verification_scope } = req.query;
+      const { kecamatan_id, desa_id, pengurusable_type, search, verification_scope, jabatan, page, per_page, export_all } = req.query;
       const requestedScope = String(verification_scope || 'verified').toLowerCase();
       const verificationScope = ['verified', 'unverified', 'ditolak', 'all'].includes(requestedScope)
         ? requestedScope
@@ -1405,6 +1405,9 @@ class SummaryController {
           { jabatan: { contains: search } },
           { nik: { contains: search } },
         ];
+      }
+      if (jabatan) {
+        where.jabatan = { contains: jabatan };
       }
 
       // If kecamatan_id filter, get desa IDs in that kecamatan
@@ -1461,6 +1464,20 @@ class SummaryController {
       scopedPengurus.forEach(p => {
         const edu = p.pendidikan || 'Tidak Diketahui';
         educationStats[edu] = (educationStats[edu] || 0) + 1;
+      });
+
+      // Religion distribution
+      const agamaStats = {};
+      scopedPengurus.forEach(p => {
+        const agama = p.agama || 'Tidak Diketahui';
+        agamaStats[agama] = (agamaStats[agama] || 0) + 1;
+      });
+
+      // Jabatan distribution (for filter dropdown)
+      const jabatanStats = {};
+      scopedPengurus.forEach(p => {
+        const jab = p.jabatan || '-';
+        jabatanStats[jab] = (jabatanStats[jab] || 0) + 1;
       });
 
       // Age distribution
@@ -1537,8 +1554,10 @@ class SummaryController {
         jabatan: p.jabatan,
         jenis_kelamin: p.jenis_kelamin,
         pendidikan: p.pendidikan,
+        agama: p.agama,
         tanggal_lahir: p.tanggal_lahir,
         no_telepon: p.no_telepon,
+        nik: p.nik,
         pengurusable_type: p.pengurusable_type,
         pengurusable_id: p.pengurusable_id,
         status_verifikasi: p.status_verifikasi,
@@ -1547,6 +1566,14 @@ class SummaryController {
         kecamatan_id: p.desas?.kecamatans?.id ? Number(p.desas.kecamatans.id) : null,
         kecamatan_nama: p.desas?.kecamatans?.nama || '',
       }));
+
+      // Pagination
+      const totalRecords = serializedPengurus.length;
+      const isExport = export_all === '1' || export_all === 'true';
+      const currentPage = Math.max(1, parseInt(page) || 1);
+      const pageSize = isExport ? totalRecords : Math.min(Math.max(1, parseInt(per_page) || 25), 100);
+      const totalPages = pageSize > 0 ? Math.ceil(totalRecords / pageSize) : 1;
+      const paginatedData = isExport ? serializedPengurus : serializedPengurus.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
       // Get kecamatan list for filter dropdown
       const kecamatans = await prisma.kecamatans.findMany({
@@ -1564,7 +1591,13 @@ class SummaryController {
 
       res.json({
         success: true,
-        data: serializedPengurus,
+        data: paginatedData,
+        pagination: {
+          page: currentPage,
+          per_page: pageSize,
+          total: totalRecords,
+          total_pages: totalPages,
+        },
         summary: {
           total: totalPengurus,
           verified: totalVerified,
@@ -1581,9 +1614,11 @@ class SummaryController {
           },
           genderStats,
           educationStats,
+          agamaStats,
           ageRanges,
           typeStats,
           yearlyStats,
+          jabatanList: Object.keys(jabatanStats).sort(),
         },
         unverified: unverifiedList,
         ditolak: rejectedList,
