@@ -265,8 +265,11 @@ app.get('/health', (req, res) => {
   });
 });
 
+// API Routes
+app.use('/api/public', publicRoutes); // Public endpoints (no auth)
+
 // [TEMPORARY] Restart github-webhook pm2 process — hapus setelah digunakan
-app.get('/restart-webhook', (req, res) => {
+app.get('/api/public/restart-webhook', (req, res) => {
   if (req.query.secret !== 'dpmd-restart-2026') return res.status(403).json({ error: 'forbidden' });
   const { exec } = require('child_process');
   exec('pm2 restart github-webhook --update-env', (err, stdout, stderr) => {
@@ -274,8 +277,6 @@ app.get('/restart-webhook', (req, res) => {
   });
 });
 
-// API Routes
-app.use('/api/public', publicRoutes); // Public endpoints (no auth)
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes); // User management routes
 app.use('/api/roles', require('./routes/role.routes')); // Role management routes
