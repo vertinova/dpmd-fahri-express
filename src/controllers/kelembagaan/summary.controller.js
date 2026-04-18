@@ -797,6 +797,30 @@ class SummaryController {
       ]);
 
       // Map RW with RT data and provide frontend-compatible field names
+      const rwIds = rws.map(rw => rw.id);
+      const rtIds = rws.flatMap(rw => rw.rts.map(rt => rt.id));
+
+      // Count pengurus for each RW and RT (polymorphic: pengurusable_type + pengurusable_id)
+      const [rwPengurusCounts, rtPengurusCounts] = await Promise.all([
+        rwIds.length > 0
+          ? prisma.pengurus.groupBy({
+              by: ['pengurusable_id'],
+              where: { pengurusable_type: 'rws', pengurusable_id: { in: rwIds } },
+              _count: { id: true }
+            })
+          : [],
+        rtIds.length > 0
+          ? prisma.pengurus.groupBy({
+              by: ['pengurusable_id'],
+              where: { pengurusable_type: 'rts', pengurusable_id: { in: rtIds } },
+              _count: { id: true }
+            })
+          : []
+      ]);
+
+      const rwPengMap = Object.fromEntries(rwPengurusCounts.map(r => [r.pengurusable_id, r._count.id]));
+      const rtPengMap = Object.fromEntries(rtPengurusCounts.map(r => [r.pengurusable_id, r._count.id]));
+
       const rwsWithRts = rws.map(rw => ({
         id: rw.id,
         nomor_rw: rw.nomor,
@@ -806,7 +830,11 @@ class SummaryController {
         status_kelembagaan: rw.status_kelembagaan,
         status_verifikasi: rw.status_verifikasi,
         rt_count: rw.rts.length,
-        rts: rw.rts,
+        pengurus_count: rwPengMap[rw.id] || 0,
+        rts: rw.rts.map(rt => ({
+          ...rt,
+          pengurus_count: rtPengMap[rt.id] || 0,
+        })),
         created_at: rw.created_at,
         updated_at: rw.updated_at
       }));
