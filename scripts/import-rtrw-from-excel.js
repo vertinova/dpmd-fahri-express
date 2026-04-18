@@ -364,9 +364,22 @@ function readExcelFile(filepath) {
 
     // Validate minimum required fields
     if (!rec.nama || rec.nama === '-') continue;
-    if (!rec.jabatan) continue;
+
+    // Skip records without valid jabatan (empty, "-", or not RT/RW related)
+    if (!rec.jabatan || rec.jabatan === '-') {
+      console.warn(`  ⚠️  Row ${rowNo}: no jabatan for "${rec.nama}", skipping`);
+      continue;
+    }
+
+    // Skip records without RW number (required for both RT and RW)
     if (!rec.rwNomor) {
       console.warn(`  ⚠️  Row ${rowNo}: no RW number found for "${rec.nama}" (${rec.jabatan}), skipping`);
+      continue;
+    }
+
+    // Skip KETUA RT without RT number (nomor lembaga RT)
+    if (rec.kelembagaanType === 'rts' && !rec.rtNomor) {
+      console.warn(`  ⚠️  Row ${rowNo}: KETUA RT "${rec.nama}" has no RT number, skipping`);
       continue;
     }
 
