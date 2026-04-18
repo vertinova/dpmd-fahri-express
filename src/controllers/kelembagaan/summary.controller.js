@@ -1568,10 +1568,9 @@ class SummaryController {
       // Serialize BigInt
       const isExport = export_all === '1' || export_all === 'true';
 
-      // Lookup lembaga nomor/nama and produk_hukum for export
-      let lembagaMap = {};
-      let produkHukumMap = {};
-      if (isExport) {
+      // Lookup lembaga nomor/nama (always needed for table display)
+      const lembagaMap = {};
+      {
         // Collect IDs by type
         const idsByType = {};
         scopedPengurus.forEach(p => {
@@ -1597,7 +1596,6 @@ class SummaryController {
           const idArr = [...ids];
           try {
             if (cfg.model === 'rts') {
-              // For RT, also fetch parent RW nomor
               const records = await prisma.rts.findMany({
                 where: { id: { in: idArr } },
                 select: { id: true, nomor: true, rws: { select: { nomor: true } } },
@@ -1622,7 +1620,11 @@ class SummaryController {
             }
           } catch { /* skip if model not found */ }
         }
-        // Batch fetch produk_hukum
+      }
+
+      // Batch fetch produk_hukum (only for export)
+      let produkHukumMap = {};
+      if (isExport) {
         const phIds = [...new Set(scopedPengurus.filter(p => p.produk_hukum_id).map(p => p.produk_hukum_id))];
         if (phIds.length) {
           try {
@@ -1649,6 +1651,7 @@ class SummaryController {
         pengurusable_type: p.pengurusable_type,
         pengurusable_id: p.pengurusable_id,
         status_verifikasi: p.status_verifikasi,
+        lembaga_label: lembagaMap[p.pengurusable_id] || null,
         desa_id: p.desa_id ? Number(p.desa_id) : null,
         desa_nama: p.desas?.nama || '',
         kecamatan_id: p.desas?.kecamatans?.id ? Number(p.desas.kecamatans.id) : null,
@@ -1664,7 +1667,6 @@ class SummaryController {
         base.nama_bank = p.nama_bank || null;
         base.nomor_rekening = p.nomor_rekening || null;
         base.nama_rekening = p.nama_rekening || null;
-        base.lembaga_label = lembagaMap[p.pengurusable_id] || null;
         const ph = p.produk_hukum_id ? produkHukumMap[p.produk_hukum_id] : null;
         base.produk_hukum_nomor = ph?.nomor || null;
         base.produk_hukum_tahun = ph?.tahun || null;
