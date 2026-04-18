@@ -89,6 +89,45 @@ function upOrNull(val) {
   return s || null;
 }
 
+/** Normalize pendidikan value to standard categories */
+function normalizePendidikan(val) {
+  const s = String(val ?? '').trim().toUpperCase().replace(/\s+/g, ' ');
+  if (!s || s === '-' || s === '0' || s === 'TIDAK DIKETAHUI') return 'TIDAK DIKETAHUI';
+
+  // SD / MI / SDN → SD/MI
+  if (/^(SD|SDN|MI|SD\/MI|SD\/SEDERAJAT|SD\/SEDERAJAT)$/.test(s)) return 'SD/MI';
+
+  // SMP / MTS → SMP/MTS
+  if (/^(SMP|MTS|SLTP|SMP\/MTS|SLTP\/SEDERAJAT|SMP\/SEDERAJAT)$/.test(s)) return 'SMP/MTS';
+
+  // SMA / SMK / MA / SLTA / MAN / SLA → SMA/SMK/MA
+  if (/^(SMA|SMK|MA|MAN|SLTA|SLA|SMA\/SMK|SMA\/MA|SLTA\/SEDERAJAT|SMA\/SEDERAJAT|SMA\/SMK\/MA)$/.test(s)) return 'SMA/SMK/MA';
+
+  // D1 → D1
+  if (/^(D1|D-1|D\.1|DIPLOMA I|DIPLOMA 1)$/.test(s)) return 'D1';
+
+  // D2 → D2
+  if (/^(D2|D-2|D\.2|DIPLOMA II|DIPLOMA 2)$/.test(s)) return 'D2';
+
+  // D3 / AKADEMI / DIPLOMA → D3
+  if (/^(D3|D-3|D\.3|DIPLOMA III|DIPLOMA 3|DIPLOMA|AKADEMI)$/.test(s)) return 'D3';
+
+  // S1 / SARJANA / STRATA 1 / BERIJAZAH → S1
+  if (/^(S1|S-1|S\.1|S 1|SARJANA|STRATA 1|STRATA I|S 1\/SEDERAJAT|S1\/SEDERAJAT|BERIJAZAH)$/.test(s)) return 'S1';
+
+  // S2 → S2
+  if (/^(S2|S-2|S\.2|S 2|MAGISTER|STRATA 2|STRATA II)$/.test(s)) return 'S2';
+
+  // S3 → S3
+  if (/^(S3|S-3|S\.3|S 3|DOKTOR|STRATA 3|STRATA III)$/.test(s)) return 'S3';
+
+  // TDK ADA / TIDAK ADA / TIDAK SEKOLAH → TIDAK SEKOLAH
+  if (/^(TDK ADA|TIDAK ADA|TIDAK SEKOLAH|TDK SEKOLAH|BELUM SEKOLAH)$/.test(s)) return 'TIDAK SEKOLAH';
+
+  // Anything else unrecognized → TIDAK DIKETAHUI
+  return 'TIDAK DIKETAHUI';
+}
+
 /** Parse jenis kelamin: L → "Laki-laki", P → "Perempuan", else null */
 function parseGender(lp) {
   const v = String(lp ?? '').trim().toUpperCase();
@@ -230,7 +269,7 @@ function parseFormatA(row, bankCol) {
     desaAlamat    : String(row[16] ?? '').trim(),
     kecAlamat     : String(row[17] ?? '').trim(),
     kodepos       : String(row[18] ?? '').trim(),
-    pendidikan    : upOrNull(row[19]),
+    pendidikan    : normalizePendidikan(row[19]),
     statusKawin   : upOrNull(row[20]),
     noTelepon     : upOrNull(row[21]),
     namaBank      : upOrNull(row[bk]),
@@ -284,7 +323,7 @@ function parseFormatB(row, bankCol) {
     desaAlamat    : String(row[14] ?? '').trim(),
     kecAlamat     : String(row[15] ?? '').trim(),
     kodepos       : String(row[16] ?? '').trim(),
-    pendidikan    : upOrNull(row[17]),
+    pendidikan    : normalizePendidikan(row[17]),
     statusKawin   : upOrNull(row[18]),
     noTelepon     : upOrNull(row[19]),
     namaBank      : upOrNull(row[bk]),
