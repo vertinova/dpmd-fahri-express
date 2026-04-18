@@ -32,8 +32,9 @@ const CMD_TIMEOUT = 300_000; // 5 menit per command
 const MAX_BUFFER = 10 * 1024 * 1024; // 10 MB stdout/stderr
 const NODE_BIN = '/root/.local/share/fnm/node-versions/v20.20.0/installation/bin';
 
+const { max_memory_restart: _mmr, ...cleanEnv } = process.env;
 const EXEC_ENV = {
-  ...process.env,
+  ...cleanEnv,
   PATH: `/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:${NODE_BIN}`,
   HOME: '/root',
   SHELL: '/bin/bash',
