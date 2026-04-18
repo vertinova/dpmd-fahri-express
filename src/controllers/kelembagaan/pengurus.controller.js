@@ -184,7 +184,10 @@ class PengurusController {
         tanggal_mulai_jabatan,
         tanggal_akhir_jabatan,
         status_jabatan,
-        produk_hukum_id
+        produk_hukum_id,
+        nama_bank,
+        nomor_rekening,
+        nama_rekening
       } = req.body;
 
       if (!pengurusable_type || !pengurusable_id || !nama_lengkap || !jabatan) {
@@ -243,6 +246,9 @@ class PengurusController {
           status_jabatan: status_jabatan || 'aktif',
           status_verifikasi: 'unverified',
           produk_hukum_id: produk_hukum_id || null,
+          nama_bank: nama_bank || null,
+          nomor_rekening: nomor_rekening || null,
+          nama_rekening: nama_rekening || null,
           avatar: avatarPath,
           desa_id: desaId
         }
@@ -316,7 +322,10 @@ class PengurusController {
         tanggal_mulai_jabatan,
         tanggal_akhir_jabatan,
         status_jabatan,
-        produk_hukum_id
+        produk_hukum_id,
+        nama_bank,
+        nomor_rekening,
+        nama_rekening
       } = req.body;
 
       // Validate nomor_buku_nikah for Ketua RT/RW who are married
@@ -362,6 +371,9 @@ class PengurusController {
       if (tanggal_akhir_jabatan !== undefined) updateData.tanggal_akhir_jabatan = tanggal_akhir_jabatan ? new Date(tanggal_akhir_jabatan) : null;
       if (status_jabatan !== undefined) updateData.status_jabatan = status_jabatan;
       if (produk_hukum_id !== undefined) updateData.produk_hukum_id = produk_hukum_id || null;
+      if (nama_bank !== undefined) updateData.nama_bank = nama_bank || null;
+      if (nomor_rekening !== undefined) updateData.nomor_rekening = nomor_rekening || null;
+      if (nama_rekening !== undefined) updateData.nama_rekening = nama_rekening || null;
       if (avatarPath !== undefined) updateData.avatar = avatarPath;
 
       const updated = await prisma.pengurus.update({
