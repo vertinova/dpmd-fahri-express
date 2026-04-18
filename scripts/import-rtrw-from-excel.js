@@ -15,7 +15,7 @@
  * - tanggal_akhir_jabatan = masa_bhakti_sampai_dengan (Excel date serial)
  * - tanggal_mulai_jabatan = tanggal_akhir_jabatan - 5 tahun (if not available)
  * - SK pengurus (produk_hukum_id) = null — input manual via sistem
- * - Duplicate check: skip if (NIK + pengurusable_id + pengurusable_type) exists
+ * - Duplicate check: if (NIK + pengurusable_id + pengurusable_type) exists → UPDATE (replace with Excel data)
  *
  * Usage: node scripts/import-rtrw-from-excel.js [--dry-run] [--file=FILENAME.xlsx]
  */
@@ -440,9 +440,9 @@ async function getOrCreateRT(desaId, rwId, rtNomor) {
   return newId;
 }
 
-/** Check if pengurus already exists (by NIK + pengurusable). Returns boolean. */
-async function pengurusExists(nik, pengurusableId, pengurusableType) {
-  if (nik === '-' || !nik) return false;
+/** Check if pengurus already exists (by NIK + pengurusable). Returns existing id or null. */
+async function findExistingPengurus(nik, pengurusableId, pengurusableType) {
+  if (nik === '-' || !nik) return null;
   const found = await prisma.pengurus.findFirst({
     where: {
       nik,
@@ -451,7 +451,7 @@ async function pengurusExists(nik, pengurusableId, pengurusableType) {
     },
     select: { id: true },
   });
-  return !!found;
+  return found ? found.id : null;
 }
 
 // ─── Main Import Logic ────────────────────────────────────────────────────────
@@ -480,6 +480,7 @@ async function main() {
     rwCreated  : 0,
     rtCreated  : 0,
     pengCreated: 0,
+    pengUpdated: 0,
     pengSkipped: 0,
     notFound   : 0,
     errors     : 0,
@@ -549,10 +550,7 @@ async function main() {
 
         // 4d. Duplicate check
         const nik = rec.nik === '-' ? null : rec.nik;
-        if (nik && await pengurusExists(nik, pengurusableId, pengurusableType)) {
-          stats.pengSkipped++;
-          continue;
-        }
+        const existingId = await findExistingPengurus(nik, pengurusableId, pengurusableType);
 
         // 4e. Compute dates
         const tanggalAkhir = rec.masaBhakti;
@@ -569,50 +567,80 @@ async function main() {
         );
 
         if (DRY_RUN) {
-          console.log(`  [DRY] Would create pengurus: ${rec.nama} (${rec.jabatan}) → ${pengurusableType} ${pengurusableId}`);
-          stats.pengCreated++;
+          const action = existingId ? 'update' : 'create';
+          console.log(`  [DRY] Would ${action} pengurus: ${rec.nama} (${rec.jabatan}) → ${pengurusableType} ${pengurusableId}`);
+          if (existingId) stats.pengUpdated++; else stats.pengCreated++;
           continue;
         }
 
-        // 4g. Insert pengurus
-        await prisma.$executeRaw`
-          INSERT INTO pengurus (
-            id, desa_id, pengurusable_id, pengurusable_type,
-            jabatan, tanggal_mulai_jabatan, tanggal_akhir_jabatan,
-            status_jabatan, status_verifikasi, produk_hukum_id,
-            nama_lengkap, nik, tempat_lahir, tanggal_lahir, jenis_kelamin,
-            status_perkawinan, alamat, no_telepon,
-            nama_bank, nomor_rekening, nama_rekening,
-            pendidikan, created_at, updated_at
-          ) VALUES (
-            ${uuid()},
-            ${desaId},
-            ${pengurusableId},
-            ${pengurusableType},
-            ${rec.jabatan},
-            ${toDateStr(tanggalMulai)},
-            ${toDateStr(tanggalAkhir)},
-            'aktif',
-            'unverified',
-            NULL,
-            ${rec.nama},
-            ${nik ?? '-'},
-            ${rec.tempatLahir},
-            ${toDateStr(rec.tanggalLahir)},
-            ${rec.jenisKelamin},
-            ${rec.statusKawin ?? '-'},
-            ${alamat},
-            ${rec.noTelepon},
-            ${rec.namaBank},
-            ${rec.nomorRekening},
-            ${rec.namaRekening},
-            ${rec.pendidikan},
-            NOW(),
-            NOW()
-          )
-        `;
-
-        stats.pengCreated++;
+        if (existingId) {
+          // 4g-UPDATE. Replace existing pengurus with Excel data
+          await prisma.$executeRaw`
+            UPDATE pengurus SET
+              desa_id              = ${desaId},
+              pengurusable_id      = ${pengurusableId},
+              pengurusable_type    = ${pengurusableType},
+              jabatan              = ${rec.jabatan},
+              tanggal_mulai_jabatan = ${toDateStr(tanggalMulai)},
+              tanggal_akhir_jabatan = ${toDateStr(tanggalAkhir)},
+              status_jabatan       = 'aktif',
+              status_verifikasi    = 'unverified',
+              nama_lengkap         = ${rec.nama},
+              nik                  = ${nik ?? '-'},
+              tempat_lahir         = ${rec.tempatLahir},
+              tanggal_lahir        = ${toDateStr(rec.tanggalLahir)},
+              jenis_kelamin        = ${rec.jenisKelamin},
+              status_perkawinan    = ${rec.statusKawin ?? '-'},
+              alamat               = ${alamat},
+              no_telepon           = ${rec.noTelepon},
+              nama_bank            = ${rec.namaBank},
+              nomor_rekening       = ${rec.nomorRekening},
+              nama_rekening        = ${rec.namaRekening},
+              pendidikan           = ${rec.pendidikan},
+              updated_at           = NOW()
+            WHERE id = ${existingId}
+          `;
+          stats.pengUpdated++;
+        } else {
+          // 4g-INSERT. Create new pengurus
+          await prisma.$executeRaw`
+            INSERT INTO pengurus (
+              id, desa_id, pengurusable_id, pengurusable_type,
+              jabatan, tanggal_mulai_jabatan, tanggal_akhir_jabatan,
+              status_jabatan, status_verifikasi, produk_hukum_id,
+              nama_lengkap, nik, tempat_lahir, tanggal_lahir, jenis_kelamin,
+              status_perkawinan, alamat, no_telepon,
+              nama_bank, nomor_rekening, nama_rekening,
+              pendidikan, created_at, updated_at
+            ) VALUES (
+              ${uuid()},
+              ${desaId},
+              ${pengurusableId},
+              ${pengurusableType},
+              ${rec.jabatan},
+              ${toDateStr(tanggalMulai)},
+              ${toDateStr(tanggalAkhir)},
+              'aktif',
+              'unverified',
+              NULL,
+              ${rec.nama},
+              ${nik ?? '-'},
+              ${rec.tempatLahir},
+              ${toDateStr(rec.tanggalLahir)},
+              ${rec.jenisKelamin},
+              ${rec.statusKawin ?? '-'},
+              ${alamat},
+              ${rec.noTelepon},
+              ${rec.namaBank},
+              ${rec.nomorRekening},
+              ${rec.namaRekening},
+              ${rec.pendidikan},
+              NOW(),
+              NOW()
+            )
+          `;
+          stats.pengCreated++;
+        }
       } catch (e) {
         console.error(`  ❌ Error processing "${rec.nama}": ${e.message}`);
         stats.errors++;
@@ -629,7 +657,7 @@ async function main() {
   console.log(`  RW created       : ${stats.rwCreated}`);
   console.log(`  RT created       : ${stats.rtCreated}`);
   console.log(`  Pengurus created : ${stats.pengCreated}`);
-  console.log(`  Pengurus skipped : ${stats.pengSkipped} (duplicate)`);
+  console.log(`  Pengurus updated : ${stats.pengUpdated} (replaced from Excel)`);
   console.log(`  Desa not found   : ${stats.notFound}`);
   console.log(`  Errors           : ${stats.errors}`);
   if (DRY_RUN) console.log('\n  ⚠️  DRY RUN — no data was written to database');
