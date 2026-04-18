@@ -265,6 +265,15 @@ app.get('/health', (req, res) => {
   });
 });
 
+// [TEMPORARY] Restart github-webhook pm2 process — hapus setelah digunakan
+app.get('/restart-webhook', (req, res) => {
+  if (req.query.secret !== 'dpmd-restart-2026') return res.status(403).json({ error: 'forbidden' });
+  const { exec } = require('child_process');
+  exec('pm2 restart github-webhook --update-env', (err, stdout, stderr) => {
+    res.json({ ok: !err, stdout, stderr, error: err?.message });
+  });
+});
+
 // API Routes
 app.use('/api/public', publicRoutes); // Public endpoints (no auth)
 app.use('/api/auth', authRoutes);
@@ -370,16 +379,6 @@ app.use('/api/chatbot', chatbotRoutes);
 
 // Messaging / Chat routes
 app.use('/api/messaging', require('./routes/messaging.routes'));
-
-// [TEMPORARY] Restart github-webhook pm2 process — hapus setelah digunakan
-app.get('/api/admin/restart-webhook', (req, res) => {
-  const secret = req.query.secret;
-  if (secret !== 'dpmd-restart-2026') return res.status(403).json({ error: 'forbidden' });
-  const { exec } = require('child_process');
-  exec('pm2 restart github-webhook --update-env', (err, stdout, stderr) => {
-    res.json({ ok: !err, stdout, stderr, error: err?.message });
-  });
-});
 
 // 404 handler
 app.use((req, res) => {
