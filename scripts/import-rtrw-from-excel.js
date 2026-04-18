@@ -92,7 +92,7 @@ function upOrNull(val) {
 /** Parse jenis kelamin: L → "Laki-laki", P → "Perempuan", else null */
 function parseGender(lp) {
   const v = String(lp ?? '').trim().toUpperCase();
-  if (v === 'L') return 'Laki_laki';   // Prisma enum key
+  if (v === 'L') return 'Laki-laki';  // raw DB ENUM value
   if (v === 'P') return 'Perempuan';
   return null;
 }
@@ -114,6 +114,11 @@ function buildAlamat(jalan, rtNo, rwNo, desa, kecamatan, kodepos) {
 /** Normalize desa/kecamatan name for lookup */
 function normName(s) {
   return String(s ?? '').trim().toUpperCase().replace(/\s+/g, ' ');
+}
+
+/** Compact name: remove all spaces (for fuzzy fallback match) */
+function compactName(s) {
+  return normName(s).replace(/\s+/g, '');
 }
 
 /** Normalize RW/RT nomor: strip leading zeros → numeric string like "001" → "1", or keep if alpha */
@@ -342,14 +347,15 @@ async function buildDesaLookup() {
       kecamatans: { select: { nama: true } },
     },
   });
-  const map = new Map();
+  const map    = new Map(); // "DESA|KEC" → id  (exact normalized)
+  const mapCmp = new Map(); // "DESANOSPACE|KECNOSPACE" → id  (compact fallback)
   for (const d of desas) {
-    const kecNama = normName(d.kecamatans?.nama ?? '');
+    const kecNama  = normName(d.kecamatans?.nama ?? '');
     const desaNama = normName(d.nama);
-    const key = `${desaNama}|${kecNama}`;
-    map.set(key, d.id);
+    map.set(`${desaNama}|${kecNama}`, d.id);
+    mapCmp.set(`${compactName(desaNama)}|${compactName(kecNama)}`, d.id);
   }
-  return map;
+  return { map, mapCmp };
 }
 
 /** Cache: "desaId|rwNomor" → rwId */
@@ -455,7 +461,7 @@ async function main() {
 
   // 1. Build desa lookup
   console.log('⏳ Loading desa lookup from database…');
-  const desaMap = await buildDesaLookup();
+  const { map: desaMap, mapCmp: desaMapCmp } = await buildDesaLookup();
   console.log(`✅ Loaded ${desaMap.size} desa records\n`);
 
   // 2. Find Excel files
@@ -503,12 +509,16 @@ async function main() {
       let desaId = desaMap.get(desaKey);
 
       if (!desaId) {
-        // Try matching desa only (in case kecamatan name differs slightly)
-        for (const [k, v] of desaMap) {
-          if (k.startsWith(`${normName(rec.desaNama)}|`)) {
-            desaId = v;
-            break;
-          }
+        // Compact fallback: handles "PASIR EURIH" → "PASIREURIH" in DB
+        const cmpKey = `${compactName(rec.desaNama)}|${compactName(rec.kecamatanNama)}`;
+        desaId = desaMapCmp.get(cmpKey);
+      }
+
+      if (!desaId) {
+        // Last resort: match by desa name only (ignoring kecamatan)
+        const cmpDesa = compactName(rec.desaNama);
+        for (const [k, v] of desaMapCmp) {
+          if (k.startsWith(`${cmpDesa}|`)) { desaId = v; break; }
         }
       }
 
