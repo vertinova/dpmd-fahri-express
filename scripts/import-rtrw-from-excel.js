@@ -121,10 +121,11 @@ function compactName(s) {
   return normName(s).replace(/\s+/g, '');
 }
 
-/** Normalize RW/RT nomor: strip leading zeros → numeric string like "001" → "1", or keep if alpha */
+/** Normalize RW/RT nomor: always 3-digit zero-padded (e.g. "1" → "001", "12" → "012") */
 function normalizeNomor(val) {
   const s = String(val ?? '').trim().replace(/^0+/, '') || '0';
-  return s === '0' ? null : s;
+  if (s === '0') return null;
+  return s.padStart(3, '0');
 }
 
 // ─── Format Detection ─────────────────────────────────────────────────────────
