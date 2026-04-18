@@ -748,6 +748,38 @@ class SummaryController {
    */
   async getDesaKelembagaanDetail(req, res) {
     try {
+      // Helper: get ketua name for a single entity
+      const getKetuaNama = async (entityId, type, jabatanValues) => {
+        const ketua = await prisma.pengurus.findFirst({
+          where: {
+            pengurusable_id: entityId,
+            pengurusable_type: type,
+            status_jabatan: 'aktif',
+            jabatan: { in: jabatanValues }
+          },
+          select: { nama_lengkap: true }
+        });
+        return ketua?.nama_lengkap || null;
+      };
+
+      // Helper: enrich array of entities with ketua_nama
+      const enrichWithKetua = async (items, type, jabatanValues) => {
+        if (!items || items.length === 0) return items;
+        const ids = items.map(i => i.id);
+        const ketuaList = await prisma.pengurus.findMany({
+          where: {
+            pengurusable_id: { in: ids },
+            pengurusable_type: type,
+            status_jabatan: 'aktif',
+            jabatan: { in: jabatanValues }
+          },
+          select: { pengurusable_id: true, nama_lengkap: true },
+          distinct: ['pengurusable_id']
+        });
+        const map = Object.fromEntries(ketuaList.map(k => [k.pengurusable_id, k.nama_lengkap]));
+        return items.map(item => ({ ...item, ketua_nama: map[item.id] || null }));
+      };
+
       const { id } = req.params;
       const desa = await prisma.desas.findUnique({ 
         where: { id: parseInt(id) },
@@ -800,6 +832,21 @@ class SummaryController {
       const rwIds = rws.map(rw => rw.id);
       const rtIds = rws.flatMap(rw => rw.rts.map(rt => rt.id));
 
+      // Fetch ketua for each RW and RT
+      const allRwRtIds = [...rwIds, ...rtIds];
+      const ketuaList = allRwRtIds.length > 0
+        ? await prisma.pengurus.findMany({
+            where: {
+              pengurusable_id: { in: allRwRtIds },
+              pengurusable_type: { in: ['rws', 'rts'] },
+              status_jabatan: 'aktif',
+              jabatan: { in: ['Ketua RW', 'ketua rw', 'KETUA RW', 'Ketua RT', 'ketua rt', 'KETUA RT'] }
+            },
+            select: { pengurusable_id: true, nama_lengkap: true }
+          })
+        : [];
+      const ketuaMap = Object.fromEntries(ketuaList.map(k => [k.pengurusable_id, k.nama_lengkap]));
+
       // Count pengurus for each RW and RT (polymorphic: pengurusable_type + pengurusable_id)
       const [rwPengurusCounts, rtPengurusCounts] = await Promise.all([
         rwIds.length > 0
@@ -829,10 +876,12 @@ class SummaryController {
         desa_id: rw.desa_id,
         status_kelembagaan: rw.status_kelembagaan,
         status_verifikasi: rw.status_verifikasi,
+        ketua_nama: ketuaMap[rw.id] || null,
         rt_count: rw.rts.length,
         pengurus_count: rwPengMap[rw.id] || 0,
         rts: rw.rts.map(rt => ({
           ...rt,
+          ketua_nama: ketuaMap[rt.id] || null,
           pengurus_count: rtPengMap[rt.id] || 0,
         })),
         created_at: rw.created_at,
@@ -851,12 +900,12 @@ class SummaryController {
           },
           kelembagaan: {
             rw: rwsWithRts,
-            posyandu: posyandus,
-            karang_taruna: karangTaruna,
-            lpm: lpm,
-            satlinmas: satlinmas,
-            pkk: pkk,
-            lembaga_lainnya: lembagaLainnya
+            posyandu: await enrichWithKetua(posyandus, 'posyandus', ['Ketua', 'ketua', 'KETUA', 'Ketua Posyandu', 'ketua posyandu']),
+            karang_taruna: karangTaruna ? { ...karangTaruna, ketua_nama: await getKetuaNama(karangTaruna.id, 'karang_taruna', ['Ketua', 'ketua', 'KETUA', 'Ketua Karang Taruna', 'ketua karang taruna']) } : null,
+            lpm: lpm ? { ...lpm, ketua_nama: await getKetuaNama(lpm.id, 'lpm', ['Ketua', 'ketua', 'KETUA', 'Ketua LPM', 'ketua lpm']) } : null,
+            satlinmas: satlinmas ? { ...satlinmas, ketua_nama: await getKetuaNama(satlinmas.id, 'satlinmas', ['Ketua', 'ketua', 'KETUA', 'Ketua Satlinmas', 'ketua satlinmas', 'Komandan', 'komandan', 'KOMANDAN']) } : null,
+            pkk: pkk ? { ...pkk, ketua_nama: await getKetuaNama(pkk.id, 'pkk', ['Ketua', 'ketua', 'KETUA', 'Ketua PKK', 'ketua pkk', 'Ketua TP PKK', 'ketua tp pkk']) } : null,
+            lembaga_lainnya: await enrichWithKetua(lembagaLainnya, 'lembaga-lainnya', ['Ketua', 'ketua', 'KETUA'])
           }
         }
       });
