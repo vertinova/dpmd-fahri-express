@@ -58,7 +58,8 @@ const REPOS = {
       '/bin/cp -f /var/www/backend/webhook-handler.js /var/www/webhook/webhook-handler.js',
       // Restart backend; fallback start jika process belum ada
       `${NODE_BIN}/pm2 restart dpmd-backend --update-env || ${NODE_BIN}/pm2 start /var/www/backend/src/server.js --name dpmd-backend`,
-      // JANGAN restart github-webhook di sini — akan kill proses deploy sendiri
+      // Restart webhook handler (delayed 2s agar response deploy selesai dulu)
+      `/bin/bash -c 'nohup /bin/bash -c "sleep 2 && ${NODE_BIN}/pm2 restart github-webhook --update-env" &>/dev/null &'`,
     ],
   },
   'dpmd-frontend': {
