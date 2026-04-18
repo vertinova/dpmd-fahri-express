@@ -1039,6 +1039,9 @@ model pengurus {
   status_perkawinan     String?                     @db.VarChar(255)
   alamat                String?                     @db.Text
   no_telepon            String?                     @db.VarChar(32)
+  nama_bank             String?                     @db.VarChar(100)
+  nomor_rekening        String?                     @db.VarChar(100)
+  nama_rekening         String?                     @db.VarChar(255)
   pendidikan            String?                     @db.VarChar(255)
   agama                 String?                     @db.VarChar(50)
   golongan_darah        String?                     @db.VarChar(5)
