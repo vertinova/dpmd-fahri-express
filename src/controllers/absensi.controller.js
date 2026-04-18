@@ -19,6 +19,9 @@ const ABSENSI_REQUIRED_STATUS = [
 // Status kepegawaian yang TIDAK dihitung terlambat
 const NO_TELAT_STATUS = ['Tenaga_Keamanan', 'Tenaga_Kebersihan'];
 
+// Status kepegawaian yang TETAP MASUK di hari Sabtu & Minggu (khusus Tenaga Keamanan)
+const WEEKEND_WORK_STATUS = ['Tenaga_Keamanan'];
+
 // Hari Libur Nasional Indonesia 2026 (format: MM-DD)
 const HOLIDAYS_2026 = {
   '01-01': 'Tahun Baru 2026',
@@ -834,11 +837,11 @@ const absensiController = {
       // Cek hari libur
       const holidayInfo = checkHoliday(new Date());
 
-      // Tenaga Keamanan & Kebersihan tetap masuk di weekend (Sabtu/Minggu)
+      // Tenaga Keamanan tetap masuk di weekend (Sabtu/Minggu)
       // Mereka hanya libur di hari libur nasional (tanggal merah)
       const isWeekendOnly = holidayInfo.isHoliday && (holidayInfo.reason === 'Hari Sabtu' || holidayInfo.reason === 'Hari Minggu');
-      const isNoHolidayWeekend = NO_TELAT_STATUS.includes(statusKepegawaian);
-      const effectiveHoliday = isNoHolidayWeekend && isWeekendOnly ? false : holidayInfo.isHoliday;
+      const isWeekendWorker = WEEKEND_WORK_STATUS.includes(statusKepegawaian);
+      const effectiveHoliday = isWeekendWorker && isWeekendOnly ? false : holidayInfo.isHoliday;
       const effectiveReason = effectiveHoliday ? holidayInfo.reason : null;
 
       return res.json({
