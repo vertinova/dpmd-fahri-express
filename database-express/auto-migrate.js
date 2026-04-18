@@ -86,7 +86,8 @@ async function autoMigrate() {
 				}
 				console.error(`❌ Failed: ${file}`);
 				console.error(err.message);
-				process.exit(1);
+				// Continue to next migration instead of stopping
+				continue;
 			}
 		}
 
