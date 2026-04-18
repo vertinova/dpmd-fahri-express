@@ -1425,13 +1425,25 @@ class SummaryController {
         include: {
           desas: {
             select: {
-              id: true, nama: true,
-              kecamatans: { select: { id: true, nama: true } }
+              id: true, nama: true, kode: true,
+              kecamatans: { select: { id: true, nama: true, kode: true } }
             }
           }
         },
         orderBy: [{ created_at: 'desc' }]
       });
+
+      // Sort by kecamatan kode + desa kode for export
+      if (export_all === '1' || export_all === 'true') {
+        allPengurus.sort((a, b) => {
+          const kecA = a.desas?.kecamatans?.kode || '';
+          const kecB = b.desas?.kecamatans?.kode || '';
+          if (kecA !== kecB) return kecA.localeCompare(kecB);
+          const desA = a.desas?.kode || '';
+          const desB = b.desas?.kode || '';
+          return desA.localeCompare(desB);
+        });
+      }
 
       // Build summary from the same filtered dataset used by the table.
       const verifiedPengurus = allPengurus.filter((pengurus) => pengurus.status_verifikasi === 'verified');
