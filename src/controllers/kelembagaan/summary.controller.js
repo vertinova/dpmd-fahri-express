@@ -1548,7 +1548,58 @@ class SummaryController {
         }));
 
       // Serialize BigInt
-        const serializedPengurus = scopedPengurus.map(p => ({
+      const isExport = export_all === '1' || export_all === 'true';
+
+      // Lookup lembaga nomor/nama and produk_hukum for export
+      let lembagaMap = {};
+      let produkHukumMap = {};
+      if (isExport) {
+        // Collect IDs by type
+        const idsByType = {};
+        scopedPengurus.forEach(p => {
+          const t = p.pengurusable_type;
+          if (!idsByType[t]) idsByType[t] = new Set();
+          idsByType[t].add(p.pengurusable_id);
+        });
+        // Map pengurusable_type to prisma model and display field
+        const typeModelMap = {
+          rw: { model: 'rws', field: 'nomor' }, rws: { model: 'rws', field: 'nomor' },
+          rt: { model: 'rts', field: 'nomor' }, rts: { model: 'rts', field: 'nomor' },
+          posyandu: { model: 'posyandus', field: 'nama' }, posyandus: { model: 'posyandus', field: 'nama' },
+          karang_taruna: { model: 'karang_tarunas', field: 'nama' }, karang_tarunas: { model: 'karang_tarunas', field: 'nama' },
+          lpm: { model: 'lpms', field: 'nama' }, lpms: { model: 'lpms', field: 'nama' },
+          pkk: { model: 'pkks', field: 'nama' }, pkks: { model: 'pkks', field: 'nama' },
+          satlinmas: { model: 'satlinmas', field: 'nama' },
+          'lembaga-lainnya': { model: 'lembaga_lainnyas', field: 'nama' }, lembaga_lainnyas: { model: 'lembaga_lainnyas', field: 'nama' },
+        };
+        // Batch fetch lembaga
+        for (const [type, ids] of Object.entries(idsByType)) {
+          const cfg = typeModelMap[type];
+          if (!cfg || !prisma[cfg.model]) continue;
+          const idArr = [...ids];
+          try {
+            const records = await prisma[cfg.model].findMany({
+              where: { id: { in: idArr } },
+              select: { id: true, [cfg.field]: true },
+            });
+            records.forEach(r => { lembagaMap[r.id] = r[cfg.field]; });
+          } catch { /* skip if model not found */ }
+        }
+        // Batch fetch produk_hukum
+        const phIds = [...new Set(scopedPengurus.filter(p => p.produk_hukum_id).map(p => p.produk_hukum_id))];
+        if (phIds.length) {
+          try {
+            const phs = await prisma.produk_hukums.findMany({
+              where: { id: { in: phIds } },
+              select: { id: true, nomor: true, tahun: true },
+            });
+            phs.forEach(ph => { produkHukumMap[ph.id] = ph; });
+          } catch { /* skip */ }
+        }
+      }
+
+        const serializedPengurus = scopedPengurus.map(p => {
+        const base = {
         id: p.id,
         nama_lengkap: p.nama_lengkap,
         jabatan: p.jabatan,
@@ -1565,11 +1616,27 @@ class SummaryController {
         desa_nama: p.desas?.nama || '',
         kecamatan_id: p.desas?.kecamatans?.id ? Number(p.desas.kecamatans.id) : null,
         kecamatan_nama: p.desas?.kecamatans?.nama || '',
-      }));
+      };
+      if (isExport) {
+        base.tempat_lahir = p.tempat_lahir || null;
+        base.status_perkawinan = p.status_perkawinan || null;
+        base.golongan_darah = p.golongan_darah || null;
+        base.alamat = p.alamat || null;
+        base.tanggal_mulai_jabatan = p.tanggal_mulai_jabatan || null;
+        base.tanggal_akhir_jabatan = p.tanggal_akhir_jabatan || null;
+        base.nama_bank = p.nama_bank || null;
+        base.nomor_rekening = p.nomor_rekening || null;
+        base.nama_rekening = p.nama_rekening || null;
+        base.lembaga_label = lembagaMap[p.pengurusable_id] || null;
+        const ph = p.produk_hukum_id ? produkHukumMap[p.produk_hukum_id] : null;
+        base.produk_hukum_nomor = ph?.nomor || null;
+        base.produk_hukum_tahun = ph?.tahun || null;
+      }
+      return base;
+      });
 
       // Pagination
       const totalRecords = serializedPengurus.length;
-      const isExport = export_all === '1' || export_all === 'true';
       const currentPage = Math.max(1, parseInt(page) || 1);
       const pageSize = isExport ? totalRecords : Math.min(Math.max(1, parseInt(per_page) || 25), 100);
       const totalPages = pageSize > 0 ? Math.ceil(totalRecords / pageSize) : 1;
