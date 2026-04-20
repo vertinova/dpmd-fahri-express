@@ -372,6 +372,37 @@ app.use('/api/chatbot', chatbotRoutes);
 // Messaging / Chat routes
 app.use('/api/messaging', require('./routes/messaging.routes'));
 
+// TEMPORARY DIAGNOSTIC - REMOVE AFTER DEBUGGING
+app.get('/api/debug/bankeu-proposals', async (req, res) => {
+  try {
+    const prisma = require('./config/prisma');
+    const proposals = await prisma.bankeu_proposals.findMany({
+      where: { submitted_to_dpmd: true, kecamatan_status: 'approved', dinas_status: 'approved', tahun_anggaran: 2026 },
+      select: {
+        id: true, desa_id: true, kegiatan_id: true, tahun_anggaran: true, judul_proposal: true,
+        anggaran_usulan: true, status: true, dpmd_status: true, created_by: true, created_at: true,
+        bankeu_proposal_kegiatan: {
+          select: { kegiatan_id: true, bankeu_master_kegiatan: { select: { id: true, nama_kegiatan: true } } }
+        },
+        desas: { select: { id: true, nama: true, kecamatans: { select: { id: true, nama: true } } } },
+        users_bankeu_proposals_created_byTousers: { select: { id: true, name: true } },
+        users_bankeu_proposals_kecamatan_verified_byTousers: { select: { id: true, name: true } },
+        users_bankeu_proposals_dpmd_verified_byTousers: { select: { id: true, name: true } },
+      },
+      orderBy: { submitted_to_dpmd_at: 'desc' }
+    });
+    const data = proposals.map(p => ({
+      ...p,
+      id: Number(p.id), desa_id: Number(p.desa_id),
+      anggaran_usulan: Number(p.anggaran_usulan),
+      kegiatan_id: p.kegiatan_id ? Number(p.kegiatan_id) : null,
+    }));
+    res.json({ success: true, count: data.length, data });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message, stack: err.stack?.split('\n').slice(0, 5) });
+  }
+});
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({
