@@ -18,16 +18,15 @@ class DPMDVerificationController {
    */
   async getProposals(req, res) {
     try {
-      const { status, kecamatan_id, desa_id, tahun_anggaran } = req.query;
+      const { status, desa_id, tahun_anggaran } = req.query;
 
       // Build query filters
       const whereClause = {
         submitted_to_dpmd: true,
-        kecamatan_status: 'approved', // Only show if Kecamatan approved
-        dinas_status: 'approved' // Only show if Dinas approved
+        kecamatan_status: 'approved',
+        dinas_status: 'approved'
       };
 
-      // Filter by tahun_anggaran if provided
       if (tahun_anggaran) {
         whereClause.tahun_anggaran = parseInt(tahun_anggaran);
       }
@@ -40,48 +39,66 @@ class DPMDVerificationController {
         whereClause.desa_id = BigInt(desa_id);
       }
 
-      // Get proposals
+      // Use select pattern (same fix as getTrackingProposals) to avoid BigInt serialization issues
       const proposals = await prisma.bankeu_proposals.findMany({
         where: whereClause,
-        include: {
-          desas: {
-            include: {
-              kecamatans: kecamatan_id ? {
-                where: { id: parseInt(kecamatan_id) }
-              } : true
+        select: {
+          id: true,
+          desa_id: true,
+          kegiatan_id: true,
+          tahun_anggaran: true,
+          judul_proposal: true,
+          nama_kegiatan_spesifik: true,
+          volume: true,
+          lokasi: true,
+          anggaran_usulan: true,
+          status: true,
+          file_proposal: true,
+          surat_pengantar: true,
+          surat_permohonan: true,
+          dinas_reviewed_file: true,
+          dinas_status: true,
+          dinas_verified_at: true,
+          dinas_catatan: true,
+          kecamatan_status: true,
+          kecamatan_verified_at: true,
+          kecamatan_catatan: true,
+          dpmd_status: true,
+          dpmd_verified_at: true,
+          dpmd_catatan: true,
+          submitted_to_dinas_at: true,
+          submitted_to_kecamatan: true,
+          submitted_to_dpmd: true,
+          submitted_to_dpmd_at: true,
+          berita_acara_path: true,
+          troubleshoot_catatan: true,
+          created_at: true,
+          created_by: true,
+          bankeu_proposal_kegiatan: {
+            select: {
+              kegiatan_id: true,
+              bankeu_master_kegiatan: {
+                select: { id: true, nama_kegiatan: true, dinas_terkait: true, jenis_kegiatan: true, urutan: true }
+              }
             }
           },
-          bankeu_proposal_kegiatan: {
-            include: {
-              bankeu_master_kegiatan: {
-                select: {
-                  id: true,
-                  nama_kegiatan: true,
-                  dinas_terkait: true,
-                  jenis_kegiatan: true,
-                  urutan: true
-                }
+          desas: {
+            select: {
+              id: true,
+              nama: true,
+              kecamatans: {
+                select: { id: true, nama: true }
               }
             }
           },
           users_bankeu_proposals_created_byTousers: {
-            select: {
-              id: true,
-              name: true,
-              email: true
-            }
+            select: { id: true, name: true, email: true }
           },
           users_bankeu_proposals_kecamatan_verified_byTousers: {
-            select: {
-              id: true,
-              name: true
-            }
+            select: { id: true, name: true }
           },
           users_bankeu_proposals_dpmd_verified_byTousers: {
-            select: {
-              id: true,
-              name: true
-            }
+            select: { id: true, name: true }
           }
         },
         orderBy: {
@@ -96,65 +113,63 @@ class DPMDVerificationController {
       const kegiatanMap = {};
       allKegiatan.forEach(k => { kegiatanMap[Number(k.id)] = k; });
 
-      // Get kegiatan info and surat desa for each proposal
-      const proposalsWithKegiatan = await Promise.all(
-        proposals.map(async (proposal) => {
-          // Resolve kegiatan: pivot table first, then direct FK fallback
-          let kegiatanData = null;
-          
-          if (proposal.bankeu_proposal_kegiatan?.length > 0) {
-            const pivotKeg = proposal.bankeu_proposal_kegiatan[0]?.bankeu_master_kegiatan;
-            if (pivotKeg) {
-              kegiatanData = {
-                ...pivotKeg,
-                id: Number(pivotKeg.id)
-              };
-            }
-          }
-          
-          // Fallback to direct kegiatan_id FK
-          if (!kegiatanData && proposal.kegiatan_id) {
-            const directKeg = kegiatanMap[Number(proposal.kegiatan_id)];
-            if (directKeg) {
-              kegiatanData = { ...directKeg, id: Number(directKeg.id) };
-            }
-          }
-          
-          // Build kegiatan_list (all kegiatan from pivot)
-          const kegiatanList = proposal.bankeu_proposal_kegiatan
-            ?.sort((a, b) => (a.bankeu_master_kegiatan?.urutan || 0) - (b.bankeu_master_kegiatan?.urutan || 0))
-            .map(bpk => ({
-              id: bpk.bankeu_master_kegiatan ? Number(bpk.bankeu_master_kegiatan.id) : null,
-              jenis_kegiatan: bpk.bankeu_master_kegiatan?.jenis_kegiatan || null,
-              nama_kegiatan: bpk.bankeu_master_kegiatan?.nama_kegiatan || null,
-              dinas_terkait: bpk.bankeu_master_kegiatan?.dinas_terkait || null
-            })) || [];
+      // Batch fetch desa_bankeu_surat (instead of N+1 queries)
+      const desaIds = [...new Set(proposals.map(p => p.desa_id))];
+      const currentYear = new Date().getFullYear();
+      const allSurat = desaIds.length > 0 ? await prisma.desa_bankeu_surat.findMany({
+        where: { desa_id: { in: desaIds }, tahun: currentYear },
+        select: { desa_id: true, surat_pengantar: true, surat_permohonan: true }
+      }) : [];
+      const suratMap = {};
+      allSurat.forEach(s => { suratMap[Number(s.desa_id)] = s; });
 
-          // Get surat pengantar & permohonan from desa
-          const suratDesa = await prisma.desa_bankeu_surat.findFirst({
-            where: {
-              desa_id: proposal.desa_id,
-              tahun: new Date().getFullYear()
-            }
-          });
-          
-          return {
-            ...proposal,
-            id: Number(proposal.id),
-            desa_id: Number(proposal.desa_id),
-            kegiatan_id: proposal.kegiatan_id ? Number(proposal.kegiatan_id) : null,
-            anggaran_usulan: Number(proposal.anggaran_usulan),
-            bankeu_master_kegiatan: kegiatanData,
-            kegiatan_list: kegiatanList,
-            surat_pengantar_desa: suratDesa?.surat_pengantar || null,
-            surat_permohonan_desa: suratDesa?.surat_permohonan || null
-          };
-        })
-      );
+      // Transform proposals
+      const proposalsData = proposals.map(proposal => {
+        // Resolve kegiatan: pivot table first, then direct FK fallback
+        let kegiatanData = null;
+
+        if (proposal.bankeu_proposal_kegiatan?.length > 0) {
+          const pivotKeg = proposal.bankeu_proposal_kegiatan[0]?.bankeu_master_kegiatan;
+          if (pivotKeg) {
+            kegiatanData = { ...pivotKeg, id: Number(pivotKeg.id) };
+          }
+        }
+
+        if (!kegiatanData && proposal.kegiatan_id) {
+          const directKeg = kegiatanMap[Number(proposal.kegiatan_id)];
+          if (directKeg) {
+            kegiatanData = { ...directKeg, id: Number(directKeg.id) };
+          }
+        }
+
+        // Build kegiatan_list
+        const kegiatanList = (proposal.bankeu_proposal_kegiatan || [])
+          .sort((a, b) => (a.bankeu_master_kegiatan?.urutan || 0) - (b.bankeu_master_kegiatan?.urutan || 0))
+          .map(bpk => ({
+            id: bpk.bankeu_master_kegiatan ? Number(bpk.bankeu_master_kegiatan.id) : null,
+            jenis_kegiatan: bpk.bankeu_master_kegiatan?.jenis_kegiatan || null,
+            nama_kegiatan: bpk.bankeu_master_kegiatan?.nama_kegiatan || null,
+            dinas_terkait: bpk.bankeu_master_kegiatan?.dinas_terkait || null
+          }));
+
+        const suratDesa = suratMap[Number(proposal.desa_id)];
+
+        return {
+          ...proposal,
+          id: Number(proposal.id),
+          desa_id: Number(proposal.desa_id),
+          kegiatan_id: proposal.kegiatan_id ? Number(proposal.kegiatan_id) : null,
+          anggaran_usulan: Number(proposal.anggaran_usulan),
+          bankeu_master_kegiatan: kegiatanData,
+          kegiatan_list: kegiatanList,
+          surat_pengantar_desa: suratDesa?.surat_pengantar || null,
+          surat_permohonan_desa: suratDesa?.surat_permohonan || null
+        };
+      });
 
       return res.json({
         success: true,
-        data: proposalsWithKegiatan
+        data: proposalsData
       });
 
     } catch (error) {
