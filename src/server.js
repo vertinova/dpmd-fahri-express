@@ -374,32 +374,87 @@ app.use('/api/messaging', require('./routes/messaging.routes'));
 
 // TEMPORARY DIAGNOSTIC - REMOVE AFTER DEBUGGING
 app.get('/api/debug/bankeu-proposals', async (req, res) => {
+  const steps = [];
   try {
     const prisma = require('./config/prisma');
+    steps.push('step1: query start');
     const proposals = await prisma.bankeu_proposals.findMany({
       where: { submitted_to_dpmd: true, kecamatan_status: 'approved', dinas_status: 'approved', tahun_anggaran: 2026 },
       select: {
         id: true, desa_id: true, kegiatan_id: true, tahun_anggaran: true, judul_proposal: true,
-        anggaran_usulan: true, status: true, dpmd_status: true, created_by: true, created_at: true,
+        nama_kegiatan_spesifik: true, volume: true, lokasi: true, anggaran_usulan: true, status: true,
+        file_proposal: true, surat_pengantar: true, surat_permohonan: true, dinas_reviewed_file: true,
+        dinas_status: true, dinas_verified_at: true, dinas_catatan: true,
+        kecamatan_status: true, kecamatan_verified_at: true, kecamatan_catatan: true,
+        dpmd_status: true, dpmd_verified_at: true, dpmd_catatan: true,
+        submitted_to_dinas_at: true, submitted_to_kecamatan: true, submitted_to_dpmd: true,
+        submitted_to_dpmd_at: true, berita_acara_path: true, troubleshoot_catatan: true,
+        created_at: true, created_by: true,
         bankeu_proposal_kegiatan: {
-          select: { kegiatan_id: true, bankeu_master_kegiatan: { select: { id: true, nama_kegiatan: true } } }
+          select: { kegiatan_id: true, bankeu_master_kegiatan: { select: { id: true, nama_kegiatan: true, dinas_terkait: true, jenis_kegiatan: true, urutan: true } } }
         },
         desas: { select: { id: true, nama: true, kecamatans: { select: { id: true, nama: true } } } },
-        users_bankeu_proposals_created_byTousers: { select: { id: true, name: true } },
+        users_bankeu_proposals_created_byTousers: { select: { id: true, name: true, email: true } },
         users_bankeu_proposals_kecamatan_verified_byTousers: { select: { id: true, name: true } },
         users_bankeu_proposals_dpmd_verified_byTousers: { select: { id: true, name: true } },
       },
       orderBy: { submitted_to_dpmd_at: 'desc' }
     });
-    const data = proposals.map(p => ({
-      ...p,
-      id: Number(p.id), desa_id: Number(p.desa_id),
-      anggaran_usulan: Number(p.anggaran_usulan),
-      kegiatan_id: p.kegiatan_id ? Number(p.kegiatan_id) : null,
-    }));
-    res.json({ success: true, count: data.length, data });
+    steps.push(`step2: got ${proposals.length} proposals`);
+
+    const allKegiatan = await prisma.bankeu_master_kegiatan.findMany({ select: { id: true, nama_kegiatan: true, dinas_terkait: true } });
+    const kegiatanMap = {};
+    allKegiatan.forEach(k => { kegiatanMap[Number(k.id)] = k; });
+    steps.push('step3: kegiatan map built');
+
+    const desaIds = [...new Set(proposals.map(p => p.desa_id))];
+    const currentYear = new Date().getFullYear();
+    const allSurat = desaIds.length > 0 ? await prisma.desa_bankeu_surat.findMany({
+      where: { desa_id: { in: desaIds }, tahun: currentYear },
+      select: { desa_id: true, surat_pengantar: true, surat_permohonan: true }
+    }) : [];
+    const suratMap = {};
+    allSurat.forEach(s => { suratMap[Number(s.desa_id)] = s; });
+    steps.push(`step4: surat map built (${allSurat.length} surat)`);
+
+    const proposalsData = proposals.map(proposal => {
+      let kegiatanData = null;
+      if (proposal.bankeu_proposal_kegiatan?.length > 0) {
+        const pivotKeg = proposal.bankeu_proposal_kegiatan[0]?.bankeu_master_kegiatan;
+        if (pivotKeg) kegiatanData = { ...pivotKeg, id: Number(pivotKeg.id) };
+      }
+      if (!kegiatanData && proposal.kegiatan_id) {
+        const directKeg = kegiatanMap[Number(proposal.kegiatan_id)];
+        if (directKeg) kegiatanData = { ...directKeg, id: Number(directKeg.id) };
+      }
+      const kegiatanList = (proposal.bankeu_proposal_kegiatan || [])
+        .sort((a, b) => (a.bankeu_master_kegiatan?.urutan || 0) - (b.bankeu_master_kegiatan?.urutan || 0))
+        .map(bpk => ({
+          id: bpk.bankeu_master_kegiatan ? Number(bpk.bankeu_master_kegiatan.id) : null,
+          jenis_kegiatan: bpk.bankeu_master_kegiatan?.jenis_kegiatan || null,
+          nama_kegiatan: bpk.bankeu_master_kegiatan?.nama_kegiatan || null,
+          dinas_terkait: bpk.bankeu_master_kegiatan?.dinas_terkait || null
+        }));
+      const suratDesa = suratMap[Number(proposal.desa_id)];
+      return {
+        ...proposal,
+        id: Number(proposal.id), desa_id: Number(proposal.desa_id),
+        kegiatan_id: proposal.kegiatan_id ? Number(proposal.kegiatan_id) : null,
+        anggaran_usulan: Number(proposal.anggaran_usulan),
+        bankeu_master_kegiatan: kegiatanData, kegiatan_list: kegiatanList,
+        surat_pengantar_desa: suratDesa?.surat_pengantar || null,
+        surat_permohonan_desa: suratDesa?.surat_permohonan || null
+      };
+    });
+    steps.push(`step5: transformed ${proposalsData.length} proposals`);
+
+    // Test JSON.stringify explicitly
+    const jsonStr = JSON.stringify({ success: true, data: proposalsData });
+    steps.push(`step6: JSON.stringify OK (${jsonStr.length} chars)`);
+
+    res.json({ success: true, count: proposalsData.length, steps, first: proposalsData[0] || null });
   } catch (err) {
-    res.status(500).json({ success: false, error: err.message, stack: err.stack?.split('\n').slice(0, 5) });
+    res.status(500).json({ success: false, steps, error: err.message, stack: err.stack?.split('\n').slice(0, 10) });
   }
 });
 
