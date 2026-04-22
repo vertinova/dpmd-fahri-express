@@ -148,7 +148,15 @@ class PengurusController {
         return res.status(404).json({ success: false, message: 'Pengurus tidak ditemukan' });
       }
 
-      res.json({ success: true, data: pengurus });
+      let produk_hukum = null;
+      if (pengurus.produk_hukum_id) {
+        produk_hukum = await prisma.produk_hukums.findUnique({
+          where: { id: pengurus.produk_hukum_id },
+          select: { id: true, nomor: true, tahun: true, judul: true, jenis: true }
+        });
+      }
+
+      res.json({ success: true, data: { ...pengurus, produk_hukum } });
     } catch (error) {
       console.error('Error in showDesaPengurus:', error);
       res.status(500).json({ success: false, message: 'Gagal mengambil data pengurus', error: error.message });
@@ -613,7 +621,15 @@ class PengurusController {
         return res.status(404).json({ success: false, message: 'Pengurus tidak ditemukan' });
       }
 
-      res.json({ success: true, data: pengurus });
+      let produk_hukum = null;
+      if (pengurus.produk_hukum_id) {
+        produk_hukum = await prisma.produk_hukums.findUnique({
+          where: { id: pengurus.produk_hukum_id },
+          select: { id: true, nomor: true, tahun: true, judul: true, jenis: true }
+        });
+      }
+
+      res.json({ success: true, data: { ...pengurus, produk_hukum } });
     } catch (error) {
       console.error('Error in showPengurus:', error);
       res.status(500).json({ success: false, message: 'Gagal mengambil data pengurus', error: error.message });
