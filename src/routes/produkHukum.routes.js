@@ -66,6 +66,14 @@ router.delete('/:id', auth, (req, res) => produkHukumController.destroy(req, res
 router.put('/:id/status', auth, (req, res) => produkHukumController.updateStatus(req, res));
 
 /**
+ * @route   GET /api/produk-hukum/:id/related
+ * @desc    Get related kelembagaan and pengurus for a produk hukum
+ * @access  Private
+ * @params  id - UUID of produk hukum
+ */
+router.get('/:id/related', auth, (req, res) => produkHukumController.getRelated(req, res));
+
+/**
  * @route   GET /api/produk-hukum/:id/download
  * @desc    Download PDF file of produk hukum
  * @access  Private (requires authentication)

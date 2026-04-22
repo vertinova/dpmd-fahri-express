@@ -12,6 +12,9 @@ router.get('/', controller.getAllProdukHukum);
 // GET /api/pemdes/produk-hukum/stats - Get produk hukum statistics
 router.get('/stats', controller.getStats);
 
+// GET /api/pemdes/produk-hukum/:id/related - Get related kelembagaan & pengurus
+router.get('/:id/related', controller.getRelated);
+
 // GET /api/pemdes/produk-hukum/:id - Get single produk hukum detail
 router.get('/:id', controller.getById);
 

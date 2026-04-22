@@ -614,6 +614,72 @@ class ProdukHukumController {
       });
     }
   }
+
+  /**
+   * Get related kelembagaan and pengurus for a produk hukum
+   */
+  async getRelated(req, res) {
+    try {
+      const { id } = req.params;
+
+      const ph = await prisma.produk_hukums.findUnique({
+        where: { id },
+        select: {
+          rws: { select: { id: true, nomor: true, status_kelembagaan: true, desas: { select: { nama: true } } } },
+          rts: { select: { id: true, nomor: true, status_kelembagaan: true, rws: { select: { nomor: true } }, desas: { select: { nama: true } } } },
+          posyandus: { select: { id: true, nama: true, status_kelembagaan: true, desas: { select: { nama: true } } } },
+          karang_tarunas: { select: { id: true, nama: true, status_kelembagaan: true, desas: { select: { nama: true } } } },
+          lpms: { select: { id: true, nama: true, status_kelembagaan: true, desas: { select: { nama: true } } } },
+          pkks: { select: { id: true, nama: true, status_kelembagaan: true, desas: { select: { nama: true } } } },
+          satlinmas: { select: { id: true, status_kelembagaan: true, desas: { select: { nama: true } } } },
+          lembaga_lainnyas: { select: { id: true, nama: true, status_kelembagaan: true, desas: { select: { nama: true } } } },
+          aparatur_desa: { select: { id: true, nama_lengkap: true, jabatan: true, desas: { select: { nama: true } } } },
+        },
+      });
+
+      if (!ph) {
+        return res.status(404).json({ success: false, message: 'Produk hukum tidak ditemukan' });
+      }
+
+      const pengurusList = await prisma.pengurus.findMany({
+        where: { produk_hukum_id: id },
+        select: {
+          id: true,
+          nama_lengkap: true,
+          jabatan: true,
+          pengurusable_type: true,
+          pengurusable_id: true,
+          status_jabatan: true,
+          desas: { select: { nama: true } },
+        },
+      });
+
+      return res.json({
+        success: true,
+        data: {
+          kelembagaan: {
+            rws: ph.rws || [],
+            rts: ph.rts || [],
+            posyandus: ph.posyandus || [],
+            karang_tarunas: ph.karang_tarunas || [],
+            lpms: ph.lpms || [],
+            pkks: ph.pkks || [],
+            satlinmas: ph.satlinmas || [],
+            lembaga_lainnyas: ph.lembaga_lainnyas || [],
+          },
+          aparatur_desa: ph.aparatur_desa || [],
+          pengurus: pengurusList,
+        },
+      });
+    } catch (error) {
+      console.error('Error in getRelated:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Gagal mengambil data terkait',
+        error: error.message,
+      });
+    }
+  }
 }
 
 module.exports = new ProdukHukumController();
