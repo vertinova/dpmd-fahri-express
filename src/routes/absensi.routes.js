@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const absensiController = require('../controllers/absensi.controller');
-const { auth, checkAbsensiAdmin } = require('../middlewares/auth');
+const { auth, checkAbsensiAdmin, requireSuperadmin } = require('../middlewares/auth');
 
 /**
  * Absensi Pegawai Routes
@@ -19,7 +19,8 @@ router.post('/register-device', auth, absensiController.registerDevice);
 router.delete('/remove-device', auth, absensiController.removeDevice);
 router.get('/success-messages', auth, absensiController.getSuccessMessages);
 
-// Admin routes (superadmin + bidang Sekretariat)
+// Admin routes: superadmin + bidang Sekretariat
+// Edit/delete rekap harian records: superadmin only
 router.get('/admin/dashboard-hari-ini', auth, checkAbsensiAdmin, absensiController.getDashboardHariIni);
 router.get('/admin/rekap-pegawai', auth, checkAbsensiAdmin, absensiController.getRekapPegawai);
 router.get('/admin/history/:userId', auth, checkAbsensiAdmin, absensiController.getHistoryPerUser);
@@ -28,8 +29,8 @@ router.get('/admin/pegawai-absensi', auth, checkAbsensiAdmin, absensiController.
 router.get('/admin/settings', auth, checkAbsensiAdmin, absensiController.getSettings);
 router.put('/admin/settings', auth, checkAbsensiAdmin, absensiController.updateSettings);
 router.put('/admin/set-device/:userId', auth, checkAbsensiAdmin, absensiController.adminSetDevice);
-router.put('/admin/:id', auth, checkAbsensiAdmin, absensiController.adminUpdateAbsensi);
-router.delete('/admin/:id', auth, checkAbsensiAdmin, absensiController.adminDeleteAbsensi);
+router.put('/admin/:id', auth, checkAbsensiAdmin, requireSuperadmin, absensiController.adminUpdateAbsensi);
+router.delete('/admin/:id', auth, checkAbsensiAdmin, requireSuperadmin, absensiController.adminDeleteAbsensi);
 router.get('/admin/success-messages', auth, checkAbsensiAdmin, absensiController.getAdminSuccessMessages);
 router.put('/admin/success-messages/:type', auth, checkAbsensiAdmin, absensiController.updateSuccessMessage);
 router.get('/admin/reminder-templates', auth, checkAbsensiAdmin, absensiController.getReminderTemplates);
