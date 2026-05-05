@@ -16,12 +16,14 @@ const {
   lembagaLainnyaController
 } = require('../controllers/kelembagaan/index');
 const posyanduComparisonController = require('../controllers/kelembagaan/posyanduComparison.controller');
+const rtrwComparisonController = require('../controllers/kelembagaan/rtrwComparison.controller');
 
 // All kelembagaan routes require authentication
 router.use(auth);
 
 // Posyandu comparison endpoint
 router.get('/posyandu-comparison', posyanduComparisonController.getComparison.bind(posyanduComparisonController));
+router.get('/rtrw-comparison', rtrwComparisonController.getComparison.bind(rtrwComparisonController));
 
 // Summary and overview endpoints
 router.get('/', summaryController.index.bind(summaryController));
