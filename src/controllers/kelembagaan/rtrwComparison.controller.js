@@ -20,9 +20,14 @@ let sourceCache = {
   addMeta: {},
   bpjsMeta: {},
 };
+let sourceCacheBuildPromise = null;
 
 const toText = (value) => String(value ?? '').trim();
 const toUpper = (value) => toText(value).toUpperCase();
+
+function boolQuery(value) {
+  return ['1', 'true', 'yes'].includes(toText(value).toLowerCase());
+}
 
 function normalizeNik(value) {
   const digits = String(value ?? '').replace(/\D/g, '');
@@ -324,6 +329,33 @@ function readSourceData() {
   return sourceCache;
 }
 
+function isSourceCacheReady() {
+  return sourceCache.key === getSourceCacheKey();
+}
+
+function warmSourceCache() {
+  if (isSourceCacheReady()) return Promise.resolve(sourceCache);
+  if (sourceCacheBuildPromise) return sourceCacheBuildPromise;
+
+  sourceCacheBuildPromise = new Promise((resolve, reject) => {
+    setImmediate(() => {
+      try {
+        resolve(readSourceData());
+      } catch (error) {
+        reject(error);
+      }
+    });
+  }).finally(() => {
+    sourceCacheBuildPromise = null;
+  });
+
+  sourceCacheBuildPromise.catch((error) => {
+    console.error('Error warming RT/RW source cache:', error);
+  });
+
+  return sourceCacheBuildPromise;
+}
+
 function groupBy(items, keyGetter) {
   return items.reduce((acc, item) => {
     const key = keyGetter(item);
@@ -455,7 +487,9 @@ function addToCanonMap(canonMap, indexes, source, item, enableFuzzy) {
   indexEntry(indexes, key, source, item);
 }
 
-function compareItems(dbList, addList, bpjsList, enableFuzzy = false) {
+function compareItems(dbList, addList, bpjsList, options = {}) {
+  const enableFuzzy = typeof options === 'boolean' ? options : Boolean(options.enableFuzzy);
+  const includeDetails = typeof options === 'object' && Boolean(options.includeDetails);
   const canonMap = new Map();
   const indexes = createMatchIndexes();
 
@@ -487,7 +521,10 @@ function compareItems(dbList, addList, bpjsList, enableFuzzy = false) {
     ]);
     const isFuzzy = normalizedNames.size > 1 && (hasDb || hasAdd) && (hasBpjs || hasAdd);
 
-    items.push({
+    const dbDetails = entry.dbItems;
+    const addDetails = entry.addItems.flatMap((item) => item.details || []);
+    const bpjsDetails = entry.bpjsItems.flatMap((item) => item.details || []);
+    const item = {
       key,
       nama: Array.from(sourceNames).join(' / '),
       normalized: Array.from(normalizedNames)[0] || '',
@@ -506,12 +543,21 @@ function compareItems(dbList, addList, bpjsList, enableFuzzy = false) {
       jenis: entry.dbItems[0]?.jenis || entry.addItems[0]?.jenis || null,
       rwNomor: entry.dbItems[0]?.rwNomor || entry.addItems[0]?.rwNomor || null,
       rtNomor: entry.dbItems[0]?.rtNomor || entry.addItems[0]?.rtNomor || null,
-      dbDetails: entry.dbItems,
-      addDetails: entry.addItems.flatMap((item) => item.details || []),
-      bpjsDetails: entry.bpjsItems.flatMap((item) => item.details || []),
       addNilai: entry.addItems.reduce((sum, item) => sum + (item.totalNilai || 0), 0),
       bpjsUpah: entry.bpjsItems.reduce((sum, item) => sum + (item.totalUpah || 0), 0),
-    });
+      dbDetailCount: dbDetails.length,
+      addDetailCount: addDetails.length,
+      bpjsDetailCount: bpjsDetails.length,
+      detailsLoaded: includeDetails,
+    };
+
+    if (includeDetails) {
+      item.dbDetails = dbDetails;
+      item.addDetails = addDetails;
+      item.bpjsDetails = bpjsDetails;
+    }
+
+    items.push(item);
   });
 
   const order = {
@@ -538,14 +584,42 @@ class RtrwComparisonController {
    */
   async getComparison(req, res) {
     try {
-      const enableFuzzy = ['1', 'true', 'yes'].includes(toText(req.query?.fuzzy).toLowerCase());
-      const debugTiming = ['1', 'true', 'yes'].includes(toText(req.query?.debugTiming).toLowerCase());
+      const enableFuzzy = boolQuery(req.query?.fuzzy);
+      const debugTiming = boolQuery(req.query?.debugTiming);
+      const desaKodeFilter = toText(req.query?.desaKode);
+      const itemKeyFilter = toText(req.query?.itemKey);
+      const includeDetails = boolQuery(req.query?.includeDetails) || Boolean(itemKeyFilter);
+      const waitForCache = boolQuery(req.query?.waitForCache);
       const startedAt = Date.now();
       const logTiming = (label) => {
         if (debugTiming) console.log(`[rtrw-comparison] ${label}: ${Date.now() - startedAt}ms`);
       };
+
+      if (!isSourceCacheReady()) {
+        const warming = warmSourceCache();
+        if (!waitForCache) {
+          return res.status(202).json({
+            success: true,
+            processing: true,
+            message: 'Cache persandingan RT/RW sedang disiapkan, silakan coba lagi beberapa saat.',
+            data: {
+              summary: null,
+              comparison: [],
+              meta: {
+                cacheReady: false,
+                includeDetails,
+                filteredDesaKode: desaKodeFilter || null,
+                filteredItemKey: itemKeyFilter || null,
+              },
+            },
+          });
+        }
+        await warming;
+      }
+
       const [allDesa, allPengurus, allRws, allRts] = await Promise.all([
         prisma.desas.findMany({
+          ...(desaKodeFilter ? { where: { kode: desaKodeFilter } } : {}),
           select: {
             id: true,
             kode: true,
@@ -652,7 +726,8 @@ class RtrwComparisonController {
         const dbList = dbByKode[desaKode] || [];
         const addList = addByKode[desaKode] || [];
         const bpjsList = bpjsByKode[desaKode] || [];
-        const items = compareItems(dbList, addList, bpjsList, enableFuzzy);
+        const items = compareItems(dbList, addList, bpjsList, { enableFuzzy, includeDetails })
+          .filter((item) => !itemKeyFilter || item.key === itemKeyFilter);
 
         return {
           desaId: desa.id.toString(),
@@ -723,7 +798,16 @@ class RtrwComparisonController {
 
       res.json({
         success: true,
-        data: { summary, comparison },
+        data: {
+          summary,
+          comparison,
+          meta: {
+            cacheReady: true,
+            includeDetails,
+            filteredDesaKode: desaKodeFilter || null,
+            filteredItemKey: itemKeyFilter || null,
+          },
+        },
       });
     } catch (error) {
       console.error('Error in RT/RW comparison:', error);
