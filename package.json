@@ -12,6 +12,7 @@
     "db:seed": "node scripts/run-seeders.js",
     "db:setup": "npm run db:push && npm run db:generate && npm run db:seed",
     "kelembagaan:import": "node scripts/import-kelembagaan-workbook.js",
+    "rtrw:generate-json": "node scripts/generate-rtrw-json-cache.js",
     "postinstall": "npx prisma generate"
   },
   "keywords": [

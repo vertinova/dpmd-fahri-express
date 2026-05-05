@@ -11,6 +11,8 @@ const { prisma } = require('./base.controller');
 const DATA_DIR = path.join(__dirname, '..', '..', '..', 'data');
 const ADD_FILE = path.join(DATA_DIR, 'rtrwadd.xlsx');
 const BPJS_FILE = path.join(DATA_DIR, 'rtrwbpjs.xlsx');
+const ADD_JSON_FILE = path.join(DATA_DIR, 'rtrwadd.json');
+const BPJS_JSON_FILE = path.join(DATA_DIR, 'rtrwbpjs.json');
 const RT_RW_TYPES = ['rw', 'rt', 'rws', 'rts'];
 
 let sourceCache = {
@@ -19,6 +21,7 @@ let sourceCache = {
   bpjsData: [],
   addMeta: {},
   bpjsMeta: {},
+  sourceType: null,
 };
 let sourceCacheBuildPromise = null;
 
@@ -176,9 +179,32 @@ function isSimilarName(a, b) {
 }
 
 function getSourceCacheKey() {
+  if (hasPreparedJsonCache()) {
+    const addStat = fs.statSync(ADD_JSON_FILE);
+    const bpjsStat = fs.statSync(BPJS_JSON_FILE);
+    return `json|${addStat.mtimeMs}:${addStat.size}|${bpjsStat.mtimeMs}:${bpjsStat.size}`;
+  }
+
   const addStat = fs.statSync(ADD_FILE);
   const bpjsStat = fs.statSync(BPJS_FILE);
-  return `${addStat.mtimeMs}:${addStat.size}|${bpjsStat.mtimeMs}:${bpjsStat.size}`;
+  return `excel|${addStat.mtimeMs}:${addStat.size}|${bpjsStat.mtimeMs}:${bpjsStat.size}`;
+}
+
+function hasPreparedJsonCache() {
+  return fs.existsSync(ADD_JSON_FILE) && fs.existsSync(BPJS_JSON_FILE);
+}
+
+function readPreparedJson(filePath, label) {
+  const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  if (!payload || !Array.isArray(payload.data)) {
+    throw new Error(`Format cache JSON ${label} tidak valid`);
+  }
+
+  return {
+    data: payload.data,
+    meta: payload.meta || {},
+    generatedAt: payload.generatedAt || null,
+  };
 }
 
 function parseAddData() {
@@ -316,14 +342,16 @@ function readSourceData() {
   const key = getSourceCacheKey();
   if (sourceCache.key === key) return sourceCache;
 
-  const add = parseAddData();
-  const bpjs = parseBpjsData();
+  const usingJsonCache = hasPreparedJsonCache();
+  const add = usingJsonCache ? readPreparedJson(ADD_JSON_FILE, 'ADD') : parseAddData();
+  const bpjs = usingJsonCache ? readPreparedJson(BPJS_JSON_FILE, 'BPJS') : parseBpjsData();
   sourceCache = {
     key,
     addData: add.data,
     bpjsData: bpjs.data,
     addMeta: add.meta,
     bpjsMeta: bpjs.meta,
+    sourceType: usingJsonCache ? 'json' : 'excel',
   };
 
   return sourceCache;
@@ -597,7 +625,7 @@ class RtrwComparisonController {
 
       if (!isSourceCacheReady()) {
         const warming = warmSourceCache();
-        if (!waitForCache) {
+        if (!waitForCache && !hasPreparedJsonCache()) {
           return res.status(202).json({
             success: true,
             processing: true,
@@ -675,7 +703,7 @@ class RtrwComparisonController {
       ]);
       logTiming('database loaded');
 
-      const { addData, bpjsData, addMeta, bpjsMeta } = readSourceData();
+      const { addData, bpjsData, addMeta, bpjsMeta, sourceType } = readSourceData();
       logTiming('excel loaded');
       const desaByKode = new Map(allDesa.map((desa) => [desa.kode, desa]));
       const rwById = new Map(allRws.map((rw) => [rw.id, rw]));
@@ -803,6 +831,7 @@ class RtrwComparisonController {
           comparison,
           meta: {
             cacheReady: true,
+            sourceType,
             includeDetails,
             filteredDesaKode: desaKodeFilter || null,
             filteredItemKey: itemKeyFilter || null,
