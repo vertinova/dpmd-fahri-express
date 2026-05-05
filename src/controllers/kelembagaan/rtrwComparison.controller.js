@@ -14,6 +14,10 @@ const BPJS_FILE = path.join(DATA_DIR, 'rtrwbpjs.xlsx');
 const ADD_JSON_FILE = path.join(DATA_DIR, 'rtrwadd.json');
 const BPJS_JSON_FILE = path.join(DATA_DIR, 'rtrwbpjs.json');
 const RT_RW_TYPES = ['rw', 'rt', 'rws', 'rts'];
+const TANGKIL_CITEUREUP_KODE = '32.01.03.2011';
+const TANGKIL_CITEUREUP_NAMA = 'Tangkil';
+const TANGKIL_CITEUREUP_KECAMATAN = 'Citeureup';
+const MAX_TANGKIL_CANDIDATES = 8;
 
 let sourceCache = {
   key: null,
@@ -393,6 +397,126 @@ function groupBy(items, keyGetter) {
   }, {});
 }
 
+function candidateScore(candidate) {
+  let score = 0;
+  if (candidate.sources.includes('DB')) score += 10;
+  if (candidate.sources.includes('ADD')) score += 5;
+  return score;
+}
+
+function pushVillageCandidate(index, name, desaKode, source, desaNama = '', kecamatanNama = '') {
+  if (!name || !desaKode || desaKode === TANGKIL_CITEUREUP_KODE) return;
+  if (!index.has(name)) index.set(name, new Map());
+
+  const byDesa = index.get(name);
+  if (!byDesa.has(desaKode)) {
+    byDesa.set(desaKode, {
+      desaKode,
+      desaNama,
+      kecamatanNama,
+      sources: [],
+    });
+  }
+
+  const candidate = byDesa.get(desaKode);
+  if (!candidate.sources.includes(source)) candidate.sources.push(source);
+  if (!candidate.desaNama && desaNama) candidate.desaNama = desaNama;
+  if (!candidate.kecamatanNama && kecamatanNama) candidate.kecamatanNama = kecamatanNama;
+}
+
+function buildTangkilCandidateIndex(addData, dbItems, desaByKode) {
+  const index = new Map();
+
+  addData.forEach((item) => {
+    const desa = desaByKode.get(item.desaKode);
+    pushVillageCandidate(
+      index,
+      item.normalized || item.nama,
+      item.desaKode,
+      'ADD',
+      desa?.nama || item.desaNamaExcel || '',
+      desa?.kecamatans?.nama || '',
+    );
+  });
+
+  dbItems.forEach((item) => {
+    pushVillageCandidate(
+      index,
+      item.normalized || item.nama,
+      item.desaKode,
+      'DB',
+      item.desaNama || '',
+      item.kecamatanNama || '',
+    );
+  });
+
+  return index;
+}
+
+function chooseTangkilCandidate(candidates) {
+  if (!candidates.length) return null;
+  return [...candidates].sort((a, b) => {
+    return candidateScore(b) - candidateScore(a)
+      || a.desaKode.localeCompare(b.desaKode);
+  })[0];
+}
+
+function applyTangkilBpjsFallback(bpjsData, addData, dbItems, desaByKode) {
+  const candidateIndex = buildTangkilCandidateIndex(addData, dbItems, desaByKode);
+  const stats = {
+    pool: 0,
+    relocated: 0,
+    returned: 0,
+    ambiguous: 0,
+  };
+
+  const adjusted = bpjsData.map((item) => {
+    if (item.desaKode !== TANGKIL_CITEUREUP_KODE) return item;
+
+    stats.pool += 1;
+    const candidates = Array.from(candidateIndex.get(item.normalized || item.nama)?.values() || [])
+      .sort((a, b) => {
+        return candidateScore(b) - candidateScore(a)
+          || a.desaKode.localeCompare(b.desaKode);
+      });
+
+    if (candidates.length === 0) {
+      stats.returned += 1;
+      return item;
+    }
+
+    const selected = chooseTangkilCandidate(candidates);
+    stats.relocated += 1;
+    if (candidates.length > 1) stats.ambiguous += 1;
+
+    return {
+      ...item,
+      desaKode: selected.desaKode,
+      bpjsOriginalDesaKode: TANGKIL_CITEUREUP_KODE,
+      bpjsOriginalDesaNama: TANGKIL_CITEUREUP_NAMA,
+      bpjsOriginalKecamatanNama: TANGKIL_CITEUREUP_KECAMATAN,
+      bpjsTangkilSuspect: true,
+      bpjsTangkilAmbiguous: candidates.length > 1,
+      bpjsTangkilCandidateCount: candidates.length,
+      bpjsTangkilSelectedSources: selected.sources,
+      bpjsTangkilCandidates: candidates.slice(0, MAX_TANGKIL_CANDIDATES).map((candidate) => ({
+        desaKode: candidate.desaKode,
+        desaNama: candidate.desaNama,
+        kecamatanNama: candidate.kecamatanNama,
+        sources: candidate.sources,
+      })),
+      details: (item.details || []).map((detail) => ({
+        ...detail,
+        originalIdPegawai: detail.idPegawai,
+        idPegawai: selected.desaKode,
+        bpjsOriginalDesaKode: TANGKIL_CITEUREUP_KODE,
+      })),
+    };
+  });
+
+  return { data: adjusted, stats };
+}
+
 function statusFromSources(hasDb, hasAdd, hasBpjs) {
   if (hasDb && hasAdd && hasBpjs) return 'all_three';
   if (hasDb && hasAdd) return 'db_add';
@@ -537,6 +661,12 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
     const nikMatch = dbNiks.some((nik) => bpjsNiks.includes(nik));
     const nikMismatch = dbNiks.length > 0 && bpjsNiks.length > 0 && !nikMatch;
     const sourceNames = new Set();
+    const bpjsTangkilItems = entry.bpjsItems.filter((item) => item.bpjsTangkilSuspect);
+    const bpjsTangkilCandidates = bpjsTangkilItems.flatMap((item) => item.bpjsTangkilCandidates || []);
+    const bpjsTangkilCandidateCount = Math.max(
+      0,
+      ...bpjsTangkilItems.map((item) => item.bpjsTangkilCandidateCount || 0),
+    );
 
     entry.dbItems.forEach((item) => sourceNames.add(item.nama));
     entry.addItems.forEach((item) => sourceNames.add(item.nama));
@@ -563,10 +693,21 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
       inAdd: hasAdd,
       inBpjs: hasBpjs,
       status,
-      keterangan: buildKeterangan(hasDb, hasAdd, hasBpjs),
+      keterangan: bpjsTangkilItems.length > 0
+        ? `${buildKeterangan(hasDb, hasAdd, hasBpjs)}. BPJS memakai kode ${TANGKIL_CITEUREUP_NAMA} (${TANGKIL_CITEUREUP_KODE}) dan disandingkan berdasarkan nama, perlu verifikasi.`
+        : buildKeterangan(hasDb, hasAdd, hasBpjs),
       isFuzzy,
       nikMatch,
       nikMismatch,
+      bpjsTangkilSuspect: bpjsTangkilItems.length > 0,
+      bpjsTangkilAmbiguous: bpjsTangkilItems.some((item) => item.bpjsTangkilAmbiguous),
+      bpjsTangkilCandidateCount,
+      bpjsOriginalDesaKode: bpjsTangkilItems[0]?.bpjsOriginalDesaKode || null,
+      bpjsOriginalDesaNama: bpjsTangkilItems[0]?.bpjsOriginalDesaNama || null,
+      bpjsTangkilSelectedSources: [
+        ...new Set(bpjsTangkilItems.flatMap((item) => item.bpjsTangkilSelectedSources || [])),
+      ],
+      bpjsTangkilCandidates,
       nik: [...new Set([...dbNiks, ...bpjsNiks])],
       jenis: entry.dbItems[0]?.jenis || entry.addItems[0]?.jenis || null,
       rwNomor: entry.dbItems[0]?.rwNomor || entry.addItems[0]?.rwNomor || null,
@@ -744,9 +885,11 @@ class RtrwComparisonController {
         };
       }).filter((item) => item.nama && item.desaKode);
 
+      const tangkilBpjsFallback = applyTangkilBpjsFallback(bpjsData, addData, dbItems, desaByKode);
+      const effectiveBpjsData = tangkilBpjsFallback.data;
       const dbByKode = groupBy(dbItems, (item) => item.desaKode);
       const addByKode = groupBy(addData, (item) => item.desaKode);
-      const bpjsByKode = groupBy(bpjsData, (item) => item.desaKode);
+      const bpjsByKode = groupBy(effectiveBpjsData, (item) => item.desaKode);
       logTiming('source grouped');
 
       const comparison = allDesa.map((desa) => {
@@ -775,6 +918,7 @@ class RtrwComparisonController {
           onlyBpjs: items.filter((item) => item.status === 'only_bpjs').length,
           fuzzyMatched: items.filter((item) => item.isFuzzy).length,
           nikMismatch: items.filter((item) => item.nikMismatch).length,
+          bpjsTangkilSuspect: items.filter((item) => item.bpjsTangkilSuspect).length,
           items,
         };
       });
@@ -783,7 +927,7 @@ class RtrwComparisonController {
       const unmatchedAddDesa = [...new Set(addData.map((item) => item.desaKode))]
         .filter((kode) => !desaByKode.has(kode))
         .sort();
-      const unmatchedBpjsDesa = [...new Set(bpjsData.map((item) => item.desaKode))]
+      const unmatchedBpjsDesa = [...new Set(effectiveBpjsData.map((item) => item.desaKode))]
         .filter((kode) => !desaByKode.has(kode))
         .sort();
 
@@ -815,6 +959,11 @@ class RtrwComparisonController {
         totalOnlyBpjs: comparison.reduce((sum, desa) => sum + desa.onlyBpjs, 0),
         totalFuzzyMatched: comparison.reduce((sum, desa) => sum + desa.fuzzyMatched, 0),
         totalNikMismatch: comparison.reduce((sum, desa) => sum + desa.nikMismatch, 0),
+        totalBpjsTangkilPool: tangkilBpjsFallback.stats.pool,
+        totalBpjsTangkilRelocated: tangkilBpjsFallback.stats.relocated,
+        totalBpjsTangkilReturned: tangkilBpjsFallback.stats.returned,
+        totalBpjsTangkilAmbiguous: tangkilBpjsFallback.stats.ambiguous,
+        totalBpjsTangkilSuspect: comparison.reduce((sum, desa) => sum + desa.bpjsTangkilSuspect, 0),
         fuzzyEnabled: enableFuzzy,
         unmatchedAddDesa,
         unmatchedBpjsDesa,
