@@ -426,14 +426,13 @@ class PengurusController {
   async deletePengurus(req, res) {
     try {
       const user = req.user;
-      const desaId = validateDesaAccess(req, res);
-      if (!desaId) return;
 
-      const existing = await prisma.pengurus.findFirst({
-        where: {
-          id: String(req.params.id),
-          desa_id: desaId
-        }
+      if (user.role !== 'superadmin') {
+        return res.status(403).json({ success: false, message: 'Hanya superadmin yang dapat menghapus pengurus' });
+      }
+
+      const existing = await prisma.pengurus.findUnique({
+        where: { id: String(req.params.id) }
       });
 
       if (!existing) {
@@ -442,29 +441,6 @@ class PengurusController {
 
       await prisma.pengurus.delete({
         where: { id: String(req.params.id) }
-      });
-
-      // Get kelembagaan display name for logging
-      const kelembagaanDisplayName = await getKelembagaanDisplayName(existing.pengurusable_type, existing.pengurusable_id);
-
-      // Log activity
-      await logKelembagaanActivity({
-        kelembagaanType: existing.pengurusable_type,
-        kelembagaanId: existing.pengurusable_id,
-        kelembagaanNama: kelembagaanDisplayName || `${existing.pengurusable_type.toUpperCase()}`,
-        desaId: existing.desa_id,
-        activityType: 'delete',
-        entityType: ENTITY_TYPES.PENGURUS,
-        entityId: existing.id,
-        entityName: `${existing.nama} (${existing.jabatan})`,
-        oldValue: { nama: existing.nama, jabatan: existing.jabatan, status: existing.status },
-        newValue: null,
-        userId: user.id,
-        userName: user.name,
-        userRole: user.role,
-        bidangId: user.bidang_id,
-        ipAddress: req.ip,
-        userAgent: req.get('user-agent')
       });
 
       res.json({ success: true, message: 'Pengurus berhasil dihapus' });

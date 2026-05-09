@@ -408,6 +408,46 @@ class LembagaLainnyaController {
     }
   }
 
+  /**
+   * Delete lembaga lainnya and its related pengurus records.
+   * Superadmin only. This intentionally does not write an activity log.
+   */
+  async delete(req, res) {
+    try {
+      const user = req.user;
+
+      if (user.role !== 'superadmin') {
+        return res.status(403).json({ success: false, message: 'Hanya superadmin yang dapat menghapus lembaga' });
+      }
+
+      const item = await prisma[TABLE].findUnique({
+        where: { id: String(req.params.id) }
+      });
+
+      if (!item) {
+        return res.status(404).json({ success: false, message: 'Lembaga tidak ditemukan' });
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.pengurus.deleteMany({
+          where: {
+            pengurusable_type: { in: ['lembaga-lainnya', 'lembaga_lainnyas'] },
+            pengurusable_id: item.id
+          }
+        });
+
+        await tx[TABLE].delete({
+          where: { id: item.id }
+        });
+      });
+
+      res.json({ success: true, message: 'Lembaga berhasil dihapus' });
+    } catch (error) {
+      console.error('Error in delete LembagaLainnya:', error);
+      res.status(500).json({ success: false, message: 'Gagal menghapus lembaga', error: error.message });
+    }
+  }
+
   // Ajukan ulang verifikasi (desa resubmit after ditolak)
   ajukanUlangVerifikasi = createAjukanUlangHandler('lembaga_lainnyas', 'lembaga-lainnya', 'Lembaga', (item) => item.nama);
 }

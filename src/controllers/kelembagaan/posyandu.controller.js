@@ -236,6 +236,46 @@ class PosyanduController {
   }
 
   /**
+   * Delete Posyandu and its related pengurus records.
+   * Superadmin only. This intentionally does not write an activity log.
+   */
+  async deletePosyandu(req, res) {
+    try {
+      const user = req.user;
+
+      if (user.role !== 'superadmin') {
+        return res.status(403).json({ success: false, message: 'Hanya superadmin yang dapat menghapus Posyandu' });
+      }
+
+      const item = await prisma.posyandus.findUnique({
+        where: { id: String(req.params.id) }
+      });
+
+      if (!item) {
+        return res.status(404).json({ success: false, message: 'Posyandu tidak ditemukan' });
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.pengurus.deleteMany({
+          where: {
+            pengurusable_type: { in: ['posyandu', 'posyandus'] },
+            pengurusable_id: item.id
+          }
+        });
+
+        await tx.posyandus.delete({
+          where: { id: item.id }
+        });
+      });
+
+      res.json({ success: true, message: 'Posyandu berhasil dihapus' });
+    } catch (error) {
+      console.error('Error in deletePosyandu:', error);
+      res.status(500).json({ success: false, message: 'Gagal menghapus Posyandu', error: error.message });
+    }
+  }
+
+  /**
    * Toggle Posyandu status
    * PUT /api/desa/posyandu/:id/toggle-status
    */

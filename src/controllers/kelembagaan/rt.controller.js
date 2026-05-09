@@ -260,6 +260,46 @@ class RTController {
   }
 
   /**
+   * Delete RT and its related pengurus records.
+   * Superadmin only. This intentionally does not write an activity log.
+   */
+  async deleteRT(req, res) {
+    try {
+      const user = req.user;
+
+      if (user.role !== 'superadmin') {
+        return res.status(403).json({ success: false, message: 'Hanya superadmin yang dapat menghapus RT' });
+      }
+
+      const item = await prisma.rts.findUnique({
+        where: { id: String(req.params.id) }
+      });
+
+      if (!item) {
+        return res.status(404).json({ success: false, message: 'RT tidak ditemukan' });
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.pengurus.deleteMany({
+          where: {
+            pengurusable_type: { in: ['rt', 'rts'] },
+            pengurusable_id: item.id
+          }
+        });
+
+        await tx.rts.delete({
+          where: { id: item.id }
+        });
+      });
+
+      res.json({ success: true, message: 'RT berhasil dihapus' });
+    } catch (error) {
+      console.error('Error in deleteRT:', error);
+      res.status(500).json({ success: false, message: 'Gagal menghapus RT', error: error.message });
+    }
+  }
+
+  /**
    * Toggle RT status
    * PUT /api/desa/rt/:id/toggle-status
    */

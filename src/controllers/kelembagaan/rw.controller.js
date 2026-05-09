@@ -309,6 +309,61 @@ class RWController {
   }
 
   /**
+   * Delete RW and its related RT/pengurus records.
+   * Superadmin only. This intentionally does not write an activity log.
+   */
+  async deleteRW(req, res) {
+    try {
+      const user = req.user;
+
+      if (user.role !== 'superadmin') {
+        return res.status(403).json({ success: false, message: 'Hanya superadmin yang dapat menghapus RW' });
+      }
+
+      const item = await prisma.rws.findUnique({
+        where: { id: String(req.params.id) },
+        include: {
+          rts: { select: { id: true } }
+        }
+      });
+
+      if (!item) {
+        return res.status(404).json({ success: false, message: 'RW tidak ditemukan' });
+      }
+
+      const rtIds = (item.rts || []).map((rt) => rt.id);
+      const pengurusWhere = [
+        {
+          pengurusable_type: { in: ['rw', 'rws'] },
+          pengurusable_id: item.id
+        }
+      ];
+
+      if (rtIds.length > 0) {
+        pengurusWhere.push({
+          pengurusable_type: { in: ['rt', 'rts'] },
+          pengurusable_id: { in: rtIds }
+        });
+      }
+
+      await prisma.$transaction(async (tx) => {
+        await tx.pengurus.deleteMany({
+          where: { OR: pengurusWhere }
+        });
+
+        await tx.rws.delete({
+          where: { id: item.id }
+        });
+      });
+
+      res.json({ success: true, message: 'RW berhasil dihapus' });
+    } catch (error) {
+      console.error('Error in deleteRW:', error);
+      res.status(500).json({ success: false, message: 'Gagal menghapus RW', error: error.message });
+    }
+  }
+
+  /**
    * Toggle RW status
    * PUT /api/desa/rw/:id/toggle-status
    */

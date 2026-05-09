@@ -70,6 +70,10 @@ router.post('/lembaga-lainnya', lembagaLainnyaController.create.bind(lembagaLain
 router.put('/rw/:id', rwController.updateRW.bind(rwController));
 router.put('/rt/:id', rtController.updateRT.bind(rtController));
 router.put('/posyandu/:id', posyanduController.updatePosyandu.bind(posyanduController));
+router.delete('/rw/:id', rwController.deleteRW.bind(rwController));
+router.delete('/rt/:id', rtController.deleteRT.bind(rtController));
+router.delete('/posyandu/:id', posyanduController.deletePosyandu.bind(posyanduController));
+router.delete('/lembaga-lainnya/:id', lembagaLainnyaController.delete.bind(lembagaLainnyaController));
 
 // Toggle endpoints (supports desa_id query parameter for admin)
 router.put('/rw/:id/toggle-status', rwController.toggleStatus.bind(rwController));
@@ -105,6 +109,7 @@ router.get('/pengurus/by-kelembagaan', pengurusController.getPengurusByKelembaga
 router.get('/pengurus/history', pengurusController.getPengurusHistory.bind(pengurusController));
 router.get('/pengurus/:id', pengurusController.showPengurus.bind(pengurusController));
 router.get('/pengurus', pengurusController.getPengurusByKelembagaan.bind(pengurusController));
+router.delete('/pengurus/:id', pengurusController.deletePengurus.bind(pengurusController));
 
 // Admin only: Update pengurus verification status
 router.put('/pengurus/:id/verifikasi', pengurusController.updateVerifikasi.bind(pengurusController));
