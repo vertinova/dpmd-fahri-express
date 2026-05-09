@@ -71,6 +71,7 @@ database-express/seeders/*-data.json
 
 # SQL dumps - semua .sql tidak masuk GitHub
 *.sql
+!migrations/*.sql
 *.tmp
 
 /src/generated/prisma
