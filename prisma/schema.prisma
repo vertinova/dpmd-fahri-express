@@ -661,6 +661,7 @@ model karang_tarunas {
   alamat                       String?                            @db.VarChar(255)
   status_kelembagaan           karang_tarunas_status_kelembagaan? @default(aktif)
   status_verifikasi            karang_tarunas_status_verifikasi?  @default(unverified)
+  imported                     Boolean                            @default(false) @db.TinyInt
   created_at                   DateTime?                          @default(now()) @db.Timestamp(0)
   updated_at                   DateTime?                          @default(now()) @db.Timestamp(0)
   produk_hukum_id              String?                            @db.Char(36)
@@ -674,6 +675,7 @@ model karang_tarunas {
 
   @@index([desa_id], map: "karang_tarunas_desa_id_foreign")
   @@index([produk_hukum_id], map: "karang_tarunas_produk_hukum_id_foreign")
+  @@index([imported], map: "karang_tarunas_imported_index")
 }
 
 model lembaga_lainnyas {
@@ -683,6 +685,7 @@ model lembaga_lainnyas {
   alamat                       String?                              @db.VarChar(255)
   status_kelembagaan           lembaga_lainnyas_status_kelembagaan? @default(aktif)
   status_verifikasi            lembaga_lainnyas_status_verifikasi?  @default(unverified)
+  imported                     Boolean                              @default(false) @db.TinyInt
   catatan_verifikasi           String?                              @db.Text
   verifikator_nama             String?                              @db.VarChar(255)
   verified_at                  DateTime?                            @db.Timestamp(0)
@@ -695,6 +698,7 @@ model lembaga_lainnyas {
 
   @@index([desa_id], map: "lembaga_lainnyas_desa_id_foreign")
   @@index([produk_hukum_id], map: "lembaga_lainnyas_produk_hukum_id_foreign")
+  @@index([imported], map: "lembaga_lainnyas_imported_index")
 }
 
 model kecamatan_bankeu_config {
@@ -842,6 +846,7 @@ model lpms {
   alamat                       String?                  @db.VarChar(255)
   status_kelembagaan           lpms_status_kelembagaan? @default(aktif)
   status_verifikasi            lpms_status_verifikasi?  @default(unverified)
+  imported                     Boolean                  @default(false) @db.TinyInt
   created_at                   DateTime?                @default(now()) @db.Timestamp(0)
   updated_at                   DateTime?                @default(now()) @db.Timestamp(0)
   produk_hukum_id              String?                  @db.Char(36)
@@ -855,6 +860,7 @@ model lpms {
 
   @@index([desa_id], map: "lpms_desa_id_foreign")
   @@index([produk_hukum_id], map: "lpms_produk_hukum_id_foreign")
+  @@index([imported], map: "lpms_imported_index")
 }
 
 model notifications {
@@ -1030,6 +1036,7 @@ model pengurus {
   tanggal_akhir_jabatan DateTime?                   @db.Date
   status_jabatan        pengurus_status_jabatan?    @default(aktif)
   status_verifikasi     pengurus_status_verifikasi? @default(unverified)
+  imported              Boolean                     @default(false) @db.TinyInt
   produk_hukum_id       String?                     @db.Char(36)
   nama_lengkap          String                      @db.VarChar(255)
   nik                   String?                     @db.VarChar(32)
@@ -1057,6 +1064,7 @@ model pengurus {
   @@index([pengurusable_type, pengurusable_id], map: "idx_pengurusable")
   @@index([status_jabatan], map: "idx_status_jabatan")
   @@index([desa_id], map: "pengurus_desa_id_foreign")
+  @@index([imported], map: "pengurus_imported_index")
 }
 
 model perjadin_grup {
@@ -1105,6 +1113,7 @@ model pkks {
   alamat                       String?                  @db.VarChar(255)
   status_kelembagaan           pkks_status_kelembagaan? @default(aktif)
   status_verifikasi            pkks_status_verifikasi?  @default(unverified)
+  imported                     Boolean                  @default(false) @db.TinyInt
   created_at                   DateTime?                @default(now()) @db.Timestamp(0)
   updated_at                   DateTime?                @default(now()) @db.Timestamp(0)
   produk_hukum_id              String?                  @db.Char(36)
@@ -1118,6 +1127,7 @@ model pkks {
 
   @@index([desa_id], map: "pkks_desa_id_foreign")
   @@index([produk_hukum_id], map: "pkks_produk_hukum_id_foreign")
+  @@index([imported], map: "pkks_imported_index")
 }
 
 model posyandus {
@@ -1127,6 +1137,7 @@ model posyandus {
   alamat                       String?                       @db.VarChar(255)
   status_kelembagaan           posyandus_status_kelembagaan? @default(aktif)
   status_verifikasi            posyandus_status_verifikasi?  @default(unverified)
+  imported                     Boolean                       @default(false) @db.TinyInt
   created_at                   DateTime?                     @default(now()) @db.Timestamp(0)
   updated_at                   DateTime?                     @default(now()) @db.Timestamp(0)
   produk_hukum_id              String?                       @db.Char(36)
@@ -1140,6 +1151,7 @@ model posyandus {
 
   @@index([desa_id], map: "posyandus_desa_id_foreign")
   @@index([produk_hukum_id], map: "posyandus_produk_hukum_id_foreign")
+  @@index([imported], map: "posyandus_imported_index")
 }
 
 model products {
@@ -1232,6 +1244,7 @@ model rts {
   alamat                       String?                 @db.VarChar(255)
   status_kelembagaan           rts_status_kelembagaan? @default(aktif)
   status_verifikasi            rts_status_verifikasi?  @default(unverified)
+  imported                     Boolean                 @default(false) @db.TinyInt
   created_at                   DateTime?               @default(now()) @db.Timestamp(0)
   updated_at                   DateTime?               @default(now()) @db.Timestamp(0)
   produk_hukum_id              String?                 @db.Char(36)
@@ -1249,6 +1262,7 @@ model rts {
   @@unique([rw_id, nomor], map: "unique_rw_nomor")
   @@index([desa_id], map: "rts_desa_id_foreign")
   @@index([produk_hukum_id], map: "rts_produk_hukum_id_foreign")
+  @@index([imported], map: "rts_imported_index")
 }
 
 model rws {
@@ -1258,6 +1272,7 @@ model rws {
   alamat                       String?                @db.VarChar(255)
   status_kelembagaan           rws_status_kelembagaan @default(aktif)
   status_verifikasi            rws_status_verifikasi  @default(unverified)
+  imported                     Boolean                @default(false) @db.TinyInt
   created_at                   DateTime?              @db.Timestamp(0)
   updated_at                   DateTime?              @db.Timestamp(0)
   produk_hukum_id              String?                @db.Char(36)
@@ -1272,6 +1287,7 @@ model rws {
 
   @@unique([desa_id, nomor], map: "rws_desa_id_nomor_unique")
   @@index([produk_hukum_id], map: "rws_produk_hukum_id_foreign")
+  @@index([imported], map: "rws_imported_index")
 }
 
 model satlinmas {
@@ -1281,6 +1297,7 @@ model satlinmas {
   alamat                       String?                      @db.VarChar(255)
   status_kelembagaan           satlinmas_status_kelembagaan @default(aktif)
   status_verifikasi            satlinmas_status_verifikasi  @default(unverified)
+  imported                     Boolean                      @default(false) @db.TinyInt
   created_at                   DateTime?                    @db.Timestamp(0)
   updated_at                   DateTime?                    @db.Timestamp(0)
   produk_hukum_id              String?                      @db.Char(36)
@@ -1293,6 +1310,7 @@ model satlinmas {
 
   @@index([desa_id], map: "satlinmas_desa_id_foreign")
   @@index([produk_hukum_id], map: "satlinmas_produk_hukum_id_foreign")
+  @@index([imported], map: "satlinmas_imported_index")
 }
 
 model surat_masuk {
