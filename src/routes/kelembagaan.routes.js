@@ -1,6 +1,19 @@
 const express = require('express');
+const path = require('path');
+const multer = require('multer');
 const router = express.Router();
 const { auth } = require('../middlewares/auth');
+
+// In-memory multer for Excel import (no disk write)
+const uploadExcelMemory = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (['.xlsx', '.xls'].includes(ext)) cb(null, true);
+    else cb(new Error('Hanya file Excel (.xlsx/.xls) yang diperbolehkan'));
+  },
+  limits: { fileSize: 50 * 1024 * 1024 },
+}).array('files', 20);
 
 // Import new modular controllers
 const {
@@ -107,6 +120,18 @@ router.put('/lembaga-lainnya/:id', lembagaLainnyaController.update.bind(lembagaL
 // Pengurus endpoints (polymorphic relation)
 router.get('/pengurus/by-kelembagaan', pengurusController.getPengurusByKelembagaan.bind(pengurusController));
 router.get('/pengurus/history', pengurusController.getPengurusHistory.bind(pengurusController));
+
+// Import endpoints — must be before /:id to avoid route conflict
+router.post('/pengurus/import', (req, res, next) => {
+  uploadExcelMemory(req, res, (err) => {
+    if (err) return res.status(400).json({ success: false, message: err.message });
+    next();
+  });
+}, pengurusController.importPengurus.bind(pengurusController));
+router.get('/pengurus/import/stats', pengurusController.getImportStats.bind(pengurusController));
+router.get('/pengurus/import/desa/:desaId', pengurusController.getDesaPengurusList.bind(pengurusController));
+router.delete('/pengurus/import/desa/:desaId', pengurusController.deleteImportedByDesa.bind(pengurusController));
+
 router.get('/pengurus/:id', pengurusController.showPengurus.bind(pengurusController));
 router.get('/pengurus', pengurusController.getPengurusByKelembagaan.bind(pengurusController));
 router.delete('/pengurus/:id', pengurusController.deletePengurus.bind(pengurusController));
