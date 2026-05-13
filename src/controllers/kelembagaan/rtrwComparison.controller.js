@@ -32,6 +32,11 @@ let sourceCacheBuildPromise = null;
 const toText = (value) => String(value ?? '').trim();
 const toUpper = (value) => toText(value).toUpperCase();
 
+function normalizeRekening(value) {
+  // Strip all non-digits so "BJB 0140911100100" and "0140911100100" both become "0140911100100"
+  return String(value ?? '').replace(/\D/g, '');
+}
+
 function boolQuery(value) {
   return ['1', 'true', 'yes'].includes(toText(value).toLowerCase());
 }
@@ -269,6 +274,7 @@ function parseAddData() {
         rwNomor: info.rwNomor,
         rtNomor: info.rtNomor,
         totalNilai: 0,
+        rekBank: '',
         details: [],
       });
     }
@@ -276,6 +282,7 @@ function parseAddData() {
     const item = grouped.get(key);
     item.totalNilai += nilai;
     item.details.push(detail);
+    if (!item.rekBank && detail.rekBank) item.rekBank = normalizeRekening(detail.rekBank);
   });
 
   return {
@@ -463,58 +470,70 @@ function chooseTangkilCandidate(candidates) {
 
 function applyTangkilBpjsFallback(bpjsData, addData, dbItems, desaByKode) {
   const candidateIndex = buildTangkilCandidateIndex(addData, dbItems, desaByKode);
-  const stats = {
-    pool: 0,
-    relocated: 0,
-    returned: 0,
-    ambiguous: 0,
-  };
 
-  const adjusted = bpjsData.map((item) => {
-    if (item.desaKode !== TANGKIL_CITEUREUP_KODE) return item;
-
-    stats.pool += 1;
-    const candidates = Array.from(candidateIndex.get(item.normalized || item.nama)?.values() || [])
-      .sort((a, b) => {
-        return candidateScore(b) - candidateScore(a)
-          || a.desaKode.localeCompare(b.desaKode);
-      });
-
-    if (candidates.length === 0) {
-      stats.returned += 1;
-      return item;
+  const dbByNik = new Map();
+  dbItems.forEach((item) => {
+    if (item.nik && !dbByNik.has(item.nik)) {
+      dbByNik.set(item.nik, item);
     }
-
-    const selected = chooseTangkilCandidate(candidates);
-    stats.relocated += 1;
-    if (candidates.length > 1) stats.ambiguous += 1;
-
-    return {
-      ...item,
-      desaKode: selected.desaKode,
-      bpjsOriginalDesaKode: TANGKIL_CITEUREUP_KODE,
-      bpjsOriginalDesaNama: TANGKIL_CITEUREUP_NAMA,
-      bpjsOriginalKecamatanNama: TANGKIL_CITEUREUP_KECAMATAN,
-      bpjsTangkilSuspect: true,
-      bpjsTangkilAmbiguous: candidates.length > 1,
-      bpjsTangkilCandidateCount: candidates.length,
-      bpjsTangkilSelectedSources: selected.sources,
-      bpjsTangkilCandidates: candidates.slice(0, MAX_TANGKIL_CANDIDATES).map((candidate) => ({
-        desaKode: candidate.desaKode,
-        desaNama: candidate.desaNama,
-        kecamatanNama: candidate.kecamatanNama,
-        sources: candidate.sources,
-      })),
-      details: (item.details || []).map((detail) => ({
-        ...detail,
-        originalIdPegawai: detail.idPegawai,
-        idPegawai: selected.desaKode,
-        bpjsOriginalDesaKode: TANGKIL_CITEUREUP_KODE,
-      })),
-    };
   });
 
-  return { data: adjusted, stats };
+  const stats = { pool: 0, confirmed: 0, unresolved: 0 };
+  const confirmed = [];  // enters main comparison
+  const unresolved = []; // goes to special tab
+
+  bpjsData.forEach((item) => {
+    if (item.desaKode !== TANGKIL_CITEUREUP_KODE) {
+      confirmed.push(item);
+      return;
+    }
+
+    stats.pool += 1;
+
+    if (item.nik) {
+      const dbMatch = dbByNik.get(item.nik);
+      if (dbMatch && isSimilarName(item.normalized, dbMatch.normalized)) {
+        stats.confirmed += 1;
+        confirmed.push({
+          ...item,
+          desaKode: dbMatch.desaKode,
+          bpjsOriginalDesaKode: TANGKIL_CITEUREUP_KODE,
+          bpjsOriginalDesaNama: TANGKIL_CITEUREUP_NAMA,
+          bpjsOriginalKecamatanNama: TANGKIL_CITEUREUP_KECAMATAN,
+          bpjsTangkilSuspect: false,
+          bpjsTangkilDbConfirmed: true,
+          details: (item.details || []).map((detail) => ({
+            ...detail,
+            originalIdPegawai: detail.idPegawai,
+            idPegawai: dbMatch.desaKode,
+            bpjsOriginalDesaKode: TANGKIL_CITEUREUP_KODE,
+          })),
+        });
+        return;
+      }
+    }
+
+    // No NIK confirmation — collect candidates as hints but do NOT put in comparison
+    const candidates = Array.from(candidateIndex.get(item.normalized || item.nama)?.values() || [])
+      .sort((a, b) => candidateScore(b) - candidateScore(a) || a.desaKode.localeCompare(b.desaKode))
+      .slice(0, MAX_TANGKIL_CANDIDATES);
+
+    stats.unresolved += 1;
+    unresolved.push({
+      ...item,
+      bpjsOriginalDesaKode: TANGKIL_CITEUREUP_KODE,
+      bpjsOriginalDesaNama: TANGKIL_CITEUREUP_NAMA,
+      bpjsTangkilUnresolved: true,
+      bpjsTangkilCandidates: candidates.map((c) => ({
+        desaKode: c.desaKode,
+        desaNama: c.desaNama,
+        kecamatanNama: c.kecamatanNama,
+        sources: c.sources,
+      })),
+    });
+  });
+
+  return { confirmed, unresolved, stats };
 }
 
 function statusFromSources(hasDb, hasAdd, hasBpjs) {
@@ -549,6 +568,7 @@ function createMatchIndexes() {
   return {
     nikIndex: new Map(),
     nameIndex: new Map(),
+    rekeningIndex: new Map(),
     sourceKeys: {
       db: new Set(),
       add: new Set(),
@@ -562,6 +582,13 @@ function indexEntry(indexes, key, source, item) {
 
   if (item.nik && !indexes.nikIndex.has(item.nik)) {
     indexes.nikIndex.set(item.nik, key);
+  }
+
+  if (source === 'db' && item.nomorRekening) {
+    const rek = normalizeRekening(item.nomorRekening);
+    if (rek && !indexes.rekeningIndex.has(rek)) {
+      indexes.rekeningIndex.set(rek, key);
+    }
   }
 
   if (item.normalized) {
@@ -586,6 +613,20 @@ function addToCanonMap(canonMap, indexes, source, item, enableFuzzy) {
   const findByNik = () => {
     if (!item.nik) return null;
     return indexes.nikIndex.get(item.nik) || null;
+  };
+
+  const findByRekening = () => {
+    if (source !== 'add') return null;
+    const rek = item.rekBank || normalizeRekening(item.details?.[0]?.rekBank);
+    if (!rek) return null;
+    const matchKey = indexes.rekeningIndex.get(rek);
+    if (!matchKey) return null;
+    const entry = canonMap.get(matchKey);
+    if (!entry) return null;
+    for (const name of entry.names) {
+      if (isSimilarName(item.normalized, name)) return matchKey;
+    }
+    return null;
   };
 
   const findByExactName = () => {
@@ -618,6 +659,7 @@ function addToCanonMap(canonMap, indexes, source, item, enableFuzzy) {
   };
 
   const key = findByNik()
+    || findByRekening()
     || findByExactName()
     || findByFuzzyName()
     || `${source}:${item.nik || item.normalized}:${canonMap.size}`;
@@ -660,8 +702,17 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
     const bpjsNiks = [...new Set(entry.bpjsItems.map((item) => item.nik).filter(Boolean))];
     const nikMatch = dbNiks.some((nik) => bpjsNiks.includes(nik));
     const nikMismatch = dbNiks.length > 0 && bpjsNiks.length > 0 && !nikMatch;
+    const dbRekening = new Set(entry.dbItems.map((item) => normalizeRekening(item.nomorRekening)).filter(Boolean));
+    const addRekening = new Set(entry.addItems.map((item) => item.rekBank || normalizeRekening(item.details?.[0]?.rekBank || '')).filter(Boolean));
+    const norekMatch = dbRekening.size > 0 && addRekening.size > 0 && [...addRekening].some((r) => dbRekening.has(r));
+    const norekMismatch = dbRekening.size > 0 && addRekening.size > 0 && !norekMatch;
+    const dbTglLahirs = [...new Set(entry.dbItems.map((item) => item.tglLahir).filter(Boolean))];
+    const bpjsTglLahirs = [...new Set(entry.bpjsItems.flatMap((item) => (item.details || []).map((d) => d.tglLahir)).filter(Boolean))];
+    const tglLahirMatch = dbTglLahirs.length > 0 && bpjsTglLahirs.length > 0 && dbTglLahirs.some((t) => bpjsTglLahirs.includes(t));
+    const tglLahirMismatch = dbTglLahirs.length > 0 && bpjsTglLahirs.length > 0 && !tglLahirMatch;
     const sourceNames = new Set();
     const bpjsTangkilItems = entry.bpjsItems.filter((item) => item.bpjsTangkilSuspect);
+    const bpjsTangkilConfirmedItems = entry.bpjsItems.filter((item) => item.bpjsTangkilDbConfirmed);
     const bpjsTangkilCandidates = bpjsTangkilItems.flatMap((item) => item.bpjsTangkilCandidates || []);
     const bpjsTangkilCandidateCount = Math.max(
       0,
@@ -693,13 +744,20 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
       inAdd: hasAdd,
       inBpjs: hasBpjs,
       status,
-      keterangan: bpjsTangkilItems.length > 0
-        ? `${buildKeterangan(hasDb, hasAdd, hasBpjs)}. BPJS memakai kode ${TANGKIL_CITEUREUP_NAMA} (${TANGKIL_CITEUREUP_KODE}) dan disandingkan berdasarkan nama, perlu verifikasi.`
-        : buildKeterangan(hasDb, hasAdd, hasBpjs),
+      keterangan: bpjsTangkilConfirmedItems.length > 0
+        ? `${buildKeterangan(hasDb, hasAdd, hasBpjs)}. BPJS memakai kode ${TANGKIL_CITEUREUP_NAMA} (${TANGKIL_CITEUREUP_KODE}), dikonfirmasi cocok via NIK database.`
+        : bpjsTangkilItems.length > 0
+          ? `${buildKeterangan(hasDb, hasAdd, hasBpjs)}. BPJS memakai kode ${TANGKIL_CITEUREUP_NAMA} (${TANGKIL_CITEUREUP_KODE}) dan disandingkan berdasarkan nama, perlu verifikasi.`
+          : buildKeterangan(hasDb, hasAdd, hasBpjs),
       isFuzzy,
       nikMatch,
       nikMismatch,
+      norekMatch,
+      norekMismatch,
+      tglLahirMatch,
+      tglLahirMismatch,
       bpjsTangkilSuspect: bpjsTangkilItems.length > 0,
+      bpjsTangkilDbConfirmed: bpjsTangkilConfirmedItems.length > 0,
       bpjsTangkilAmbiguous: bpjsTangkilItems.some((item) => item.bpjsTangkilAmbiguous),
       bpjsTangkilCandidateCount,
       bpjsOriginalDesaKode: bpjsTangkilItems[0]?.bpjsOriginalDesaKode || null,
@@ -820,6 +878,7 @@ class RtrwComparisonController {
             status_verifikasi: true,
             tanggal_mulai_jabatan: true,
             tanggal_akhir_jabatan: true,
+            tanggal_lahir: true,
             desas: {
               select: {
                 kode: true,
@@ -882,11 +941,13 @@ class RtrwComparisonController {
           statusVerifikasi: p.status_verifikasi || '',
           tanggalMulaiJabatan: dateToStr(p.tanggal_mulai_jabatan),
           tanggalAkhirJabatan: dateToStr(p.tanggal_akhir_jabatan),
+          tglLahir: dateToStr(p.tanggal_lahir),
         };
       }).filter((item) => item.nama && item.desaKode);
 
       const tangkilBpjsFallback = applyTangkilBpjsFallback(bpjsData, addData, dbItems, desaByKode);
-      const effectiveBpjsData = tangkilBpjsFallback.data;
+      const effectiveBpjsData = tangkilBpjsFallback.confirmed;
+      const tangkilUnresolved = tangkilBpjsFallback.unresolved;
       const dbByKode = groupBy(dbItems, (item) => item.desaKode);
       const addByKode = groupBy(addData, (item) => item.desaKode);
       const bpjsByKode = groupBy(effectiveBpjsData, (item) => item.desaKode);
@@ -919,6 +980,7 @@ class RtrwComparisonController {
           fuzzyMatched: items.filter((item) => item.isFuzzy).length,
           nikMismatch: items.filter((item) => item.nikMismatch).length,
           bpjsTangkilSuspect: items.filter((item) => item.bpjsTangkilSuspect).length,
+          bpjsTangkilConfirmed: items.filter((item) => item.bpjsTangkilDbConfirmed).length,
           items,
         };
       });
@@ -960,10 +1022,8 @@ class RtrwComparisonController {
         totalFuzzyMatched: comparison.reduce((sum, desa) => sum + desa.fuzzyMatched, 0),
         totalNikMismatch: comparison.reduce((sum, desa) => sum + desa.nikMismatch, 0),
         totalBpjsTangkilPool: tangkilBpjsFallback.stats.pool,
-        totalBpjsTangkilRelocated: tangkilBpjsFallback.stats.relocated,
-        totalBpjsTangkilReturned: tangkilBpjsFallback.stats.returned,
-        totalBpjsTangkilAmbiguous: tangkilBpjsFallback.stats.ambiguous,
-        totalBpjsTangkilSuspect: comparison.reduce((sum, desa) => sum + desa.bpjsTangkilSuspect, 0),
+        totalBpjsTangkilConfirmed: tangkilBpjsFallback.stats.confirmed,
+        totalBpjsTangkilUnresolved: tangkilBpjsFallback.stats.unresolved,
         fuzzyEnabled: enableFuzzy,
         unmatchedAddDesa,
         unmatchedBpjsDesa,
@@ -973,11 +1033,23 @@ class RtrwComparisonController {
       };
       logTiming('summary built');
 
+      // Build unresolved tangkil items for the special tab
+      const tangkilUnresolvedForResponse = tangkilUnresolved.map((item) => ({
+        nama: item.nama,
+        nik: item.nik || null,
+        tglLahir: (item.details || [])[0]?.tglLahir || null,
+        upah: item.totalUpah || 0,
+        kpj: (item.details || [])[0]?.kpj || null,
+        blth: (item.details || [])[0]?.blth || null,
+        bpjsCandidates: item.bpjsTangkilCandidates || [],
+      }));
+
       res.json({
         success: true,
         data: {
           summary,
           comparison,
+          tangkilUnresolved: tangkilUnresolvedForResponse,
           meta: {
             cacheReady: true,
             sourceType,
