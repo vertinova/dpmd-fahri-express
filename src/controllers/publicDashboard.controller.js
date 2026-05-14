@@ -1,6 +1,8 @@
 const prisma = require('../config/prisma');
 const externalApiService = require('../services/externalApiProxy.service');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 
 const CORE_DASHBOARD_API_KEY_ENV = 'CORE_DASHBOARD_API_KEY';
 
@@ -8,6 +10,89 @@ const toNumber = (value) => {
   if (value === null || value === undefined) return 0;
   const number = Number(value);
   return Number.isFinite(number) ? number : 0;
+};
+
+const toCurrencyNumber = (value) => {
+  if (value === null || value === undefined) return 0;
+  const normalized = String(value).replace(/[^\d-]/g, '');
+  const number = Number(normalized);
+  return Number.isFinite(number) ? number : 0;
+};
+
+const readPublicJsonRows = (fileName) => {
+  try {
+    const filePath = path.join(__dirname, '../../public', fileName);
+    if (!fs.existsSync(filePath)) return [];
+
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (Array.isArray(parsed)) return parsed;
+    if (Array.isArray(parsed?.data)) return parsed.data;
+    return [];
+  } catch (error) {
+    console.warn(`[PublicDashboard] Failed to read ${fileName}:`, error.message);
+    return [];
+  }
+};
+
+const aggregateFinanceFiles = (fileNames) => {
+  const rows = fileNames.flatMap(readPublicJsonRows);
+  const statusMap = new Map();
+  const desaSet = new Set();
+
+  let totalRealisasi = 0;
+
+  rows.forEach((row) => {
+    const realisasi = toCurrencyNumber(row.Realisasi ?? row.realisasi ?? row.total_realisasi ?? row.nilai);
+    const status = row.sts || row.status || 'Tidak Diketahui';
+    const desaKey = `${row.kecamatan || ''}|${row.desa || row.nama_desa || ''}`;
+
+    totalRealisasi += realisasi;
+    if (desaKey.trim() !== '|') desaSet.add(desaKey);
+
+    const current = statusMap.get(status) || { status, total: 0, total_realisasi: 0 };
+    current.total += 1;
+    current.total_realisasi += realisasi;
+    statusMap.set(status, current);
+  });
+
+  return {
+    total_records: rows.length,
+    total_desa: desaSet.size,
+    total_realisasi: totalRealisasi,
+    by_status: Array.from(statusMap.values()).sort((a, b) => b.total - a.total)
+  };
+};
+
+const buildKeuanganDesaStats = () => {
+  const add = aggregateFinanceFiles(['add2025.json']);
+  const danaDesa = aggregateFinanceFiles(['dd2025.json']);
+  const bhprd = aggregateFinanceFiles(['bhprd2025.json']);
+  const bankeuPublik = aggregateFinanceFiles(['bankeu2025.json']);
+  const insentifDd = aggregateFinanceFiles(['insentif-dd.json']);
+
+  const categories = {
+    add,
+    dana_desa: danaDesa,
+    bhprd,
+    bankeu: bankeuPublik,
+    insentif_dd: insentifDd
+  };
+
+  const totalRealisasi = Object.values(categories).reduce(
+    (total, category) => total + category.total_realisasi,
+    0
+  );
+  const totalRecords = Object.values(categories).reduce(
+    (total, category) => total + category.total_records,
+    0
+  );
+
+  return {
+    total_realisasi: totalRealisasi,
+    total_records: totalRecords,
+    tahun: 2025,
+    categories
+  };
 };
 
 const safeCount = async (model, args = {}) => {
@@ -364,15 +449,15 @@ const sendCoreDashboardPage = (res) => {
 
     .guide {
       margin: 18px 0;
-      padding: 16px;
       border: 1px solid var(--line);
       border-radius: 8px;
-      background: #fbfcfe;
+      background: #ffffff;
+      overflow: hidden;
     }
 
     .guide h3 {
-      margin: 0 0 6px;
-      font-size: 16px;
+      margin: 0;
+      font-size: 18px;
       letter-spacing: 0;
     }
 
@@ -382,22 +467,57 @@ const sendCoreDashboardPage = (res) => {
       line-height: 1.55;
     }
 
+    .guide-head {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 18px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #f8fafc 0%, #ffffff 100%);
+    }
+
+    .guide-head p {
+      margin-top: 6px;
+    }
+
+    .method-pill {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 52px;
+      height: 30px;
+      border-radius: 999px;
+      background: #ecfdf3;
+      color: var(--success);
+      font-size: 12px;
+      font-weight: 900;
+      border: 1px solid #abefc6;
+    }
+
     .guide-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
       gap: 12px;
-      margin-top: 14px;
+      padding: 16px 18px 0;
     }
 
     .guide-item {
       min-width: 0;
+      border: 1px solid #e4eaf2;
+      border-radius: 8px;
+      background: #fbfcfe;
+      overflow: hidden;
     }
 
     .guide-item h4 {
-      margin: 0 0 8px;
+      margin: 0;
+      padding: 10px 12px;
+      border-bottom: 1px solid #e4eaf2;
       color: #344054;
       font-size: 13px;
       letter-spacing: 0;
+      background: #ffffff;
     }
 
     .sample {
@@ -405,17 +525,22 @@ const sendCoreDashboardPage = (res) => {
       max-height: none;
       white-space: pre-wrap;
       word-break: break-word;
+      border-radius: 0;
+      background: #111827;
     }
 
     .fields {
       display: grid;
       gap: 8px;
-      margin: 10px 0 0;
-      padding: 0;
+      margin: 16px 18px 18px;
+      padding: 14px;
       list-style: none;
       color: var(--muted);
       font-size: 13px;
       line-height: 1.5;
+      border: 1px solid #e4eaf2;
+      border-radius: 8px;
+      background: #fbfcfe;
     }
 
     .fields code {
@@ -459,6 +584,10 @@ const sendCoreDashboardPage = (res) => {
 
       .guide-grid {
         grid-template-columns: 1fr;
+      }
+
+      .guide-head {
+        flex-direction: column;
       }
     }
   </style>
@@ -507,26 +636,31 @@ const sendCoreDashboardPage = (res) => {
           <div id="meta" class="meta"></div>
           <div id="cards" class="cards"></div>
           <div class="guide">
-            <h3>Cara Teman Developer Mengambil Data</h3>
-            <p>Gunakan endpoint ini dari backend/server aplikasi teman Anda. Hindari menaruh API key di frontend publik.</p>
+            <div class="guide-head">
+              <div>
+                <h3>How to Get API</h3>
+                <p>Use this endpoint from a trusted backend service. Do not expose the API key inside public frontend code.</p>
+              </div>
+              <span class="method-pill">GET</span>
+            </div>
             <div class="guide-grid">
               <div class="guide-item">
-                <h4>Endpoint</h4>
+                <h4>Production Endpoint</h4>
                 <pre class="sample">GET https://dpmdbogorkab.id/api/public/core-dashboard</pre>
               </div>
               <div class="guide-item">
-                <h4>Header Wajib</h4>
-                <pre class="sample">x-api-key: API_KEY_YANG_DIBERIKAN</pre>
+                <h4>Required Header</h4>
+                <pre class="sample">x-api-key: YOUR_API_KEY</pre>
               </div>
               <div class="guide-item">
-                <h4>Contoh curl</h4>
-                <pre class="sample">curl -H "x-api-key: API_KEY_YANG_DIBERIKAN" https://dpmdbogorkab.id/api/public/core-dashboard</pre>
+                <h4>cURL Request</h4>
+                <pre class="sample">curl -H "x-api-key: YOUR_API_KEY" https://dpmdbogorkab.id/api/public/core-dashboard</pre>
               </div>
               <div class="guide-item">
-                <h4>Contoh JavaScript</h4>
+                <h4>JavaScript Fetch</h4>
                 <pre class="sample">const response = await fetch("https://dpmdbogorkab.id/api/public/core-dashboard", {
   headers: {
-    "x-api-key": "API_KEY_YANG_DIBERIKAN",
+    "x-api-key": "YOUR_API_KEY",
     "Accept": "application/json"
   }
 });
@@ -537,9 +671,10 @@ console.log(result.data.modules);</pre>
               </div>
             </div>
             <ul class="fields">
-              <li><code>data.summary</code> berisi ringkasan angka utama.</li>
-              <li><code>data.modules</code> berisi detail per modul seperti wilayah, BUMDes, kelembagaan, bankeu, produk hukum, profil desa, dan perjadin.</li>
-              <li><code>data.meta.generated_at</code> menunjukkan waktu data diambil ulang dari server.</li>
+              <li><code>data.summary</code> contains the main aggregate numbers for quick display.</li>
+              <li><code>data.modules.profil_desa</code>, <code>data.modules.keuangan_desa</code>, <code>data.modules.aparatur_desa</code>, and <code>data.modules.produk_hukum</code> contain the Core Dashboard detail modules.</li>
+              <li><code>data.modules</code> also includes wilayah, BUMDes, kelembagaan, bankeu, and perjadin data.</li>
+              <li><code>data.meta.generated_at</code> indicates when the data was freshly generated by the API.</li>
             </ul>
           </div>
           <pre id="jsonOutput"></pre>
@@ -560,6 +695,12 @@ console.log(result.data.modules);</pre>
     const cards = document.getElementById('cards');
     const jsonOutput = document.getElementById('jsonOutput');
     const formatter = new Intl.NumberFormat('id-ID');
+    const compactCurrencyFormatter = new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      notation: 'compact',
+      maximumFractionDigits: 1
+    });
 
     const setMessage = (text, type) => {
       message.textContent = text || '';
@@ -574,12 +715,18 @@ console.log(result.data.modules);</pre>
       return element;
     };
 
-    const renderCard = (label, value) => {
+    const formatCardValue = (value, type) => {
+      if (type === 'currency') return compactCurrencyFormatter.format(Number(value || 0));
+      if (type === 'percent') return Number(value || 0).toLocaleString('id-ID') + '%';
+      return formatter.format(Number(value || 0));
+    };
+
+    const renderCard = (label, value, type) => {
       const card = document.createElement('div');
       card.className = 'card';
       appendText(card, label);
       const strong = document.createElement('strong');
-      strong.textContent = formatter.format(Number(value || 0));
+      strong.textContent = formatCardValue(value, type);
       card.appendChild(strong);
       cards.appendChild(card);
     };
@@ -599,6 +746,10 @@ console.log(result.data.modules);</pre>
       renderCard('Kecamatan', summary.total_kecamatan);
       renderCard('Desa', summary.total_desa);
       renderCard('Kelurahan', summary.total_kelurahan);
+      renderCard('Profil Desa Terisi', summary.total_profil_desa);
+      renderCard('Aparatur Desa', summary.total_aparatur_external || summary.total_aparatur_lokal);
+      renderCard('Produk Hukum', summary.total_produk_hukum);
+      renderCard('Keuangan Desa', summary.total_keuangan_desa_realisasi, 'currency');
       renderCard('BUMDes', summary.total_bumdes);
       renderCard('Kelembagaan', summary.total_kelembagaan);
       renderCard('Bankeu Proposal', summary.total_bankeu_proposal);
@@ -726,6 +877,7 @@ const normalizeExternalDashboard = (externalDashboard) => {
 
 const buildPublicDashboardPayload = async () => {
   const now = new Date();
+  const keuanganDesaStats = buildKeuanganDesaStats();
 
   const [
     totalKecamatan,
@@ -859,6 +1011,7 @@ const buildPublicDashboardPayload = async () => {
       total_kelembagaan: totalKelembagaan,
       total_produk_hukum: totalProdukHukum,
       total_profil_desa: totalProfilDesa,
+      total_keuangan_desa_realisasi: keuanganDesaStats.total_realisasi,
       total_bankeu_proposal: bankeuProposalTotal,
       total_kegiatan: kegiatanTotal
     },
@@ -904,6 +1057,7 @@ const buildPublicDashboardPayload = async () => {
         approved_by_dpmd: bankeuApprovedDpmd,
         total_anggaran_usulan: toNumber(bankeuFinancials._sum?.anggaran_usulan)
       },
+      keuangan_desa: keuanganDesaStats,
       produk_hukum: {
         total: totalProdukHukum,
         by_jenis: produkHukumByJenis.map((item) => ({
