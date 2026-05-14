@@ -95,6 +95,145 @@ const buildKeuanganDesaStats = () => {
   };
 };
 
+const buildDashboardCards = (summary) => ([
+  {
+    key: 'kecamatan',
+    label: 'Kecamatan',
+    value: summary.total_kecamatan,
+    format: 'number',
+    data_path: 'data.summary.total_kecamatan'
+  },
+  {
+    key: 'desa',
+    label: 'Desa',
+    value: summary.total_desa,
+    format: 'number',
+    data_path: 'data.summary.total_desa'
+  },
+  {
+    key: 'kelurahan',
+    label: 'Kelurahan',
+    value: summary.total_kelurahan,
+    format: 'number',
+    data_path: 'data.summary.total_kelurahan'
+  },
+  {
+    key: 'profil_desa',
+    label: 'Profil Desa Terisi',
+    value: summary.total_profil_desa,
+    format: 'number',
+    data_path: 'data.summary.total_profil_desa'
+  },
+  {
+    key: 'aparatur_desa',
+    label: 'Aparatur Desa',
+    value: summary.total_aparatur_external || summary.total_aparatur_lokal,
+    format: 'number',
+    data_path: 'data.modules.aparatur_desa.external_total'
+  },
+  {
+    key: 'produk_hukum',
+    label: 'Produk Hukum',
+    value: summary.total_produk_hukum,
+    format: 'number',
+    data_path: 'data.summary.total_produk_hukum'
+  },
+  {
+    key: 'keuangan_desa',
+    label: 'Keuangan Desa',
+    value: summary.total_keuangan_desa_realisasi,
+    format: 'currency_idr',
+    data_path: 'data.summary.total_keuangan_desa_realisasi'
+  },
+  {
+    key: 'bumdes',
+    label: 'BUMDes',
+    value: summary.total_bumdes,
+    format: 'number',
+    data_path: 'data.summary.total_bumdes'
+  },
+  {
+    key: 'kelembagaan',
+    label: 'Kelembagaan',
+    value: summary.total_kelembagaan,
+    format: 'number',
+    data_path: 'data.summary.total_kelembagaan'
+  },
+  {
+    key: 'bankeu',
+    label: 'Bankeu Proposal',
+    value: summary.total_bankeu_proposal,
+    format: 'number',
+    data_path: 'data.summary.total_bankeu_proposal'
+  }
+]);
+
+const buildDashboardModules = (modules) => ([
+  {
+    key: 'wilayah',
+    label: 'Wilayah',
+    description: 'Jumlah kecamatan, desa, dan kelurahan.',
+    data_path: 'data.modules.wilayah',
+    data: modules.wilayah
+  },
+  {
+    key: 'profil_desa',
+    label: 'Profil Desa',
+    description: 'Status keterisian profil desa dan persentase kelengkapan.',
+    data_path: 'data.modules.profil_desa',
+    data: modules.profil_desa
+  },
+  {
+    key: 'keuangan_desa',
+    label: 'Keuangan Desa',
+    description: 'Rekap realisasi ADD, Dana Desa, BHPRD, Bankeu, dan Insentif DD.',
+    data_path: 'data.modules.keuangan_desa',
+    data: modules.keuangan_desa
+  },
+  {
+    key: 'aparatur_desa',
+    label: 'Aparatur Desa',
+    description: 'Rekap aparatur desa, kepala desa, perangkat desa, dan BPD.',
+    data_path: 'data.modules.aparatur_desa',
+    data: modules.aparatur_desa
+  },
+  {
+    key: 'produk_hukum',
+    label: 'Produk Hukum',
+    description: 'Rekap produk hukum desa berdasarkan jenis.',
+    data_path: 'data.modules.produk_hukum',
+    data: modules.produk_hukum
+  },
+  {
+    key: 'bumdes',
+    label: 'BUMDes',
+    description: 'Rekap jumlah, status, aset, omzet, laba, dan tenaga kerja BUMDes.',
+    data_path: 'data.modules.bumdes',
+    data: modules.bumdes
+  },
+  {
+    key: 'kelembagaan',
+    label: 'Kelembagaan',
+    description: 'Rekap RT, RW, LPM, PKK, Posyandu, Karang Taruna, Satlinmas, dan lembaga lainnya.',
+    data_path: 'data.modules.kelembagaan',
+    data: modules.kelembagaan
+  },
+  {
+    key: 'bankeu',
+    label: 'Bantuan Keuangan',
+    description: 'Rekap proposal dan status pengajuan bantuan keuangan.',
+    data_path: 'data.modules.bankeu',
+    data: modules.bankeu
+  },
+  {
+    key: 'perjadin',
+    label: 'Perjalanan Dinas',
+    description: 'Rekap kegiatan perjalanan dinas dan jadwal mendatang.',
+    data_path: 'data.modules.perjadin',
+    data: modules.perjadin
+  }
+]);
+
 const safeCount = async (model, args = {}) => {
   try {
     return await prisma[model].count(args);
@@ -666,13 +805,17 @@ const sendCoreDashboardPage = (res) => {
 });
 
 const result = await response.json();
+console.log(result.data.dashboard.cards);
+console.log(result.data.dashboard.modules);
 console.log(result.data.summary);
 console.log(result.data.modules);</pre>
               </div>
             </div>
             <ul class="fields">
-              <li><code>data.summary</code> contains the main aggregate numbers for quick display.</li>
+              <li><code>data.dashboard.cards</code> contains display-ready cards matching the Core Dashboard summary.</li>
+              <li><code>data.dashboard.modules</code> contains display-ready module blocks and their detail paths.</li>
               <li><code>data.modules.profil_desa</code>, <code>data.modules.keuangan_desa</code>, <code>data.modules.aparatur_desa</code>, and <code>data.modules.produk_hukum</code> contain the Core Dashboard detail modules.</li>
+              <li><code>data.summary</code> contains the main aggregate numbers for quick display.</li>
               <li><code>data.modules</code> also includes wilayah, BUMDes, kelembagaan, bankeu, and perjadin data.</li>
               <li><code>data.meta.generated_at</code> indicates when the data was freshly generated by the API.</li>
             </ul>
@@ -986,6 +1129,83 @@ const buildPublicDashboardPayload = async () => {
     externalAparatur.perangkat_desa.total +
     externalAparatur.bpd.total;
 
+  const summary = {
+    total_kecamatan: totalKecamatan,
+    total_desa: totalDesa,
+    total_kelurahan: totalKelurahan,
+    total_pegawai: totalPegawai,
+    total_bumdes: totalBumdes,
+    total_aparatur_lokal: totalAparaturLokal,
+    total_aparatur_external: totalAparaturExternal,
+    total_kelembagaan: totalKelembagaan,
+    total_produk_hukum: totalProdukHukum,
+    total_profil_desa: totalProfilDesa,
+    total_keuangan_desa_realisasi: keuanganDesaStats.total_realisasi,
+    total_bankeu_proposal: bankeuProposalTotal,
+    total_kegiatan: kegiatanTotal
+  };
+
+  const modules = {
+    wilayah: {
+      total_kecamatan: totalKecamatan,
+      total_desa: totalDesa,
+      total_kelurahan: totalKelurahan
+    },
+    aparatur_desa: {
+      source: externalAparatur.available ? 'external_dapur_desa' : 'local_database',
+      external_available: externalAparatur.available,
+      local_total_aktif: totalAparaturLokal,
+      external_total: totalAparaturExternal,
+      kepala_desa: externalAparatur.kepala_desa,
+      perangkat_desa: externalAparatur.perangkat_desa,
+      bpd: externalAparatur.bpd
+    },
+    bumdes: {
+      total: totalBumdes,
+      aktif: bumdesAktif,
+      tidak_aktif: Math.max(totalBumdes - bumdesAktif, 0),
+      total_aset: toNumber(bumdesFinancials._sum?.NilaiAset),
+      total_omzet_2024: toNumber(bumdesFinancials._sum?.Omset2024),
+      total_laba_2024: toNumber(bumdesFinancials._sum?.Laba2024),
+      total_tenaga_kerja: toNumber(bumdesFinancials._sum?.TotalTenagaKerja)
+    },
+    kelembagaan: {
+      total: totalKelembagaan,
+      rw: totalRw,
+      rt: totalRt,
+      lpm: totalLpm,
+      pkk: totalPkk,
+      posyandu: totalPosyandu,
+      karang_taruna: totalKarangTaruna,
+      satlinmas: totalSatlinmas,
+      lembaga_lainnya: totalLembagaLainnya
+    },
+    bankeu: {
+      total_proposal: bankeuProposalTotal,
+      submitted_to_kecamatan: bankeuSubmittedKecamatan,
+      submitted_to_dpmd: bankeuSubmittedDpmd,
+      approved_by_dpmd: bankeuApprovedDpmd,
+      total_anggaran_usulan: toNumber(bankeuFinancials._sum?.anggaran_usulan)
+    },
+    keuangan_desa: keuanganDesaStats,
+    produk_hukum: {
+      total: totalProdukHukum,
+      by_jenis: produkHukumByJenis.map((item) => ({
+        jenis: item.singkatan_jenis || 'Tidak Diketahui',
+        total: toNumber(item._count?._all)
+      }))
+    },
+    profil_desa: {
+      total_terisi: totalProfilDesa,
+      total_desa: totalDesa,
+      persentase_terisi: totalDesa > 0 ? Number(((totalProfilDesa / totalDesa) * 100).toFixed(2)) : 0
+    },
+    perjadin: {
+      total_kegiatan: kegiatanTotal,
+      upcoming_30_days: kegiatanUpcoming30Days
+    }
+  };
+
   return {
     meta: {
       generated_at: now.toISOString(),
@@ -1000,81 +1220,12 @@ const buildPublicDashboardPayload = async () => {
       canonical: '/api/public/core-dashboard',
       alias: '/api/public/dashboard'
     },
-    summary: {
-      total_kecamatan: totalKecamatan,
-      total_desa: totalDesa,
-      total_kelurahan: totalKelurahan,
-      total_pegawai: totalPegawai,
-      total_bumdes: totalBumdes,
-      total_aparatur_lokal: totalAparaturLokal,
-      total_aparatur_external: totalAparaturExternal,
-      total_kelembagaan: totalKelembagaan,
-      total_produk_hukum: totalProdukHukum,
-      total_profil_desa: totalProfilDesa,
-      total_keuangan_desa_realisasi: keuanganDesaStats.total_realisasi,
-      total_bankeu_proposal: bankeuProposalTotal,
-      total_kegiatan: kegiatanTotal
+    summary,
+    dashboard: {
+      cards: buildDashboardCards(summary),
+      modules: buildDashboardModules(modules)
     },
-    modules: {
-      wilayah: {
-        total_kecamatan: totalKecamatan,
-        total_desa: totalDesa,
-        total_kelurahan: totalKelurahan
-      },
-      aparatur_desa: {
-        source: externalAparatur.available ? 'external_dapur_desa' : 'local_database',
-        external_available: externalAparatur.available,
-        local_total_aktif: totalAparaturLokal,
-        external_total: totalAparaturExternal,
-        kepala_desa: externalAparatur.kepala_desa,
-        perangkat_desa: externalAparatur.perangkat_desa,
-        bpd: externalAparatur.bpd
-      },
-      bumdes: {
-        total: totalBumdes,
-        aktif: bumdesAktif,
-        tidak_aktif: Math.max(totalBumdes - bumdesAktif, 0),
-        total_aset: toNumber(bumdesFinancials._sum?.NilaiAset),
-        total_omzet_2024: toNumber(bumdesFinancials._sum?.Omset2024),
-        total_laba_2024: toNumber(bumdesFinancials._sum?.Laba2024),
-        total_tenaga_kerja: toNumber(bumdesFinancials._sum?.TotalTenagaKerja)
-      },
-      kelembagaan: {
-        total: totalKelembagaan,
-        rw: totalRw,
-        rt: totalRt,
-        lpm: totalLpm,
-        pkk: totalPkk,
-        posyandu: totalPosyandu,
-        karang_taruna: totalKarangTaruna,
-        satlinmas: totalSatlinmas,
-        lembaga_lainnya: totalLembagaLainnya
-      },
-      bankeu: {
-        total_proposal: bankeuProposalTotal,
-        submitted_to_kecamatan: bankeuSubmittedKecamatan,
-        submitted_to_dpmd: bankeuSubmittedDpmd,
-        approved_by_dpmd: bankeuApprovedDpmd,
-        total_anggaran_usulan: toNumber(bankeuFinancials._sum?.anggaran_usulan)
-      },
-      keuangan_desa: keuanganDesaStats,
-      produk_hukum: {
-        total: totalProdukHukum,
-        by_jenis: produkHukumByJenis.map((item) => ({
-          jenis: item.singkatan_jenis || 'Tidak Diketahui',
-          total: toNumber(item._count?._all)
-        }))
-      },
-      profil_desa: {
-        total_terisi: totalProfilDesa,
-        total_desa: totalDesa,
-        persentase_terisi: totalDesa > 0 ? Number(((totalProfilDesa / totalDesa) * 100).toFixed(2)) : 0
-      },
-      perjadin: {
-        total_kegiatan: kegiatanTotal,
-        upcoming_30_days: kegiatanUpcoming30Days
-      }
-    },
+    modules,
     sources: {
       local_database: true,
       external_dapur_desa: {
