@@ -74,6 +74,487 @@ const getRequestApiKey = (req) => {
   );
 };
 
+const wantsBrowserDashboardPage = (req) => {
+  const acceptHeader = req.get('accept') || '';
+  return req.method === 'GET' && acceptHeader.includes('text/html') && !getRequestApiKey(req);
+};
+
+const sendCoreDashboardPage = (res) => {
+  res.status(200).type('html').send(`<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Core Dashboard API - DPMD Kabupaten Bogor</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f8fb;
+      --panel: #ffffff;
+      --text: #152033;
+      --muted: #667085;
+      --line: #d9e2ef;
+      --brand: #0f766e;
+      --brand-dark: #115e59;
+      --danger: #b42318;
+      --success: #067647;
+      --code: #111827;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    .shell {
+      width: min(1120px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 32px 0;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 16px 0 28px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .mark {
+      display: grid;
+      place-items: center;
+      width: 42px;
+      height: 42px;
+      border-radius: 8px;
+      background: var(--brand);
+      color: #ffffff;
+      font-weight: 800;
+      letter-spacing: 0;
+    }
+
+    h1,
+    p {
+      margin: 0;
+    }
+
+    h1 {
+      font-size: clamp(22px, 4vw, 34px);
+      letter-spacing: 0;
+      line-height: 1.15;
+    }
+
+    .subtitle {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 15px;
+      line-height: 1.55;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 13px;
+      white-space: nowrap;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(280px, 380px) 1fr;
+      gap: 20px;
+      align-items: start;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+    }
+
+    .auth {
+      padding: 22px;
+      position: sticky;
+      top: 24px;
+    }
+
+    .auth h2,
+    .results h2 {
+      margin: 0 0 8px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    label {
+      display: block;
+      margin: 22px 0 8px;
+      color: #344054;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .input-wrap {
+      display: flex;
+      align-items: stretch;
+      border: 1px solid #b8c4d4;
+      border-radius: 8px;
+      overflow: hidden;
+      background: #ffffff;
+    }
+
+    input {
+      flex: 1;
+      min-width: 0;
+      border: 0;
+      padding: 13px 14px;
+      font-size: 15px;
+      outline: none;
+      color: var(--text);
+    }
+
+    .toggle {
+      border: 0;
+      border-left: 1px solid var(--line);
+      background: #f8fafc;
+      color: var(--muted);
+      width: 48px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+
+    .primary {
+      width: 100%;
+      border: 0;
+      margin-top: 16px;
+      padding: 13px 16px;
+      border-radius: 8px;
+      background: var(--brand);
+      color: #ffffff;
+      font-size: 15px;
+      font-weight: 800;
+      cursor: pointer;
+    }
+
+    .primary:hover {
+      background: var(--brand-dark);
+    }
+
+    .primary:disabled {
+      cursor: wait;
+      opacity: 0.72;
+    }
+
+    .hint {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .endpoint {
+      margin-top: 18px;
+      padding: 12px;
+      border-radius: 8px;
+      background: #f8fafc;
+      border: 1px solid var(--line);
+      color: #344054;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      overflow-x: auto;
+    }
+
+    .results {
+      padding: 22px;
+      min-height: 420px;
+    }
+
+    .state {
+      display: grid;
+      min-height: 220px;
+      place-items: center;
+      text-align: center;
+      color: var(--muted);
+      border: 1px dashed #c6d3e1;
+      border-radius: 8px;
+      background: #fbfcfe;
+      padding: 28px;
+    }
+
+    .message {
+      display: none;
+      margin: 0 0 16px;
+      padding: 12px 14px;
+      border-radius: 8px;
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    .message.error {
+      display: block;
+      background: #fef3f2;
+      color: var(--danger);
+      border: 1px solid #fecdca;
+    }
+
+    .message.success {
+      display: block;
+      background: #ecfdf3;
+      color: var(--success);
+      border: 1px solid #abefc6;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 14px 0 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px;
+      background: #ffffff;
+    }
+
+    .card span {
+      display: block;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .card strong {
+      display: block;
+      margin-top: 8px;
+      color: var(--text);
+      font-size: 25px;
+      line-height: 1;
+      letter-spacing: 0;
+    }
+
+    pre {
+      margin: 0;
+      padding: 16px;
+      border-radius: 8px;
+      background: var(--code);
+      color: #e5e7eb;
+      overflow: auto;
+      max-height: 520px;
+      font-size: 12px;
+      line-height: 1.6;
+    }
+
+    .hidden {
+      display: none;
+    }
+
+    @media (max-width: 820px) {
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .auth {
+        position: static;
+      }
+
+      .cards {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="mark" aria-hidden="true">D</div>
+        <div>
+          <h1>Core Dashboard API</h1>
+          <p class="subtitle">Akses data agregat DPMD Kabupaten Bogor dengan API key resmi.</p>
+        </div>
+      </div>
+      <div class="badge">Protected API</div>
+    </header>
+
+    <section class="layout">
+      <form id="authForm" class="panel auth">
+        <h2>Masukkan API Key</h2>
+        <p class="subtitle">Key tidak disimpan di server oleh halaman ini. Browser hanya mengirimnya sebagai header <strong>x-api-key</strong>.</p>
+
+        <label for="apiKey">API key</label>
+        <div class="input-wrap">
+          <input id="apiKey" name="apiKey" type="password" autocomplete="off" placeholder="Tempel API key di sini" required>
+          <button class="toggle" type="button" id="toggleKey" aria-label="Tampilkan API key">o</button>
+        </div>
+
+        <button class="primary" type="submit" id="submitButton">Lihat Data</button>
+
+        <p class="hint">Untuk integrasi aplikasi, gunakan endpoint yang sama dengan header <strong>x-api-key</strong> atau <strong>Authorization: Bearer</strong>.</p>
+        <div class="endpoint">GET /api/public/core-dashboard</div>
+      </form>
+
+      <section class="panel results">
+        <div id="message" class="message"></div>
+        <div id="emptyState" class="state">
+          <div>
+            <h2>Data belum dibuka</h2>
+            <p class="subtitle">Masukkan API key untuk melihat ringkasan dan JSON respons realtime.</p>
+          </div>
+        </div>
+
+        <div id="dataView" class="hidden">
+          <h2>Ringkasan Core Dashboard</h2>
+          <div id="meta" class="meta"></div>
+          <div id="cards" class="cards"></div>
+          <pre id="jsonOutput"></pre>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const form = document.getElementById('authForm');
+    const apiKey = document.getElementById('apiKey');
+    const toggleKey = document.getElementById('toggleKey');
+    const submitButton = document.getElementById('submitButton');
+    const message = document.getElementById('message');
+    const emptyState = document.getElementById('emptyState');
+    const dataView = document.getElementById('dataView');
+    const meta = document.getElementById('meta');
+    const cards = document.getElementById('cards');
+    const jsonOutput = document.getElementById('jsonOutput');
+    const formatter = new Intl.NumberFormat('id-ID');
+
+    const setMessage = (text, type) => {
+      message.textContent = text || '';
+      message.className = text ? 'message ' + type : 'message';
+    };
+
+    const appendText = (parent, text, className) => {
+      const element = document.createElement('span');
+      if (className) element.className = className;
+      element.textContent = text;
+      parent.appendChild(element);
+      return element;
+    };
+
+    const renderCard = (label, value) => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      appendText(card, label);
+      const strong = document.createElement('strong');
+      strong.textContent = formatter.format(Number(value || 0));
+      card.appendChild(strong);
+      cards.appendChild(card);
+    };
+
+    const renderData = (payload) => {
+      const data = payload.data || {};
+      const summary = data.summary || {};
+
+      meta.innerHTML = '';
+      cards.innerHTML = '';
+      jsonOutput.textContent = JSON.stringify(payload, null, 2);
+
+      appendText(meta, 'Generated: ' + (data.meta?.generated_at || '-'));
+      appendText(meta, 'Realtime: ' + (data.meta?.realtime ? 'Ya' : 'Tidak'));
+      appendText(meta, 'Cache: ' + (data.meta?.cache || '-'));
+
+      renderCard('Kecamatan', summary.total_kecamatan);
+      renderCard('Desa', summary.total_desa);
+      renderCard('Kelurahan', summary.total_kelurahan);
+      renderCard('BUMDes', summary.total_bumdes);
+      renderCard('Kelembagaan', summary.total_kelembagaan);
+      renderCard('Bankeu Proposal', summary.total_bankeu_proposal);
+
+      emptyState.classList.add('hidden');
+      dataView.classList.remove('hidden');
+      setMessage(payload.message || 'Data berhasil diambil.', 'success');
+    };
+
+    toggleKey.addEventListener('click', () => {
+      apiKey.type = apiKey.type === 'password' ? 'text' : 'password';
+    });
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault();
+      const key = apiKey.value.trim();
+
+      if (!key) {
+        setMessage('API key wajib diisi.', 'error');
+        return;
+      }
+
+      submitButton.disabled = true;
+      submitButton.textContent = 'Memuat...';
+      setMessage('', '');
+
+      try {
+        const response = await fetch(window.location.pathname, {
+          method: 'GET',
+          cache: 'no-store',
+          headers: {
+            Accept: 'application/json',
+            'x-api-key': key
+          }
+        });
+
+        const payload = await response.json().catch(() => null);
+
+        if (!response.ok || !payload?.success) {
+          throw new Error(payload?.message || 'Gagal membuka data.');
+        }
+
+        renderData(payload);
+      } catch (error) {
+        dataView.classList.add('hidden');
+        emptyState.classList.remove('hidden');
+        setMessage(error.message || 'Gagal membuka data.', 'error');
+      } finally {
+        submitButton.disabled = false;
+        submitButton.textContent = 'Lihat Data';
+      }
+    });
+  </script>
+</body>
+</html>`);
+};
+
 const validateCoreDashboardAccess = (req, res) => {
   const configuredApiKey = process.env[CORE_DASHBOARD_API_KEY_ENV];
 
@@ -354,6 +835,11 @@ const getCoreDashboard = async (req, res) => {
     res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
     res.set('Pragma', 'no-cache');
     res.set('Expires', '0');
+
+    if (wantsBrowserDashboardPage(req)) {
+      sendCoreDashboardPage(res);
+      return;
+    }
 
     if (!validateCoreDashboardAccess(req, res)) {
       return;
