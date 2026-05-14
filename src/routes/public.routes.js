@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
+const publicDashboardController = require('../controllers/publicDashboard.controller');
 
 /**
  * @route   GET /api/public/stats
@@ -54,5 +55,13 @@ router.get('/hero-gallery', async (req, res) => {
     });
   }
 });
+
+/**
+ * @route   GET /api/public/core-dashboard
+ * @route   GET /api/public/dashboard
+ * @desc    Get tidy public Core Dashboard aggregate data
+ * @access  Protected by CORE_DASHBOARD_API_KEY header
+ */
+router.get(['/core-dashboard', '/dashboard'], publicDashboardController.getCoreDashboard);
 
 module.exports = router;
