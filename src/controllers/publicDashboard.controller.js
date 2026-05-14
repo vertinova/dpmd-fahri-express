@@ -362,6 +362,67 @@ const sendCoreDashboardPage = (res) => {
       letter-spacing: 0;
     }
 
+    .guide {
+      margin: 18px 0;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fbfcfe;
+    }
+
+    .guide h3 {
+      margin: 0 0 6px;
+      font-size: 16px;
+      letter-spacing: 0;
+    }
+
+    .guide p {
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.55;
+    }
+
+    .guide-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 14px;
+    }
+
+    .guide-item {
+      min-width: 0;
+    }
+
+    .guide-item h4 {
+      margin: 0 0 8px;
+      color: #344054;
+      font-size: 13px;
+      letter-spacing: 0;
+    }
+
+    .sample {
+      margin: 0;
+      max-height: none;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .fields {
+      display: grid;
+      gap: 8px;
+      margin: 10px 0 0;
+      padding: 0;
+      list-style: none;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    .fields code {
+      color: #344054;
+      font-weight: 800;
+    }
+
     pre {
       margin: 0;
       padding: 16px;
@@ -393,6 +454,10 @@ const sendCoreDashboardPage = (res) => {
       }
 
       .cards {
+        grid-template-columns: 1fr;
+      }
+
+      .guide-grid {
         grid-template-columns: 1fr;
       }
     }
@@ -441,6 +506,42 @@ const sendCoreDashboardPage = (res) => {
           <h2>Ringkasan Core Dashboard</h2>
           <div id="meta" class="meta"></div>
           <div id="cards" class="cards"></div>
+          <div class="guide">
+            <h3>Cara Teman Developer Mengambil Data</h3>
+            <p>Gunakan endpoint ini dari backend/server aplikasi teman Anda. Hindari menaruh API key di frontend publik.</p>
+            <div class="guide-grid">
+              <div class="guide-item">
+                <h4>Endpoint</h4>
+                <pre class="sample">GET https://dpmdbogorkab.id/api/public/core-dashboard</pre>
+              </div>
+              <div class="guide-item">
+                <h4>Header Wajib</h4>
+                <pre class="sample">x-api-key: API_KEY_YANG_DIBERIKAN</pre>
+              </div>
+              <div class="guide-item">
+                <h4>Contoh curl</h4>
+                <pre class="sample">curl -H "x-api-key: API_KEY_YANG_DIBERIKAN" https://dpmdbogorkab.id/api/public/core-dashboard</pre>
+              </div>
+              <div class="guide-item">
+                <h4>Contoh JavaScript</h4>
+                <pre class="sample">const response = await fetch("https://dpmdbogorkab.id/api/public/core-dashboard", {
+  headers: {
+    "x-api-key": "API_KEY_YANG_DIBERIKAN",
+    "Accept": "application/json"
+  }
+});
+
+const result = await response.json();
+console.log(result.data.summary);
+console.log(result.data.modules);</pre>
+              </div>
+            </div>
+            <ul class="fields">
+              <li><code>data.summary</code> berisi ringkasan angka utama.</li>
+              <li><code>data.modules</code> berisi detail per modul seperti wilayah, BUMDes, kelembagaan, bankeu, produk hukum, profil desa, dan perjadin.</li>
+              <li><code>data.meta.generated_at</code> menunjukkan waktu data diambil ulang dari server.</li>
+            </ul>
+          </div>
           <pre id="jsonOutput"></pre>
         </div>
       </section>
