@@ -474,6 +474,58 @@ const sendCoreDashboardPage = (res) => {
       font-size: 16px;
     }
 
+    .mode-toggle {
+      display: grid;
+      gap: 8px;
+    }
+
+    .mode-option {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      padding: 12px 14px;
+      border: 1px solid #b8c4d4;
+      border-radius: 8px;
+      background: #ffffff;
+      cursor: pointer;
+      margin: 0;
+      font-weight: normal;
+      transition: border-color 0.15s, background 0.15s;
+    }
+
+    .mode-option:hover {
+      border-color: var(--brand);
+      background: #f8fafc;
+    }
+
+    .mode-option input[type="radio"] {
+      margin-top: 3px;
+      accent-color: var(--brand);
+    }
+
+    .mode-option span {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    .mode-option strong {
+      color: var(--text);
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .mode-option small {
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.4;
+    }
+
+    .mode-option:has(input:checked) {
+      border-color: var(--brand);
+      background: #ecfdf3;
+    }
+
     .primary {
       width: 100%;
       border: 0;
@@ -764,6 +816,24 @@ const sendCoreDashboardPage = (res) => {
           <button class="toggle" type="button" id="toggleKey" aria-label="Tampilkan API key">o</button>
         </div>
 
+        <label>Mode pengambilan data</label>
+        <div class="mode-toggle" role="radiogroup" aria-label="Mode pengambilan data">
+          <label class="mode-option">
+            <input type="radio" name="mode" value="full" checked>
+            <span>
+              <strong>Full Detail</strong>
+              <small>Semua records lengkap (lebih berat, butuh beberapa detik)</small>
+            </span>
+          </label>
+          <label class="mode-option">
+            <input type="radio" name="mode" value="preview">
+            <span>
+              <strong>Preview / Ringkasan</strong>
+              <small>Hanya angka rekap (cepat, records kosong)</small>
+            </span>
+          </label>
+        </div>
+
         <button class="primary" type="submit" id="submitButton">Lihat Data</button>
 
         <p class="hint">Untuk integrasi aplikasi, gunakan endpoint yang sama dengan header <strong>x-api-key</strong> atau <strong>Authorization: Bearer</strong>.</p>
@@ -783,6 +853,11 @@ const sendCoreDashboardPage = (res) => {
           <h2>Ringkasan Core Dashboard</h2>
           <div id="meta" class="meta"></div>
           <div id="cards" class="cards"></div>
+
+          <h3 style="margin: 22px 0 10px; font-size: 16px; letter-spacing: 0;">Jumlah record detail per modul</h3>
+          <p class="subtitle" style="margin-bottom: 12px; font-size: 13px;">Angka 0 saat mode <strong>Full Detail</strong> berarti detail builder gagal di server (cek log). Saat mode <strong>Preview</strong>, semuanya 0 — itu memang perilaku normal.</p>
+          <div id="moduleCounts" class="cards"></div>
+
           <div class="guide">
             <div class="guide-head">
               <div>
@@ -793,11 +868,11 @@ const sendCoreDashboardPage = (res) => {
             </div>
             <div class="guide-grid">
               <div class="guide-item">
-                <h4>Production Endpoint</h4>
+                <h4>Full Detail (default) — records lengkap</h4>
                 <pre class="sample">GET https://dpmdbogorkab.id/api/public/core-dashboard</pre>
               </div>
               <div class="guide-item">
-                <h4>Fast Preview</h4>
+                <h4>Preview — hanya summary, cepat</h4>
                 <pre class="sample">GET https://dpmdbogorkab.id/api/public/core-dashboard?view=preview</pre>
               </div>
               <div class="guide-item">
@@ -805,34 +880,50 @@ const sendCoreDashboardPage = (res) => {
                 <pre class="sample">x-api-key: YOUR_API_KEY</pre>
               </div>
               <div class="guide-item">
-                <h4>cURL Request</h4>
-                <pre class="sample">curl -H "x-api-key: YOUR_API_KEY" https://dpmdbogorkab.id/api/public/core-dashboard</pre>
+                <h4>cURL — ambil semua detail</h4>
+                <pre class="sample">curl -H "x-api-key: YOUR_API_KEY" \
+  https://dpmdbogorkab.id/api/public/core-dashboard \
+  -o core-dashboard.json</pre>
               </div>
               <div class="guide-item">
-                <h4>JavaScript Fetch</h4>
-                <pre class="sample">const response = await fetch("https://dpmdbogorkab.id/api/public/core-dashboard", {
-  headers: {
-    "x-api-key": "YOUR_API_KEY",
-    "Accept": "application/json"
+                <h4>JavaScript Fetch — ambil semua detail</h4>
+                <pre class="sample">const response = await fetch(
+  "https://dpmdbogorkab.id/api/public/core-dashboard",
+  {
+    headers: {
+      "x-api-key": "YOUR_API_KEY",
+      "Accept": "application/json"
+    }
   }
-});
+);
 
-const result = await response.json();
-console.log(result.data.dashboard.cards);
-console.log(result.data.dashboard.modules);
-console.log(result.data.summary);
-console.log(result.data.modules);</pre>
+const { data } = await response.json();
+
+// Verifikasi mode + record count
+console.log(data.meta.mode);                          // "full"
+console.log(data.modules.aparatur_desa.records.length); // 9000+
+console.log(data.modules.bumdes.records.length);        // 400+
+console.log(data.modules.produk_hukum.records.length);  // ratusan</pre>
+              </div>
+              <div class="guide-item">
+                <h4>Cara baca: ringkasan vs detail</h4>
+                <pre class="sample">data.summary                  → 10 angka rekap utama
+data.modules.X                → detail per modul (records)
+
+Modul yang tersedia:
+  wilayah, profil_desa, produk_hukum,
+  aparatur_desa, bumdes, kelembagaan,
+  bankeu, keuangan_desa</pre>
               </div>
             </div>
             <ul class="fields">
-              <li><code>data.dashboard.cards</code> contains display-ready cards matching the Core Dashboard summary.</li>
-              <li><code>data.dashboard.modules</code> contains display-ready module blocks and their detail paths.</li>
-              <li><code>data.modules.profil_desa</code>, <code>data.modules.keuangan_desa</code>, <code>data.modules.aparatur_desa</code>, and <code>data.modules.produk_hukum</code> contain detailed Core Dashboard records.</li>
-              <li>File and photo fields are returned as structured objects with <code>path</code>, <code>url</code>, and <code>download_url</code>.</li>
-              <li><code>?view=preview</code> returns a lightweight response for documentation and quick browser checks.</li>
-              <li><code>data.summary</code> contains the main aggregate numbers for quick display.</li>
-              <li><code>data.modules</code> also includes wilayah, BUMDes, kelembagaan, and bankeu data. Perjalanan dinas is excluded from this public payload.</li>
-              <li><code>data.meta.generated_at</code> indicates when the data was freshly generated by the API.</li>
+              <li><strong>Default = Full Detail.</strong> Hanya jika query berisi <code>?view=preview</code>, <code>?view=summary</code>, atau <code>?detail=preview</code> maka response hanya ringkasan.</li>
+              <li><code>data.meta.mode</code> akan bernilai <code>"full"</code> atau <code>"preview"</code> — selalu cek field ini untuk memastikan apa yang Anda terima.</li>
+              <li><code>data.summary</code> = 10 angka rekap (kecamatan, desa, BUMDes, dll) untuk tampilan cepat.</li>
+              <li><code>data.modules.aparatur_desa.records</code>, <code>data.modules.bumdes.records</code>, <code>data.modules.produk_hukum.records</code>, <code>data.modules.profil_desa.records</code>, <code>data.modules.bankeu.records</code>, <code>data.modules.kelembagaan.all_records</code> — detail lengkap per record.</li>
+              <li>Field file/foto berupa objek terstruktur dengan <code>path</code>, <code>url</code>, dan <code>download_url</code>.</li>
+              <li>Halaman web ini memanggil endpoint sesuai mode yang Anda pilih di sebelah kiri — sebelumnya selalu preview. Untuk integrasi aplikasi, panggil endpoint dari backend (jangan dari frontend publik karena API key akan terekspos).</li>
+              <li>Perjalanan dinas <strong>tidak</strong> termasuk di payload publik ini.</li>
             </ul>
           </div>
           <pre id="jsonOutput"></pre>
@@ -851,6 +942,7 @@ console.log(result.data.modules);</pre>
     const dataView = document.getElementById('dataView');
     const meta = document.getElementById('meta');
     const cards = document.getElementById('cards');
+    const moduleCounts = document.getElementById('moduleCounts');
     const jsonOutput = document.getElementById('jsonOutput');
     const formatter = new Intl.NumberFormat('id-ID');
     const compactCurrencyFormatter = new Intl.NumberFormat('id-ID', {
@@ -889,14 +981,35 @@ console.log(result.data.modules);</pre>
       cards.appendChild(card);
     };
 
+    const renderModuleCount = (label, value) => {
+      const card = document.createElement('div');
+      card.className = 'card';
+      appendText(card, label);
+      const strong = document.createElement('strong');
+      strong.textContent = formatter.format(Number(value || 0));
+      card.appendChild(strong);
+      moduleCounts.appendChild(card);
+    };
+
+    const countOrZero = (value) => {
+      if (Array.isArray(value)) return value.length;
+      if (typeof value === 'number') return value;
+      return 0;
+    };
+
     const renderData = (payload) => {
       const data = payload.data || {};
       const summary = data.summary || {};
+      const modules = data.modules || {};
 
       meta.innerHTML = '';
       cards.innerHTML = '';
+      moduleCounts.innerHTML = '';
       jsonOutput.textContent = JSON.stringify(payload, null, 2);
 
+      const mode = data.meta?.mode || '-';
+      const modeBadge = mode === 'full' ? 'Mode: FULL DETAIL' : (mode === 'preview' ? 'Mode: PREVIEW (records kosong)' : 'Mode: ' + mode);
+      appendText(meta, modeBadge);
       appendText(meta, 'Generated: ' + (data.meta?.generated_at || '-'));
       appendText(meta, 'Realtime: ' + (data.meta?.realtime ? 'Ya' : 'Tidak'));
       appendText(meta, 'Cache: ' + (data.meta?.cache || '-'));
@@ -911,6 +1024,15 @@ console.log(result.data.modules);</pre>
       renderCard('BUMDes', summary.total_bumdes);
       renderCard('Kelembagaan', summary.total_kelembagaan);
       renderCard('Bankeu Proposal', summary.total_bankeu_proposal);
+
+      renderModuleCount('Wilayah (Kecamatan)', countOrZero(modules.wilayah?.records));
+      renderModuleCount('Profil Desa', countOrZero(modules.profil_desa?.records));
+      renderModuleCount('Produk Hukum', countOrZero(modules.produk_hukum?.records));
+      renderModuleCount('Aparatur Desa', countOrZero(modules.aparatur_desa?.records));
+      renderModuleCount('BUMDes', countOrZero(modules.bumdes?.records));
+      renderModuleCount('Kelembagaan', countOrZero(modules.kelembagaan?.all_records));
+      renderModuleCount('Bankeu Proposal', countOrZero(modules.bankeu?.records));
+      renderModuleCount('Keuangan Desa (records)', countOrZero(modules.keuangan_desa?.total_records));
 
       emptyState.classList.add('hidden');
       dataView.classList.remove('hidden');
@@ -930,15 +1052,22 @@ console.log(result.data.modules);</pre>
         return;
       }
 
+      const selectedMode = (document.querySelector('input[name="mode"]:checked')?.value) || 'full';
+
       submitButton.disabled = true;
-      submitButton.textContent = 'Memuat...';
+      submitButton.textContent = selectedMode === 'full' ? 'Memuat detail lengkap...' : 'Memuat...';
       setMessage('', '');
 
       try {
-        const previewUrl = new URL(window.location.href);
-        previewUrl.searchParams.set('view', 'preview');
+        const requestUrl = new URL(window.location.href);
+        requestUrl.searchParams.delete('view');
+        requestUrl.searchParams.delete('mode');
+        requestUrl.searchParams.delete('detail');
+        if (selectedMode === 'preview') {
+          requestUrl.searchParams.set('view', 'preview');
+        }
 
-        const response = await fetch(previewUrl.pathname + previewUrl.search, {
+        const response = await fetch(requestUrl.pathname + requestUrl.search, {
           method: 'GET',
           cache: 'no-store',
           headers: {
