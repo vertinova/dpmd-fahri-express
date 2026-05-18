@@ -879,6 +879,11 @@ class RtrwComparisonController {
             tanggal_mulai_jabatan: true,
             tanggal_akhir_jabatan: true,
             tanggal_lahir: true,
+            tempat_lahir: true,
+            jenis_kelamin: true,
+            status_perkawinan: true,
+            alamat: true,
+            pendidikan: true,
             desas: {
               select: {
                 kode: true,
@@ -921,6 +926,7 @@ class RtrwComparisonController {
           source: 'db',
           id: p.id,
           nama,
+          namaLengkap: toText(p.nama_lengkap),
           normalized: nama,
           nik: normalizeNik(p.nik),
           desaId: p.desa_id.toString(),
@@ -942,6 +948,11 @@ class RtrwComparisonController {
           tanggalMulaiJabatan: dateToStr(p.tanggal_mulai_jabatan),
           tanggalAkhirJabatan: dateToStr(p.tanggal_akhir_jabatan),
           tglLahir: dateToStr(p.tanggal_lahir),
+          tempatLahir: toText(p.tempat_lahir),
+          jenisKelamin: toText(p.jenis_kelamin),
+          statusPerkawinan: toText(p.status_perkawinan),
+          alamat: toText(p.alamat),
+          pendidikan: toText(p.pendidikan),
         };
       }).filter((item) => item.nama && item.desaKode);
 
