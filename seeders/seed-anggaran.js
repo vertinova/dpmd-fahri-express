@@ -12,7 +12,7 @@ const listBelanja = require('../data/anggaran/list_belanja.json');
 function parseDbConfig() {
   const url = process.env.DATABASE_URL;
   if (url) {
-    const m = url.match(/mysql:\/\/([^:]+):([^@]*)@([^:]+):(\d+)\/(.+)/);
+    const m = url.match(/mysql:\/\/([^:]+):([^@]*)@([^:]+):(\d+)\/([^?]+)/);
     if (m) return { user: m[1], password: m[2], host: m[3], port: Number(m[4]), database: m[5] };
   }
   return {
