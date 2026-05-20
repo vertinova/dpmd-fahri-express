@@ -97,6 +97,7 @@ const externalApiRoutes = require('./routes/externalApi.routes');
 const pemdesAparaturRoutes = require('./routes/pemdes-aparatur.routes');
 const pemdesProfilDesaRoutes = require('./routes/pemdes-profil-desa.routes');
 const chatbotRoutes = require('./routes/chatbot.routes');
+const anggaranRoutes = require('./routes/anggaran.routes');
 
 const app = express();
 
@@ -371,6 +372,9 @@ app.use('/api/chatbot', chatbotRoutes);
 
 // Messaging / Chat routes
 app.use('/api/messaging', require('./routes/messaging.routes'));
+
+// Anggaran Bidang routes
+app.use('/api/anggaran', anggaranRoutes);
 
 // 404 handler
 app.use((req, res) => {

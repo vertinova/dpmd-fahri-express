@@ -320,14 +320,106 @@ model informasi {
 }
 
 model bidangs {
-  id                     BigInt                   @id @default(autoincrement()) @db.UnsignedBigInt
-  nama                   String                   @db.VarChar(255)
-  created_at             DateTime?                @db.Timestamp(0)
-  updated_at             DateTime?                @db.Timestamp(0)
-  jadwal_kegiatan        jadwal_kegiatan[]
-  jadwal_kegiatan_bidang jadwal_kegiatan_bidang[]
-  kegiatan_bidang        kegiatan_bidang[]
-  pegawai                pegawai[]
+  id                        BigInt                      @id @default(autoincrement()) @db.UnsignedBigInt
+  nama                      String                      @db.VarChar(255)
+  created_at                DateTime?                   @db.Timestamp(0)
+  updated_at                DateTime?                   @db.Timestamp(0)
+  jadwal_kegiatan           jadwal_kegiatan[]
+  jadwal_kegiatan_bidang    jadwal_kegiatan_bidang[]
+  kegiatan_bidang           kegiatan_bidang[]
+  pegawai                   pegawai[]
+  anggaran_bidang_units     anggaran_bidang_units[]
+  anggaran_master_kegiatan  anggaran_master_kegiatan[]
+}
+
+model anggaran_bidang_units {
+  id                       BigInt                     @id @default(autoincrement()) @db.UnsignedBigInt
+  bidang_id                BigInt                     @db.UnsignedBigInt
+  nama                     String                     @db.VarChar(255)
+  kode                     String?                    @db.VarChar(50)
+  urutan                   Int                        @default(1)
+  created_at               DateTime?                  @default(now()) @db.Timestamp(0)
+  updated_at               DateTime?                  @default(now()) @db.Timestamp(0)
+  bidangs                  bidangs                    @relation(fields: [bidang_id], references: [id], onDelete: Cascade, map: "fk_anggaran_bidang_units_bidang")
+  anggaran_master_kegiatan anggaran_master_kegiatan[]
+
+  @@index([bidang_id], map: "idx_bidang_id")
+}
+
+/// Master Kegiatan - data tetap, tidak berubah tiap tahun
+model anggaran_master_kegiatan {
+  id                BigInt                  @id @default(autoincrement()) @db.UnsignedBigInt
+  bidang_id         BigInt                  @db.UnsignedBigInt
+  bidang_unit_id    BigInt?                 @db.UnsignedBigInt
+  kode_program      String?                 @db.VarChar(100)
+  nama_program      String                  @db.VarChar(500)
+  kode_kegiatan     String?                 @db.VarChar(100)
+  nama_kegiatan     String                  @db.VarChar(500)
+  kode_sub_kegiatan String?                 @db.VarChar(100)
+  nama_sub_kegiatan String?                 @db.VarChar(500)
+  id_giat           Int?
+  id_sub_giat       Int?
+  urutan            Int                     @default(1)
+  is_active         Boolean                 @default(true)
+  created_by        BigInt                  @db.UnsignedBigInt
+  created_at        DateTime?               @default(now()) @db.Timestamp(0)
+  updated_at        DateTime?               @default(now()) @db.Timestamp(0)
+  bidangs           bidangs                 @relation(fields: [bidang_id], references: [id], onDelete: Cascade, map: "fk_amk_bidang")
+  bidang_unit       anggaran_bidang_units?  @relation(fields: [bidang_unit_id], references: [id], onDelete: SetNull, map: "fk_amk_unit")
+  users             users                   @relation("anggaran_master_kegiatan_created_by", fields: [created_by], references: [id], map: "fk_amk_user")
+  pagu_list         anggaran_pagu[]
+
+  @@index([bidang_id], map: "idx_bidang_id")
+  @@index([bidang_unit_id], map: "idx_bidang_unit_id")
+  @@index([kode_kegiatan], map: "idx_kode_kegiatan")
+  @@index([is_active], map: "idx_is_active")
+}
+
+/// Pagu per kegiatan per tahun - berubah setiap tahun
+model anggaran_pagu {
+  id                  BigInt                   @id @default(autoincrement()) @db.UnsignedBigInt
+  master_kegiatan_id  BigInt                   @db.UnsignedBigInt
+  tahun               Int
+  pagu                Decimal                  @default(0) @db.Decimal(20, 2)
+  pagu_indikatif      Decimal?                 @default(0) @db.Decimal(20, 2)
+  created_by          BigInt                   @db.UnsignedBigInt
+  created_at          DateTime?                @default(now()) @db.Timestamp(0)
+  updated_at          DateTime?                @default(now()) @db.Timestamp(0)
+  master_kegiatan     anggaran_master_kegiatan @relation(fields: [master_kegiatan_id], references: [id], onDelete: Cascade, map: "fk_ap_master")
+  users               users                    @relation("anggaran_pagu_created_by", fields: [created_by], references: [id], map: "fk_ap_user")
+  rka_items           anggaran_rka_items[]
+
+  @@unique([master_kegiatan_id, tahun], map: "uk_pagu_kegiatan_tahun")
+  @@index([tahun], map: "idx_tahun")
+}
+
+/// Item RKA per pagu (per tahun) - berubah setiap tahun
+model anggaran_rka_items {
+  id            BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
+  pagu_id       BigInt              @db.UnsignedBigInt
+  nama_item     String              @db.VarChar(500)
+  kode_rekening String?             @db.VarChar(500)
+  satuan        String              @db.VarChar(100)
+  volume        Decimal             @default(1) @db.Decimal(15, 4)
+  harga_satuan  Decimal             @default(0) @db.Decimal(20, 2)
+  jenis_sht     anggaran_jenis_sht  @default(SSH)
+  kode_sht      String?             @db.VarChar(100)
+  keterangan    String?             @db.Text
+  koefisien     String?             @db.Text
+  grup          String?             @db.VarChar(200)
+  urutan        Int                 @default(1)
+  created_by    BigInt              @db.UnsignedBigInt
+  created_at    DateTime?           @default(now()) @db.Timestamp(0)
+  updated_at    DateTime?           @default(now()) @db.Timestamp(0)
+  pagu          anggaran_pagu       @relation(fields: [pagu_id], references: [id], onDelete: Cascade, map: "fk_ari_pagu")
+  users         users               @relation("anggaran_rka_items_created_by", fields: [created_by], references: [id], map: "fk_ari_user")
+
+  @@index([pagu_id], map: "idx_pagu_id")
+}
+
+enum anggaran_jenis_sht {
+  SSH
+  SBU
 }
 
 model bumdes {
@@ -1431,6 +1523,9 @@ model users {
   user_statuses                                                  user_statuses[]
   status_views                                                   status_views[]
   nomor_surat_requests                                           nomor_surat_requests[]
+  anggaran_master_kegiatan                                       anggaran_master_kegiatan[] @relation("anggaran_master_kegiatan_created_by")
+  anggaran_pagu                                                  anggaran_pagu[]            @relation("anggaran_pagu_created_by")
+  anggaran_rka_items                                             anggaran_rka_items[]       @relation("anggaran_rka_items_created_by")
 
   @@index([pegawai_id], map: "users_pegawai_id_index")
 }

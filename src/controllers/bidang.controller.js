@@ -115,28 +115,39 @@ class BidangController {
             bankeu_2025_uploaded: this.checkFileExists('public/bankeu2025.json')
           };
           
-        case 4: // Kekayaan Keuangan Desa (KKD - ADD, DD, BHPRD)
+        case 4: { // Kekayaan Keuangan Desa (KKD - ADD, DD, BHPRD)
+          const tahun = new Date().getFullYear();
           const totalDesa = await prisma.desas.count({
             where: { status_pemerintahan: 'desa' }
           });
-          
+
+          const penerimaAdd = this.countJsonRecords('public/add2025.json', r => r.sts && r.sts.includes('Dicairkan'));
+          const penerimaDD  = this.countUniqueJsonField('public/dd2025.json', r => `${r.desa}|${r.kecamatan}`);
+
+          const paguAgg4 = await prisma.anggaran_pagu.aggregate({
+            where: { tahun, master_kegiatan: { bidang_id: BigInt(4) } },
+            _sum: { pagu: true }
+          });
+
           return {
             total_desa: totalDesa,
-            // ADD stats (dari JSON files)
+            penerima_add: penerimaAdd,
+            penerima_dd: penerimaDD,
+            pagu: Number(paguAgg4._sum.pagu ?? 0),
+            // file flags (masih dipakai di halaman detail)
             add_uploaded: this.checkFileExists('public/add2025.json'),
-            // DD stats
             dd_uploaded: this.checkFileExists('public/dd2025.json'),
             dd_earmarked_t1: this.checkFileExists('public/dd-earmarked-tahap1.json'),
             dd_earmarked_t2: this.checkFileExists('public/dd-earmarked-tahap2.json'),
             dd_nonearmarked_t1: this.checkFileExists('public/dd-nonearmarked-tahap1.json'),
             dd_nonearmarked_t2: this.checkFileExists('public/dd-nonearmarked-tahap2.json'),
-            // BHPRD stats
             bhprd_uploaded: this.checkFileExists('public/bhprd2025.json'),
             bhprd_t1: this.checkFileExists('public/bhprd-tahap1.json'),
             bhprd_t2: this.checkFileExists('public/bhprd-tahap2.json'),
             bhprd_t3: this.checkFileExists('public/bhprd-tahap3.json'),
             insentif_dd: this.checkFileExists('public/insentif-dd.json')
           };
+        }
           
         case 5: // Pemberdayaan Masyarakat (PMD - Kelembagaan)
           return {
@@ -155,21 +166,22 @@ class BidangController {
             })
           };
           
-        case 6: // Pemerintahan Desa (PEMDES)
+        case 6: { // Pemerintahan Desa (PEMDES)
+          const tahun6 = new Date().getFullYear();
+          const paguAgg6 = await prisma.anggaran_pagu.aggregate({
+            where: { tahun: tahun6, master_kegiatan: { bidang_id: BigInt(6) } },
+            _sum: { pagu: true }
+          });
           return {
-            total_musdesus: await prisma.musdesus.count(),
-            musdesus_approved: await prisma.musdesus.count({ 
-              where: { status: 'approved' } 
-            }),
-            musdesus_pending: await prisma.musdesus.count({ 
-              where: { status: 'pending' } 
-            }),
+            total_desa: await prisma.desas.count({ where: { status_pemerintahan: 'desa' } }),
             total_aparatur: await prisma.aparatur_desa.count(),
             total_produk_hukum: await prisma.produk_hukums.count(),
             produk_hukum_berlaku: await prisma.produk_hukums.count({
               where: { status_peraturan: 'berlaku' }
-            })
+            }),
+            pagu: Number(paguAgg6._sum.pagu ?? 0),
           };
+        }
           
         default:
           return {};
@@ -178,6 +190,25 @@ class BidangController {
       console.error(`Error getting stats for bidang ${bidangId}:`, error);
       return {};
     }
+  }
+
+  countJsonRecords(filePath, filterFn) {
+    try {
+      const fullPath = path.join(__dirname, '../../', filePath);
+      if (!fs.existsSync(fullPath)) return 0;
+      const data = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
+      return Array.isArray(data) ? (filterFn ? data.filter(filterFn).length : data.length) : 0;
+    } catch { return 0; }
+  }
+
+  countUniqueJsonField(filePath, keyFn) {
+    try {
+      const fullPath = path.join(__dirname, '../../', filePath);
+      if (!fs.existsSync(fullPath)) return 0;
+      const data = JSON.parse(fs.readFileSync(fullPath, 'utf8'));
+      if (!Array.isArray(data)) return 0;
+      return new Set(data.map(keyFn)).size;
+    } catch { return 0; }
   }
 
   /**
