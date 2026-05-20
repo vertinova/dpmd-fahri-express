@@ -3,17 +3,28 @@
  * Mapping: 2.13.01 → Sekretariat (bidang_id=2), 2.13.02/03/04 → Pemdes (bidang_id=6), 2.13.05 → PMD (bidang_id=5)
  */
 
+require('dotenv').config();
 const mysql = require('mysql2/promise');
 const path = require('path');
 const listBelanja = require('../data/anggaran/list_belanja.json');
 
-const DB_CONFIG = {
-  host: 'localhost',
-  port: 3306,
-  user: 'root',
-  password: '',
-  database: 'dpmd',
-};
+// Parse DATABASE_URL jika ada, fallback ke individual env vars
+function parseDbConfig() {
+  const url = process.env.DATABASE_URL;
+  if (url) {
+    const m = url.match(/mysql:\/\/([^:]+):([^@]*)@([^:]+):(\d+)\/(.+)/);
+    if (m) return { user: m[1], password: m[2], host: m[3], port: Number(m[4]), database: m[5] };
+  }
+  return {
+    host:     process.env.DB_HOST     || 'localhost',
+    port:     Number(process.env.DB_PORT) || 3306,
+    user:     process.env.DB_USER     || 'root',
+    password: process.env.DB_PASSWORD || '',
+    database: process.env.DB_NAME     || 'dpmd',
+  };
+}
+
+const DB_CONFIG = parseDbConfig();
 
 // Mapping kode_program → bidang_id
 const PROGRAM_BIDANG_MAP = {
