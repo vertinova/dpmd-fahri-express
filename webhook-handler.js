@@ -59,8 +59,6 @@ const REPOS = {
       '/bin/cp -f /var/www/backend/webhook-handler.js /var/www/webhook/webhook-handler.js',
       // Restart backend using ecosystem config (preserves max_memory_restart)
       `${NODE_BIN}/pm2 delete dpmd-backend 2>/dev/null; ${NODE_BIN}/pm2 start /var/www/backend/ecosystem.config.js`,
-      // Restart webhook: spawn background process then exit this command immediately
-      `/bin/bash -c '(sleep 3 && ${NODE_BIN}/pm2 restart github-webhook --update-env) &'`,
     ],
   },
   'dpmd-frontend': {
@@ -78,6 +76,9 @@ const REPOS = {
 // ─── Deployment Lock ─────────────────────────────────────────────────────────────
 
 const deployLock = {};
+let deploymentQueue = Promise.resolve();
+let queuedDeployments = 0;
+let restartWebhookAfterQueue = false;
 
 // ─── Logging ─────────────────────────────────────────────────────────────────────
 
@@ -139,6 +140,49 @@ function runCommands(commands, cwd) {
 }
 
 // ─── HTTP Helpers ────────────────────────────────────────────────────────────────
+
+async function runDeployment(repoName, config) {
+  log(`=== Deployment START: ${repoName} ===`);
+
+  try {
+    const results = await runCommands(config.commands, config.path);
+    const failed = results.filter((r) => !r.ok).length;
+    log(`=== Deployment END: ${repoName} — ${results.length - failed}/${results.length} OK ===`);
+
+    if (repoName === 'dpmd-fahri-express') {
+      restartWebhookAfterQueue = true;
+      log('Webhook restart scheduled after deployment queue is empty');
+    }
+  } catch (err) {
+    log(`=== Deployment FAILED: ${repoName} — ${err.message} ===`);
+  }
+}
+
+function enqueueDeployment(repoName, config) {
+  deployLock[repoName] = Date.now();
+  queuedDeployments++;
+
+  deploymentQueue = deploymentQueue
+    .catch((err) => {
+      log(`Deployment queue recovered after error: ${err.message}`);
+    })
+    .then(async () => {
+      try {
+        await runDeployment(repoName, config);
+      } finally {
+        delete deployLock[repoName];
+        queuedDeployments = Math.max(0, queuedDeployments - 1);
+
+        if (queuedDeployments === 0 && restartWebhookAfterQueue) {
+          restartWebhookAfterQueue = false;
+          log('Restarting github-webhook to load updated webhook-handler.js...');
+          setTimeout(() => process.exit(0), 1000); // pm2 auto-restart
+        }
+      }
+    });
+
+  return deploymentQueue;
+}
 
 function jsonResponse(res, status, data) {
   res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -240,7 +284,14 @@ async function handleWebhook(req, res) {
   }
 
   // Respond dulu, deploy secara async
-  jsonResponse(res, 200, { deploying: true, repo: repoName });
+  jsonResponse(res, 200, {
+    queued: true,
+    repo: repoName,
+    queue_size: queuedDeployments + 1,
+  });
+
+  enqueueDeployment(repoName, config);
+  return;
 
   // Jalankan deployment
   deployLock[repoName] = Date.now();
