@@ -287,6 +287,7 @@ model berita {
   konten          String           @db.Text
   ringkasan       String?          @db.VarChar(500)
   gambar          String?          @db.VarChar(255)
+  dokumen_pdf     String?          @db.VarChar(255)
   kategori        berita_kategori? @default(umum)
   status          berita_status?   @default(draft)
   tanggal_publish DateTime?        @db.DateTime(0)

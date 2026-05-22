@@ -105,6 +105,7 @@ const auth = async (req, res, next) => {
 // Some routes specify bidang names as roles (e.g., 'kekayaan_keuangan', 'sarana_prasarana').
 // These don't match any actual user.role — they map to bidang_id instead.
 const BIDANG_ROLE_MAP = {
+  'sekretariat': 2,        // Sekretariat
   'sarana_prasarana': 3,    // Bidang Sarana Prasarana Kewilayahan dan Ekonomi Desa
   'kekayaan_keuangan': 4,   // Bidang Kekayaan dan Keuangan Desa
   'pemberdayaan_masyarakat': 5, // Bidang Pemberdayaan Masyarakat Desa

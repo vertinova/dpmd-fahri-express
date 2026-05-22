@@ -40,6 +40,10 @@ const Berita = sequelize.define('Berita', {
     type: DataTypes.STRING(255),
     allowNull: true
   },
+  dokumen_pdf: {
+    type: DataTypes.STRING(255),
+    allowNull: true
+  },
   kategori: {
     type: DataTypes.ENUM('umum', 'bumdes', 'perjadin', 'musdesus', 'pengumuman'),
     defaultValue: 'umum'

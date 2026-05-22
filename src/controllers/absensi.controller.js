@@ -51,6 +51,34 @@ const HOLIDAYS_2026 = {
   '12-31': 'Cuti Bersama Tahun Baru',
 };
 
+const REKAP_DAY_LABELS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
+
+function formatDateKey(date) {
+  return date.toISOString().split('T')[0];
+}
+
+function buildWeekdayCalendar(startDate, endDate) {
+  const days = [];
+  const current = new Date(startDate);
+  current.setUTCHours(0, 0, 0, 0);
+
+  while (current <= endDate) {
+    const dayOfWeek = current.getUTCDay();
+    if (dayOfWeek >= 1 && dayOfWeek <= 5) {
+      const day = current.getUTCDate();
+      days.push({
+        date: formatDateKey(current),
+        day,
+        day_label: REKAP_DAY_LABELS[dayOfWeek],
+        label: `${String(day).padStart(2, '0')} ${REKAP_DAY_LABELS[dayOfWeek]}`,
+      });
+    }
+    current.setUTCDate(current.getUTCDate() + 1);
+  }
+
+  return days;
+}
+
 /**
  * Cek apakah tanggal adalah hari libur (weekend atau tanggal merah)
  * @param {Date} date - Tanggal yang dicek (dalam WIB)
@@ -1168,6 +1196,9 @@ const absensiController = {
       const wibNow = getWIB();
       let where = {};
       let periodeLabel = '';
+      let startDate = null;
+      let endDate = null;
+      let calendarDays = [];
 
       if (periode === 'minggu') {
         const refDate = tanggal ? new Date(tanggal) : new Date(`${wibNow.dateString}T00:00:00.000Z`);
@@ -1178,19 +1209,26 @@ const absensiController = {
         monday.setUTCHours(0, 0, 0, 0);
         const sunday = new Date(monday);
         sunday.setUTCDate(monday.getUTCDate() + 6);
-        where.tanggal = { gte: monday, lte: sunday };
+        startDate = monday;
+        endDate = sunday;
+        where.tanggal = { gte: startDate, lte: endDate };
         periodeLabel = `${monday.toISOString().split('T')[0]} s/d ${sunday.toISOString().split('T')[0]}`;
       } else if (periode === 'tahun') {
         const y = tahun ? parseInt(tahun) : wibNow.year;
-        where.tanggal = { gte: new Date(Date.UTC(y, 0, 1)), lte: new Date(Date.UTC(y, 11, 31)) };
+        startDate = new Date(Date.UTC(y, 0, 1));
+        endDate = new Date(Date.UTC(y, 11, 31));
+        where.tanggal = { gte: startDate, lte: endDate };
         periodeLabel = `Tahun ${y}`;
       } else {
         // Default: bulan
         const m = bulan ? parseInt(bulan) : wibNow.month;
         const y = tahun ? parseInt(tahun) : wibNow.year;
-        where.tanggal = { gte: new Date(Date.UTC(y, m - 1, 1)), lte: new Date(Date.UTC(y, m, 0)) };
+        startDate = new Date(Date.UTC(y, m - 1, 1));
+        endDate = new Date(Date.UTC(y, m, 0));
+        where.tanggal = { gte: startDate, lte: endDate };
         const monthNames = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
         periodeLabel = `${monthNames[m - 1]} ${y}`;
+        calendarDays = buildWeekdayCalendar(startDate, endDate);
       }
 
       // Get all eligible users
@@ -1210,7 +1248,17 @@ const absensiController = {
       const settings = await getAbsensiSettings();
       const rawRecords = await prisma.absensi_pegawai.findMany({
         where,
-        select: { user_id: true, status: true, tanggal: true, jam_masuk: true, jam_keluar: true }
+        select: {
+          id: true,
+          user_id: true,
+          status: true,
+          tanggal: true,
+          jam_masuk: true,
+          jam_keluar: true,
+          keterangan: true,
+          tujuan_dinas: true,
+        },
+        orderBy: [{ tanggal: 'asc' }, { jam_masuk: 'asc' }]
       });
 
       const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk);
@@ -1235,9 +1283,26 @@ const absensiController = {
         userRecords.forEach(r => { if (summary[r.status] !== undefined) summary[r.status]++; });
         summary.total = userRecords.length;
         summary.telat = isNoTelatUser ? 0 : userRecords.filter(r => r.telat_masuk_menit > 0).length;
+
+        const daily = {};
+        userRecords.forEach(r => {
+          const dateKey = formatDateKey(new Date(r.tanggal));
+          daily[dateKey] = {
+            id: r.id?.toString ? r.id.toString() : r.id,
+            tanggal: dateKey,
+            status: r.status,
+            jam_masuk: r.jam_masuk,
+            jam_keluar: r.jam_keluar,
+            keterangan: r.keterangan,
+            tujuan_dinas: r.tujuan_dinas,
+            telat_masuk_menit: isNoTelatUser ? 0 : (r.telat_masuk_menit || 0),
+          };
+        });
+
         return {
           user: u,
           summary,
+          daily,
           total_records: userRecords.length,
         };
       });
@@ -1246,15 +1311,18 @@ const absensiController = {
       const globalSummary = {};
       allStatuses.forEach(s => { globalSummary[s] = records.filter(r => r.status === s).length; });
       globalSummary.total = records.length;
-      globalSummary.telat = records.filter(r => r.telat_masuk_menit > 0).length;
+      globalSummary.telat = pegawaiRekap.reduce((sum, p) => sum + (p.summary.telat || 0), 0);
 
       return res.json({
         success: true,
         data: {
           pegawai: pegawaiRekap,
           global_summary: globalSummary,
+          calendar_days: calendarDays,
           periode,
           periode_label: periodeLabel,
+          periode_start: startDate ? formatDateKey(startDate) : null,
+          periode_end: endDate ? formatDateKey(endDate) : null,
           total_pegawai: allUsers.length,
         }
       });

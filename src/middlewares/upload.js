@@ -10,6 +10,7 @@ const uploadDirs = [
   'storage/uploads/musdesus',
   'storage/uploads/perjalanan_dinas',
   'storage/uploads/hero-gallery',
+  'storage/uploads/berita',
   'storage/uploads/surat-masuk',
   'storage/uploads/aparatur_desa_files',
   'storage/produk_hukum'
@@ -175,11 +176,31 @@ const uploadHeroGallery = multer({
   }
 });
 
+const beritaFileFilter = (req, file, cb) => {
+  if (file.fieldname === 'gambar') {
+    return imageFilter(req, file, cb);
+  }
+
+  if (file.fieldname === 'dokumen_pdf') {
+    const isPdf =
+      file.mimetype === 'application/pdf' ||
+      path.extname(file.originalname).toLowerCase() === '.pdf';
+
+    if (isPdf) {
+      return cb(null, true);
+    }
+
+    return cb(new Error('Dokumen berita harus berupa file PDF'), false);
+  }
+
+  return cb(new Error('Field upload berita tidak valid'), false);
+};
+
 const uploadBerita = multer({
   storage: storageBerita,
-  fileFilter: imageFilter,
+  fileFilter: beritaFileFilter,
   limits: {
-    fileSize: 5 * 1024 * 1024 // 5MB for images
+    fileSize: 15 * 1024 * 1024 // 15MB for images/PDF
   }
 });
 
