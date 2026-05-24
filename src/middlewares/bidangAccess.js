@@ -1,12 +1,13 @@
 /**
  * Middleware to check if user has access to specific bidang
- * 
+ *
  * Access Rules:
  * - pegawai: Can only access their own bidang (based on bidang_id)
  * - kepala_bidang: Can only access their own bidang (based on bidang_id)
  * - ketua_tim: Can only access their own bidang (based on bidang_id)
  * - kepala_dinas: Can access all bidangs
  * - sekretaris_dinas: Can access all bidangs
+ * - bendahara: Can access all bidangs (manages budget across all bidangs)
  * - superadmin: Can access all bidangs
  */
 
@@ -22,9 +23,9 @@ const checkBidangAccess = (req, res, next) => {
       userId: user.id
     });
 
-    // Superadmin, Kepala Dinas, dan Sekretaris Dinas punya full access ke semua bidang
-    if (user.role === 'superadmin' || user.role === 'kepala_dinas' || user.role === 'sekretaris_dinas') {
-      console.log('✅ [Bidang Access] Full access granted (superadmin/kepala_dinas/sekretaris_dinas)');
+    // Superadmin, Kepala Dinas, Sekretaris Dinas, dan Bendahara punya full access ke semua bidang
+    if (user.role === 'superadmin' || user.role === 'kepala_dinas' || user.role === 'sekretaris_dinas' || user.role === 'bendahara') {
+      console.log('✅ [Bidang Access] Full access granted (superadmin/kepala_dinas/sekretaris_dinas/bendahara)');
       return next();
     }
 
