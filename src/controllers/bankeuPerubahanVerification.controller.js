@@ -54,6 +54,11 @@ class BankeuPerubahanVerificationController {
           bp.submitted_to_dpmd, bp.submitted_to_dpmd_at,
           bp.surat_pengantar, bp.surat_permohonan,
           bp.berita_acara_path, bp.berita_acara_generated_at,
+          bp.berita_acara_qr_code, bp.berita_acara_version,
+          bp.surat_pengantar_kecamatan_path,
+          bp.surat_pengantar_kecamatan_nomor,
+          bp.surat_pengantar_kecamatan_generated_at,
+          bp.quisioner_completed,
           bp.catatan_verifikasi, bp.verified_at,
           bp.created_at, bp.updated_at,
           u_created.name AS created_by_name,
@@ -327,6 +332,40 @@ class BankeuPerubahanVerificationController {
         return res.status(400).json({
           success: false,
           message: 'Tidak ada proposal yang siap dikirim ke DPMD'
+        });
+      }
+
+      // Prerequisite: setiap proposal approved harus punya Quisioner + BA + Surat Pengantar
+      const [missingDocs] = await sequelize.query(`
+        SELECT id, judul_proposal,
+               (quisioner_completed IS NULL OR quisioner_completed = FALSE) AS missing_quisioner,
+               (berita_acara_path IS NULL OR berita_acara_path = '') AS missing_ba,
+               (surat_pengantar_kecamatan_path IS NULL OR surat_pengantar_kecamatan_path = '') AS missing_sp
+        FROM bankeu_perubahan_proposals
+        WHERE ${filters.join(' AND ')}
+          AND (
+            quisioner_completed IS NULL OR quisioner_completed = FALSE OR
+            berita_acara_path IS NULL OR berita_acara_path = '' OR
+            surat_pengantar_kecamatan_path IS NULL OR surat_pengantar_kecamatan_path = ''
+          )
+      `, { replacements });
+
+      if (missingDocs.length > 0) {
+        await transaction.rollback();
+        return res.status(400).json({
+          success: false,
+          message: 'Dokumen Kecamatan belum lengkap. Setiap proposal wajib memiliki Quisioner, Berita Acara, dan Surat Pengantar sebelum dikirim ke DPMD.',
+          data: {
+            incomplete_proposals: missingDocs.map(p => ({
+              id: p.id,
+              judul: p.judul_proposal,
+              missing: [
+                p.missing_quisioner ? 'Quisioner' : null,
+                p.missing_ba ? 'Berita Acara' : null,
+                p.missing_sp ? 'Surat Pengantar' : null,
+              ].filter(Boolean),
+            })),
+          },
         });
       }
 

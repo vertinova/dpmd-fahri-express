@@ -40,6 +40,8 @@ const requiredDirs = [
   path.join(__dirname, '../storage/uploads/bumdes_laporan_keuangan'),
   path.join(__dirname, '../storage/uploads/bumdes'),
   path.join(__dirname, '../storage/uploads/profil_desa'),
+  path.join(__dirname, '../storage/uploads/bankeu-perubahan/berita-acara'),
+  path.join(__dirname, '../storage/uploads/bankeu-perubahan/surat-pengantar'),
   path.join(__dirname, '../public/backups')
 ];
 
@@ -94,6 +96,8 @@ const bankeuPerubahanConfigRoutes = require('./routes/bankeuPerubahanConfig.rout
 const bankeuPerubahanLpjRoutes = require('./routes/bankeuPerubahanLpj.routes');
 const dpmdBankeuPerubahanLpjRoutes = require('./routes/dpmdBankeuPerubahanLpj.routes');
 const bankeuPerubahanPublicRoutes = require('./routes/bankeuPerubahanPublic.routes');
+const bankeuPerubahanBeritaAcaraRoutes = require('./routes/bankeuPerubahanBeritaAcara.routes');
+const bankeuPerubahanQuestionnaireRoutes = require('./routes/bankeuPerubahanQuestionnaire.routes');
 const dinasRoutes = require('./routes/dinas.routes');
 const dinasVerificationRoutes = require('./routes/dinasVerification.routes');
 const dpmdVerificationRoutes = require('./routes/dpmdVerification.routes');
@@ -331,6 +335,11 @@ app.use('/api/dpmd/bankeu-perubahan', bankeuPerubahanDpmdRoutes);
 app.use('/api/desa/bankeu-perubahan-lpj', bankeuPerubahanLpjRoutes);
 app.use('/api/dpmd/bankeu-perubahan-lpj', dpmdBankeuPerubahanLpjRoutes);
 app.use('/api/public/bankeu-perubahan', bankeuPerubahanPublicRoutes);
+
+// Bankeu Perubahan: validate tim & quisioner kelengkapan untuk Berita Acara
+app.use('/api/bankeu-perubahan/berita-acara', bankeuPerubahanBeritaAcaraRoutes);
+// Bankeu Perubahan: quisioner verifikasi
+app.use('/api/bankeu-perubahan/questionnaire', bankeuPerubahanQuestionnaireRoutes);
 app.use('/api/desa/bankeu-lpj', bankeuLpjRoutes); // Bankeu LPJ upload routes for desa
 app.use('/api/dpmd/bankeu-lpj', dpmdBankeuLpjRoutes); // Bankeu LPJ monitoring routes for DPMD/SPKED
 app.use('/api/bankeu/master-kegiatan', bankeuMasterKegiatanRoutes); // Master kegiatan CRUD

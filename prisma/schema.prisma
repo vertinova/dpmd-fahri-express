@@ -346,6 +346,12 @@ model bankeu_perubahan_proposals {
   surat_permohonan                                              String?                                      @db.VarChar(255)
   berita_acara_path                                             String?                                      @db.VarChar(255)
   berita_acara_generated_at                                     DateTime?                                    @db.Timestamp(0)
+  berita_acara_qr_code                                          String?                                      @db.VarChar(255)
+  berita_acara_version                                          Int?                                         @default(1) @db.UnsignedInt
+  surat_pengantar_kecamatan_path                                String?                                      @db.VarChar(255)
+  surat_pengantar_kecamatan_nomor                               String?                                      @db.VarChar(100)
+  surat_pengantar_kecamatan_generated_at                        DateTime?                                    @db.Timestamp(0)
+  quisioner_completed                                           Boolean?                                     @default(false)
   catatan_verifikasi                                            String?                                      @db.Text
   verified_by                                                   BigInt?                                      @db.UnsignedBigInt
   verified_at                                                   DateTime?                                    @db.Timestamp(0)
@@ -353,6 +359,7 @@ model bankeu_perubahan_proposals {
   created_at                                                    DateTime?                                    @default(now()) @db.Timestamp(0)
   updated_at                                                    DateTime?                                    @default(now()) @db.Timestamp(0)
   bankeu_perubahan_proposal_kegiatan                            bankeu_perubahan_proposal_kegiatan[]
+  bankeu_perubahan_questionnaires                               bankeu_perubahan_questionnaires[]
   desas                                                         desas                                        @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_bp_perubahan_desa")
   kecamatans                                                    kecamatans                                   @relation(fields: [kecamatan_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_bp_perubahan_kecamatan")
   users_bankeu_perubahan_proposals_created_byTousers            users                                        @relation("bp_perubahan_created_by", fields: [created_by], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_bp_perubahan_created_by")
@@ -421,24 +428,56 @@ model kecamatan_bankeu_perubahan_config {
 }
 
 model tim_verifikasi_bankeu_perubahan {
-  id                         BigInt                      @id @default(autoincrement()) @db.UnsignedBigInt
-  kecamatan_id               BigInt                      @db.UnsignedBigInt
-  proposal_id                BigInt?                     @db.UnsignedBigInt
-  jabatan                    String                      @db.VarChar(50)
-  jabatan_label              String?                     @db.VarChar(255)
-  nama                       String                      @db.VarChar(255)
-  nip                        String?                     @db.VarChar(50)
-  ttd_path                   String?                     @db.VarChar(255)
-  is_active                  Boolean?                    @default(true)
-  created_at                 DateTime?                   @default(now()) @db.Timestamp(0)
-  updated_at                 DateTime?                   @default(now()) @db.Timestamp(0)
-  kecamatans                 kecamatans                  @relation(fields: [kecamatan_id], references: [id], onDelete: Cascade, map: "fk_tvbp_kecamatan")
-  bankeu_perubahan_proposals bankeu_perubahan_proposals? @relation(fields: [proposal_id], references: [id], onDelete: Cascade, map: "fk_tvbp_proposal")
+  id                              BigInt                            @id @default(autoincrement()) @db.UnsignedBigInt
+  kecamatan_id                    BigInt                            @db.UnsignedBigInt
+  proposal_id                     BigInt?                           @db.UnsignedBigInt
+  jabatan                         String                            @db.VarChar(50)
+  jabatan_label                   String?                           @db.VarChar(255)
+  nama                            String                            @db.VarChar(255)
+  nip                             String?                           @db.VarChar(50)
+  ttd_path                        String?                           @db.VarChar(255)
+  is_active                       Boolean?                          @default(true)
+  created_at                      DateTime?                         @default(now()) @db.Timestamp(0)
+  updated_at                      DateTime?                         @default(now()) @db.Timestamp(0)
+  kecamatans                      kecamatans                        @relation(fields: [kecamatan_id], references: [id], onDelete: Cascade, map: "fk_tvbp_kecamatan")
+  bankeu_perubahan_proposals      bankeu_perubahan_proposals?       @relation(fields: [proposal_id], references: [id], onDelete: Cascade, map: "fk_tvbp_proposal")
+  bankeu_perubahan_questionnaires bankeu_perubahan_questionnaires[]
 
   @@index([kecamatan_id], map: "idx_tvbp_kecamatan")
   @@index([proposal_id], map: "idx_tvbp_proposal")
   @@index([jabatan], map: "idx_tvbp_jabatan")
   @@index([is_active], map: "idx_tvbp_active")
+}
+
+model bankeu_perubahan_questionnaires {
+  id                              BigInt                          @id @default(autoincrement()) @db.UnsignedBigInt
+  proposal_id                     BigInt                          @db.UnsignedBigInt
+  tim_verifikasi_id               BigInt?                         @db.UnsignedBigInt
+  verifikasi_type                 String                          @default("kecamatan_tim") @db.VarChar(30)
+  q1                              Boolean?
+  q2                              Boolean?
+  q3                              Boolean?
+  q4                              Boolean?
+  q5                              Boolean?
+  q6                              Boolean?
+  q7                              Boolean?
+  q8                              Boolean?
+  q9                              Boolean?
+  q10                             Boolean?
+  q11                             Boolean?
+  q12                             Boolean?
+  overall_notes                   String?                         @db.Text
+  status                          String                          @default("draft") @db.VarChar(20)
+  submitted_at                    DateTime?                       @db.Timestamp(0)
+  created_at                      DateTime                        @default(now()) @db.Timestamp(0)
+  updated_at                      DateTime                        @default(now()) @db.Timestamp(0)
+  bankeu_perubahan_proposals      bankeu_perubahan_proposals      @relation(fields: [proposal_id], references: [id], onDelete: Cascade, map: "fk_bpq_proposal")
+  tim_verifikasi_bankeu_perubahan tim_verifikasi_bankeu_perubahan? @relation(fields: [tim_verifikasi_id], references: [id], onDelete: Cascade, map: "fk_bpq_tim")
+
+  @@unique([proposal_id, tim_verifikasi_id], map: "uniq_bpq_proposal_tim")
+  @@index([proposal_id], map: "idx_bpq_proposal")
+  @@index([tim_verifikasi_id], map: "idx_bpq_tim")
+  @@index([verifikasi_type], map: "idx_bpq_type")
 }
 
 model bankeu_perubahan_lpj {
