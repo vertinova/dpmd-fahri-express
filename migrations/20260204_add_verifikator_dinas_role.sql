@@ -2,20 +2,12 @@
 -- Date: 2026-02-04
 -- Description: Menambahkan role 'verifikator_dinas' untuk user yang ditunjuk dinas untuk melakukan verifikasi bankeu
 
--- Step 1: Add new role to enum
+-- Step 1: Pastikan kolom role tidak dipersempit ke ENUM lama.
+-- Production sudah memakai role dinamis lewat tabel `roles`, jadi kolom ini
+-- harus tetap VARCHAR agar role baru seperti bpjs tidak menyebabkan
+-- "Data truncated for column 'role'" saat migration lama ini rerun.
 ALTER TABLE `users` 
-MODIFY COLUMN `role` ENUM(
-  'superadmin',
-  'kepala_dinas',
-  'sekretaris_dinas',
-  'kepala_bidang',
-  'ketua_tim',
-  'pegawai',
-  'desa',
-  'kecamatan',
-  'dinas_terkait',
-  'verifikator_dinas'
-) NOT NULL DEFAULT 'desa';
+MODIFY COLUMN `role` VARCHAR(50) NOT NULL DEFAULT 'desa';
 
 -- Step 2: Create table for verifikator_dinas assignments (optional - for tracking)
 -- NOTE: dinas_id references master_dinas table (dinas terkait)

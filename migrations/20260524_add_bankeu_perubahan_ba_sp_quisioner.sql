@@ -3,17 +3,106 @@
 -- versioning Berita Acara, dan flag Quisioner; serta buat tabel
 -- bankeu_perubahan_questionnaires (per tim member per proposal).
 --
--- Idempotent (gunakan IF NOT EXISTS untuk MySQL 8.0.29+)
+-- Idempotent dan kompatibel dengan MySQL production yang tidak mendukung
+-- ALTER TABLE ... ADD COLUMN IF NOT EXISTS.
 -- ============================================================
 
 -- 1) Tambah kolom ke bankeu_perubahan_proposals
-ALTER TABLE bankeu_perubahan_proposals
-  ADD COLUMN IF NOT EXISTS berita_acara_qr_code VARCHAR(255) NULL AFTER berita_acara_generated_at,
-  ADD COLUMN IF NOT EXISTS berita_acara_version INT UNSIGNED NULL DEFAULT 1 AFTER berita_acara_qr_code,
-  ADD COLUMN IF NOT EXISTS surat_pengantar_kecamatan_path VARCHAR(255) NULL AFTER berita_acara_version,
-  ADD COLUMN IF NOT EXISTS surat_pengantar_kecamatan_nomor VARCHAR(100) NULL AFTER surat_pengantar_kecamatan_path,
-  ADD COLUMN IF NOT EXISTS surat_pengantar_kecamatan_generated_at TIMESTAMP NULL AFTER surat_pengantar_kecamatan_nomor,
-  ADD COLUMN IF NOT EXISTS quisioner_completed TINYINT(1) NULL DEFAULT 0 AFTER surat_pengantar_kecamatan_generated_at;
+SET @column_exists := (
+  SELECT COUNT(*)
+  FROM INFORMATION_SCHEMA.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'bankeu_perubahan_proposals'
+    AND COLUMN_NAME = 'berita_acara_qr_code'
+);
+SET @sql := IF(
+  @column_exists = 0,
+  'ALTER TABLE bankeu_perubahan_proposals ADD COLUMN berita_acara_qr_code VARCHAR(255) NULL AFTER berita_acara_generated_at',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @column_exists := (
+  SELECT COUNT(*)
+  FROM INFORMATION_SCHEMA.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'bankeu_perubahan_proposals'
+    AND COLUMN_NAME = 'berita_acara_version'
+);
+SET @sql := IF(
+  @column_exists = 0,
+  'ALTER TABLE bankeu_perubahan_proposals ADD COLUMN berita_acara_version INT UNSIGNED NULL DEFAULT 1 AFTER berita_acara_qr_code',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @column_exists := (
+  SELECT COUNT(*)
+  FROM INFORMATION_SCHEMA.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'bankeu_perubahan_proposals'
+    AND COLUMN_NAME = 'surat_pengantar_kecamatan_path'
+);
+SET @sql := IF(
+  @column_exists = 0,
+  'ALTER TABLE bankeu_perubahan_proposals ADD COLUMN surat_pengantar_kecamatan_path VARCHAR(255) NULL AFTER berita_acara_version',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @column_exists := (
+  SELECT COUNT(*)
+  FROM INFORMATION_SCHEMA.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'bankeu_perubahan_proposals'
+    AND COLUMN_NAME = 'surat_pengantar_kecamatan_nomor'
+);
+SET @sql := IF(
+  @column_exists = 0,
+  'ALTER TABLE bankeu_perubahan_proposals ADD COLUMN surat_pengantar_kecamatan_nomor VARCHAR(100) NULL AFTER surat_pengantar_kecamatan_path',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @column_exists := (
+  SELECT COUNT(*)
+  FROM INFORMATION_SCHEMA.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'bankeu_perubahan_proposals'
+    AND COLUMN_NAME = 'surat_pengantar_kecamatan_generated_at'
+);
+SET @sql := IF(
+  @column_exists = 0,
+  'ALTER TABLE bankeu_perubahan_proposals ADD COLUMN surat_pengantar_kecamatan_generated_at TIMESTAMP NULL AFTER surat_pengantar_kecamatan_nomor',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
+
+SET @column_exists := (
+  SELECT COUNT(*)
+  FROM INFORMATION_SCHEMA.COLUMNS
+  WHERE TABLE_SCHEMA = DATABASE()
+    AND TABLE_NAME = 'bankeu_perubahan_proposals'
+    AND COLUMN_NAME = 'quisioner_completed'
+);
+SET @sql := IF(
+  @column_exists = 0,
+  'ALTER TABLE bankeu_perubahan_proposals ADD COLUMN quisioner_completed TINYINT(1) NULL DEFAULT 0 AFTER surat_pengantar_kecamatan_generated_at',
+  'SELECT 1'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
 
 -- 2) Buat tabel bankeu_perubahan_questionnaires
 CREATE TABLE IF NOT EXISTS bankeu_perubahan_questionnaires (
