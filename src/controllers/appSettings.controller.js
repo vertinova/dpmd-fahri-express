@@ -72,7 +72,7 @@ class AppSettingsController {
       });
 
       // Default values for bankeu submission settings (including year-suffixed keys)
-      const isBankeuKey = key.startsWith('bankeu_submission_desa') || key.startsWith('bankeu_submission_kecamatan');
+      const isBankeuKey = key.startsWith('bankeu_submission_desa') || key.startsWith('bankeu_submission_kecamatan') || key.startsWith('bankeu_perubahan_submission_');
       const defaultBankeuConfig = { enabled: true, schedule: null };
 
       if (!setting) {
@@ -97,7 +97,7 @@ class AppSettingsController {
       }
 
       // For bankeu settings, evaluate schedule
-      if (key.startsWith('bankeu_submission_')) {
+      if (key.startsWith('bankeu_submission_') || key.startsWith('bankeu_perubahan_submission_')) {
         const { isOpen, config, reason } = evaluateBankeuSchedule(setting.setting_value);
         return res.json({
           success: true,
@@ -172,8 +172,8 @@ class AppSettingsController {
         // Kelembagaan settings: Only Superadmin OR PMD
         hasPermission = isSuperadmin || parseInt(userBidangId) === pmdBidangId;
         requiredPermission = 'Superadmin atau Bidang PMD (bidang_id=5)';
-      } else if (key.startsWith('bankeu_submission_desa') || key.startsWith('bankeu_submission_kecamatan')) {
-        // Bankeu settings (including year-suffixed): Only Superadmin OR SPKED
+      } else if (key.startsWith('bankeu_submission_desa') || key.startsWith('bankeu_submission_kecamatan') || key.startsWith('bankeu_perubahan_submission_')) {
+        // Bankeu settings (including year-suffixed and perubahan): Only Superadmin OR SPKED
         hasPermission = isSuperadmin || parseInt(userBidangId) === spkedBidangId;
         requiredPermission = 'Superadmin atau Bidang SPKED (bidang_id=3)';
       } else {
@@ -193,7 +193,7 @@ class AppSettingsController {
 
       // For bankeu settings, store as JSON config
       let valueStr;
-      if (key.startsWith('bankeu_submission_') && typeof value === 'object' && value !== null) {
+      if ((key.startsWith('bankeu_submission_') || key.startsWith('bankeu_perubahan_submission_')) && typeof value === 'object' && value !== null) {
         // New format: { enabled, schedule: { days, startTime, endTime } }
         valueStr = JSON.stringify(value);
       } else {
@@ -214,7 +214,7 @@ class AppSettingsController {
       });
 
       // Parse response
-      if (key.startsWith('bankeu_submission_')) {
+      if (key.startsWith('bankeu_submission_') || key.startsWith('bankeu_perubahan_submission_')) {
         const { isOpen, config } = evaluateBankeuSchedule(setting.setting_value);
         return res.json({
           success: true,

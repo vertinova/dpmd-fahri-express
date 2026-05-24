@@ -280,6 +280,198 @@ model bankeu_verification_questionnaires {
   @@index([verifikasi_type], map: "idx_verifikasi_type")
 }
 
+// ============================================================
+// BANKEU PERUBAHAN 2026 - Independent feature
+// Flow: Desa -> Kecamatan -> DPMD (skip Dinas)
+// ============================================================
+
+model bankeu_perubahan_master_kegiatan {
+  id                                 Int                                            @id @default(autoincrement()) @db.UnsignedTinyInt
+  kategori                           bankeu_perubahan_master_kegiatan_kategori
+  urutan                             Int                                            @db.UnsignedTinyInt
+  nama_kegiatan                      String                                         @db.VarChar(500)
+  deskripsi                          String?                                        @db.Text
+  is_active                          Boolean?                                       @default(true)
+  created_at                         DateTime?                                      @default(now()) @db.Timestamp(0)
+  updated_at                         DateTime?                                      @default(now()) @db.Timestamp(0)
+  bankeu_perubahan_proposal_kegiatan bankeu_perubahan_proposal_kegiatan[]
+
+  @@index([kategori], map: "idx_bpmk_kategori")
+  @@index([is_active], map: "idx_bpmk_active")
+}
+
+model bankeu_perubahan_proposal_kegiatan {
+  id                               BigInt                           @id @default(autoincrement()) @db.UnsignedBigInt
+  proposal_id                      BigInt                           @db.UnsignedBigInt
+  kegiatan_id                      Int                              @db.UnsignedTinyInt
+  created_at                       DateTime?                        @default(now()) @db.Timestamp(0)
+  bankeu_perubahan_master_kegiatan bankeu_perubahan_master_kegiatan @relation(fields: [kegiatan_id], references: [id], onDelete: NoAction, onUpdate: NoAction, map: "fk_bppk_kegiatan")
+  bankeu_perubahan_proposals       bankeu_perubahan_proposals       @relation(fields: [proposal_id], references: [id], onDelete: Cascade, map: "fk_bppk_proposal")
+
+  @@unique([proposal_id, kegiatan_id], map: "uniq_bppk_proposal_kegiatan")
+  @@index([kegiatan_id], map: "idx_bppk_kegiatan")
+  @@index([proposal_id], map: "idx_bppk_proposal")
+}
+
+model bankeu_perubahan_proposals {
+  id                                                            BigInt                                       @id @default(autoincrement()) @db.UnsignedBigInt
+  desa_id                                                       BigInt                                       @db.UnsignedBigInt
+  kecamatan_id                                                  BigInt                                       @db.UnsignedBigInt
+  tahun_anggaran                                                Int                                          @default(2026) @db.Year
+  jenis_kegiatan                                                bankeu_perubahan_proposals_jenis_kegiatan
+  kegiatan_id                                                   Int?                                         @db.UnsignedTinyInt
+  kegiatan_nama                                                 String?                                      @db.VarChar(255)
+  nama_kegiatan_spesifik                                        String?                                      @db.VarChar(500)
+  volume                                                        String?                                      @db.VarChar(255)
+  lokasi                                                        String?                                      @db.VarChar(500)
+  judul_proposal                                                String                                       @db.VarChar(255)
+  deskripsi                                                     String?                                      @db.Text
+  file_proposal                                                 String                                       @db.VarChar(255)
+  file_size                                                     Int?                                         @db.UnsignedInt
+  anggaran_usulan                                               Decimal?                                     @db.Decimal(15, 2)
+  status                                                        bankeu_perubahan_proposals_status?           @default(draft)
+  kecamatan_status                                              bankeu_perubahan_proposals_kecamatan_status? @default(pending)
+  kecamatan_catatan                                             String?                                      @db.Text
+  kecamatan_verified_by                                         BigInt?                                      @db.UnsignedBigInt
+  kecamatan_verified_at                                         DateTime?                                    @db.Timestamp(0)
+  dpmd_status                                                   bankeu_perubahan_proposals_dpmd_status?      @default(pending)
+  dpmd_catatan                                                  String?                                      @db.Text
+  dpmd_verified_by                                              BigInt?                                      @db.UnsignedBigInt
+  dpmd_verified_at                                              DateTime?                                    @db.Timestamp(0)
+  submitted_to_kecamatan                                        Boolean?                                     @default(false)
+  submitted_at                                                  DateTime?                                    @db.Timestamp(0)
+  submitted_to_dpmd                                             Boolean?                                     @default(false)
+  submitted_to_dpmd_at                                          DateTime?                                    @db.Timestamp(0)
+  surat_pengantar                                               String?                                      @db.VarChar(255)
+  surat_permohonan                                              String?                                      @db.VarChar(255)
+  berita_acara_path                                             String?                                      @db.VarChar(255)
+  berita_acara_generated_at                                     DateTime?                                    @db.Timestamp(0)
+  catatan_verifikasi                                            String?                                      @db.Text
+  verified_by                                                   BigInt?                                      @db.UnsignedBigInt
+  verified_at                                                   DateTime?                                    @db.Timestamp(0)
+  created_by                                                    BigInt                                       @db.UnsignedBigInt
+  created_at                                                    DateTime?                                    @default(now()) @db.Timestamp(0)
+  updated_at                                                    DateTime?                                    @default(now()) @db.Timestamp(0)
+  bankeu_perubahan_proposal_kegiatan                            bankeu_perubahan_proposal_kegiatan[]
+  desas                                                         desas                                        @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_bp_perubahan_desa")
+  kecamatans                                                    kecamatans                                   @relation(fields: [kecamatan_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_bp_perubahan_kecamatan")
+  users_bankeu_perubahan_proposals_created_byTousers            users                                        @relation("bp_perubahan_created_by", fields: [created_by], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_bp_perubahan_created_by")
+  users_bankeu_perubahan_proposals_kecamatan_verified_byTousers users?                                       @relation("bp_perubahan_kec_verified_by", fields: [kecamatan_verified_by], references: [id], onUpdate: NoAction, map: "fk_bp_perubahan_kec_verified_by")
+  users_bankeu_perubahan_proposals_dpmd_verified_byTousers      users?                                       @relation("bp_perubahan_dpmd_verified_by", fields: [dpmd_verified_by], references: [id], onUpdate: NoAction, map: "fk_bp_perubahan_dpmd_verified_by")
+  users_bankeu_perubahan_proposals_verified_byTousers           users?                                       @relation("bp_perubahan_verified_by", fields: [verified_by], references: [id], onUpdate: NoAction, map: "fk_bp_perubahan_verified_by")
+  tim_verifikasi_bankeu_perubahan                               tim_verifikasi_bankeu_perubahan[]
+
+  @@index([desa_id], map: "idx_bp_per_desa")
+  @@index([kecamatan_id], map: "idx_bp_per_kecamatan")
+  @@index([tahun_anggaran], map: "idx_bp_per_tahun")
+  @@index([status], map: "idx_bp_per_status")
+  @@index([kecamatan_status], map: "idx_bp_per_kec_status")
+  @@index([dpmd_status], map: "idx_bp_per_dpmd_status")
+  @@index([submitted_to_kecamatan], map: "idx_bp_per_submitted_kec")
+  @@index([submitted_to_dpmd], map: "idx_bp_per_submitted_dpmd")
+  @@index([created_by], map: "idx_bp_per_created_by")
+  @@index([kecamatan_verified_by], map: "idx_bp_per_kec_verified_by")
+  @@index([dpmd_verified_by], map: "idx_bp_per_dpmd_verified_by")
+  @@index([verified_by], map: "idx_bp_per_verified_by")
+}
+
+model desa_bankeu_perubahan_surat {
+  id                       BigInt                                              @id @default(autoincrement()) @db.UnsignedBigInt
+  desa_id                  BigInt                                              @db.UnsignedBigInt
+  tahun                    Int                                                 @default(2026) @db.Year
+  surat_pengantar          String?                                             @db.VarChar(255)
+  surat_permohonan         String?                                             @db.VarChar(255)
+  submitted_to_kecamatan   Boolean?                                            @default(false)
+  submitted_at             DateTime?                                           @db.Timestamp(0)
+  kecamatan_review_status  desa_bankeu_perubahan_surat_kecamatan_review_status?
+  kecamatan_review_catatan String?                                             @db.Text
+  kecamatan_review_by      BigInt?                                             @db.UnsignedBigInt
+  kecamatan_review_at      DateTime?                                           @db.Timestamp(0)
+  created_at               DateTime?                                           @default(now()) @db.Timestamp(0)
+  updated_at               DateTime?                                           @default(now()) @db.Timestamp(0)
+  desas                    desas                                               @relation(fields: [desa_id], references: [id], onDelete: Cascade, map: "fk_dbps_desa")
+  users                    users?                                              @relation(fields: [kecamatan_review_by], references: [id], map: "fk_dbps_kec_review_by")
+
+  @@unique([desa_id, tahun], map: "uniq_desa_tahun_perubahan")
+  @@index([desa_id], map: "idx_dbps_desa")
+  @@index([tahun], map: "idx_dbps_tahun")
+  @@index([submitted_to_kecamatan], map: "idx_dbps_submitted")
+  @@index([kecamatan_review_by], map: "fk_dbps_kec_review_by")
+}
+
+model kecamatan_bankeu_perubahan_config {
+  id                    BigInt     @id @default(autoincrement()) @db.UnsignedBigInt
+  kecamatan_id          BigInt     @unique(map: "uniq_kecamatan_perubahan") @db.UnsignedBigInt
+  nama_camat            String     @db.VarChar(255)
+  nip_camat             String?    @db.VarChar(50)
+  jabatan_penandatangan String     @default("Camat") @db.VarChar(50)
+  logo_path             String?    @db.VarChar(255)
+  ttd_camat_path        String?    @db.VarChar(255)
+  stempel_path          String?    @db.VarChar(255)
+  alamat                String?    @db.Text
+  telepon               String?    @db.VarChar(50)
+  email                 String?    @db.VarChar(100)
+  website               String?    @db.VarChar(150)
+  kode_pos              String?    @db.VarChar(10)
+  created_at            DateTime?  @default(now()) @db.Timestamp(0)
+  updated_at            DateTime?  @default(now()) @db.Timestamp(0)
+  kecamatans            kecamatans @relation(fields: [kecamatan_id], references: [id], onDelete: Cascade, map: "fk_kbpc_kecamatan")
+
+  @@index([kecamatan_id], map: "idx_kbpc_kecamatan")
+}
+
+model tim_verifikasi_bankeu_perubahan {
+  id                         BigInt                      @id @default(autoincrement()) @db.UnsignedBigInt
+  kecamatan_id               BigInt                      @db.UnsignedBigInt
+  proposal_id                BigInt?                     @db.UnsignedBigInt
+  jabatan                    String                      @db.VarChar(50)
+  jabatan_label              String?                     @db.VarChar(255)
+  nama                       String                      @db.VarChar(255)
+  nip                        String?                     @db.VarChar(50)
+  ttd_path                   String?                     @db.VarChar(255)
+  is_active                  Boolean?                    @default(true)
+  created_at                 DateTime?                   @default(now()) @db.Timestamp(0)
+  updated_at                 DateTime?                   @default(now()) @db.Timestamp(0)
+  kecamatans                 kecamatans                  @relation(fields: [kecamatan_id], references: [id], onDelete: Cascade, map: "fk_tvbp_kecamatan")
+  bankeu_perubahan_proposals bankeu_perubahan_proposals? @relation(fields: [proposal_id], references: [id], onDelete: Cascade, map: "fk_tvbp_proposal")
+
+  @@index([kecamatan_id], map: "idx_tvbp_kecamatan")
+  @@index([proposal_id], map: "idx_tvbp_proposal")
+  @@index([jabatan], map: "idx_tvbp_jabatan")
+  @@index([is_active], map: "idx_tvbp_active")
+}
+
+model bankeu_perubahan_lpj {
+  id                                                  BigInt                          @id @default(autoincrement()) @db.UnsignedBigInt
+  desa_id                                             BigInt                          @db.UnsignedBigInt
+  tahun_anggaran                                      Int                             @default(2026) @db.Year
+  nama_file                                           String                          @db.VarChar(255)
+  file_path                                           String                          @db.VarChar(500)
+  file_size                                           Int?                            @db.UnsignedInt
+  keterangan                                          String?                         @db.Text
+  status                                              bankeu_perubahan_lpj_status     @default(pending)
+  dpmd_catatan                                        String?                         @db.Text
+  dpmd_verified_by                                    BigInt?                         @db.UnsignedBigInt
+  dpmd_verified_at                                    DateTime?                       @db.Timestamp(0)
+  uploaded_by                                         BigInt                          @db.UnsignedBigInt
+  created_at                                          DateTime                        @default(now()) @db.Timestamp(0)
+  updated_at                                          DateTime                        @default(now()) @db.Timestamp(0)
+  desas                                               desas                           @relation(fields: [desa_id], references: [id], onDelete: Cascade, map: "fk_bplp_desa")
+  users_bankeu_perubahan_lpj_uploaded_byTousers       users                           @relation("bp_perubahan_lpj_uploaded_by", fields: [uploaded_by], references: [id], onDelete: Cascade, map: "fk_bplp_uploaded_by")
+  users_bankeu_perubahan_lpj_dpmd_verified_byTousers  users?                          @relation("bp_perubahan_lpj_dpmd_verified_by", fields: [dpmd_verified_by], references: [id], map: "fk_bplp_dpmd_verified_by")
+
+  @@index([desa_id, tahun_anggaran], map: "idx_bplp_desa_tahun")
+  @@index([desa_id], map: "idx_bplp_desa")
+  @@index([tahun_anggaran], map: "idx_bplp_tahun")
+  @@index([status], map: "idx_bplp_status")
+  @@index([uploaded_by], map: "fk_bplp_uploaded_by")
+  @@index([dpmd_verified_by], map: "fk_bplp_dpmd_verified_by")
+}
+
+// ============================================================
+// END BANKEU PERUBAHAN models
+// ============================================================
+
 model berita {
   id_berita       Int              @id @default(autoincrement())
   judul           String           @db.VarChar(255)
@@ -546,12 +738,15 @@ model desas {
   is_musdesus_target        Boolean                     @default(false)
   created_at                DateTime?                   @db.Timestamp(0)
   updated_at                DateTime?                   @db.Timestamp(0)
-  aparatur_desa             aparatur_desa[]
-  bankeu_lpj                bankeu_lpj[]
-  bankeu_proposals          bankeu_proposals[]
-  berita_acara_history      berita_acara_history[]
-  desa_bankeu_surat         desa_bankeu_surat[]
-  kecamatans                kecamatans                  @relation(fields: [kecamatan_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "desas_kecamatan_id_foreign")
+  aparatur_desa               aparatur_desa[]
+  bankeu_lpj                  bankeu_lpj[]
+  bankeu_proposals            bankeu_proposals[]
+  bankeu_perubahan_proposals  bankeu_perubahan_proposals[]
+  bankeu_perubahan_lpj        bankeu_perubahan_lpj[]
+  desa_bankeu_perubahan_surat desa_bankeu_perubahan_surat[]
+  berita_acara_history        berita_acara_history[]
+  desa_bankeu_surat           desa_bankeu_surat[]
+  kecamatans                  kecamatans                  @relation(fields: [kecamatan_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "desas_kecamatan_id_foreign")
   karang_tarunas            karang_tarunas[]
   kelembagaan_activity_logs kelembagaan_activity_logs[]
   lembaga_lainnyas          lembaga_lainnyas[]
@@ -824,10 +1019,13 @@ model kecamatans {
   logo_path              String?                  @db.VarChar(255)
   nama_camat             String?                  @db.VarChar(255)
   nip_camat              String?                  @db.VarChar(50)
-  berita_acara_history   berita_acara_history[]
-  desas                  desas[]
-  petugas_monitoring     petugas_monitoring[]
-  verifikator_akses_desa verifikator_akses_desa[]
+  berita_acara_history             berita_acara_history[]
+  desas                            desas[]
+  petugas_monitoring               petugas_monitoring[]
+  verifikator_akses_desa           verifikator_akses_desa[]
+  bankeu_perubahan_proposals       bankeu_perubahan_proposals[]
+  kecamatan_bankeu_perubahan_config kecamatan_bankeu_perubahan_config?
+  tim_verifikasi_bankeu_perubahan  tim_verifikasi_bankeu_perubahan[]
 }
 
 model kegiatan {
@@ -1494,6 +1692,13 @@ model users {
   bankeu_proposals_bankeu_proposals_created_byTousers            bankeu_proposals[]          @relation("bankeu_proposals_created_byTousers")
   bankeu_proposals_bankeu_proposals_verified_byTousers           bankeu_proposals[]          @relation("bankeu_proposals_verified_byTousers")
   bankeu_proposals_bankeu_proposals_troubleshoot_byTousers       bankeu_proposals[]          @relation("bankeu_proposals_troubleshoot_byTousers")
+  bankeu_perubahan_proposals_created_byTousers                   bankeu_perubahan_proposals[] @relation("bp_perubahan_created_by")
+  bankeu_perubahan_proposals_kec_verified_byTousers              bankeu_perubahan_proposals[] @relation("bp_perubahan_kec_verified_by")
+  bankeu_perubahan_proposals_dpmd_verified_byTousers             bankeu_perubahan_proposals[] @relation("bp_perubahan_dpmd_verified_by")
+  bankeu_perubahan_proposals_verified_byTousers                  bankeu_perubahan_proposals[] @relation("bp_perubahan_verified_by")
+  bankeu_perubahan_lpj_uploaded_byTousers                        bankeu_perubahan_lpj[]      @relation("bp_perubahan_lpj_uploaded_by")
+  bankeu_perubahan_lpj_dpmd_verified_byTousers                   bankeu_perubahan_lpj[]      @relation("bp_perubahan_lpj_dpmd_verified_by")
+  desa_bankeu_perubahan_surat                                    desa_bankeu_perubahan_surat[]
   bankeu_lpj                                                     bankeu_lpj[]
   berita_acara_history                                           berita_acara_history[]
   desa_bankeu_surat                                              desa_bankeu_surat[]
@@ -2119,6 +2324,60 @@ enum bankeu_proposals_dpmd_status {
 enum bankeu_lpj_status {
   pending
   approved
+  rejected
+  revision
+}
+
+// ============================================================
+// BANKEU PERUBAHAN 2026 - Enums
+// ============================================================
+
+enum bankeu_perubahan_master_kegiatan_kategori {
+  wajib
+  pilihan_infrastruktur
+  pilihan_non_infrastruktur
+}
+
+enum bankeu_perubahan_proposals_jenis_kegiatan {
+  wajib
+  pilihan_infrastruktur
+  pilihan_non_infrastruktur
+}
+
+enum bankeu_perubahan_proposals_status {
+  pending
+  verified
+  rejected
+  revision
+  draft
+}
+
+enum bankeu_perubahan_proposals_kecamatan_status {
+  pending
+  in_review
+  approved
+  rejected
+  revision
+}
+
+enum bankeu_perubahan_proposals_dpmd_status {
+  pending
+  in_review
+  approved
+  rejected
+  revision
+}
+
+enum desa_bankeu_perubahan_surat_kecamatan_review_status {
+  pending
+  approved
+  rejected
+  revision
+}
+
+enum bankeu_perubahan_lpj_status {
+  pending
+  verified
   rejected
   revision
 }

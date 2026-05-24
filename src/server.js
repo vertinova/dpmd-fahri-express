@@ -84,6 +84,16 @@ const desaBankeuSuratRoutes = require('./routes/desaBankeuSurat.routes');
 const kecamatanBankeuSuratRoutes = require('./routes/kecamatanBankeuSurat.routes');
 const bankeuVerificationRoutes = require('./routes/bankeuVerification.routes');
 const bankeuMasterKegiatanRoutes = require('./routes/bankeuMasterKegiatan.routes');
+// Bankeu Perubahan 2026 - flow Desa -> Kecamatan -> DPMD (skip Dinas)
+const bankeuPerubahanProposalRoutes = require('./routes/bankeuPerubahanProposal.routes');
+const bankeuPerubahanVerificationRoutes = require('./routes/bankeuPerubahanVerification.routes');
+const bankeuPerubahanDpmdRoutes = require('./routes/bankeuPerubahanDpmd.routes');
+const bankeuPerubahanSuratRoutes = require('./routes/bankeuPerubahanSurat.routes');
+const kecamatanBankeuPerubahanSuratRoutes = require('./routes/kecamatanBankeuPerubahanSurat.routes');
+const bankeuPerubahanConfigRoutes = require('./routes/bankeuPerubahanConfig.routes');
+const bankeuPerubahanLpjRoutes = require('./routes/bankeuPerubahanLpj.routes');
+const dpmdBankeuPerubahanLpjRoutes = require('./routes/dpmdBankeuPerubahanLpj.routes');
+const bankeuPerubahanPublicRoutes = require('./routes/bankeuPerubahanPublic.routes');
 const dinasRoutes = require('./routes/dinas.routes');
 const dinasVerificationRoutes = require('./routes/dinasVerification.routes');
 const dpmdVerificationRoutes = require('./routes/dpmdVerification.routes');
@@ -161,6 +171,7 @@ const bankeuUploadLimiter = rateLimit({
 if (process.env.NODE_ENV === 'production') {
   // Apply permissive rate limit to bankeu upload routes
   app.use('/api/desa/bankeu', bankeuUploadLimiter);
+  app.use('/api/desa/bankeu-perubahan', bankeuUploadLimiter);
   // Apply standard rate limit to other API routes
   app.use('/api/', limiter);
   logger.info('🛡️  Rate limiting enabled (1000 req/15min API, 5000 req/15min Bankeu uploads)');
@@ -310,6 +321,16 @@ app.use('/api/kecamatan/bankeu/surat', kecamatanBankeuSuratRoutes); // Kecamatan
 app.use('/api/kecamatan/bankeu', bankeuVerificationRoutes); // Bankeu verification routes for kecamatan
 app.use('/api/dinas/bankeu', dinasVerificationRoutes); // Bankeu verification routes for dinas terkait
 app.use('/api/dpmd/bankeu', dpmdVerificationRoutes); // Bankeu verification routes for DPMD/SPKED
+// Bankeu Perubahan 2026 - independent feature (Desa -> Kecamatan -> DPMD, skip Dinas)
+app.use('/api/desa/bankeu-perubahan/surat', bankeuPerubahanSuratRoutes); // Desa surat (mount sebelum proposal route agar tidak konflik)
+app.use('/api/desa/bankeu-perubahan', bankeuPerubahanProposalRoutes);
+app.use('/api/kecamatan/bankeu-perubahan/surat', kecamatanBankeuPerubahanSuratRoutes);
+app.use('/api/kecamatan/bankeu-perubahan', bankeuPerubahanVerificationRoutes);
+app.use('/api/kecamatan/bankeu-perubahan', bankeuPerubahanConfigRoutes); // Config & tim verifikasi
+app.use('/api/dpmd/bankeu-perubahan', bankeuPerubahanDpmdRoutes);
+app.use('/api/desa/bankeu-perubahan-lpj', bankeuPerubahanLpjRoutes);
+app.use('/api/dpmd/bankeu-perubahan-lpj', dpmdBankeuPerubahanLpjRoutes);
+app.use('/api/public/bankeu-perubahan', bankeuPerubahanPublicRoutes);
 app.use('/api/desa/bankeu-lpj', bankeuLpjRoutes); // Bankeu LPJ upload routes for desa
 app.use('/api/dpmd/bankeu-lpj', dpmdBankeuLpjRoutes); // Bankeu LPJ monitoring routes for DPMD/SPKED
 app.use('/api/bankeu/master-kegiatan', bankeuMasterKegiatanRoutes); // Master kegiatan CRUD
@@ -415,6 +436,17 @@ function startServer() {
 
     // Initialize scheduler for push notifications
     schedulerService.init();
+
+    // Auto-seed bankeu_perubahan_master_kegiatan (idempotent)
+    // Fire-and-forget - jangan blocking startup, error tidak akan crash server
+    const { seedBankeuPerubahanMasterKegiatan } = require('./utils/seedBankeuPerubahanMaster');
+    seedBankeuPerubahanMasterKegiatan()
+      .then(result => {
+        if (result.seeded > 0) {
+          logger.info(`🌱 Bankeu Perubahan master kegiatan seeded: ${result.seeded} items`);
+        }
+      })
+      .catch(err => logger.warn('[Startup Seed] bankeu_perubahan_master_kegiatan:', err.message));
 
     // Signal PM2 that the app is ready (enables --wait-ready graceful reload)
     if (process.send) {

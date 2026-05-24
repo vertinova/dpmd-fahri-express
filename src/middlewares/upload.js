@@ -457,6 +457,116 @@ const uploadBankeuProposal = multer({
   }
 });
 
+// Storage configuration for BANKEU PERUBAHAN PROPOSAL (independent from bankeu normal)
+const storageBankeuPerubahanProposal = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = 'storage/uploads/bankeu-perubahan';
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    const nameWithoutExt = path.basename(file.originalname, ext)
+      .replace(/[^a-zA-Z0-9]/g, '_')
+      .substring(0, 50);
+    const filename = `${timestamp}_${nameWithoutExt}${ext}`;
+    cb(null, filename);
+  }
+});
+
+const uploadBankeuPerubahanProposal = multer({
+  storage: storageBankeuPerubahanProposal,
+  fileFilter: bankeuFileFilter, // reuse same PDF-only filter
+  limits: {
+    fileSize: 100 * 1024 * 1024 // 100MB for proposals
+  }
+});
+
+// Storage configuration for BANKEU PERUBAHAN SURAT (pengantar/permohonan PDF)
+const storageBankeuPerubahanSurat = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = 'storage/uploads/bankeu-perubahan/surat';
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    const nameWithoutExt = path.basename(file.originalname, ext)
+      .replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
+    cb(null, `surat_${timestamp}_${nameWithoutExt}${ext}`);
+  }
+});
+const uploadBankeuPerubahanSurat = multer({
+  storage: storageBankeuPerubahanSurat,
+  fileFilter: bankeuFileFilter,
+  limits: { fileSize: 50 * 1024 * 1024 } // 50MB for surat
+});
+
+// Storage configuration for BANKEU PERUBAHAN LPJ (PDF)
+const storageBankeuPerubahanLpj = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = 'storage/uploads/bankeu-perubahan/lpj/temp';
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    const nameWithoutExt = path.basename(file.originalname, ext)
+      .replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
+    cb(null, `lpj_perubahan_${timestamp}_${nameWithoutExt}${ext}`);
+  }
+});
+const uploadBankeuPerubahanLpj = multer({
+  storage: storageBankeuPerubahanLpj,
+  fileFilter: pdfFilter,
+  limits: { fileSize: 100 * 1024 * 1024 } // 100MB for LPJ
+});
+
+// Storage configuration for BANKEU PERUBAHAN CONFIG (logo/ttd-camat/stempel - images)
+const storageBankeuPerubahanConfig = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = 'storage/uploads/bankeu-perubahan/config';
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname).toLowerCase();
+    const nameWithoutExt = path.basename(file.originalname, ext)
+      .replace(/[^a-zA-Z0-9]/g, '_').substring(0, 30);
+    cb(null, `cfg_${timestamp}_${nameWithoutExt}${ext}`);
+  }
+});
+const uploadBankeuPerubahanConfig = multer({
+  storage: storageBankeuPerubahanConfig,
+  fileFilter: imageFilter,
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB for config images
+});
+
+// Storage configuration for BANKEU PERUBAHAN TIM SIGNATURE (reuse signatures folder)
+const storageBankeuPerubahanSignature = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = 'storage/uploads/signatures';
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname).toLowerCase();
+    cb(null, `sig-perubahan-${timestamp}${ext}`);
+  }
+});
+const uploadBankeuPerubahanSignature = multer({
+  storage: storageBankeuPerubahanSignature,
+  fileFilter: imageFilter,
+  limits: { fileSize: 2 * 1024 * 1024 }
+});
+
 // Storage: Contoh Proposal (format surat)
 const storageContohProposal = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -539,6 +649,11 @@ module.exports = {
   uploadProfilDesa,
   uploadInformasi,
   bankeuProposal: uploadBankeuProposal.single('file'),
+  bankeuPerubahanProposal: uploadBankeuPerubahanProposal.single('file'),
+  bankeuPerubahanSurat: uploadBankeuPerubahanSurat.single('file'),
+  bankeuPerubahanLpj: uploadBankeuPerubahanLpj.array('files', 10),
+  bankeuPerubahanConfigFile: uploadBankeuPerubahanConfig.single('file'),
+  bankeuPerubahanSignature: uploadBankeuPerubahanSignature.single('file'),
   bankeuLpj: uploadBankeuLpj.array('files', 10),
   contohProposalUpload: uploadContohProposal.single('file')
 };
