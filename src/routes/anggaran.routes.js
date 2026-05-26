@@ -12,7 +12,7 @@
 const express = require('express');
 const router = express.Router();
 const prisma = require('../config/prisma');
-const { auth, requireSuperadmin } = require('../middlewares/auth');
+const { auth, requireSuperadmin, checkRole } = require('../middlewares/auth');
 
 // ============================================================
 // HELPERS
@@ -543,7 +543,7 @@ router.get('/pagu/:paguId/items', auth, async (req, res) => {
  * POST /api/anggaran/pagu/:paguId/items
  * Tambah item RKA (superadmin)
  */
-router.post('/pagu/:paguId/items', auth, requireSuperadmin, async (req, res) => {
+router.post('/pagu/:paguId/items', auth, checkRole(['superadmin', 'bendahara']), async (req, res) => {
   try {
     const { paguId } = req.params;
     const pagu = await prisma.anggaran_pagu.findUnique({ where: { id: BigInt(paguId) } });
@@ -582,7 +582,7 @@ router.post('/pagu/:paguId/items', auth, requireSuperadmin, async (req, res) => 
  * PUT /api/anggaran/items/:id
  * Update item RKA (superadmin)
  */
-router.put('/items/:id', auth, requireSuperadmin, async (req, res) => {
+router.put('/items/:id', auth, checkRole(['superadmin', 'bendahara']), async (req, res) => {
   try {
     const { id } = req.params;
     const existing = await prisma.anggaran_rka_items.findUnique({ where: { id: BigInt(id) } });
@@ -619,7 +619,7 @@ router.put('/items/:id', auth, requireSuperadmin, async (req, res) => {
  * DELETE /api/anggaran/items/:id
  * Hapus item RKA (superadmin)
  */
-router.delete('/items/:id', auth, requireSuperadmin, async (req, res) => {
+router.delete('/items/:id', auth, checkRole(['superadmin', 'bendahara']), async (req, res) => {
   try {
     const { id } = req.params;
     const existing = await prisma.anggaran_rka_items.findUnique({ where: { id: BigInt(id) } });
