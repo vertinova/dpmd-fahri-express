@@ -353,6 +353,8 @@ class BidangController {
           pegawaiRole = 'koordinator';
         } else if (user.role === 'ketua_tim') {
           pegawaiRole = 'ketua_tim';
+        } else if (user.role === 'bendahara') {
+          pegawaiRole = 'bendahara';
         }
 
         return {

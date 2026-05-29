@@ -28,7 +28,8 @@ const desaContextMiddleware = (req, res, next) => {
     'kepala_bidang',
     'pegawai',
     'pemberdayaan_masyarakat',
-    'pmd'
+    'pmd',
+    'bendahara'
   ];
 
   // Check if user is admin

@@ -164,7 +164,7 @@ function validateDesaAccess(req, res) {
   const user = req.user;
   
   // Admin roles that can access any desa via desa_id parameter
-  const adminRoles = ['superadmin', 'pemberdayaan_masyarakat', 'pegawai', 'kepala_bidang', 'ketua_tim', 'kepala_dinas', 'sekretaris_dinas'];
+  const adminRoles = ['superadmin', 'pemberdayaan_masyarakat', 'pegawai', 'kepala_bidang', 'ketua_tim', 'kepala_dinas', 'sekretaris_dinas', 'bendahara'];
   
   if (adminRoles.includes(user.role)) {
     const desaId = req.query?.desa_id || req.body?.desa_id || req.desaId || req.user?.desa_id;
