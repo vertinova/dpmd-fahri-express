@@ -136,34 +136,33 @@ model bankeu_proposal_kegiatan {
 }
 
 model bankeu_lpj {
-  id               BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
-  desa_id          BigInt              @db.UnsignedBigInt
-  tahun_anggaran   Int                 @default(2025) @db.Year
-  nama_file        String              @db.VarChar(255)
-  file_path        String              @db.VarChar(500)
-  file_size        Int?                @db.UnsignedInt
-  keterangan       String?             @db.Text
-  status           bankeu_lpj_status   @default(pending)
-  dpmd_catatan     String?             @db.Text
-  dpmd_verified_by BigInt?             @db.UnsignedBigInt
-  dpmd_verified_at DateTime?           @db.Timestamp(0)
-  uploaded_by      BigInt              @db.UnsignedBigInt
-  created_at       DateTime            @default(now()) @db.Timestamp(0)
-  updated_at       DateTime            @default(now()) @db.Timestamp(0)
-
-  desas            desas               @relation(fields: [desa_id], references: [id], onDelete: Cascade, map: "fk_bankeu_lpj_desa")
-  users            users               @relation(fields: [uploaded_by], references: [id], onDelete: Cascade, map: "fk_bankeu_lpj_user")
+  id               BigInt            @id @default(autoincrement()) @db.UnsignedBigInt
+  desa_id          BigInt            @db.UnsignedBigInt
+  tahun_anggaran   Int               @default(2025) @db.Year
+  nama_file        String            @db.VarChar(255)
+  file_path        String            @db.VarChar(500)
+  file_size        Int?              @db.UnsignedInt
+  keterangan       String?           @db.Text
+  uploaded_by      BigInt            @db.UnsignedBigInt
+  created_at       DateTime          @default(now()) @db.Timestamp(0)
+  updated_at       DateTime          @default(now()) @db.Timestamp(0)
+  dpmd_catatan     String?           @db.Text
+  dpmd_verified_at DateTime?         @db.Timestamp(0)
+  dpmd_verified_by BigInt?           @db.UnsignedBigInt
+  status           bankeu_lpj_status @default(pending)
+  desas            desas             @relation(fields: [desa_id], references: [id], onDelete: Cascade, map: "fk_bankeu_lpj_desa")
+  users            users             @relation(fields: [uploaded_by], references: [id], onDelete: Cascade, map: "fk_bankeu_lpj_user")
 
   @@index([desa_id, tahun_anggaran], map: "idx_bankeu_lpj_desa_tahun")
   @@index([desa_id], map: "idx_bankeu_lpj_desa_id")
   @@index([tahun_anggaran], map: "idx_bankeu_lpj_tahun")
   @@index([status], map: "idx_bankeu_lpj_status")
+  @@index([uploaded_by], map: "fk_bankeu_lpj_user")
 }
 
 model bankeu_proposals {
   id                                                  BigInt                               @id @default(autoincrement()) @db.UnsignedBigInt
   desa_id                                             BigInt                               @db.UnsignedBigInt
-  tahun_anggaran                                      Int                                  @default(2026) @db.Year
   kegiatan_id                                         Int?                                 @db.UnsignedTinyInt
   judul_proposal                                      String                               @db.VarChar(255)
   nama_kegiatan_spesifik                              String?                              @db.VarChar(255)
@@ -184,13 +183,13 @@ model bankeu_proposals {
   dinas_verified_by                                   Int?
   dinas_catatan                                       String?                              @db.Text
   kecamatan_status                                    bankeu_proposals_kecamatan_status?
+  kecamatan_catatan                                   String?                              @db.Text
   kecamatan_verified_at                               DateTime?                            @db.Timestamp(0)
   kecamatan_verified_by                               BigInt?                              @db.UnsignedBigInt
-  kecamatan_catatan                                   String?                              @db.Text
   dpmd_status                                         bankeu_proposals_dpmd_status?
+  dpmd_catatan                                        String?                              @db.Text
   dpmd_verified_at                                    DateTime?                            @db.Timestamp(0)
   dpmd_verified_by                                    BigInt?                              @db.UnsignedBigInt
-  dpmd_catatan                                        String?                              @db.Text
   submitted_to_kecamatan                              Boolean?                             @default(false)
   submitted_at                                        DateTime?                            @db.Timestamp(0)
   submitted_to_dpmd                                   Boolean?                             @default(false)
@@ -203,9 +202,10 @@ model bankeu_proposals {
   created_by                                          BigInt                               @db.UnsignedBigInt
   created_at                                          DateTime?                            @default(now()) @db.Timestamp(0)
   updated_at                                          DateTime?                            @default(now()) @db.Timestamp(0)
-  troubleshoot_at                                     DateTime?                            @db.Timestamp(0)
-  troubleshoot_by                                     BigInt?                              @db.UnsignedBigInt
+  tahun_anggaran                                      Int                                  @default(2026) @db.Year
   troubleshoot_catatan                                String?                              @db.Text
+  troubleshoot_by                                     BigInt?                              @db.UnsignedBigInt
+  troubleshoot_at                                     DateTime?                            @db.Timestamp(0)
   bankeu_proposal_kegiatan                            bankeu_proposal_kegiatan[]
   users_bankeu_proposals_dpmd_verified_byTousers      users?                               @relation("bankeu_proposals_dpmd_verified_byTousers", fields: [dpmd_verified_by], references: [id], onUpdate: NoAction, map: "fk_bankeu_dpmd_verified_by")
   users_bankeu_proposals_kecamatan_verified_byTousers users?                               @relation("bankeu_proposals_kecamatan_verified_byTousers", fields: [kecamatan_verified_by], references: [id], onUpdate: NoAction, map: "fk_bankeu_kecamatan_verified_by")
@@ -518,7 +518,6 @@ model berita {
   konten          String           @db.Text
   ringkasan       String?          @db.VarChar(500)
   gambar          String?          @db.VarChar(255)
-  dokumen_pdf     String?          @db.VarChar(255)
   kategori        berita_kategori? @default(umum)
   status          berita_status?   @default(draft)
   tanggal_publish DateTime?        @db.DateTime(0)
@@ -552,16 +551,17 @@ model informasi {
 }
 
 model bidangs {
-  id                        BigInt                      @id @default(autoincrement()) @db.UnsignedBigInt
-  nama                      String                      @db.VarChar(255)
-  created_at                DateTime?                   @db.Timestamp(0)
-  updated_at                DateTime?                   @db.Timestamp(0)
-  jadwal_kegiatan           jadwal_kegiatan[]
-  jadwal_kegiatan_bidang    jadwal_kegiatan_bidang[]
-  kegiatan_bidang           kegiatan_bidang[]
-  pegawai                   pegawai[]
-  anggaran_bidang_units     anggaran_bidang_units[]
-  anggaran_master_kegiatan  anggaran_master_kegiatan[]
+  id                       BigInt                     @id @default(autoincrement()) @db.UnsignedBigInt
+  nama                     String                     @db.VarChar(255)
+  created_at               DateTime?                  @db.Timestamp(0)
+  updated_at               DateTime?                  @db.Timestamp(0)
+  anggaran_bidang_units    anggaran_bidang_units[]
+  anggaran_master_kegiatan anggaran_master_kegiatan[]
+  jadwal_kegiatan          jadwal_kegiatan[]
+  jadwal_kegiatan_bidang   jadwal_kegiatan_bidang[]
+  kegiatan_bidang          kegiatan_bidang[]
+  pegawai                  pegawai[]
+  pencairan                pencairan[]
 }
 
 model anggaran_bidang_units {
@@ -580,78 +580,79 @@ model anggaran_bidang_units {
 
 /// Master Kegiatan - data tetap, tidak berubah tiap tahun
 model anggaran_master_kegiatan {
-  id                BigInt                  @id @default(autoincrement()) @db.UnsignedBigInt
-  bidang_id         BigInt                  @db.UnsignedBigInt
-  bidang_unit_id    BigInt?                 @db.UnsignedBigInt
-  kode_program      String?                 @db.VarChar(100)
-  nama_program      String                  @db.VarChar(500)
-  kode_kegiatan     String?                 @db.VarChar(100)
-  nama_kegiatan     String                  @db.VarChar(500)
-  kode_sub_kegiatan String?                 @db.VarChar(100)
-  nama_sub_kegiatan String?                 @db.VarChar(500)
+  id                BigInt                 @id @default(autoincrement()) @db.UnsignedBigInt
+  bidang_id         BigInt                 @db.UnsignedBigInt
+  bidang_unit_id    BigInt?                @db.UnsignedBigInt
+  kode_program      String?                @db.VarChar(100)
+  nama_program      String                 @db.VarChar(500)
+  kode_kegiatan     String?                @db.VarChar(100)
+  nama_kegiatan     String                 @db.VarChar(500)
+  kode_sub_kegiatan String?                @db.VarChar(100)
+  nama_sub_kegiatan String?                @db.VarChar(500)
   id_giat           Int?
   id_sub_giat       Int?
-  urutan            Int                     @default(1)
-  is_active         Boolean                 @default(true)
-  created_by        BigInt                  @db.UnsignedBigInt
-  created_at        DateTime?               @default(now()) @db.Timestamp(0)
-  updated_at        DateTime?               @default(now()) @db.Timestamp(0)
-  bidangs           bidangs                 @relation(fields: [bidang_id], references: [id], onDelete: Cascade, map: "fk_amk_bidang")
-  bidang_unit       anggaran_bidang_units?  @relation(fields: [bidang_unit_id], references: [id], onDelete: SetNull, map: "fk_amk_unit")
-  users             users                   @relation("anggaran_master_kegiatan_created_by", fields: [created_by], references: [id], map: "fk_amk_user")
+  urutan            Int                    @default(1)
+  is_active         Boolean                @default(true)
+  created_by        BigInt                 @db.UnsignedBigInt
+  created_at        DateTime?              @default(now()) @db.Timestamp(0)
+  updated_at        DateTime?              @default(now()) @db.Timestamp(0)
+  bidangs           bidangs                @relation(fields: [bidang_id], references: [id], onDelete: Cascade, map: "fk_amk_bidang")
+  bidang_unit       anggaran_bidang_units? @relation(fields: [bidang_unit_id], references: [id], map: "fk_amk_unit")
+  users             users                  @relation("anggaran_master_kegiatan_created_by", fields: [created_by], references: [id], map: "fk_amk_user")
   pagu_list         anggaran_pagu[]
+  pencairan         pencairan[]
 
   @@index([bidang_id], map: "idx_bidang_id")
   @@index([bidang_unit_id], map: "idx_bidang_unit_id")
   @@index([kode_kegiatan], map: "idx_kode_kegiatan")
   @@index([is_active], map: "idx_is_active")
+  @@index([created_by], map: "fk_amk_user")
 }
 
 /// Pagu per kegiatan per tahun - berubah setiap tahun
 model anggaran_pagu {
-  id                  BigInt                   @id @default(autoincrement()) @db.UnsignedBigInt
-  master_kegiatan_id  BigInt                   @db.UnsignedBigInt
-  tahun               Int
-  pagu                Decimal                  @default(0) @db.Decimal(20, 2)
-  pagu_indikatif      Decimal?                 @default(0) @db.Decimal(20, 2)
-  created_by          BigInt                   @db.UnsignedBigInt
-  created_at          DateTime?                @default(now()) @db.Timestamp(0)
-  updated_at          DateTime?                @default(now()) @db.Timestamp(0)
-  master_kegiatan     anggaran_master_kegiatan @relation(fields: [master_kegiatan_id], references: [id], onDelete: Cascade, map: "fk_ap_master")
-  users               users                    @relation("anggaran_pagu_created_by", fields: [created_by], references: [id], map: "fk_ap_user")
-  rka_items           anggaran_rka_items[]
+  id                 BigInt                   @id @default(autoincrement()) @db.UnsignedBigInt
+  master_kegiatan_id BigInt                   @db.UnsignedBigInt
+  tahun              Int
+  pagu               Decimal                  @default(0.00) @db.Decimal(20, 2)
+  pagu_indikatif     Decimal?                 @default(0.00) @db.Decimal(20, 2)
+  created_by         BigInt                   @db.UnsignedBigInt
+  created_at         DateTime?                @default(now()) @db.Timestamp(0)
+  updated_at         DateTime?                @default(now()) @db.Timestamp(0)
+  master_kegiatan    anggaran_master_kegiatan @relation(fields: [master_kegiatan_id], references: [id], onDelete: Cascade, map: "fk_ap_master")
+  users              users                    @relation("anggaran_pagu_created_by", fields: [created_by], references: [id], map: "fk_ap_user")
+  rka_items          anggaran_rka_items[]
+  pencairan          pencairan[]
 
   @@unique([master_kegiatan_id, tahun], map: "uk_pagu_kegiatan_tahun")
   @@index([tahun], map: "idx_tahun")
+  @@index([created_by], map: "fk_ap_user")
 }
 
 /// Item RKA per pagu (per tahun) - berubah setiap tahun
 model anggaran_rka_items {
-  id            BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
-  pagu_id       BigInt              @db.UnsignedBigInt
-  nama_item     String              @db.VarChar(500)
-  kode_rekening String?             @db.VarChar(500)
-  satuan        String              @db.VarChar(100)
-  volume        Decimal             @default(1) @db.Decimal(15, 4)
-  harga_satuan  Decimal             @default(0) @db.Decimal(20, 2)
-  jenis_sht     anggaran_jenis_sht  @default(SSH)
-  kode_sht      String?             @db.VarChar(100)
-  keterangan    String?             @db.Text
-  koefisien     String?             @db.Text
-  grup          String?             @db.VarChar(200)
-  urutan        Int                 @default(1)
-  created_by    BigInt              @db.UnsignedBigInt
-  created_at    DateTime?           @default(now()) @db.Timestamp(0)
-  updated_at    DateTime?           @default(now()) @db.Timestamp(0)
-  pagu          anggaran_pagu       @relation(fields: [pagu_id], references: [id], onDelete: Cascade, map: "fk_ari_pagu")
-  users         users               @relation("anggaran_rka_items_created_by", fields: [created_by], references: [id], map: "fk_ari_user")
+  id              BigInt             @id @default(autoincrement()) @db.UnsignedBigInt
+  pagu_id         BigInt             @db.UnsignedBigInt
+  nama_item       String             @db.VarChar(500)
+  kode_rekening   String?            @db.VarChar(500)
+  satuan          String             @db.VarChar(100)
+  volume          Decimal            @default(1.0000) @db.Decimal(15, 4)
+  harga_satuan    Decimal            @default(0.00) @db.Decimal(20, 2)
+  jenis_sht       anggaran_jenis_sht @default(SSH)
+  kode_sht        String?            @db.VarChar(100)
+  keterangan      String?            @db.Text
+  koefisien       String?            @db.Text
+  grup            String?            @db.VarChar(200)
+  urutan          Int                @default(1)
+  created_by      BigInt             @db.UnsignedBigInt
+  created_at      DateTime?          @default(now()) @db.Timestamp(0)
+  updated_at      DateTime?          @default(now()) @db.Timestamp(0)
+  pagu            anggaran_pagu      @relation(fields: [pagu_id], references: [id], onDelete: Cascade, map: "fk_ari_pagu")
+  users           users              @relation("anggaran_rka_items_created_by", fields: [created_by], references: [id], map: "fk_ari_user")
+  pencairan_items pencairan_items[]
 
   @@index([pagu_id], map: "idx_pagu_id")
-}
-
-enum anggaran_jenis_sht {
-  SSH
-  SBU
+  @@index([created_by], map: "fk_ari_user")
 }
 
 model bumdes {
@@ -764,7 +765,6 @@ model desa_bankeu_surat {
   @@index([kecamatan_status], map: "idx_kecamatan_status")
   @@index([submitted_to_kecamatan], map: "idx_submitted")
   @@index([tahun], map: "idx_tahun")
-  @@index([submitted_to_kecamatan], map: "idx_submitted_to_kecamatan")
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
@@ -777,15 +777,15 @@ model desas {
   is_musdesus_target        Boolean                     @default(false)
   created_at                DateTime?                   @db.Timestamp(0)
   updated_at                DateTime?                   @db.Timestamp(0)
-  aparatur_desa               aparatur_desa[]
-  bankeu_lpj                  bankeu_lpj[]
-  bankeu_proposals            bankeu_proposals[]
-  bankeu_perubahan_proposals  bankeu_perubahan_proposals[]
-  bankeu_perubahan_lpj        bankeu_perubahan_lpj[]
+  aparatur_desa             aparatur_desa[]
+  bankeu_lpj                bankeu_lpj[]
+  bankeu_perubahan_lpj      bankeu_perubahan_lpj[]
+  bankeu_perubahan_proposals bankeu_perubahan_proposals[]
+  bankeu_proposals          bankeu_proposals[]
+  berita_acara_history      berita_acara_history[]
   desa_bankeu_perubahan_surat desa_bankeu_perubahan_surat[]
-  berita_acara_history        berita_acara_history[]
-  desa_bankeu_surat           desa_bankeu_surat[]
-  kecamatans                  kecamatans                  @relation(fields: [kecamatan_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "desas_kecamatan_id_foreign")
+  desa_bankeu_surat         desa_bankeu_surat[]
+  kecamatans                kecamatans                  @relation(fields: [kecamatan_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "desas_kecamatan_id_foreign")
   karang_tarunas            karang_tarunas[]
   kelembagaan_activity_logs kelembagaan_activity_logs[]
   lembaga_lainnyas          lembaga_lainnyas[]
@@ -848,22 +848,22 @@ model dinas_verifikator {
 }
 
 model disposisi {
-  id                                  BigInt               @id @default(autoincrement()) @db.UnsignedBigInt
-  surat_id                            BigInt               @db.UnsignedBigInt
-  dari_user_id                        BigInt               @db.UnsignedBigInt
-  ke_user_id                          BigInt               @db.UnsignedBigInt
-  catatan                             String?              @db.Text
-  instruksi                           String?              @db.VarChar(255)
-  status                              disposisi_status?    @default(pending)
-  level_disposisi                     Int                  @db.UnsignedTinyInt
-  tanggal_disposisi                   DateTime?            @default(now()) @db.DateTime(0)
-  tanggal_dibaca                      DateTime?            @db.DateTime(0)
-  tanggal_selesai                     DateTime?            @db.DateTime(0)
-  created_at                          DateTime?            @default(now()) @db.Timestamp(0)
-  updated_at                          DateTime?            @default(now()) @db.Timestamp(0)
-  users_disposisi_dari_user_idTousers users                @relation("disposisi_dari_user_idTousers", fields: [dari_user_id], references: [id])
-  users_disposisi_ke_user_idTousers   users                @relation("disposisi_ke_user_idTousers", fields: [ke_user_id], references: [id])
-  surat_masuk                         surat_masuk          @relation(fields: [surat_id], references: [id], onDelete: Cascade)
+  id                                  BigInt            @id @default(autoincrement()) @db.UnsignedBigInt
+  surat_id                            BigInt            @db.UnsignedBigInt
+  dari_user_id                        BigInt            @db.UnsignedBigInt
+  ke_user_id                          BigInt            @db.UnsignedBigInt
+  catatan                             String?           @db.Text
+  instruksi                           String?           @db.VarChar(255)
+  status                              disposisi_status? @default(pending)
+  level_disposisi                     Int               @db.UnsignedTinyInt
+  tanggal_disposisi                   DateTime?         @default(now()) @db.DateTime(0)
+  tanggal_dibaca                      DateTime?         @db.DateTime(0)
+  tanggal_selesai                     DateTime?         @db.DateTime(0)
+  created_at                          DateTime?         @default(now()) @db.Timestamp(0)
+  updated_at                          DateTime?         @default(now()) @db.Timestamp(0)
+  users_disposisi_dari_user_idTousers users             @relation("disposisi_dari_user_idTousers", fields: [dari_user_id], references: [id])
+  users_disposisi_ke_user_idTousers   users             @relation("disposisi_ke_user_idTousers", fields: [ke_user_id], references: [id])
+  surat_masuk                         surat_masuk       @relation(fields: [surat_id], references: [id], onDelete: Cascade)
 
   @@index([dari_user_id], map: "idx_dari_user")
   @@index([ke_user_id, status], map: "idx_disposisi_ke_status")
@@ -886,36 +886,36 @@ model hero_galleries {
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
 model jadwal_kegiatan {
-  id                                       BigInt                    @id @default(autoincrement()) @db.UnsignedBigInt
-  judul                                    String                    @db.VarChar(255)
-  deskripsi                                String                    @db.Text
-  bidang_id                                BigInt?                   @db.UnsignedBigInt
-  tanggal_mulai                            DateTime                  @db.DateTime(0)
-  tanggal_selesai                          DateTime                  @db.DateTime(0)
-  lokasi                                   String?                   @db.VarChar(255)
-  asal_kegiatan                            String?                   @db.VarChar(255)
-  pic_name                                 String?                   @db.VarChar(255)
-  pic_contact                              String?                   @db.VarChar(50)
-  status                                   jadwal_kegiatan_status    @default(draft)
-  prioritas                                jadwal_kegiatan_prioritas @default(sedang)
-  kategori                                 jadwal_kegiatan_kategori  @default(lainnya)
-  surat_masuk_id                           BigInt?                   @db.UnsignedBigInt
-  sub_bidang_pelaksana                     String?                   @db.VarChar(500)
-  anggaran                                 Decimal?                  @db.Decimal(15, 2)
-  catatan_approval                         String?                   @db.Text
-  created_by                               BigInt                    @db.UnsignedBigInt
-  approved_by                              BigInt?                   @db.UnsignedBigInt
-  approved_at                              DateTime?                 @db.DateTime(0)
-  created_at                               DateTime?                 @default(now()) @db.Timestamp(0)
-  updated_at                               DateTime?                 @default(now()) @db.Timestamp(0)
-  users_jadwal_kegiatan_approved_byTousers users?                    @relation("jadwal_kegiatan_approved_byTousers", fields: [approved_by], references: [id], onUpdate: NoAction, map: "fk_jadwal_kegiatan_approved_by")
-  bidangs                                  bidangs?                  @relation(fields: [bidang_id], references: [id], onUpdate: NoAction, map: "fk_jadwal_kegiatan_bidang")
-  users_jadwal_kegiatan_created_byTousers  users                     @relation("jadwal_kegiatan_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_jadwal_kegiatan_created_by")
-  surat_masuk                              surat_masuk?              @relation(fields: [surat_masuk_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "fk_jk_surat_masuk")
+  id                                       BigInt                      @id @default(autoincrement()) @db.UnsignedBigInt
+  judul                                    String                      @db.VarChar(255)
+  deskripsi                                String                      @db.Text
+  bidang_id                                BigInt?                     @db.UnsignedBigInt
+  tanggal_mulai                            DateTime                    @db.DateTime(0)
+  tanggal_selesai                          DateTime                    @db.DateTime(0)
+  lokasi                                   String?                     @db.VarChar(255)
+  asal_kegiatan                            String?                     @db.VarChar(255)
+  pic_name                                 String?                     @db.VarChar(255)
+  pic_contact                              String?                     @db.VarChar(50)
+  status                                   jadwal_kegiatan_status      @default(draft)
+  prioritas                                jadwal_kegiatan_prioritas   @default(sedang)
+  kategori                                 jadwal_kegiatan_kategori    @default(lainnya)
+  anggaran                                 Decimal?                    @db.Decimal(15, 2)
+  catatan_approval                         String?                     @db.Text
+  created_by                               BigInt                      @db.UnsignedBigInt
+  approved_by                              BigInt?                     @db.UnsignedBigInt
+  approved_at                              DateTime?                   @db.DateTime(0)
+  created_at                               DateTime?                   @default(now()) @db.Timestamp(0)
+  updated_at                               DateTime?                   @default(now()) @db.Timestamp(0)
+  sub_bidang_pelaksana                     String?                     @db.VarChar(500)
+  surat_masuk_id                           BigInt?                     @db.UnsignedBigInt
+  users_jadwal_kegiatan_approved_byTousers users?                      @relation("jadwal_kegiatan_approved_byTousers", fields: [approved_by], references: [id], onUpdate: NoAction, map: "fk_jadwal_kegiatan_approved_by")
+  bidangs                                  bidangs?                    @relation(fields: [bidang_id], references: [id], onUpdate: NoAction, map: "fk_jadwal_kegiatan_bidang")
+  users_jadwal_kegiatan_created_byTousers  users                       @relation("jadwal_kegiatan_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_jadwal_kegiatan_created_by")
+  surat_masuk                              surat_masuk?                @relation(fields: [surat_masuk_id], references: [id], onUpdate: NoAction, map: "fk_jk_surat_masuk")
   jadwal_kegiatan_bidang                   jadwal_kegiatan_bidang[]
-  jadwal_kegiatan_views                    jadwal_kegiatan_views[]
-  jadwal_kegiatan_reactions                jadwal_kegiatan_reactions[]
   jadwal_kegiatan_comments                 jadwal_kegiatan_comments[]
+  jadwal_kegiatan_reactions                jadwal_kegiatan_reactions[]
+  jadwal_kegiatan_views                    jadwal_kegiatan_views[]
 
   @@index([approved_by], map: "idx_jadwal_kegiatan_approved_by")
   @@index([bidang_id], map: "idx_jadwal_kegiatan_bidang_id")
@@ -988,7 +988,7 @@ model karang_tarunas {
   alamat                       String?                            @db.VarChar(255)
   status_kelembagaan           karang_tarunas_status_kelembagaan? @default(aktif)
   status_verifikasi            karang_tarunas_status_verifikasi?  @default(unverified)
-  imported                     Boolean                            @default(false) @db.TinyInt
+  imported                     Boolean                            @default(false)
   created_at                   DateTime?                          @default(now()) @db.Timestamp(0)
   updated_at                   DateTime?                          @default(now()) @db.Timestamp(0)
   produk_hukum_id              String?                            @db.Char(36)
@@ -1012,7 +1012,7 @@ model lembaga_lainnyas {
   alamat                       String?                              @db.VarChar(255)
   status_kelembagaan           lembaga_lainnyas_status_kelembagaan? @default(aktif)
   status_verifikasi            lembaga_lainnyas_status_verifikasi?  @default(unverified)
-  imported                     Boolean                              @default(false) @db.TinyInt
+  imported                     Boolean                              @default(false)
   catatan_verifikasi           String?                              @db.Text
   verifikator_nama             String?                              @db.VarChar(255)
   verified_at                  DateTime?                            @db.Timestamp(0)
@@ -1033,6 +1033,7 @@ model kecamatan_bankeu_config {
   kecamatan_id          BigInt    @unique(map: "kecamatan_id") @db.UnsignedBigInt
   nama_camat            String    @db.VarChar(255)
   nip_camat             String?   @db.VarChar(50)
+  jabatan_penandatangan String    @default("Camat") @db.VarChar(50)
   logo_path             String?   @db.VarChar(255)
   alamat                String?   @db.Text
   telepon               String?   @db.VarChar(50)
@@ -1043,7 +1044,6 @@ model kecamatan_bankeu_config {
   stempel_path          String?   @db.VarChar(255)
   created_at            DateTime? @default(now()) @db.Timestamp(0)
   updated_at            DateTime? @default(now()) @db.Timestamp(0)
-  jabatan_penandatangan String    @default("Camat") @db.VarChar(50)
 
   @@index([kecamatan_id], map: "idx_kecamatan")
 }
@@ -1058,13 +1058,13 @@ model kecamatans {
   logo_path              String?                  @db.VarChar(255)
   nama_camat             String?                  @db.VarChar(255)
   nip_camat              String?                  @db.VarChar(50)
-  berita_acara_history             berita_acara_history[]
-  desas                            desas[]
-  petugas_monitoring               petugas_monitoring[]
-  verifikator_akses_desa           verifikator_akses_desa[]
   bankeu_perubahan_proposals       bankeu_perubahan_proposals[]
+  berita_acara_history   berita_acara_history[]
+  desas                  desas[]
   kecamatan_bankeu_perubahan_config kecamatan_bankeu_perubahan_config?
+  petugas_monitoring     petugas_monitoring[]
   tim_verifikasi_bankeu_perubahan  tim_verifikasi_bankeu_perubahan[]
+  verifikator_akses_desa verifikator_akses_desa[]
 }
 
 model kegiatan {
@@ -1176,7 +1176,7 @@ model lpms {
   alamat                       String?                  @db.VarChar(255)
   status_kelembagaan           lpms_status_kelembagaan? @default(aktif)
   status_verifikasi            lpms_status_verifikasi?  @default(unverified)
-  imported                     Boolean                  @default(false) @db.TinyInt
+  imported                     Boolean                  @default(false)
   created_at                   DateTime?                @default(now()) @db.Timestamp(0)
   updated_at                   DateTime?                @default(now()) @db.Timestamp(0)
   produk_hukum_id              String?                  @db.Char(36)
@@ -1248,7 +1248,6 @@ model master_dinas {
 model pegawai {
   id_pegawai          BigInt                      @id @default(autoincrement()) @db.UnsignedBigInt
   id_bidang           BigInt                      @db.UnsignedBigInt
-  sub_bidang          String?                     @db.VarChar(255)
   nama_pegawai        String                      @db.VarChar(255)
   created_at          DateTime?                   @db.Timestamp(0)
   updated_at          DateTime?                   @db.Timestamp(0)
@@ -1266,6 +1265,7 @@ model pegawai {
   tempat_lahir        String?                     @db.VarChar(100)
   tmt_jabatan         DateTime?                   @db.Date
   unit_kerja          String?                     @db.VarChar(255)
+  sub_bidang          String?                     @db.VarChar(255)
   kegiatan_pegawai    kegiatan_pegawai[]
   bidangs             bidangs                     @relation(fields: [id_bidang], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "pegawai_id_bidang_foreign")
   perjadin_pegawai    perjadin_pegawai[]
@@ -1330,7 +1330,7 @@ model absensi_success_messages {
 
 model absensi_reminder_templates {
   id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  type       String    @unique @db.VarChar(50) // 'reminder_masuk', 'reminder_pulang'
+  type       String    @unique @db.VarChar(50)
   title      String    @default("") @db.VarChar(255)
   message    String?   @db.Text
   is_active  Boolean   @default(true)
@@ -1366,7 +1366,7 @@ model pengurus {
   tanggal_akhir_jabatan DateTime?                   @db.Date
   status_jabatan        pengurus_status_jabatan?    @default(aktif)
   status_verifikasi     pengurus_status_verifikasi? @default(unverified)
-  imported              Boolean                     @default(false) @db.TinyInt
+  imported              Boolean                     @default(false)
   produk_hukum_id       String?                     @db.Char(36)
   nama_lengkap          String                      @db.VarChar(255)
   nik                   String?                     @db.VarChar(32)
@@ -1380,15 +1380,15 @@ model pengurus {
   nomor_rekening        String?                     @db.VarChar(100)
   nama_rekening         String?                     @db.VarChar(255)
   pendidikan            String?                     @db.VarChar(255)
-  agama                 String?                     @db.VarChar(50)
-  golongan_darah        String?                     @db.VarChar(5)
-  nomor_buku_nikah      String?                     @db.VarChar(100)
   avatar                String?                     @db.VarChar(255)
   created_at            DateTime?                   @default(now()) @db.Timestamp(0)
   updated_at            DateTime?                   @default(now()) @db.Timestamp(0)
   catatan_verifikasi    String?                     @db.Text
   verified_at           DateTime?                   @db.Timestamp(0)
   verifikator_nama      String?                     @db.VarChar(255)
+  agama                 String?                     @db.VarChar(50)
+  golongan_darah        String?                     @db.VarChar(5)
+  nomor_buku_nikah      String?                     @db.VarChar(100)
   desas                 desas                       @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "pengurus_desa_id_foreign")
 
   @@index([pengurusable_type, pengurusable_id], map: "idx_pengurusable")
@@ -1443,7 +1443,7 @@ model pkks {
   alamat                       String?                  @db.VarChar(255)
   status_kelembagaan           pkks_status_kelembagaan? @default(aktif)
   status_verifikasi            pkks_status_verifikasi?  @default(unverified)
-  imported                     Boolean                  @default(false) @db.TinyInt
+  imported                     Boolean                  @default(false)
   created_at                   DateTime?                @default(now()) @db.Timestamp(0)
   updated_at                   DateTime?                @default(now()) @db.Timestamp(0)
   produk_hukum_id              String?                  @db.Char(36)
@@ -1467,7 +1467,7 @@ model posyandus {
   alamat                       String?                       @db.VarChar(255)
   status_kelembagaan           posyandus_status_kelembagaan? @default(aktif)
   status_verifikasi            posyandus_status_verifikasi?  @default(unverified)
-  imported                     Boolean                       @default(false) @db.TinyInt
+  imported                     Boolean                       @default(false)
   created_at                   DateTime?                     @default(now()) @db.Timestamp(0)
   updated_at                   DateTime?                     @default(now()) @db.Timestamp(0)
   produk_hukum_id              String?                       @db.Char(36)
@@ -1574,7 +1574,7 @@ model rts {
   alamat                       String?                 @db.VarChar(255)
   status_kelembagaan           rts_status_kelembagaan? @default(aktif)
   status_verifikasi            rts_status_verifikasi?  @default(unverified)
-  imported                     Boolean                 @default(false) @db.TinyInt
+  imported                     Boolean                 @default(false)
   created_at                   DateTime?               @default(now()) @db.Timestamp(0)
   updated_at                   DateTime?               @default(now()) @db.Timestamp(0)
   produk_hukum_id              String?                 @db.Char(36)
@@ -1602,7 +1602,7 @@ model rws {
   alamat                       String?                @db.VarChar(255)
   status_kelembagaan           rws_status_kelembagaan @default(aktif)
   status_verifikasi            rws_status_verifikasi  @default(unverified)
-  imported                     Boolean                @default(false) @db.TinyInt
+  imported                     Boolean                @default(false)
   created_at                   DateTime?              @db.Timestamp(0)
   updated_at                   DateTime?              @db.Timestamp(0)
   produk_hukum_id              String?                @db.Char(36)
@@ -1627,7 +1627,7 @@ model satlinmas {
   alamat                       String?                      @db.VarChar(255)
   status_kelembagaan           satlinmas_status_kelembagaan @default(aktif)
   status_verifikasi            satlinmas_status_verifikasi  @default(unverified)
-  imported                     Boolean                      @default(false) @db.TinyInt
+  imported                     Boolean                      @default(false)
   created_at                   DateTime?                    @db.Timestamp(0)
   updated_at                   DateTime?                    @db.Timestamp(0)
   produk_hukum_id              String?                      @db.Char(36)
@@ -1644,26 +1644,26 @@ model satlinmas {
 }
 
 model surat_masuk {
-  id             BigInt                   @id @default(autoincrement()) @db.UnsignedBigInt
-  nomor_surat    String                   @unique @db.VarChar(100)
-  tanggal_surat  DateTime                 @db.Date
-  tanggal_terima DateTime?                @default(now()) @db.DateTime(0)
-  pengirim       String                   @db.VarChar(255)
-  perihal        String                   @db.Text
-  jenis_surat    surat_masuk_jenis_surat? @default(biasa)
-  file_path      String?                  @db.VarChar(500)
-  keterangan     String?                  @db.Text
-  jam_kegiatan      String?               @db.VarChar(10)
-  lokasi_kegiatan   String?               @db.VarChar(255)
-  tanggal_kegiatan  DateTime?             @db.Date
-  status         surat_masuk_status?      @default(draft)
-  created_by     BigInt                   @db.UnsignedBigInt
-  created_at     DateTime?                @default(now()) @db.Timestamp(0)
-  updated_at     DateTime?                @default(now()) @db.Timestamp(0)
-  disposisi      disposisi[]
-  jadwal_kegiatan jadwal_kegiatan[]
-  lampiran_surat lampiran_surat[]
-  users          users                    @relation(fields: [created_by], references: [id])
+  id               BigInt                   @id @default(autoincrement()) @db.UnsignedBigInt
+  nomor_surat      String                   @unique @db.VarChar(100)
+  tanggal_surat    DateTime                 @db.Date
+  tanggal_terima   DateTime?                @default(now()) @db.DateTime(0)
+  pengirim         String                   @db.VarChar(255)
+  perihal          String                   @db.Text
+  jenis_surat      surat_masuk_jenis_surat? @default(biasa)
+  file_path        String?                  @db.VarChar(500)
+  keterangan       String?                  @db.Text
+  status           surat_masuk_status?      @default(draft)
+  created_by       BigInt                   @db.UnsignedBigInt
+  created_at       DateTime?                @default(now()) @db.Timestamp(0)
+  updated_at       DateTime?                @default(now()) @db.Timestamp(0)
+  jam_kegiatan     String?                  @db.VarChar(10)
+  lokasi_kegiatan  String?                  @db.VarChar(255)
+  tanggal_kegiatan DateTime?                @db.Date
+  disposisi        disposisi[]
+  jadwal_kegiatan  jadwal_kegiatan[]
+  lampiran_surat   lampiran_surat[]
+  users            users                    @relation(fields: [created_by], references: [id])
 
   @@index([created_by], map: "idx_created_by")
   @@index([status], map: "idx_status")
@@ -1709,6 +1709,7 @@ model users {
   email                                                          String                      @unique(map: "users_email_unique") @db.VarChar(255)
   email_verified_at                                              DateTime?                   @db.Timestamp(0)
   password                                                       String                      @db.VarChar(255)
+  plain_password                                                 String?                     @db.VarChar(255)
   role                                                           String                      @default("desa") @db.VarChar(50)
   kecamatan_id                                                   Int?                        @db.UnsignedInt
   desa_id                                                        BigInt?                     @db.UnsignedBigInt
@@ -1720,57 +1721,67 @@ model users {
   updated_at                                                     DateTime?                   @db.Timestamp(0)
   is_active                                                      Boolean                     @default(true)
   pegawai_id                                                     BigInt?                     @db.UnsignedBigInt
-  plain_password                                                 String?                     @db.VarChar(255)
   device_id                                                      String?                     @db.VarChar(100)
   last_active_at                                                 DateTime?                   @db.Timestamp(0)
   absensi_pegawai                                                absensi_pegawai[]
   activity_logs                                                  activity_logs[]
+  anggaran_master_kegiatan                                       anggaran_master_kegiatan[]  @relation("anggaran_master_kegiatan_created_by")
+  anggaran_pagu                                                  anggaran_pagu[]             @relation("anggaran_pagu_created_by")
+  anggaran_rka_items                                             anggaran_rka_items[]        @relation("anggaran_rka_items_created_by")
   app_settings                                                   app_settings[]
+  bankeu_lpj                                                     bankeu_lpj[]
+  bankeu_perubahan_lpj_dpmd_verified_byTousers                   bankeu_perubahan_lpj[]      @relation("bp_perubahan_lpj_dpmd_verified_by")
+  bankeu_perubahan_lpj_uploaded_byTousers                        bankeu_perubahan_lpj[]      @relation("bp_perubahan_lpj_uploaded_by")
+  bankeu_perubahan_proposals_created_byTousers                   bankeu_perubahan_proposals[] @relation("bp_perubahan_created_by")
+  bankeu_perubahan_proposals_dpmd_verified_byTousers             bankeu_perubahan_proposals[] @relation("bp_perubahan_dpmd_verified_by")
+  bankeu_perubahan_proposals_kec_verified_byTousers              bankeu_perubahan_proposals[] @relation("bp_perubahan_kec_verified_by")
+  bankeu_perubahan_proposals_verified_byTousers                  bankeu_perubahan_proposals[] @relation("bp_perubahan_verified_by")
   bankeu_proposals_bankeu_proposals_dpmd_verified_byTousers      bankeu_proposals[]          @relation("bankeu_proposals_dpmd_verified_byTousers")
   bankeu_proposals_bankeu_proposals_kecamatan_verified_byTousers bankeu_proposals[]          @relation("bankeu_proposals_kecamatan_verified_byTousers")
   bankeu_proposals_bankeu_proposals_created_byTousers            bankeu_proposals[]          @relation("bankeu_proposals_created_byTousers")
   bankeu_proposals_bankeu_proposals_verified_byTousers           bankeu_proposals[]          @relation("bankeu_proposals_verified_byTousers")
   bankeu_proposals_bankeu_proposals_troubleshoot_byTousers       bankeu_proposals[]          @relation("bankeu_proposals_troubleshoot_byTousers")
-  bankeu_perubahan_proposals_created_byTousers                   bankeu_perubahan_proposals[] @relation("bp_perubahan_created_by")
-  bankeu_perubahan_proposals_kec_verified_byTousers              bankeu_perubahan_proposals[] @relation("bp_perubahan_kec_verified_by")
-  bankeu_perubahan_proposals_dpmd_verified_byTousers             bankeu_perubahan_proposals[] @relation("bp_perubahan_dpmd_verified_by")
-  bankeu_perubahan_proposals_verified_byTousers                  bankeu_perubahan_proposals[] @relation("bp_perubahan_verified_by")
-  bankeu_perubahan_lpj_uploaded_byTousers                        bankeu_perubahan_lpj[]      @relation("bp_perubahan_lpj_uploaded_by")
-  bankeu_perubahan_lpj_dpmd_verified_byTousers                   bankeu_perubahan_lpj[]      @relation("bp_perubahan_lpj_dpmd_verified_by")
-  desa_bankeu_perubahan_surat                                    desa_bankeu_perubahan_surat[]
-  bankeu_lpj                                                     bankeu_lpj[]
   berita_acara_history                                           berita_acara_history[]
+  conversation_memberships                                       conversation_participants[]
+  conversations_as_one                                           conversations[]             @relation("conv_participant_one")
+  conversations_as_two                                           conversations[]             @relation("conv_participant_two")
+  desa_bankeu_perubahan_surat                                    desa_bankeu_perubahan_surat[]
   desa_bankeu_surat                                              desa_bankeu_surat[]
   disposisi_disposisi_dari_user_idTousers                        disposisi[]                 @relation("disposisi_dari_user_idTousers")
   disposisi_disposisi_ke_user_idTousers                          disposisi[]                 @relation("disposisi_ke_user_idTousers")
   informasi                                                      informasi[]
   jadwal_kegiatan_jadwal_kegiatan_approved_byTousers             jadwal_kegiatan[]           @relation("jadwal_kegiatan_approved_byTousers")
   jadwal_kegiatan_jadwal_kegiatan_created_byTousers              jadwal_kegiatan[]           @relation("jadwal_kegiatan_created_byTousers")
-  jadwal_kegiatan_views                                          jadwal_kegiatan_views[]
-  jadwal_kegiatan_reactions                                      jadwal_kegiatan_reactions[]
   jadwal_kegiatan_comments                                       jadwal_kegiatan_comments[]
+  jadwal_kegiatan_reactions                                      jadwal_kegiatan_reactions[]
+  jadwal_kegiatan_views                                          jadwal_kegiatan_views[]
   kelembagaan_activity_logs                                      kelembagaan_activity_logs[]
   lampiran_surat                                                 lampiran_surat[]
+  login_histories                                                login_histories[]
+  message_reactions                                              message_reactions[]
+  messages_sent                                                  messages[]                  @relation("msg_sender")
+  nomor_surat_requests                                           nomor_surat_requests[]
   notification_logs                                              notification_logs[]
   notifications_sent                                             notifications[]             @relation("notifications_sender")
   notifications_received                                         notifications[]             @relation("notifications_user")
+  pencairan_pencairan_atasan_pengurus_barang_idTousers           pencairan[]                 @relation("pencairan_atasan_pengurus_barang_idTousers")
+  pencairan_pencairan_bendahara_pengeluaran_idTousers            pencairan[]                 @relation("pencairan_bendahara_pengeluaran_idTousers")
+  pencairan_pencairan_created_byTousers                          pencairan[]                 @relation("pencairan_created_byTousers")
+  pencairan_pencairan_finalized_byTousers                        pencairan[]                 @relation("pencairan_finalized_byTousers")
+  pencairan_pencairan_kpa_idTousers                              pencairan[]                 @relation("pencairan_kpa_idTousers")
+  pencairan_pencairan_penerima_faktur_idTousers                  pencairan[]                 @relation("pencairan_penerima_faktur_idTousers")
+  pencairan_pencairan_pengurus_barang_idTousers                  pencairan[]                 @relation("pencairan_pengurus_barang_idTousers")
+  pencairan_pencairan_ppk_idTousers                              pencairan[]                 @relation("pencairan_ppk_idTousers")
+  pencairan_pencairan_pptk_idTousers                             pencairan[]                 @relation("pencairan_pptk_idTousers")
+  pencairan_pemeriksa                                            pencairan_pemeriksa[]
+  penyedia                                                       penyedia[]
   perjadin_grup                                                  perjadin_grup[]
   perjadin_pegawai                                               perjadin_pegawai[]
   push_subscriptions                                             push_subscriptions[]
-  login_histories                                                login_histories[]
-  surat_masuk                                                    surat_masuk[]
-  pegawai                                                        pegawai?                    @relation(fields: [pegawai_id], references: [id_pegawai], onDelete: Cascade, onUpdate: NoAction, map: "users_pegawai_id_foreign")
-  conversations_as_one                                           conversations[]             @relation("conv_participant_one")
-  conversations_as_two                                           conversations[]             @relation("conv_participant_two")
-  messages_sent                                                  messages[]                  @relation("msg_sender")
-  conversation_memberships                                       conversation_participants[]
-  message_reactions                                              message_reactions[]
-  user_statuses                                                  user_statuses[]
   status_views                                                   status_views[]
-  nomor_surat_requests                                           nomor_surat_requests[]
-  anggaran_master_kegiatan                                       anggaran_master_kegiatan[] @relation("anggaran_master_kegiatan_created_by")
-  anggaran_pagu                                                  anggaran_pagu[]            @relation("anggaran_pagu_created_by")
-  anggaran_rka_items                                             anggaran_rka_items[]       @relation("anggaran_rka_items_created_by")
+  surat_masuk                                                    surat_masuk[]
+  user_statuses                                                  user_statuses[]
+  pegawai                                                        pegawai?                    @relation(fields: [pegawai_id], references: [id_pegawai], onDelete: Cascade, onUpdate: NoAction, map: "users_pegawai_id_foreign")
 
   @@index([pegawai_id], map: "users_pegawai_id_index")
 }
@@ -1981,15 +1992,15 @@ model video_meetings {
 }
 
 model user_statuses {
-  id               BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
-  user_id          BigInt        @db.UnsignedBigInt
-  content          String        @db.Text
-  background_color String?       @default("#059669") @db.VarChar(20)
-  media_path       String?       @db.VarChar(500)
-  created_at       DateTime?     @default(now()) @db.Timestamp(0)
-  expires_at       DateTime      @db.DateTime(0)
-  users            users         @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_us_user")
+  id               BigInt         @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id          BigInt         @db.UnsignedBigInt
+  content          String         @db.Text
+  background_color String?        @default("#059669") @db.VarChar(20)
+  media_path       String?        @db.VarChar(500)
+  created_at       DateTime?      @default(now()) @db.Timestamp(0)
+  expires_at       DateTime       @db.DateTime(0)
   status_views     status_views[]
+  users            users          @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_us_user")
 
   @@index([user_id], map: "idx_us_user")
   @@index([expires_at], map: "idx_us_expires")
@@ -2005,6 +2016,273 @@ model status_views {
 
   @@unique([status_id, viewer_id], map: "uk_status_view")
   @@index([viewer_id], map: "idx_sv_viewer")
+}
+
+model klasifikasi_arsip {
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  kode        String    @unique @db.VarChar(20)
+  nama        String    @db.VarChar(500)
+  parent_kode String?   @db.VarChar(20)
+  level       Int       @default(1) @db.UnsignedTinyInt
+  is_active   Boolean   @default(true)
+  created_at  DateTime? @default(now()) @db.Timestamp(0)
+
+  @@index([parent_kode], map: "idx_parent")
+  @@index([level], map: "idx_level")
+}
+
+model nomor_surat_requests {
+  id                    BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  klasifikasi_kode      String    @db.VarChar(20)
+  nomor_registrasi      Int       @db.UnsignedInt
+  nomor_surat_generated String    @db.VarChar(255)
+  perihal               String    @db.VarChar(500)
+  bidang_id             Int       @db.UnsignedInt
+  bidang_nama           String    @db.VarChar(100)
+  requested_by          BigInt    @db.UnsignedBigInt
+  requested_by_name     String    @db.VarChar(255)
+  catatan               String?   @db.Text
+  tahun                 Int       @db.UnsignedSmallInt
+  created_at            DateTime? @default(now()) @db.Timestamp(0)
+  updated_at            DateTime? @default(now()) @db.Timestamp(0)
+  users                 users     @relation(fields: [requested_by], references: [id], onDelete: Cascade, map: "fk_nomorsurat_user")
+
+  @@unique([nomor_registrasi, klasifikasi_kode, tahun], map: "uq_nomor_tahun")
+  @@index([klasifikasi_kode], map: "idx_klasifikasi")
+  @@index([bidang_id], map: "idx_nomorsurat_bidang")
+  @@index([requested_by], map: "idx_nomorsurat_requested_by")
+  @@index([tahun], map: "idx_nomorsurat_tahun")
+  @@index([tahun, klasifikasi_kode], map: "idx_tahun_kode")
+}
+
+model conversations {
+  id                 BigInt                        @id @default(autoincrement()) @db.UnsignedBigInt
+  type               conversations_type
+  reference_type     conversations_reference_type?
+  reference_id       BigInt?                       @db.UnsignedBigInt
+  participant_one_id BigInt?                       @db.UnsignedBigInt
+  participant_two_id BigInt?                       @db.UnsignedBigInt
+  last_message_id    BigInt?                       @db.UnsignedBigInt
+  last_message_at    DateTime?                     @db.Timestamp(0)
+  created_at         DateTime                      @default(now()) @db.Timestamp(0)
+  updated_at         DateTime                      @default(now()) @db.Timestamp(0)
+  created_by         BigInt?                       @db.UnsignedBigInt
+  group_avatar       String?                       @db.VarChar(500)
+  group_name         String?                       @db.VarChar(100)
+  is_group           Boolean                       @default(false)
+  participants       conversation_participants[]
+  participant_one    users?                        @relation("conv_participant_one", fields: [participant_one_id], references: [id], onDelete: Cascade, map: "fk_conv_participant_one")
+  participant_two    users?                        @relation("conv_participant_two", fields: [participant_two_id], references: [id], onDelete: Cascade, map: "fk_conv_participant_two")
+  messages           messages[]
+
+  @@unique([participant_one_id, participant_two_id, reference_type, reference_id], map: "uk_conversation_context")
+  @@index([participant_one_id], map: "idx_conv_participant_one")
+  @@index([participant_two_id], map: "idx_conv_participant_two")
+  @@index([last_message_at], map: "idx_conv_last_message_at")
+  @@index([type], map: "idx_conv_type")
+  @@index([reference_type, reference_id], map: "idx_conv_reference")
+  @@index([is_group], map: "idx_conv_is_group")
+}
+
+model messages {
+  id              BigInt                @id @default(autoincrement()) @db.UnsignedBigInt
+  conversation_id BigInt                @db.UnsignedBigInt
+  sender_id       BigInt                @db.UnsignedBigInt
+  content         String                @db.Text
+  message_type    messages_message_type @default(text)
+  file_path       String?               @db.VarChar(500)
+  file_name       String?               @db.VarChar(255)
+  file_size       Int?                  @db.UnsignedInt
+  is_read         Boolean               @default(false)
+  read_at         DateTime?             @db.Timestamp(0)
+  created_at      DateTime              @default(now()) @db.Timestamp(0)
+  updated_at      DateTime              @default(now()) @db.Timestamp(0)
+  reply_to_id     BigInt?               @db.UnsignedBigInt
+  reactions       message_reactions[]
+  conversation    conversations         @relation(fields: [conversation_id], references: [id], onDelete: Cascade, map: "fk_msg_conversation")
+  reply_to        messages?             @relation("msg_reply", fields: [reply_to_id], references: [id], map: "fk_msg_reply_to")
+  replies         messages[]            @relation("msg_reply")
+  sender          users                 @relation("msg_sender", fields: [sender_id], references: [id], onDelete: Cascade, map: "fk_msg_sender")
+
+  @@index([conversation_id], map: "idx_msg_conversation")
+  @@index([sender_id], map: "idx_msg_sender")
+  @@index([reply_to_id], map: "idx_msg_reply_to")
+  @@index([created_at], map: "idx_msg_created_at")
+  @@index([is_read], map: "idx_msg_is_read")
+}
+
+model message_reactions {
+  id         BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  message_id BigInt   @db.UnsignedBigInt
+  user_id    BigInt   @db.UnsignedBigInt
+  emoji      String   @db.VarChar(32)
+  created_at DateTime @default(now()) @db.Timestamp(0)
+  message    messages @relation(fields: [message_id], references: [id], onDelete: Cascade, map: "fk_msg_reaction_message")
+  user       users    @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_msg_reaction_user")
+
+  @@unique([message_id, user_id, emoji], map: "uk_msg_reaction_user_emoji")
+  @@index([message_id], map: "idx_msg_reaction_message")
+  @@index([user_id], map: "idx_msg_reaction_user")
+}
+
+model conversation_participants {
+  id              BigInt                         @id @default(autoincrement()) @db.UnsignedBigInt
+  conversation_id BigInt                         @db.UnsignedBigInt
+  user_id         BigInt                         @db.UnsignedBigInt
+  role            conversation_participants_role @default(member)
+  joined_at       DateTime                       @default(now()) @db.Timestamp(0)
+  last_read_at    DateTime?                      @db.Timestamp(0)
+  conversation    conversations                  @relation(fields: [conversation_id], references: [id], onDelete: Cascade, map: "fk_cp_conversation")
+  user            users                          @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_cp_user")
+
+  @@unique([conversation_id, user_id], map: "uk_cp_conv_user")
+  @@index([user_id], map: "idx_cp_user")
+  @@index([conversation_id], map: "idx_cp_conversation")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model pencairan {
+  id                                               BigInt                    @id @default(autoincrement()) @db.UnsignedBigInt
+  jenis_pencairan                                  pencairan_jenis_pencairan @default(atk)
+  master_kegiatan_id                               BigInt                    @db.UnsignedBigInt
+  pagu_id                                          BigInt                    @db.UnsignedBigInt
+  tahun_anggaran                                   Int
+  bidang_id                                        BigInt                    @db.UnsignedBigInt
+  uraian_kegiatan                                  String?                   @db.Text
+  penyedia_id                                      BigInt?                   @db.UnsignedBigInt
+  ppk_id                                           BigInt?                   @db.UnsignedBigInt
+  kpa_id                                           BigInt?                   @db.UnsignedBigInt
+  pptk_id                                          BigInt?                   @db.UnsignedBigInt
+  bendahara_pengeluaran_id                         BigInt?                   @db.UnsignedBigInt
+  pengurus_barang_id                               BigInt?                   @db.UnsignedBigInt
+  atasan_pengurus_barang_id                        BigInt?                   @db.UnsignedBigInt
+  penerima_faktur_id                               BigInt?                   @db.UnsignedBigInt
+  tgl_pesanan                                      DateTime?                 @db.Date
+  tgl_surat_perintah_tugas                         DateTime?                 @db.Date
+  tgl_faktur                                       DateTime?                 @db.Date
+  tgl_kwitansi                                     DateTime?                 @db.Date
+  tgl_ba_pemeriksaan                               DateTime?                 @db.Date
+  tgl_bast                                         DateTime?                 @db.Date
+  tgl_basthp                                       DateTime?                 @db.Date
+  no_pesanan_a                                     String?                   @db.VarChar(150)
+  no_pesanan_b                                     String?                   @db.VarChar(150)
+  no_faktur                                        String?                   @db.VarChar(150)
+  no_kwitansi                                      String?                   @db.VarChar(150)
+  no_ba_pemeriksaan                                String?                   @db.VarChar(150)
+  no_bast                                          String?                   @db.VarChar(150)
+  no_basthp                                        String?                   @db.VarChar(150)
+  no_bappbj                                        String?                   @db.VarChar(150)
+  no_lampiran_bat                                  String?                   @db.VarChar(150)
+  no_surat_perintah_tugas                          String?                   @db.VarChar(150)
+  no_sk_bupati_kpa                                 String?                   @db.VarChar(150)
+  no_sk_kadis_ppk                                  String?                   @db.VarChar(150)
+  total_nilai                                      Decimal                   @default(0.00) @db.Decimal(20, 2)
+  total_terbilang                                  String?                   @db.VarChar(500)
+  metadata                                         Json?
+  status                                           pencairan_status          @default(draft)
+  finalized_at                                     DateTime?                 @db.Timestamp(0)
+  finalized_by                                     BigInt?                   @db.UnsignedBigInt
+  created_by                                       BigInt                    @db.UnsignedBigInt
+  created_at                                       DateTime?                 @default(now()) @db.Timestamp(0)
+  updated_at                                       DateTime?                 @default(now()) @db.Timestamp(0)
+  users_pencairan_atasan_pengurus_barang_idTousers users?                    @relation("pencairan_atasan_pengurus_barang_idTousers", fields: [atasan_pengurus_barang_id], references: [id], onUpdate: NoAction, map: "fk_pc_atasan_pb")
+  users_pencairan_bendahara_pengeluaran_idTousers  users?                    @relation("pencairan_bendahara_pengeluaran_idTousers", fields: [bendahara_pengeluaran_id], references: [id], onUpdate: NoAction, map: "fk_pc_bendahara")
+  bidangs                                          bidangs                   @relation(fields: [bidang_id], references: [id], onUpdate: NoAction, map: "fk_pc_bidang")
+  users_pencairan_created_byTousers                users                     @relation("pencairan_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_pc_creator")
+  users_pencairan_finalized_byTousers              users?                    @relation("pencairan_finalized_byTousers", fields: [finalized_by], references: [id], onUpdate: NoAction, map: "fk_pc_finalized_by")
+  users_pencairan_kpa_idTousers                    users?                    @relation("pencairan_kpa_idTousers", fields: [kpa_id], references: [id], onUpdate: NoAction, map: "fk_pc_kpa")
+  anggaran_master_kegiatan                         anggaran_master_kegiatan  @relation(fields: [master_kegiatan_id], references: [id], onUpdate: NoAction, map: "fk_pc_master")
+  anggaran_pagu                                    anggaran_pagu             @relation(fields: [pagu_id], references: [id], onUpdate: NoAction, map: "fk_pc_pagu")
+  users_pencairan_penerima_faktur_idTousers        users?                    @relation("pencairan_penerima_faktur_idTousers", fields: [penerima_faktur_id], references: [id], onUpdate: NoAction, map: "fk_pc_penerima_fak")
+  users_pencairan_pengurus_barang_idTousers        users?                    @relation("pencairan_pengurus_barang_idTousers", fields: [pengurus_barang_id], references: [id], onUpdate: NoAction, map: "fk_pc_pengurus")
+  penyedia                                         penyedia?                 @relation(fields: [penyedia_id], references: [id], onDelete: Restrict, onUpdate: NoAction, map: "fk_pc_penyedia")
+  users_pencairan_ppk_idTousers                    users?                    @relation("pencairan_ppk_idTousers", fields: [ppk_id], references: [id], onUpdate: NoAction, map: "fk_pc_ppk")
+  users_pencairan_pptk_idTousers                   users?                    @relation("pencairan_pptk_idTousers", fields: [pptk_id], references: [id], onUpdate: NoAction, map: "fk_pc_pptk")
+  pencairan_items                                  pencairan_items[]
+  pencairan_pemeriksa                              pencairan_pemeriksa[]
+
+  @@index([atasan_pengurus_barang_id], map: "fk_pc_atasan_pb")
+  @@index([bendahara_pengeluaran_id], map: "fk_pc_bendahara")
+  @@index([created_by], map: "fk_pc_creator")
+  @@index([finalized_by], map: "fk_pc_finalized_by")
+  @@index([kpa_id], map: "fk_pc_kpa")
+  @@index([penerima_faktur_id], map: "fk_pc_penerima_fak")
+  @@index([pengurus_barang_id], map: "fk_pc_pengurus")
+  @@index([ppk_id], map: "fk_pc_ppk")
+  @@index([pptk_id], map: "fk_pc_pptk")
+  @@index([bidang_id], map: "idx_pc_bidang")
+  @@index([jenis_pencairan], map: "idx_pc_jenis")
+  @@index([master_kegiatan_id], map: "idx_pc_master")
+  @@index([pagu_id], map: "idx_pc_pagu")
+  @@index([penyedia_id], map: "idx_pc_penyedia")
+  @@index([status], map: "idx_pc_status")
+  @@index([tahun_anggaran], map: "idx_pc_tahun")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model pencairan_items {
+  id                 BigInt                             @id @default(autoincrement()) @db.UnsignedBigInt
+  pencairan_id       BigInt                             @db.UnsignedBigInt
+  rka_item_id        BigInt?                            @db.UnsignedBigInt
+  nama_barang        String                             @db.VarChar(500)
+  spesifikasi        String?                            @db.Text
+  kode_rekening      String?                            @db.VarChar(500)
+  qty                Decimal                            @default(1.0000) @db.Decimal(15, 4)
+  satuan             String                             @db.VarChar(100)
+  harga_satuan       Decimal                            @default(0.00) @db.Decimal(20, 2)
+  ppn                Decimal                            @default(0.00) @db.Decimal(20, 2)
+  total              Decimal                            @default(0.00) @db.Decimal(20, 2)
+  status_pemeriksaan pencairan_items_status_pemeriksaan @default(baik)
+  urutan             Int                                @default(1)
+  created_at         DateTime?                          @default(now()) @db.Timestamp(0)
+  updated_at         DateTime?                          @default(now()) @db.Timestamp(0)
+  pencairan          pencairan                          @relation(fields: [pencairan_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_pci_pc")
+  anggaran_rka_items anggaran_rka_items?                @relation(fields: [rka_item_id], references: [id], onUpdate: NoAction, map: "fk_pci_rka")
+
+  @@index([pencairan_id], map: "idx_pci_pc")
+  @@index([rka_item_id], map: "idx_pci_rka")
+}
+
+model pencairan_pemeriksa {
+  id           BigInt                    @id @default(autoincrement()) @db.UnsignedBigInt
+  pencairan_id BigInt                    @db.UnsignedBigInt
+  user_id      BigInt                    @db.UnsignedBigInt
+  peran        pencairan_pemeriksa_peran @default(anggota)
+  urutan       Int                       @default(1)
+  created_at   DateTime?                 @default(now()) @db.Timestamp(0)
+  pencairan    pencairan                 @relation(fields: [pencairan_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_pcp_pc")
+  users        users                     @relation(fields: [user_id], references: [id], onUpdate: NoAction, map: "fk_pcp_user")
+
+  @@unique([pencairan_id, urutan], map: "uk_pcp_pc_urutan")
+  @@index([user_id], map: "idx_pcp_user")
+}
+
+model penyedia {
+  id               BigInt      @id @default(autoincrement()) @db.UnsignedBigInt
+  nama             String      @db.VarChar(255)
+  alamat           String?     @db.Text
+  npwp             String?     @db.VarChar(50)
+  nama_direktur    String?     @db.VarChar(255)
+  jabatan_direktur String?     @default("Direktur") @db.VarChar(100)
+  no_rekening      String?     @db.VarChar(50)
+  nama_bank        String?     @db.VarChar(100)
+  telepon          String?     @db.VarChar(30)
+  email            String?     @db.VarChar(150)
+  is_active        Boolean     @default(true)
+  created_by       BigInt?     @db.UnsignedBigInt
+  created_at       DateTime?   @default(now()) @db.Timestamp(0)
+  updated_at       DateTime?   @default(now()) @db.Timestamp(0)
+  pencairan        pencairan[]
+  users            users?      @relation(fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_penyedia_creator")
+
+  @@index([created_by], map: "fk_penyedia_creator")
+  @@index([is_active], map: "idx_penyedia_active")
+  @@index([nama], map: "idx_penyedia_nama")
+}
+
+enum anggaran_jenis_sht {
+  SSH
+  SBU
 }
 
 enum pegawai_jenis_kelamin {
@@ -2102,31 +2380,6 @@ enum rws_status_kelembagaan {
 enum satlinmas_status_kelembagaan {
   aktif
   nonaktif
-}
-
-enum disposisi_instruksi {
-  pedomani
-  tindaklanjuti
-  fasilitasi
-  wakili
-  hadiri_tugaskan
-  tugaskan_staff
-  jadwalkan
-  catat_ingatkan
-  klarifikasi
-  menghadapi_jelaskan
-  laksanakan
-  ikuti_monitor
-  kaji_pelajari
-  koordinasikan
-  siapkan_bahan
-  sikapi
-  persiapkan
-  udk
-  ump
-  perhatikan_limit_waktu
-  monitor_hasilnya
-  lapor_hasilnya
 }
 
 enum karang_tarunas_status_verifikasi {
@@ -2302,43 +2555,6 @@ enum bankeu_proposals_dinas_status {
   revision
 }
 
-model klasifikasi_arsip {
-  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  kode       String    @unique @db.VarChar(20)
-  nama       String    @db.VarChar(500)
-  parent_kode String?  @db.VarChar(20)
-  level      Int       @default(1) @db.UnsignedTinyInt
-  is_active  Boolean   @default(true)
-  created_at DateTime? @default(now()) @db.Timestamp(0)
-
-  @@index([parent_kode], map: "idx_parent")
-  @@index([level], map: "idx_level")
-}
-
-model nomor_surat_requests {
-  id                    BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  klasifikasi_kode      String    @db.VarChar(20)
-  nomor_registrasi      Int       @db.UnsignedInt
-  nomor_surat_generated String    @db.VarChar(255)
-  perihal               String    @db.VarChar(500)
-  bidang_id             Int       @db.UnsignedInt
-  bidang_nama           String    @db.VarChar(100)
-  requested_by          BigInt    @db.UnsignedBigInt
-  requested_by_name     String    @db.VarChar(255)
-  catatan               String?   @db.Text
-  tahun                 Int       @db.UnsignedSmallInt
-  created_at            DateTime? @default(now()) @db.Timestamp(0)
-  updated_at            DateTime? @default(now()) @db.Timestamp(0)
-  users                 users     @relation(fields: [requested_by], references: [id], onDelete: Cascade, map: "fk_nomorsurat_user")
-
-  @@unique([nomor_registrasi, klasifikasi_kode, tahun], map: "uq_nomor_tahun")
-  @@index([klasifikasi_kode], map: "idx_klasifikasi")
-  @@index([bidang_id], map: "idx_nomorsurat_bidang")
-  @@index([requested_by], map: "idx_nomorsurat_requested_by")
-  @@index([tahun], map: "idx_nomorsurat_tahun")
-  @@index([tahun, klasifikasi_kode], map: "idx_tahun_kode")
-}
-
 enum aparatur_desa_status {
   Aktif
   Tidak_Aktif @map("Tidak Aktif")
@@ -2366,10 +2582,6 @@ enum bankeu_lpj_status {
   rejected
   revision
 }
-
-// ============================================================
-// BANKEU PERUBAHAN 2026 - Enums
-// ============================================================
 
 enum bankeu_perubahan_master_kegiatan_kategori {
   wajib
@@ -2480,99 +2692,6 @@ enum video_meetings_status {
   cancelled
 }
 
-// ============================================
-// MESSAGING SYSTEM
-// ============================================
-
-model conversations {
-  id                BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
-  type              conversations_type
-  is_group          Boolean            @default(false)
-  group_name        String?            @db.VarChar(100)
-  group_avatar      String?            @db.VarChar(500)
-  created_by        BigInt?            @db.UnsignedBigInt
-  reference_type    conversations_reference_type?
-  reference_id      BigInt?            @db.UnsignedBigInt
-  participant_one_id BigInt?            @db.UnsignedBigInt
-  participant_two_id BigInt?            @db.UnsignedBigInt
-  last_message_id   BigInt?            @db.UnsignedBigInt
-  last_message_at   DateTime?          @db.Timestamp(0)
-  created_at        DateTime           @default(now()) @db.Timestamp(0)
-  updated_at        DateTime           @default(now()) @db.Timestamp(0)
-
-  participant_one   users?             @relation("conv_participant_one", fields: [participant_one_id], references: [id], onDelete: Cascade, map: "fk_conv_participant_one")
-  participant_two   users?             @relation("conv_participant_two", fields: [participant_two_id], references: [id], onDelete: Cascade, map: "fk_conv_participant_two")
-  messages          messages[]
-  participants      conversation_participants[]
-
-  @@unique([participant_one_id, participant_two_id, reference_type, reference_id], map: "uk_conversation_context")
-  @@index([participant_one_id], map: "idx_conv_participant_one")
-  @@index([participant_two_id], map: "idx_conv_participant_two")
-  @@index([last_message_at], map: "idx_conv_last_message_at")
-  @@index([type], map: "idx_conv_type")
-  @@index([reference_type, reference_id], map: "idx_conv_reference")
-  @@index([is_group], map: "idx_conv_is_group")
-}
-
-model messages {
-  id                BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
-  conversation_id   BigInt             @db.UnsignedBigInt
-  sender_id         BigInt             @db.UnsignedBigInt
-  reply_to_id       BigInt?            @db.UnsignedBigInt
-  content           String             @db.Text
-  message_type      messages_message_type @default(text)
-  file_path         String?            @db.VarChar(500)
-  file_name         String?            @db.VarChar(255)
-  file_size         Int?               @db.UnsignedInt
-  is_read           Boolean            @default(false)
-  read_at           DateTime?          @db.Timestamp(0)
-  created_at        DateTime           @default(now()) @db.Timestamp(0)
-  updated_at        DateTime           @default(now()) @db.Timestamp(0)
-
-  conversation      conversations      @relation(fields: [conversation_id], references: [id], onDelete: Cascade, map: "fk_msg_conversation")
-  sender            users              @relation("msg_sender", fields: [sender_id], references: [id], onDelete: Cascade, map: "fk_msg_sender")
-  reply_to          messages?          @relation("msg_reply", fields: [reply_to_id], references: [id], onDelete: SetNull, map: "fk_msg_reply_to")
-  replies           messages[]         @relation("msg_reply")
-  reactions         message_reactions[]
-
-  @@index([conversation_id], map: "idx_msg_conversation")
-  @@index([sender_id], map: "idx_msg_sender")
-  @@index([reply_to_id], map: "idx_msg_reply_to")
-  @@index([created_at], map: "idx_msg_created_at")
-  @@index([is_read], map: "idx_msg_is_read")
-}
-
-model message_reactions {
-  id          BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
-  message_id  BigInt   @db.UnsignedBigInt
-  user_id     BigInt   @db.UnsignedBigInt
-  emoji       String   @db.VarChar(32)
-  created_at  DateTime @default(now()) @db.Timestamp(0)
-
-  message     messages @relation(fields: [message_id], references: [id], onDelete: Cascade, map: "fk_msg_reaction_message")
-  user        users    @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_msg_reaction_user")
-
-  @@unique([message_id, user_id, emoji], map: "uk_msg_reaction_user_emoji")
-  @@index([message_id], map: "idx_msg_reaction_message")
-  @@index([user_id], map: "idx_msg_reaction_user")
-}
-
-model conversation_participants {
-  id              BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
-  conversation_id BigInt    @db.UnsignedBigInt
-  user_id         BigInt    @db.UnsignedBigInt
-  role            conversation_participants_role @default(member)
-  joined_at       DateTime  @default(now()) @db.Timestamp(0)
-  last_read_at    DateTime? @db.Timestamp(0)
-
-  conversation    conversations @relation(fields: [conversation_id], references: [id], onDelete: Cascade, map: "fk_cp_conversation")
-  user            users         @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_cp_user")
-
-  @@unique([conversation_id, user_id], map: "uk_cp_conv_user")
-  @@index([user_id], map: "idx_cp_user")
-  @@index([conversation_id], map: "idx_cp_conversation")
-}
-
 enum conversation_participants_role {
   admin
   member
@@ -2599,4 +2718,30 @@ enum messages_message_type {
   image
   system
   status_reply
+}
+
+enum pencairan_jenis_pencairan {
+  atk
+  cetak
+  makmin
+  perjadin
+  jasa
+  hibah
+  lainnya
+}
+
+enum pencairan_pemeriksa_peran {
+  ketua
+  anggota
+}
+
+enum pencairan_items_status_pemeriksaan {
+  baik
+  kurang_baik
+}
+
+enum pencairan_status {
+  draft
+  finalized
+  cancelled
 }
