@@ -39,6 +39,7 @@ const requiredDirs = [
   path.join(__dirname, '../storage/uploads/bumdes_dokumen_badanhukum'),
   path.join(__dirname, '../storage/uploads/bumdes_laporan_keuangan'),
   path.join(__dirname, '../storage/uploads/bumdes'),
+  path.join(__dirname, '../storage/uploads/photo-booth'),
   path.join(__dirname, '../storage/uploads/profil_desa'),
   path.join(__dirname, '../storage/uploads/bankeu-perubahan/berita-acara'),
   path.join(__dirname, '../storage/uploads/bankeu-perubahan/surat-pengantar'),
@@ -300,6 +301,8 @@ app.use('/api/settings', require('./routes/settings.routes'));
 
 // Printer routes (for thermal printer)
 app.use('/api/printer', require('./routes/printer.routes'));
+app.use('/api/event-attendance', require('./routes/eventAttendance.routes'));
+app.use('/api/photo-booth', require('./routes/photoBooth.routes'));
 
 // Disposisi Surat routes
 app.use('/api/surat-masuk', require('./routes/surat.routes'));
