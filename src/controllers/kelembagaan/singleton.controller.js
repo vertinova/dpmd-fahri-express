@@ -12,7 +12,8 @@ const {
   logKelembagaanActivity,
   validateDesaAccess,
   toUpper,
-  createAjukanUlangHandler
+  createAjukanUlangHandler,
+  validateKecamatanScope,
 } = require('./base.controller');
 
 /**
@@ -309,10 +310,13 @@ function createSingletonController(type, tableName, displayName) {
           return res.status(404).json({ success: false, message: `${displayName} tidak ditemukan` });
         }
 
-        // For desa users, validate they have access to this desa
+        // Desa: must own this desa
         if (user.role === 'desa' && Number(user.desa_id) !== Number(item.desa_id)) {
           return res.status(403).json({ success: false, message: 'User tidak memiliki akses desa' });
         }
+
+        // Kecamatan: desa must be in their kecamatan
+        if (!(await validateKecamatanScope(req, res, item.desa_id))) return;
 
         const { status_verifikasi, catatan_verifikasi } = req.body;
         if (!status_verifikasi) {

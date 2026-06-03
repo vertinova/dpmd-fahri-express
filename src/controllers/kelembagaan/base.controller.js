@@ -192,6 +192,36 @@ function toUpper(val) {
 }
 
 /**
+ * Validate that a kecamatan user may access/verify a specific desa.
+ * Returns true if allowed, responds with 403 and returns false if not.
+ * Non-kecamatan roles are always allowed through (no restriction).
+ */
+async function validateKecamatanScope(req, res, desaId) {
+  const user = req.user;
+  if (user.role !== 'kecamatan') return true; // only restrict kecamatan role
+
+  if (!user.kecamatan_id) {
+    res.status(403).json({ success: false, message: 'Kecamatan ID tidak ditemukan pada token' });
+    return false;
+  }
+
+  const desa = await prisma.desas.findFirst({
+    where: {
+      id: Number(desaId),
+      kecamatan_id: Number(user.kecamatan_id),
+    },
+    select: { id: true },
+  });
+
+  if (!desa) {
+    res.status(403).json({ success: false, message: 'Desa tidak berada di wilayah kecamatan Anda' });
+    return false;
+  }
+
+  return true;
+}
+
+/**
  * Shared handler for "Ajukan Ulang Verifikasi" (desa resubmit after ditolak)
  * Resets status_verifikasi from 'ditolak' to 'unverified'
  * @param {string} tableName - Prisma table name (e.g. 'rws', 'rts', 'posyandus')
@@ -270,5 +300,6 @@ module.exports = {
   getDesaId,
   validateDesaAccess,
   toUpper,
-  createAjukanUlangHandler
+  createAjukanUlangHandler,
+  validateKecamatanScope,
 };

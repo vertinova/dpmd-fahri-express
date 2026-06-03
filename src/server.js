@@ -354,6 +354,7 @@ app.use('/api/dinas', dinasVerifikatorRoutes); // Dinas verifikator management
 app.use('/api/dinas/verifikator', verifikatorAksesDesaRoutes); // Verifikator akses desa management
 app.use('/api/verifikator/profile', require('./routes/verifikatorProfile.routes')); // Verifikator profile & TTD
 app.use('/api/kecamatan', require('./routes/kecamatanBankeuTimConfig.routes')); // Kecamatan tim verifikasi config
+app.use('/api/kecamatan/kelembagaan', require('./routes/kecamatanKelembagaan.routes')); // Kecamatan kelembagaan verification
 app.use('/api/bankeu/questionnaire', require('./routes/bankeuQuestionnaire.routes')); // Verification questionnaire
 app.use('/api/berita-acara', beritaAcaraRoutes); // Berita Acara routes
 app.use('/api/contoh-proposal', require('./routes/contohProposal.routes')); // Example proposal files

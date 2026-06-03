@@ -13,7 +13,8 @@ const {
   validateDesaAccess,
   getDesaId,
   toUpper,
-  createAjukanUlangHandler
+  createAjukanUlangHandler,
+  validateKecamatanScope,
 } = require('./base.controller');
 
 const TYPE = 'lembaga-lainnya';
@@ -306,6 +307,9 @@ class LembagaLainnyaController {
       if (user.role === 'desa' && Number(user.desa_id) !== Number(item.desa_id)) {
         return res.status(403).json({ success: false, message: 'User tidak memiliki akses' });
       }
+
+      // Kecamatan: desa must be in their kecamatan
+      if (!(await validateKecamatanScope(req, res, item.desa_id))) return;
 
       const { status_verifikasi, catatan_verifikasi } = req.body;
       if (!status_verifikasi) {

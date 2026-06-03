@@ -4,7 +4,7 @@
  * This is polymorphic - can be attached to any kelembagaan type
  */
 
-const { prisma, ACTIVITY_TYPES, ENTITY_TYPES, logKelembagaanActivity, validateDesaAccess, toUpper } = require('./base.controller');
+const { prisma, ACTIVITY_TYPES, ENTITY_TYPES, logKelembagaanActivity, validateDesaAccess, toUpper, validateKecamatanScope } = require('./base.controller');
 const { v4: uuidv4 } = require('uuid');
 
 /**
@@ -620,24 +620,27 @@ class PengurusController {
     try {
       const user = req.user;
       
-      // Validate admin access (only admin bidang PMD or superadmin)
-      const isAdmin = user.role === 'superadmin' || 
-                     (user.role === 'kepala_bidang' && user.bidang_id === 5) || 
-                     (user.role === 'pegawai' && user.bidang_id === 5);
-      
-      if (!isAdmin) {
-        return res.status(403).json({ 
-          success: false, 
-          message: 'Hanya admin bidang Pemberdayaan Masyarakat yang dapat mengubah status verifikasi' 
+      // Kecamatan, admin bidang PMD (bidang_id=5), dan superadmin boleh verifikasi
+      const isAdminPMD = user.role === 'superadmin' ||
+                         (user.role === 'kepala_bidang' && user.bidang_id === 5) ||
+                         (user.role === 'pegawai' && user.bidang_id === 5);
+      const isKecamatan = user.role === 'kecamatan';
+
+      if (!isAdminPMD && !isKecamatan) {
+        return res.status(403).json({
+          success: false,
+          message: 'Hanya kecamatan, admin bidang Pemberdayaan Masyarakat, atau superadmin yang dapat mengubah status verifikasi',
         });
       }
 
       const { status_verifikasi, catatan_verifikasi } = req.body;
-      
-      if (!status_verifikasi || !['verified', 'unverified', 'ditolak'].includes(status_verifikasi)) {
-        return res.status(400).json({ 
-          success: false, 
-          message: 'Status verifikasi harus "verified", "unverified", atau "ditolak"' 
+
+      // Kecamatan hanya boleh verified atau ditolak (tidak bisa reset ke unverified)
+      const allowedStatuses = isAdminPMD ? ['verified', 'unverified', 'ditolak'] : ['verified', 'ditolak'];
+      if (!status_verifikasi || !allowedStatuses.includes(status_verifikasi)) {
+        return res.status(400).json({
+          success: false,
+          message: `Status verifikasi harus salah satu dari: ${allowedStatuses.join(', ')}`,
         });
       }
 
@@ -648,6 +651,9 @@ class PengurusController {
       if (!existing) {
         return res.status(404).json({ success: false, message: 'Pengurus tidak ditemukan' });
       }
+
+      // Kecamatan: desa pengurus harus berada di wilayah kecamatan mereka
+      if (isKecamatan && !(await validateKecamatanScope(req, res, existing.desa_id))) return;
 
       const updateData = {
         status_verifikasi,
