@@ -382,30 +382,6 @@ model bankeu_perubahan_proposals {
   @@index([verified_by], map: "idx_bp_per_verified_by")
 }
 
-model desa_bankeu_perubahan_surat {
-  id                       BigInt                                              @id @default(autoincrement()) @db.UnsignedBigInt
-  desa_id                  BigInt                                              @db.UnsignedBigInt
-  tahun                    Int                                                 @default(2026) @db.Year
-  surat_pengantar          String?                                             @db.VarChar(255)
-  surat_permohonan         String?                                             @db.VarChar(255)
-  submitted_to_kecamatan   Boolean?                                            @default(false)
-  submitted_at             DateTime?                                           @db.Timestamp(0)
-  kecamatan_review_status  desa_bankeu_perubahan_surat_kecamatan_review_status?
-  kecamatan_review_catatan String?                                             @db.Text
-  kecamatan_review_by      BigInt?                                             @db.UnsignedBigInt
-  kecamatan_review_at      DateTime?                                           @db.Timestamp(0)
-  created_at               DateTime?                                           @default(now()) @db.Timestamp(0)
-  updated_at               DateTime?                                           @default(now()) @db.Timestamp(0)
-  desas                    desas                                               @relation(fields: [desa_id], references: [id], onDelete: Cascade, map: "fk_dbps_desa")
-  users                    users?                                              @relation(fields: [kecamatan_review_by], references: [id], map: "fk_dbps_kec_review_by")
-
-  @@unique([desa_id, tahun], map: "uniq_desa_tahun_perubahan")
-  @@index([desa_id], map: "idx_dbps_desa")
-  @@index([tahun], map: "idx_dbps_tahun")
-  @@index([submitted_to_kecamatan], map: "idx_dbps_submitted")
-  @@index([kecamatan_review_by], map: "fk_dbps_kec_review_by")
-}
-
 model kecamatan_bankeu_perubahan_config {
   id                    BigInt     @id @default(autoincrement()) @db.UnsignedBigInt
   kecamatan_id          BigInt     @unique(map: "uniq_kecamatan_perubahan") @db.UnsignedBigInt
@@ -783,7 +759,6 @@ model desas {
   bankeu_perubahan_proposals bankeu_perubahan_proposals[]
   bankeu_proposals          bankeu_proposals[]
   berita_acara_history      berita_acara_history[]
-  desa_bankeu_perubahan_surat desa_bankeu_perubahan_surat[]
   desa_bankeu_surat         desa_bankeu_surat[]
   kecamatans                kecamatans                  @relation(fields: [kecamatan_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "desas_kecamatan_id_foreign")
   karang_tarunas            karang_tarunas[]
@@ -1745,7 +1720,6 @@ model users {
   conversation_memberships                                       conversation_participants[]
   conversations_as_one                                           conversations[]             @relation("conv_participant_one")
   conversations_as_two                                           conversations[]             @relation("conv_participant_two")
-  desa_bankeu_perubahan_surat                                    desa_bankeu_perubahan_surat[]
   desa_bankeu_surat                                              desa_bankeu_surat[]
   disposisi_disposisi_dari_user_idTousers                        disposisi[]                 @relation("disposisi_dari_user_idTousers")
   disposisi_disposisi_ke_user_idTousers                          disposisi[]                 @relation("disposisi_ke_user_idTousers")
@@ -2614,13 +2588,6 @@ enum bankeu_perubahan_proposals_kecamatan_status {
 enum bankeu_perubahan_proposals_dpmd_status {
   pending
   in_review
-  approved
-  rejected
-  revision
-}
-
-enum desa_bankeu_perubahan_surat_kecamatan_review_status {
-  pending
   approved
   rejected
   revision

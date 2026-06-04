@@ -91,8 +91,6 @@ const bankeuMasterKegiatanRoutes = require('./routes/bankeuMasterKegiatan.routes
 const bankeuPerubahanProposalRoutes = require('./routes/bankeuPerubahanProposal.routes');
 const bankeuPerubahanVerificationRoutes = require('./routes/bankeuPerubahanVerification.routes');
 const bankeuPerubahanDpmdRoutes = require('./routes/bankeuPerubahanDpmd.routes');
-const bankeuPerubahanSuratRoutes = require('./routes/bankeuPerubahanSurat.routes');
-const kecamatanBankeuPerubahanSuratRoutes = require('./routes/kecamatanBankeuPerubahanSurat.routes');
 const bankeuPerubahanConfigRoutes = require('./routes/bankeuPerubahanConfig.routes');
 const bankeuPerubahanLpjRoutes = require('./routes/bankeuPerubahanLpj.routes');
 const dpmdBankeuPerubahanLpjRoutes = require('./routes/dpmdBankeuPerubahanLpj.routes');
@@ -331,9 +329,7 @@ app.use('/api/kecamatan/bankeu', bankeuVerificationRoutes); // Bankeu verificati
 app.use('/api/dinas/bankeu', dinasVerificationRoutes); // Bankeu verification routes for dinas terkait
 app.use('/api/dpmd/bankeu', dpmdVerificationRoutes); // Bankeu verification routes for DPMD/SPKED
 // Bankeu Perubahan 2026 - independent feature (Desa -> Kecamatan -> DPMD, skip Dinas)
-app.use('/api/desa/bankeu-perubahan/surat', bankeuPerubahanSuratRoutes); // Desa surat (mount sebelum proposal route agar tidak konflik)
 app.use('/api/desa/bankeu-perubahan', bankeuPerubahanProposalRoutes);
-app.use('/api/kecamatan/bankeu-perubahan/surat', kecamatanBankeuPerubahanSuratRoutes);
 app.use('/api/kecamatan/bankeu-perubahan', bankeuPerubahanVerificationRoutes);
 app.use('/api/kecamatan/bankeu-perubahan', bankeuPerubahanConfigRoutes); // Config & tim verifikasi
 app.use('/api/dpmd/bankeu-perubahan', bankeuPerubahanDpmdRoutes);

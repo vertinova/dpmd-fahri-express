@@ -12,7 +12,7 @@ const KEGIATAN_DATA = [
   { kategori: 'wajib', urutan: 2, nama_kegiatan: 'Digitalisasi Data Desa' },
   { kategori: 'wajib', urutan: 3, nama_kegiatan: 'Dayeuh Pajajaran' },
 
-  // PILIHAN INFRASTRUKTUR (9)
+  // PILIHAN INFRASTRUKTUR (8)
   { kategori: 'pilihan_infrastruktur', urutan: 1, nama_kegiatan: 'Jalan Desa' },
   { kategori: 'pilihan_infrastruktur', urutan: 2, nama_kegiatan: 'Jalan Lingkungan' },
   { kategori: 'pilihan_infrastruktur', urutan: 3, nama_kegiatan: 'Jembatan Desa' },
@@ -21,9 +21,8 @@ const KEGIATAN_DATA = [
   { kategori: 'pilihan_infrastruktur', urutan: 6, nama_kegiatan: 'Drainase/Gorong-gorong' },
   { kategori: 'pilihan_infrastruktur', urutan: 7, nama_kegiatan: 'Sarana Prasarana Air Bersih' },
   { kategori: 'pilihan_infrastruktur', urutan: 8, nama_kegiatan: 'Pendukung KDMP (Pengkerasan Lahan Parkir)' },
-  { kategori: 'pilihan_infrastruktur', urutan: 9, nama_kegiatan: 'Sarana dan Prasarana Keagamaan' },
 
-  // PILIHAN NON INFRASTRUKTUR (7)
+  // PILIHAN NON INFRASTRUKTUR (8)
   { kategori: 'pilihan_non_infrastruktur', urutan: 1, nama_kegiatan: 'Desa Siaga' },
   { kategori: 'pilihan_non_infrastruktur', urutan: 2, nama_kegiatan: 'Kampung KB' },
   { kategori: 'pilihan_non_infrastruktur', urutan: 3, nama_kegiatan: 'Sekolah Pra Nikah' },
@@ -31,6 +30,7 @@ const KEGIATAN_DATA = [
   { kategori: 'pilihan_non_infrastruktur', urutan: 5, nama_kegiatan: 'Sekolah Perempuan' },
   { kategori: 'pilihan_non_infrastruktur', urutan: 6, nama_kegiatan: 'Pemberdayaan Lembaga Kemasyarakatan' },
   { kategori: 'pilihan_non_infrastruktur', urutan: 7, nama_kegiatan: 'BPJS Ketenagakerjaan Pekerja Rentan' },
+  { kategori: 'pilihan_non_infrastruktur', urutan: 8, nama_kegiatan: 'Sarana dan Prasarana Keagamaan' },
 ];
 
 async function seedBankeuPerubahanMasterKegiatan() {
@@ -44,6 +44,17 @@ async function seedBankeuPerubahanMasterKegiatan() {
       // Tabel belum dibuat - skip silently (akan dibuat via prisma db push / migration SQL)
       return { seeded: 0, skipped: true, reason: 'Table not exists yet' };
     }
+
+    // Self-heal: "Sarana dan Prasarana Keagamaan" dipindah dari infrastruktur
+    // ke non-infrastruktur. Jalankan tiap startup agar DB yang sudah ter-seed
+    // sebelumnya (mis. di server) ikut terkoreksi, karena db push hanya
+    // menyinkronkan skema, bukan data.
+    await sequelize.query(`
+      UPDATE bankeu_perubahan_master_kegiatan
+      SET kategori = 'pilihan_non_infrastruktur', urutan = 8
+      WHERE nama_kegiatan = 'Sarana dan Prasarana Keagamaan'
+        AND kategori = 'pilihan_infrastruktur'
+    `);
 
     // Cek apakah sudah ada data
     const [existing] = await sequelize.query(`

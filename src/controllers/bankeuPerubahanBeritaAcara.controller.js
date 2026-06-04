@@ -234,6 +234,15 @@ class BankeuPerubahanBeritaAcaraController {
       const writeStream = fs.createWriteStream(filePath);
       doc.pipe(writeStream);
 
+      // Logo Kabupaten Bogor standar (di tengah atas)
+      try {
+        const logoAbs = path.join(__dirname, '../../public/logo-bogor.png');
+        if (fs.existsSync(logoAbs)) {
+          doc.image(logoAbs, (doc.page.width - 55) / 2, 40, { width: 55, height: 55 });
+          doc.y = 105;
+        }
+      } catch (e) {}
+
       // Header
       doc.fontSize(13).font('Helvetica-Bold').text('BERITA ACARA VERIFIKASI', { align: 'center' });
       doc.fontSize(11).text('PROPOSAL BANTUAN KEUANGAN PERUBAHAN DESA', { align: 'center' });
@@ -456,12 +465,10 @@ class BankeuPerubahanBeritaAcaraController {
       const writeStream = fs.createWriteStream(filePath);
       doc.pipe(writeStream);
 
-      // Kop Surat
+      // Kop Surat - logo Kabupaten Bogor standar (bukan logo upload kecamatan)
       try {
-        if (config.logo_path) {
-          const logoAbs = path.join(__dirname, '../../storage/uploads/bankeu-perubahan/config', config.logo_path);
-          if (fs.existsSync(logoAbs)) doc.image(logoAbs, 50, 50, { width: 60 });
-        }
+        const logoAbs = path.join(__dirname, '../../public/logo-bogor.png');
+        if (fs.existsSync(logoAbs)) doc.image(logoAbs, 50, 45, { width: 55, height: 55 });
       } catch (e) {}
 
       doc.fontSize(11).font('Helvetica-Bold').text('PEMERINTAH KABUPATEN BOGOR', 120, 50, { align: 'left' });

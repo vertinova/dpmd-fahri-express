@@ -175,9 +175,9 @@ class BankeuPerubahanConfigController {
     }
   }
 
-  uploadLogo(req, res) { return this._uploadFile(req, res, 'logo_path', 'Logo'); }
-  uploadCamatSignature(req, res) { return this._uploadFile(req, res, 'ttd_camat_path', 'TTD Camat'); }
-  uploadStempel(req, res) { return this._uploadFile(req, res, 'stempel_path', 'Stempel'); }
+  uploadLogo = (req, res) => this._uploadFile(req, res, 'logo_path', 'Logo');
+  uploadCamatSignature = (req, res) => this._uploadFile(req, res, 'ttd_camat_path', 'TTD Camat');
+  uploadStempel = (req, res) => this._uploadFile(req, res, 'stempel_path', 'Stempel');
 
   /**
    * Delete file helper
@@ -215,8 +215,105 @@ class BankeuPerubahanConfigController {
     }
   }
 
-  deleteCamatSignature(req, res) { return this._deleteFile(req, res, 'ttd_camat_path', 'TTD Camat'); }
-  deleteStempel(req, res) { return this._deleteFile(req, res, 'stempel_path', 'Stempel'); }
+  deleteCamatSignature = (req, res) => this._deleteFile(req, res, 'ttd_camat_path', 'TTD Camat');
+  deleteStempel = (req, res) => this._deleteFile(req, res, 'stempel_path', 'Stempel');
+
+  /**
+   * Sinkron data konfigurasi dari Bankeu reguler (kecamatan_bankeu_config)
+   * ke config Bankeu Perubahan. Menyalin field teks + file TTD camat & stempel.
+   * POST /api/kecamatan/bankeu-perubahan/config/:kecamatanId/sync-from-reguler
+   * (handler tidak memakai `this`)
+   */
+  async syncFromReguler(req, res) {
+    try {
+      const { kecamatanId } = req.params;
+      const userId = req.user.id;
+      const [users] = await sequelize.query(`SELECT kecamatan_id FROM users WHERE id = ?`, { replacements: [userId] });
+      if (Number(users[0]?.kecamatan_id) !== Number(kecamatanId)) {
+        return res.status(403).json({ success: false, message: 'Akses ditolak' });
+      }
+
+      const [regRows] = await sequelize.query(
+        `SELECT nama_camat, nip_camat, jabatan_penandatangan, alamat, telepon, email, website, kode_pos, ttd_camat_path, stempel_path
+         FROM kecamatan_bankeu_config WHERE kecamatan_id = ? LIMIT 1`,
+        { replacements: [kecamatanId] }
+      );
+      if (!regRows.length) {
+        return res.status(404).json({ success: false, message: 'Konfigurasi Bankeu reguler belum dibuat untuk kecamatan ini' });
+      }
+      const reg = regRows[0];
+
+      // Salin file dari folder reguler ke folder config perubahan
+      const srcBase = path.join(__dirname, '../../storage/uploads');
+      const destDir = path.join(__dirname, '../../storage/uploads/bankeu-perubahan/config');
+      if (!fs.existsSync(destDir)) fs.mkdirSync(destDir, { recursive: true });
+      const copyFile = (relPath, prefix) => {
+        if (!relPath) return null;
+        try {
+          const src = path.join(srcBase, relPath);
+          if (!fs.existsSync(src)) return null;
+          const ext = path.extname(relPath) || '.png';
+          const name = `sync_${prefix}_${kecamatanId}_${Date.now()}${ext}`;
+          fs.copyFileSync(src, path.join(destDir, name));
+          return name;
+        } catch (e) {
+          logger.error(`[BankeuPerubahan Config] sync copy ${prefix} gagal:`, e.message);
+          return null;
+        }
+      };
+      const newTtd = copyFile(reg.ttd_camat_path, 'ttd');
+      const newStempel = copyFile(reg.stempel_path, 'stempel');
+
+      const [existing] = await sequelize.query(
+        `SELECT id, ttd_camat_path, stempel_path FROM kecamatan_bankeu_perubahan_config WHERE kecamatan_id = ? LIMIT 1`,
+        { replacements: [kecamatanId] }
+      );
+
+      const ttdFinal = newTtd || existing[0]?.ttd_camat_path || null;
+      const stempelFinal = newStempel || existing[0]?.stempel_path || null;
+      const fields = [
+        reg.nama_camat || 'Camat', reg.nip_camat || null, reg.jabatan_penandatangan || 'Camat',
+        reg.alamat || null, reg.telepon || null, reg.email || null, reg.website || null, reg.kode_pos || null,
+        ttdFinal, stempelFinal,
+      ];
+
+      if (existing.length) {
+        await sequelize.query(
+          `UPDATE kecamatan_bankeu_perubahan_config
+           SET nama_camat = ?, nip_camat = ?, jabatan_penandatangan = ?, alamat = ?, telepon = ?,
+               email = ?, website = ?, kode_pos = ?, ttd_camat_path = ?, stempel_path = ?, updated_at = NOW()
+           WHERE kecamatan_id = ?`,
+          { replacements: [...fields, kecamatanId] }
+        );
+      } else {
+        await sequelize.query(
+          `INSERT INTO kecamatan_bankeu_perubahan_config
+             (kecamatan_id, nama_camat, nip_camat, jabatan_penandatangan, alamat, telepon, email, website, kode_pos, ttd_camat_path, stempel_path)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          { replacements: [kecamatanId, ...fields] }
+        );
+      }
+
+      ActivityLogger.log({
+        userId,
+        userName: req.user.name || `User ${userId}`,
+        userRole: req.user.role,
+        bidangId: 3,
+        module: MODULE_NAME,
+        action: 'sync',
+        entityType: 'bankeu_perubahan_config',
+        entityId: parseInt(kecamatanId),
+        description: `${req.user.name || 'User'} sinkron konfigurasi Bankeu Perubahan dari Bankeu reguler`,
+        ipAddress: ActivityLogger.getIpFromRequest(req),
+        userAgent: ActivityLogger.getUserAgentFromRequest(req),
+      });
+
+      res.json({ success: true, message: 'Konfigurasi berhasil disinkron dari Bankeu reguler' });
+    } catch (error) {
+      logger.error('[BankeuPerubahan Config] Error sync:', error);
+      res.status(500).json({ success: false, message: 'Gagal sinkron konfigurasi', error: error.message });
+    }
+  }
 
   // === TIM VERIFIKASI ===
 
