@@ -1,6 +1,7 @@
 const sequelize = require('../config/database');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
+const { fetchVersions, fetchRevisions } = require('../utils/bankeuPerubahanRevisionService');
 
 const MODULE_NAME = 'bankeu_perubahan';
 
@@ -218,6 +219,34 @@ class BankeuPerubahanDpmdController {
     } catch (error) {
       logger.error('[BankeuPerubahan DPMD] Error history:', error);
       res.status(500).json({ success: false, message: 'Gagal mengambil riwayat', error: error.message });
+    }
+  }
+
+  /**
+   * Riwayat versi dokumen (DPMD melihat seluruh versi).
+   * GET /api/dpmd/bankeu-perubahan/proposals/:id/versions
+   */
+  async getProposalVersions(req, res) {
+    try {
+      const { id } = req.params;
+      res.json({ success: true, data: await fetchVersions(id) });
+    } catch (error) {
+      logger.error('[BankeuPerubahan DPMD] Error getProposalVersions:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil versi dokumen', error: error.message });
+    }
+  }
+
+  /**
+   * Riwayat ronde revisi/anotasi (DPMD melihat seluruh ronde).
+   * GET /api/dpmd/bankeu-perubahan/proposals/:id/revisions
+   */
+  async getProposalRevisions(req, res) {
+    try {
+      const { id } = req.params;
+      res.json({ success: true, data: await fetchRevisions(id) });
+    } catch (error) {
+      logger.error('[BankeuPerubahan DPMD] Error getProposalRevisions:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil riwayat revisi', error: error.message });
     }
   }
 }

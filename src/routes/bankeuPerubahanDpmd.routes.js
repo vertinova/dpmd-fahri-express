@@ -12,6 +12,10 @@ router.get('/proposals', controller.getProposals);
 // Verifikasi final
 router.patch('/proposals/:id/verify', controller.verifyProposal);
 
+// Riwayat versi dokumen & ronde revisi/anotasi
+router.get('/proposals/:id/versions', controller.getProposalVersions);
+router.get('/proposals/:id/revisions', controller.getProposalRevisions);
+
 // Activity log history
 router.get('/proposals/:proposalId/history', controller.getProposalVerificationHistory);
 

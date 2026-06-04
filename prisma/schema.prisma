@@ -328,6 +328,9 @@ model bankeu_perubahan_proposals {
   deskripsi                                                     String?                                      @db.Text
   file_proposal                                                 String                                       @db.VarChar(255)
   file_size                                                     Int?                                         @db.UnsignedInt
+  current_version                                               Int                                          @default(1) @db.UnsignedInt
+  latest_revision_id                                            BigInt?                                      @db.UnsignedBigInt
+  kecamatan_annotation_draft                                    Json?
   anggaran_usulan                                               Decimal?                                     @db.Decimal(15, 2)
   status                                                        bankeu_perubahan_proposals_status?           @default(draft)
   kecamatan_status                                              bankeu_perubahan_proposals_kecamatan_status? @default(pending)
@@ -367,6 +370,8 @@ model bankeu_perubahan_proposals {
   users_bankeu_perubahan_proposals_dpmd_verified_byTousers      users?                                       @relation("bp_perubahan_dpmd_verified_by", fields: [dpmd_verified_by], references: [id], onUpdate: NoAction, map: "fk_bp_perubahan_dpmd_verified_by")
   users_bankeu_perubahan_proposals_verified_byTousers           users?                                       @relation("bp_perubahan_verified_by", fields: [verified_by], references: [id], onUpdate: NoAction, map: "fk_bp_perubahan_verified_by")
   tim_verifikasi_bankeu_perubahan                               tim_verifikasi_bankeu_perubahan[]
+  bankeu_perubahan_proposal_versions                            bankeu_perubahan_proposal_versions[]
+  bankeu_perubahan_revisions                                    bankeu_perubahan_revisions[]
 
   @@index([desa_id], map: "idx_bp_per_desa")
   @@index([kecamatan_id], map: "idx_bp_per_kecamatan")
@@ -380,6 +385,54 @@ model bankeu_perubahan_proposals {
   @@index([kecamatan_verified_by], map: "idx_bp_per_kec_verified_by")
   @@index([dpmd_verified_by], map: "idx_bp_per_dpmd_verified_by")
   @@index([verified_by], map: "idx_bp_per_verified_by")
+}
+
+model bankeu_perubahan_proposal_versions {
+  id                         BigInt                                     @id @default(autoincrement()) @db.UnsignedBigInt
+  proposal_id                BigInt                                     @db.UnsignedBigInt
+  version_number             Int                                        @db.UnsignedInt
+  file_proposal              String                                     @db.VarChar(255)
+  file_size                  Int?                                       @db.UnsignedInt
+  source                     bankeu_perubahan_proposal_versions_source  @default(initial)
+  uploaded_by                BigInt?                                    @db.UnsignedBigInt
+  created_at                 DateTime?                                  @default(now()) @db.Timestamp(0)
+  bankeu_perubahan_proposals bankeu_perubahan_proposals                 @relation(fields: [proposal_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_bppv_proposal")
+  users                      users?                                     @relation("bp_perubahan_version_uploaded_by", fields: [uploaded_by], references: [id], onUpdate: NoAction, map: "fk_bppv_uploaded_by")
+  bankeu_perubahan_revisions bankeu_perubahan_revisions[]
+
+  @@unique([proposal_id, version_number], map: "uniq_bppv_proposal_version")
+  @@index([proposal_id], map: "idx_bppv_proposal")
+  @@index([uploaded_by], map: "idx_bppv_uploaded_by")
+}
+
+model bankeu_perubahan_revisions {
+  id                                 BigInt                                @id @default(autoincrement()) @db.UnsignedBigInt
+  proposal_id                        BigInt                                @db.UnsignedBigInt
+  version_id                         BigInt                                @db.UnsignedBigInt
+  round_number                       Int                                   @db.UnsignedInt
+  annotation_data                    Json?
+  annotated_pdf_path                 String?                               @db.VarChar(255)
+  catatan                            String?                               @db.Text
+  decision                           bankeu_perubahan_revisions_decision   @default(revision)
+  annotated_by                       BigInt?                               @db.UnsignedBigInt
+  created_at                         DateTime?                             @default(now()) @db.Timestamp(0)
+  bankeu_perubahan_proposals         bankeu_perubahan_proposals            @relation(fields: [proposal_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_bpr_proposal")
+  bankeu_perubahan_proposal_versions bankeu_perubahan_proposal_versions    @relation(fields: [version_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_bpr_version")
+  users                              users?                                @relation("bp_perubahan_revision_annotated_by", fields: [annotated_by], references: [id], onUpdate: NoAction, map: "fk_bpr_annotated_by")
+
+  @@index([proposal_id], map: "idx_bpr_proposal")
+  @@index([version_id], map: "idx_bpr_version")
+  @@index([annotated_by], map: "idx_bpr_annotated_by")
+}
+
+enum bankeu_perubahan_proposal_versions_source {
+  initial
+  revision
+}
+
+enum bankeu_perubahan_revisions_decision {
+  revision
+  rejected
 }
 
 model kecamatan_bankeu_perubahan_config {
@@ -1711,6 +1764,8 @@ model users {
   bankeu_perubahan_proposals_dpmd_verified_byTousers             bankeu_perubahan_proposals[] @relation("bp_perubahan_dpmd_verified_by")
   bankeu_perubahan_proposals_kec_verified_byTousers              bankeu_perubahan_proposals[] @relation("bp_perubahan_kec_verified_by")
   bankeu_perubahan_proposals_verified_byTousers                  bankeu_perubahan_proposals[] @relation("bp_perubahan_verified_by")
+  bankeu_perubahan_proposal_versions                             bankeu_perubahan_proposal_versions[] @relation("bp_perubahan_version_uploaded_by")
+  bankeu_perubahan_revisions                                     bankeu_perubahan_revisions[] @relation("bp_perubahan_revision_annotated_by")
   bankeu_proposals_bankeu_proposals_dpmd_verified_byTousers      bankeu_proposals[]          @relation("bankeu_proposals_dpmd_verified_byTousers")
   bankeu_proposals_bankeu_proposals_kecamatan_verified_byTousers bankeu_proposals[]          @relation("bankeu_proposals_kecamatan_verified_byTousers")
   bankeu_proposals_bankeu_proposals_created_byTousers            bankeu_proposals[]          @relation("bankeu_proposals_created_byTousers")

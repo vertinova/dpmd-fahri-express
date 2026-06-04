@@ -43,6 +43,7 @@ const requiredDirs = [
   path.join(__dirname, '../storage/uploads/profil_desa'),
   path.join(__dirname, '../storage/uploads/bankeu-perubahan/berita-acara'),
   path.join(__dirname, '../storage/uploads/bankeu-perubahan/surat-pengantar'),
+  path.join(__dirname, '../storage/uploads/bankeu-perubahan/annotated'),
   path.join(__dirname, '../public/backups')
 ];
 

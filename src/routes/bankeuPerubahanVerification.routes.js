@@ -10,9 +10,17 @@ router.use(auth);
 // List proposals
 router.get('/proposals', controller.getProposalsByKecamatan);
 
-// Verifikasi proposal
+// Verifikasi proposal (body boleh menyertakan annotation_data saat revision/rejected)
 router.patch('/proposals/:id/verify', controller.verifyProposal);
 router.patch('/proposals/:id/cancel-approval', controller.cancelApproval);
+
+// Anotasi PDF (editor Kecamatan)
+router.get('/proposals/:id/annotation', controller.getAnnotation);
+router.put('/proposals/:id/annotation', controller.saveAnnotationDraft);
+
+// Riwayat versi dokumen & ronde revisi/anotasi
+router.get('/proposals/:id/versions', controller.getVersions);
+router.get('/proposals/:id/revisions', controller.getRevisions);
 
 // Activity log history
 router.get('/proposals/:proposalId/history', controller.getProposalVerificationHistory);

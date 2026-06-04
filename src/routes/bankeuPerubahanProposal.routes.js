@@ -18,6 +18,10 @@ router.patch('/proposals/:id/replace-file', upload.bankeuPerubahanProposal, cont
 router.put('/proposals/:id/edit', upload.bankeuPerubahanProposal, controller.editProposal);
 router.delete('/proposals/:id', controller.deleteProposal);
 
+// Riwayat versi dokumen & ronde revisi/anotasi Kecamatan (untuk melihat coretan)
+router.get('/proposals/:id/versions', controller.getProposalVersions);
+router.get('/proposals/:id/revisions', controller.getProposalRevisions);
+
 // Submission ke kecamatan (skip Dinas - flow perubahan)
 router.post('/submit-to-kecamatan', controller.submitToKecamatan);
 router.post('/resubmit', controller.resubmitProposal);

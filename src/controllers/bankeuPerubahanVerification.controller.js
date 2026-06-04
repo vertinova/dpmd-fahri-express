@@ -1,11 +1,126 @@
 const sequelize = require('../config/database');
+const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const path = require('path');
 const fs = require('fs');
 const PDFDocument = require('pdfkit');
+const { flattenAnnotations } = require('../utils/pdfAnnotation');
+const { fetchVersions, fetchRevisions } = require('../utils/bankeuPerubahanRevisionService');
 
 const MODULE_NAME = 'bankeu_perubahan';
+const PERUBAHAN_DIR = path.join(__dirname, '../../storage/uploads/bankeu-perubahan');
+const ANNOTATED_DIR = path.join(PERUBAHAN_DIR, 'annotated');
+
+/**
+ * Normalisasi annotation_data (boleh object atau string JSON).
+ */
+function parseAnnotation(raw) {
+  if (!raw) return null;
+  if (typeof raw === 'string') {
+    try { return JSON.parse(raw); } catch (e) { return null; }
+  }
+  return raw;
+}
+
+function annotationHasContent(data) {
+  if (!data || !Array.isArray(data.pages)) return false;
+  return data.pages.some(p => (Array.isArray(p.items) && p.items.length > 0) || (p.note && String(p.note).trim()));
+}
+
+/**
+ * Helper: pastikan proposal milik kecamatan user. Return proposal row atau null
+ * (sudah mengirim response error bila tidak valid). Fungsi modul — tanpa `this`.
+ */
+async function assertKecamatanProposal(req, res) {
+  const userId = req.user.id;
+  const { id } = req.params;
+  const [users] = await sequelize.query(`SELECT kecamatan_id FROM users WHERE id = ?`, { replacements: [userId] });
+  if (!users[0]?.kecamatan_id) {
+    res.status(403).json({ success: false, message: 'User tidak terkait dengan kecamatan' });
+    return null;
+  }
+  const [proposals] = await sequelize.query(`
+    SELECT bp.id, bp.file_proposal, bp.current_version, bp.kecamatan_annotation_draft,
+           bp.kecamatan_status, d.kecamatan_id
+    FROM bankeu_perubahan_proposals bp
+    INNER JOIN desas d ON bp.desa_id = d.id
+    WHERE bp.id = ?
+  `, { replacements: [id] });
+  if (!proposals.length) {
+    res.status(404).json({ success: false, message: 'Proposal tidak ditemukan' });
+    return null;
+  }
+  if (Number(proposals[0].kecamatan_id) !== Number(users[0].kecamatan_id)) {
+    res.status(403).json({ success: false, message: 'Proposal ini bukan dari kecamatan Anda' });
+    return null;
+  }
+  return proposals[0];
+}
+
+/**
+ * Catat satu ronde revisi Kecamatan (Prisma). Bila ada anotasi, flatten ke PDF.
+ * Mengembalikan { revisionId, annotatedPath } atau null jika gagal kritikal.
+ */
+async function recordRevisionRound({ proposalId, fileProposal, annotationData, catatan, decision, userId }) {
+  const pid = BigInt(proposalId);
+
+  // Versi dokumen yang sedang dianotasi = versi terbaru
+  const latestVersion = await prisma.bankeu_perubahan_proposal_versions.findFirst({
+    where: { proposal_id: pid },
+    orderBy: { version_number: 'desc' },
+    select: { id: true },
+  });
+  if (!latestVersion) {
+    logger.warn(`[BankeuPerubahan Kec] Proposal #${proposalId} belum punya versi dokumen; ronde revisi dilewati`);
+    return null;
+  }
+
+  // Nomor ronde berikutnya
+  const roundCount = await prisma.bankeu_perubahan_revisions.count({ where: { proposal_id: pid } });
+  const roundNumber = roundCount + 1;
+
+  // Flatten anotasi ke PDF (opsional — hanya bila ada konten & file asli ada)
+  let annotatedPath = null;
+  const data = parseAnnotation(annotationData);
+  if (annotationHasContent(data) && fileProposal) {
+    const originalPath = path.join(PERUBAHAN_DIR, fileProposal);
+    if (fs.existsSync(originalPath)) {
+      if (!fs.existsSync(ANNOTATED_DIR)) fs.mkdirSync(ANNOTATED_DIR, { recursive: true });
+      const outName = `annotated_p${proposalId}_rev${roundNumber}_${Date.now()}.pdf`;
+      const outPath = path.join(ANNOTATED_DIR, outName);
+      try {
+        await flattenAnnotations(originalPath, data, outPath);
+        annotatedPath = `annotated/${outName}`;
+      } catch (e) {
+        logger.error('[BankeuPerubahan Kec] Gagal flatten anotasi PDF:', e);
+      }
+    } else {
+      logger.warn(`[BankeuPerubahan Kec] File asli tidak ditemukan utk flatten: ${originalPath}`);
+    }
+  }
+
+  const revision = await prisma.bankeu_perubahan_revisions.create({
+    data: {
+      proposal_id: pid,
+      version_id: latestVersion.id,
+      round_number: roundNumber,
+      annotation_data: data || undefined,
+      annotated_pdf_path: annotatedPath,
+      catatan: catatan || null,
+      decision: decision === 'rejected' ? 'rejected' : 'revision',
+      annotated_by: userId ? BigInt(userId) : null,
+    },
+  });
+
+  // Tandai revisi terbaru + bersihkan draft
+  await prisma.bankeu_perubahan_proposals.update({
+    where: { id: pid },
+    data: { latest_revision_id: revision.id, kecamatan_annotation_draft: null },
+  });
+
+  return { revisionId: revision.id, annotatedPath, roundNumber };
+}
 
 class BankeuPerubahanVerificationController {
   /**
@@ -107,7 +222,7 @@ class BankeuPerubahanVerificationController {
     try {
       const { id } = req.params;
       const userId = req.user.id;
-      const { status, catatan } = req.body;
+      const { status, catatan, annotation_data } = req.body;
 
       if (!['approved', 'rejected', 'revision'].includes(status)) {
         return res.status(400).json({
@@ -126,7 +241,8 @@ class BankeuPerubahanVerificationController {
       }
 
       const [proposals] = await sequelize.query(`
-        SELECT bp.id, bp.judul_proposal, bp.kecamatan_status, bp.submitted_to_dpmd, bp.desa_id, d.kecamatan_id
+        SELECT bp.id, bp.judul_proposal, bp.kecamatan_status, bp.submitted_to_dpmd, bp.desa_id, d.kecamatan_id,
+               bp.file_proposal, bp.current_version
         FROM bankeu_perubahan_proposals bp
         INNER JOIN desas d ON bp.desa_id = d.id
         WHERE bp.id = ?
@@ -180,6 +296,23 @@ class BankeuPerubahanVerificationController {
         ]
       });
 
+      // Untuk revisi/penolakan: simpan ronde revisi + (opsional) PDF beranotasi
+      let revisionResult = null;
+      if (returnToDesa) {
+        try {
+          revisionResult = await recordRevisionRound({
+            proposalId: id,
+            fileProposal: proposal.file_proposal,
+            annotationData: annotation_data,
+            catatan,
+            decision: status,
+            userId,
+          });
+        } catch (revErr) {
+          logger.error('[BankeuPerubahan Kec] Gagal menyimpan ronde revisi/anotasi:', revErr);
+        }
+      }
+
       logger.info(`[BankeuPerubahan Kec] Proposal #${id} ${status} by user ${userId}${returnToDesa ? ' (returned to desa)' : ''}`);
 
       ActivityLogger.log({
@@ -200,7 +333,14 @@ class BankeuPerubahanVerificationController {
 
       res.json({
         success: true,
-        message: `Proposal berhasil di-${status === 'approved' ? 'setujui' : (status === 'revision' ? 'minta revisi' : 'tolak')}`
+        message: `Proposal berhasil di-${status === 'approved' ? 'setujui' : (status === 'revision' ? 'minta revisi' : 'tolak')}`,
+        data: revisionResult ? {
+          revision_id: Number(revisionResult.revisionId),
+          round_number: revisionResult.roundNumber,
+          annotated_pdf_path: revisionResult.annotatedPath
+            ? `/storage/uploads/bankeu-perubahan/${revisionResult.annotatedPath}`
+            : null,
+        } : null,
       });
     } catch (error) {
       logger.error('[BankeuPerubahan Kec] Error verify:', error);
@@ -650,6 +790,108 @@ class BankeuPerubahanVerificationController {
     } catch (error) {
       logger.error('[BankeuPerubahan Kec] Error history:', error);
       res.status(500).json({ success: false, message: 'Gagal mengambil riwayat', error: error.message });
+    }
+  }
+
+  /**
+   * Muat anotasi untuk editor (draft jika ada, jika tidak ambil ronde terakhir).
+   * GET /api/kecamatan/bankeu-perubahan/proposals/:id/annotation
+   */
+  async getAnnotation(req, res) {
+    try {
+      const proposal = await assertKecamatanProposal(req, res);
+      if (!proposal) return;
+
+      let annotation = proposal.kecamatan_annotation_draft || null;
+      if (typeof annotation === 'string') {
+        try { annotation = JSON.parse(annotation); } catch (e) { annotation = null; }
+      }
+      let isDraft = !!annotation;
+
+      // Bila tidak ada draft, ambil anotasi dari ronde revisi terakhir (untuk dilanjutkan)
+      if (!annotation) {
+        const lastRev = await prisma.bankeu_perubahan_revisions.findFirst({
+          where: { proposal_id: BigInt(proposal.id) },
+          orderBy: { round_number: 'desc' },
+          select: { annotation_data: true },
+        });
+        annotation = lastRev?.annotation_data || null;
+      }
+
+      res.json({
+        success: true,
+        data: {
+          annotation,
+          is_draft: isDraft,
+          file_proposal: proposal.file_proposal,
+          file_url: `/storage/uploads/bankeu-perubahan/${proposal.file_proposal}`,
+          current_version: proposal.current_version,
+        },
+      });
+    } catch (error) {
+      logger.error('[BankeuPerubahan Kec] Error getAnnotation:', error);
+      res.status(500).json({ success: false, message: 'Gagal memuat anotasi', error: error.message });
+    }
+  }
+
+  /**
+   * Simpan draft anotasi (belum mengubah status proposal).
+   * PUT /api/kecamatan/bankeu-perubahan/proposals/:id/annotation
+   * Body: { annotation_data }
+   */
+  async saveAnnotationDraft(req, res) {
+    try {
+      const proposal = await assertKecamatanProposal(req, res);
+      if (!proposal) return;
+
+      let data = req.body?.annotation_data ?? null;
+      if (typeof data === 'string') {
+        try { data = JSON.parse(data); } catch (e) {
+          return res.status(400).json({ success: false, message: 'annotation_data tidak valid (JSON)' });
+        }
+      }
+
+      await prisma.bankeu_perubahan_proposals.update({
+        where: { id: BigInt(proposal.id) },
+        data: { kecamatan_annotation_draft: data || undefined },
+      });
+
+      res.json({ success: true, message: 'Draft anotasi tersimpan' });
+    } catch (error) {
+      logger.error('[BankeuPerubahan Kec] Error saveAnnotationDraft:', error);
+      res.status(500).json({ success: false, message: 'Gagal menyimpan draft anotasi', error: error.message });
+    }
+  }
+
+  /**
+   * Riwayat versi dokumen.
+   * GET /api/kecamatan/bankeu-perubahan/proposals/:id/versions
+   */
+  async getVersions(req, res) {
+    try {
+      const proposal = await assertKecamatanProposal(req, res);
+      if (!proposal) return;
+      const versions = await fetchVersions(proposal.id);
+      res.json({ success: true, data: versions });
+    } catch (error) {
+      logger.error('[BankeuPerubahan Kec] Error getVersions:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil versi dokumen', error: error.message });
+    }
+  }
+
+  /**
+   * Riwayat ronde revisi/anotasi.
+   * GET /api/kecamatan/bankeu-perubahan/proposals/:id/revisions
+   */
+  async getRevisions(req, res) {
+    try {
+      const proposal = await assertKecamatanProposal(req, res);
+      if (!proposal) return;
+      const revisions = await fetchRevisions(proposal.id);
+      res.json({ success: true, data: revisions });
+    } catch (error) {
+      logger.error('[BankeuPerubahan Kec] Error getRevisions:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil riwayat revisi', error: error.message });
     }
   }
 }

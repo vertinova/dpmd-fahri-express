@@ -4,6 +4,7 @@ const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const path = require('path');
 const fs = require('fs');
+const { fetchVersions, fetchRevisions } = require('../utils/bankeuPerubahanRevisionService');
 
 // Batas maksimal anggaran per proposal (1.5 Miliar) - sama dengan bankeu existing
 const MAX_ANGGARAN = 1_500_000_000;
@@ -49,6 +50,66 @@ function cleanupUploadedFile(req) {
   if (req.file && req.file.path) {
     try { fs.unlinkSync(req.file.path); } catch (e) { /* ignore */ }
   }
+}
+
+/**
+ * Helper: catat versi dokumen proposal (NON-DESTRUKTIF).
+ * Semua versi file disimpan — file lama tidak pernah dihapus, agar riwayat &
+ * anotasi Kecamatan tetap dapat dilihat. Mengembalikan version_number baru.
+ * Pakai Prisma client (sesuai standar baru fitur ini).
+ */
+async function recordProposalVersion({ proposalId, fileName, fileSize, source, userId }) {
+  const pid = BigInt(proposalId);
+  const last = await prisma.bankeu_perubahan_proposal_versions.findFirst({
+    where: { proposal_id: pid },
+    orderBy: { version_number: 'desc' },
+    select: { version_number: true },
+  });
+  const nextVersion = (last?.version_number || 0) + 1;
+
+  await prisma.bankeu_perubahan_proposal_versions.create({
+    data: {
+      proposal_id: pid,
+      version_number: nextVersion,
+      file_proposal: fileName,
+      file_size: (fileSize === undefined || fileSize === null) ? null : Number(fileSize),
+      source: source === 'initial' ? 'initial' : 'revision',
+      uploaded_by: userId ? BigInt(userId) : null,
+    },
+  });
+
+  await prisma.bankeu_perubahan_proposals.update({
+    where: { id: pid },
+    data: { current_version: nextVersion },
+  });
+
+  return nextVersion;
+}
+
+/**
+ * Helper: pastikan proposal milik desa user. Return proposalId atau null
+ * (sudah kirim response error). Fungsi modul — tanpa `this`.
+ */
+async function assertDesaProposal(req, res) {
+  const userId = req.user.id;
+  const { id } = req.params;
+  const [users] = await sequelize.query(`SELECT desa_id FROM users WHERE id = ?`, { replacements: [userId] });
+  if (!users[0]?.desa_id) {
+    res.status(403).json({ success: false, message: 'User tidak terkait dengan desa' });
+    return null;
+  }
+  const [proposals] = await sequelize.query(`
+    SELECT id, desa_id FROM bankeu_perubahan_proposals WHERE id = ?
+  `, { replacements: [id] });
+  if (!proposals.length) {
+    res.status(404).json({ success: false, message: 'Proposal tidak ditemukan' });
+    return null;
+  }
+  if (Number(proposals[0].desa_id) !== Number(users[0].desa_id)) {
+    res.status(403).json({ success: false, message: 'Akses ditolak' });
+    return null;
+  }
+  return proposals[0].id;
 }
 
 class BankeuPerubahanProposalController {
@@ -133,6 +194,7 @@ class BankeuPerubahanProposalController {
           bp.jenis_kegiatan, bp.kegiatan_id, bp.kegiatan_nama,
           bp.nama_kegiatan_spesifik, bp.volume, bp.lokasi,
           bp.judul_proposal, bp.deskripsi, bp.file_proposal, bp.file_size,
+          bp.current_version,
           bp.anggaran_usulan,
           bp.status,
           bp.kecamatan_status, bp.kecamatan_catatan, bp.kecamatan_verified_at,
@@ -351,6 +413,13 @@ class BankeuPerubahanProposalController {
 
         await transaction.commit();
 
+        // Catat sebagai versi dokumen pertama (initial)
+        try {
+          await recordProposalVersion({ proposalId, fileName: filePath, fileSize, source: 'initial', userId });
+        } catch (verErr) {
+          logger.error('[BankeuPerubahan] Gagal mencatat versi awal proposal:', verErr);
+        }
+
         logger.info(`[BankeuPerubahan] Proposal created: ${proposalId} by user ${userId} (desa ${desaId})`);
 
         // Activity Log
@@ -459,19 +528,12 @@ class BankeuPerubahanProposalController {
         }
       }
 
-      // Optional: replace file
+      // Optional: replace file (NON-DESTRUKTIF — file lama disimpan sebagai versi)
       let newFilePath = null;
       let newFileSize = null;
       if (req.file) {
         newFilePath = req.file.filename;
         newFileSize = req.file.size;
-        // delete old file
-        if (proposal.file_proposal) {
-          const oldPath = path.join(__dirname, '../../storage/uploads/bankeu-perubahan', proposal.file_proposal);
-          if (fs.existsSync(oldPath)) {
-            try { fs.unlinkSync(oldPath); } catch (e) { /* ignore */ }
-          }
-        }
       }
 
       // Build update fields
@@ -506,6 +568,15 @@ class BankeuPerubahanProposalController {
         SET ${fields.join(', ')}, updated_at = NOW()
         WHERE id = ?
       `, { replacements });
+
+      // Jika file diganti, catat sebagai versi baru (revisi)
+      if (newFilePath) {
+        try {
+          await recordProposalVersion({ proposalId: id, fileName: newFilePath, fileSize: newFileSize, source: 'revision', userId });
+        } catch (verErr) {
+          logger.error('[BankeuPerubahan] Gagal mencatat versi (updateProposal):', verErr);
+        }
+      }
 
       ActivityLogger.log({
         userId,
@@ -607,16 +678,12 @@ class BankeuPerubahanProposalController {
         }
       }
 
-      // Optional new file
+      // Optional new file (NON-DESTRUKTIF — file lama disimpan sebagai versi)
       let filePath = proposal.file_proposal;
       let fileSize = null;
       if (req.file) {
         filePath = req.file.filename;
         fileSize = req.file.size;
-        if (proposal.file_proposal) {
-          const oldPath = path.join(__dirname, '../../storage/uploads/bankeu-perubahan', proposal.file_proposal);
-          if (fs.existsSync(oldPath)) { try { fs.unlinkSync(oldPath); } catch (e) {} }
-        }
       }
 
       const [kegiatanInfo] = await sequelize.query(`
@@ -678,6 +745,15 @@ class BankeuPerubahanProposalController {
       } catch (txError) {
         await transaction.rollback();
         throw txError;
+      }
+
+      // Jika file diganti saat edit penuh, catat versi baru
+      if (req.file) {
+        try {
+          await recordProposalVersion({ proposalId: id, fileName: filePath, fileSize, source: 'revision', userId });
+        } catch (verErr) {
+          logger.error('[BankeuPerubahan] Gagal mencatat versi (editProposal):', verErr);
+        }
       }
 
       ActivityLogger.log({
@@ -752,19 +828,20 @@ class BankeuPerubahanProposalController {
         });
       }
 
-      // Delete old file
-      if (proposal.file_proposal) {
-        const oldPath = path.join(__dirname, '../../storage/uploads/bankeu-perubahan', proposal.file_proposal);
-        if (fs.existsSync(oldPath)) {
-          try { fs.unlinkSync(oldPath); } catch (e) {}
-        }
-      }
+      // NON-DESTRUKTIF: file lama TIDAK dihapus, disimpan sebagai versi sebelumnya
 
       await sequelize.query(`
         UPDATE bankeu_perubahan_proposals
         SET file_proposal = ?, file_size = ?, updated_at = NOW()
         WHERE id = ?
       `, { replacements: [req.file.filename, req.file.size, id] });
+
+      // Catat file baru sebagai versi (revisi)
+      try {
+        await recordProposalVersion({ proposalId: id, fileName: req.file.filename, fileSize: req.file.size, source: 'revision', userId });
+      } catch (verErr) {
+        logger.error('[BankeuPerubahan] Gagal mencatat versi (replaceFile):', verErr);
+      }
 
       ActivityLogger.log({
         userId,
@@ -1032,6 +1109,36 @@ class BankeuPerubahanProposalController {
     } catch (error) {
       logger.error('[BankeuPerubahan] Error delete:', error);
       res.status(500).json({ success: false, message: 'Gagal menghapus proposal', error: error.message });
+    }
+  }
+
+  /**
+   * Riwayat versi dokumen (Desa).
+   * GET /api/desa/bankeu-perubahan/proposals/:id/versions
+   */
+  async getProposalVersions(req, res) {
+    try {
+      const proposalId = await assertDesaProposal(req, res);
+      if (!proposalId) return;
+      res.json({ success: true, data: await fetchVersions(proposalId) });
+    } catch (error) {
+      logger.error('[BankeuPerubahan] Error getProposalVersions:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil versi dokumen', error: error.message });
+    }
+  }
+
+  /**
+   * Riwayat ronde revisi/anotasi (Desa) — untuk melihat coretan Kecamatan.
+   * GET /api/desa/bankeu-perubahan/proposals/:id/revisions
+   */
+  async getProposalRevisions(req, res) {
+    try {
+      const proposalId = await assertDesaProposal(req, res);
+      if (!proposalId) return;
+      res.json({ success: true, data: await fetchRevisions(proposalId) });
+    } catch (error) {
+      logger.error('[BankeuPerubahan] Error getProposalRevisions:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil riwayat revisi', error: error.message });
     }
   }
 }
