@@ -4,7 +4,7 @@ const controller = require('../controllers/pemdes-produk-hukum.controller');
 const { auth, checkRole } = require('../middlewares/auth');
 
 router.use(auth);
-router.use(checkRole(['pegawai', 'kepala_bidang', 'ketua_tim', 'kepala_dinas', 'superadmin']));
+router.use(checkRole(['pegawai', 'kepala_bidang', 'ketua_tim', 'kepala_dinas', 'bendahara', 'superadmin']));
 
 // GET /api/pemdes/produk-hukum - List all produk hukum from all desas
 router.get('/', controller.getAllProdukHukum);
