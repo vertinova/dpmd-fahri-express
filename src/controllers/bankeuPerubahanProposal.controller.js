@@ -195,6 +195,14 @@ class BankeuPerubahanProposalController {
           bp.nama_kegiatan_spesifik, bp.volume, bp.lokasi,
           bp.judul_proposal, bp.deskripsi, bp.file_proposal, bp.file_size,
           bp.current_version,
+          (
+            SELECT COUNT(*) FROM bankeu_perubahan_proposal_versions v
+            WHERE v.proposal_id = bp.id AND v.source = 'revision'
+              AND v.created_at > COALESCE(
+                (SELECT MAX(r.created_at) FROM bankeu_perubahan_revisions r WHERE r.proposal_id = bp.id),
+                '1970-01-01 00:00:00'
+              )
+          ) AS reupload_after_revision_count,
           bp.anggaran_usulan,
           bp.status,
           bp.kecamatan_status, bp.kecamatan_catatan, bp.kecamatan_verified_at,
@@ -893,8 +901,15 @@ class BankeuPerubahanProposalController {
       }
       const desaId = users[0].desa_id;
 
-      // Filter
-      const filters = ['desa_id = ?', 'submitted_to_kecamatan = FALSE'];
+      // Filter — hanya draft baru. Proposal yang sedang direvisi/ditolak TIDAK
+      // boleh lewat jalur ini; harus via "Kirim Ulang Revisi" yang mewajibkan
+      // upload ulang PDF terlebih dahulu.
+      const filters = [
+        'desa_id = ?',
+        'submitted_to_kecamatan = FALSE',
+        `(kecamatan_status IS NULL OR kecamatan_status NOT IN ('revision','rejected'))`,
+        `(dpmd_status IS NULL OR dpmd_status NOT IN ('revision','rejected'))`,
+      ];
       const replacements = [desaId];
       if (tahun) { filters.push('tahun_anggaran = ?'); replacements.push(parseInt(tahun)); }
       if (Array.isArray(proposal_ids) && proposal_ids.length) {
@@ -978,10 +993,19 @@ class BankeuPerubahanProposalController {
       }
       const desaId = users[0].desa_id;
 
-      // Eligible: kecamatan_status revision/rejected OR dpmd_status revision/rejected
+      // Eligible: status revision/rejected DAN Desa sudah mengupload ulang PDF
+      // setelah ronde revisi terakhir (tidak boleh kirim ulang tanpa perbaikan dokumen).
       const filters = [
         'desa_id = ?',
-        '(kecamatan_status IN ("revision","rejected") OR dpmd_status IN ("revision","rejected"))'
+        '(kecamatan_status IN ("revision","rejected") OR dpmd_status IN ("revision","rejected"))',
+        `EXISTS (
+          SELECT 1 FROM bankeu_perubahan_proposal_versions v
+          WHERE v.proposal_id = bankeu_perubahan_proposals.id AND v.source = 'revision'
+            AND v.created_at > COALESCE(
+              (SELECT MAX(r.created_at) FROM bankeu_perubahan_revisions r WHERE r.proposal_id = bankeu_perubahan_proposals.id),
+              '1970-01-01 00:00:00'
+            )
+        )`
       ];
       const replacements = [desaId];
       if (tahun) { filters.push('tahun_anggaran = ?'); replacements.push(parseInt(tahun)); }
@@ -1000,7 +1024,7 @@ class BankeuPerubahanProposalController {
         await transaction.rollback();
         return res.status(400).json({
           success: false,
-          message: 'Tidak ada proposal revisi yang dapat dikirim ulang'
+          message: 'Belum bisa kirim ulang. Upload ulang (perbaiki) PDF proposal yang direvisi terlebih dahulu, lalu kirim ulang.'
         });
       }
 

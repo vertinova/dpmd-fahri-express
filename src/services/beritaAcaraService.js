@@ -326,7 +326,7 @@ class BeritaAcaraService {
    * @param {Object} qrCode - QR code data { code, imagePath, verificationUrl }
    * @param {Object} checklistData - Aggregated checklist data { q1: true/false/null, ... }
    */
-  generatePage1(doc, desaData, kecamatanConfig, proposals, timVerifikasi, qrCode = null, checklistData = null, optionalItems = null, tanggal = null) {
+  generatePage1(doc, desaData, kecamatanConfig, proposals, timVerifikasi, qrCode = null, checklistData = null, optionalItems = null, tanggal = null, opts = {}) {
     const pageWidth = doc.page.width;
     const marginLeft = doc.page.margins.left;
     const marginRight = doc.page.margins.right;
@@ -429,41 +429,40 @@ class BeritaAcaraService {
 
     // Title - dynamic Y position based on header height
     let titleY = lineY + 20;
-    doc.fontSize(11).font('Helvetica-Bold');
-    doc.text('BERITA ACARA VERIFIKASI', marginLeft, titleY, { 
-      width: contentWidth, 
-      align: 'center' 
-    });
-    doc.text('PROPOSAL PERMOHONAN BANTUAN KEUANGAN KHUSUS AKSELERASI', marginLeft, titleY + 14, { 
-      width: contentWidth, 
-      align: 'center' 
-    });
-    doc.text('PEMBANGUNAN PERDESAAN', marginLeft, titleY + 28, { 
-      width: contentWidth, 
-      align: 'center' 
-    });
-    
-    // Generate current date first for tahun anggaran
+
+    // Generate current date first (dipakai utk tahun anggaran & paragraf)
     const today = tanggal ? new Date(tanggal) : new Date();
     const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
     const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
     const dayName = dayNames[today.getDay()];
     const monthName = monthNames[today.getMonth()];
     const year = today.getFullYear();
-    
-    doc.text(`TAHUN ANGGARAN ${year}`, marginLeft, titleY + 42, { 
-      width: contentWidth, 
-      align: 'center' 
+
+    // Judul bisa di-override (mis. untuk Bankeu Perubahan). Default = reguler.
+    const titleLines = opts.titleLines || [
+      'BERITA ACARA VERIFIKASI',
+      'PROPOSAL PERMOHONAN BANTUAN KEUANGAN KHUSUS AKSELERASI',
+      'PEMBANGUNAN PERDESAAN',
+    ];
+    doc.fontSize(11).font('Helvetica-Bold');
+    let ty = titleY;
+    titleLines.forEach((line) => {
+      doc.text(line, marginLeft, ty, { width: contentWidth, align: 'center' });
+      ty += 14;
     });
+    doc.text(`TAHUN ANGGARAN ${year}`, marginLeft, ty, { width: contentWidth, align: 'center' });
+    ty += 14;
 
     // Opening paragraph
     doc.fontSize(10).font('Helvetica');
-    let yPos = titleY + 65;
-    
+    let yPos = ty + 9;
+
     // First proposal untuk data di header (ambil yang pertama)
     const firstProposal = proposals[0] || {};
-    
-    const paragraphText = `Pada hari ini ${dayName} Tanggal ${today.getDate()} Bulan ${monthName} Tahun ${year} bertempat di Kecamatan ${kecamatanConfig.nama_kecamatan || '................'}, telah dilakukan verifikasi administrasi, teknis dan lapangan Bantuan Keuangan Khusus Akselerasi Pembangunan Perdesaan Tahun Anggaran ${year}, dengan hasil sebagai berikut :`;
+
+    // Nama program bisa di-override (mis. "Bantuan Keuangan Perubahan Desa")
+    const programName = opts.programName || 'Bantuan Keuangan Khusus Akselerasi Pembangunan Perdesaan';
+    const paragraphText = `Pada hari ini ${dayName} Tanggal ${today.getDate()} Bulan ${monthName} Tahun ${year} bertempat di Kecamatan ${kecamatanConfig.nama_kecamatan || '................'}, telah dilakukan verifikasi administrasi, teknis dan lapangan ${programName} Tahun Anggaran ${year}, dengan hasil sebagai berikut :`;
     
     doc.text(paragraphText, marginLeft, yPos, { 
       width: contentWidth, 
@@ -590,10 +589,13 @@ class BeritaAcaraService {
     
     console.log(`📌 Jenis Kegiatan: ${jenisKegiatan}, isInfrastruktur: ${isInfrastruktur}`);
 
-    // Checklist items berbeda berdasarkan jenis kegiatan
+    // Checklist items berbeda berdasarkan jenis kegiatan.
+    // Bisa di-override penuh lewat opts.checklistItems (mis. utk Bankeu Perubahan).
     let checklistItems = [];
-    
-    if (isInfrastruktur) {
+
+    if (Array.isArray(opts.checklistItems)) {
+      checklistItems = opts.checklistItems;
+    } else if (isInfrastruktur) {
       // INFRASTRUKTUR - 12 items, items 5,7,8,9 optional (controlled by optionalItems)
       checklistItems = [
         { no: 1, itemKey: 'item_1', text: 'Surat Pengantar dari Kepala Desa' },
@@ -1274,7 +1276,7 @@ class BeritaAcaraService {
   /**
    * Generate Surat Pengantar content
    */
-  generateSuratPengantarContent(doc, proposalData, kecamatanConfig, tanggal = null) {
+  generateSuratPengantarContent(doc, proposalData, kecamatanConfig, tanggal = null, opts = {}) {
     const pageWidth = doc.page.width;
     const marginLeft = doc.page.margins.left;
     const marginRight = doc.page.margins.right;
@@ -1453,7 +1455,8 @@ class BeritaAcaraService {
     
     // Jenis column
     doc.rect(tableLeft + colWidths.no, yPos, colWidths.jenis, rowHeight).stroke();
-    const jenisText = `Proposal Permohonan Bantuan Keuangan Khusus Akselerasi Pembangunan Perdesaan Tahun Anggaran ${proposalData.tahun_anggaran || '20....'}
+    const jenisLabel = opts.jenisLabel || 'Proposal Permohonan Bantuan Keuangan Khusus Akselerasi Pembangunan Perdesaan';
+    const jenisText = `${jenisLabel} Tahun Anggaran ${proposalData.tahun_anggaran || '20....'}
 Desa ${proposalData.nama_desa || '.....'}`;
     doc.text(jenisText, tableLeft + colWidths.no + 5, yPos + 8, { 
       width: colWidths.jenis - 10, 

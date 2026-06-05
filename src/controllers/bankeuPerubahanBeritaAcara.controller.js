@@ -5,6 +5,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
+const beritaAcaraService = require('../services/beritaAcaraService');
 
 const MODULE_NAME = 'bankeu_perubahan';
 
@@ -230,139 +231,91 @@ class BankeuPerubahanBeritaAcaraController {
       const relPath = `/storage/uploads/bankeu-perubahan/berita-acara/${fileName}`;
       const qrCode = `BA-PER-${proposalId}-${ts}-${crypto.randomBytes(3).toString('hex')}`.toUpperCase();
 
-      const doc = new PDFDocument({ size: 'A4', margin: 50 });
+      const doc = new PDFDocument({
+        size: [595.28, 935.43], // F4 — samakan dengan Berita Acara reguler
+        margins: { top: 50, bottom: 50, left: 72, right: 72 },
+        bufferPages: true,
+      });
       const writeStream = fs.createWriteStream(filePath);
       doc.pipe(writeStream);
 
-      // Logo Kabupaten Bogor standar (di tengah atas)
-      try {
-        const logoAbs = path.join(__dirname, '../../public/logo-bogor.png');
-        if (fs.existsSync(logoAbs)) {
-          doc.image(logoAbs, (doc.page.width - 55) / 2, 40, { width: 55, height: 55 });
-          doc.y = 105;
-        }
-      } catch (e) {}
-
-      // Header
-      doc.fontSize(13).font('Helvetica-Bold').text('BERITA ACARA VERIFIKASI', { align: 'center' });
-      doc.fontSize(11).text('PROPOSAL BANTUAN KEUANGAN PERUBAHAN DESA', { align: 'center' });
-      doc.text(`TAHUN ANGGARAN ${proposal.tahun_anggaran}`, { align: 'center' });
-      doc.fontSize(9).font('Helvetica').text(`Nomor Verifikasi: ${qrCode}`, { align: 'center' });
-      doc.moveDown();
-
-      const tanggalBA = tanggal
-        ? new Date(tanggal).toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
-        : new Date().toLocaleDateString('id-ID', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
-
-      doc.fontSize(11).font('Helvetica').text(
-        `Pada hari ini, ${tanggalBA}, bertempat di Kantor Kecamatan ${proposal.kecamatan_nama}, ` +
-        `Tim Verifikasi Kecamatan telah melakukan verifikasi proposal Bantuan Keuangan Perubahan dengan rincian sebagai berikut:`,
-        { align: 'justify' }
-      );
-      doc.moveDown();
-
-      doc.font('Helvetica-Bold').text('Identitas Proposal:');
-      doc.font('Helvetica').text(`Desa             : ${proposal.desa_nama}`);
-      doc.text(`Kecamatan        : ${proposal.kecamatan_nama}`);
-      doc.text(`Tahun Anggaran   : ${proposal.tahun_anggaran}`);
-      doc.text(`Judul            : ${proposal.judul_proposal}`);
-      doc.text(`Jenis Kegiatan   : ${proposal.jenis_kegiatan}`);
-      if (proposal.nama_kegiatan_spesifik) doc.text(`Kegiatan Spesifik: ${proposal.nama_kegiatan_spesifik}`);
-      if (proposal.volume) doc.text(`Volume           : ${proposal.volume}`);
-      if (proposal.lokasi) doc.text(`Lokasi           : ${proposal.lokasi}`);
-      if (proposal.anggaran_usulan) {
-        doc.text(`Anggaran Usulan  : Rp ${Number(proposal.anggaran_usulan).toLocaleString('id-ID')}`);
-      }
-      doc.moveDown();
-
-      // Checklist
+      // ===== Adapter data → renderer Berita Acara reguler (layout sama) =====
       const isInfra = proposal.jenis_kegiatan === 'pilihan_infrastruktur';
+
+      const desaData = {
+        nama_desa: proposal.desa_nama,
+        nama_kecamatan: proposal.kecamatan_nama,
+      };
+
+      const kecConfig = {
+        nama_kecamatan: proposal.kecamatan_nama,
+        nama_camat: config.nama_camat,
+        nip_camat: config.nip_camat,
+        jabatan_penandatangan: config.jabatan_penandatangan,
+        logo_path: config.logo_path,
+        alamat: config.alamat,
+        telepon: config.telepon,
+        email: config.email,
+        website: config.website,
+        kode_pos: config.kode_pos,
+        // path TTD/stempel relatif terhadap storage/uploads
+        ttd_camat: config.ttd_camat_path ? `bankeu-perubahan/config/${config.ttd_camat_path}` : null,
+        stempel_path: config.stempel_path ? `bankeu-perubahan/config/${config.stempel_path}` : null,
+      };
+
+      const proposalAdapter = {
+        judul_proposal: proposal.judul_proposal,
+        lokasi: proposal.lokasi,
+        volume: proposal.volume,
+        anggaran_usulan: proposal.anggaran_usulan,
+        jenis_kegiatan: isInfra ? 'infrastruktur' : 'non_infrastruktur',
+      };
+
+      const timAdapter = tim.map((t) => ({
+        jabatan: t.jabatan,
+        jabatan_label: t.jabatan_label,
+        nama: t.nama,
+        nip: t.nip,
+        ttd: t.ttd_path ? `signatures/${t.ttd_path}` : null,
+      }));
+
       const checklistItems = isInfra ? [
-        { key: 'q1', label: 'Surat Pengantar dari Kepala Desa' },
-        { key: 'q2', label: 'Surat Permohonan Bantuan Keuangan Perubahan' },
-        { key: 'q3', label: 'Proposal (Latar Belakang, Maksud dan Tujuan, Bentuk Kegiatan, Jadwal Pelaksanaan)' },
-        { key: 'q4', label: 'RPA dan RAB' },
-        { key: 'q5', label: 'Surat Pernyataan Kepala Desa (lokasi tidak dalam sengketa)' },
-        { key: 'q6', label: 'Bukti kepemilikan Aset Desa (untuk Rehab Kantor Desa)' },
-        { key: 'q7', label: 'Dokumen kesediaan peralihan hak hibah atas tanah' },
-        { key: 'q8', label: 'Dokumen pernyataan kesanggupan (tidak minta ganti rugi)' },
-        { key: 'q9', label: 'Persetujuan pemanfaatan barang milik Daerah/Negara' },
-        { key: 'q10', label: 'Foto lokasi rencana pelaksanaan kegiatan' },
-        { key: 'q11', label: 'Peta lokasi rencana kegiatan' },
-        { key: 'q12', label: 'Berita Acara Musyawarah Desa' },
+        { no: 1, itemKey: 'item_1', text: 'Surat Pengantar dari Kepala Desa' },
+        { no: 2, itemKey: 'item_2', text: 'Surat Permohonan Bantuan Keuangan Perubahan' },
+        { no: 3, itemKey: 'item_3', text: 'Proposal (Latar Belakang, Maksud dan Tujuan, Bentuk Kegiatan, Jadwal Pelaksanaan)',
+          subItems: ['- Latar Belakang', '- Maksud dan Tujuan', '- Bentuk Kegiatan', '- Jadwal Pelaksanaan'] },
+        { no: 4, itemKey: 'item_4', text: 'RPA dan RAB' },
+        { no: 5, itemKey: 'item_5', text: 'Surat Pernyataan Kepala Desa (lokasi tidak dalam sengketa)', optional: true },
+        { no: 6, itemKey: 'item_6', text: 'Bukti kepemilikan Aset Desa (untuk Rehab Kantor Desa)', optional: true },
+        { no: 7, itemKey: 'item_7', text: 'Dokumen kesediaan peralihan hak hibah atas tanah', optional: true },
+        { no: 8, itemKey: 'item_8', text: 'Dokumen pernyataan kesanggupan (tidak minta ganti rugi)', optional: true },
+        { no: 9, itemKey: 'item_9', text: 'Persetujuan pemanfaatan barang milik Daerah/Negara', optional: true },
+        { no: 10, itemKey: 'item_10', text: 'Foto lokasi rencana pelaksanaan kegiatan' },
+        { no: 11, itemKey: 'item_11', text: 'Peta lokasi rencana kegiatan' },
+        { no: 12, itemKey: 'item_12', text: 'Berita Acara Musyawarah Desa' },
       ] : [
-        { key: 'q1', label: 'Surat Pengantar dari Kepala Desa' },
-        { key: 'q2', label: 'Surat Permohonan Bantuan Keuangan Perubahan' },
-        { key: 'q3', label: 'Proposal (Latar Belakang, Maksud dan Tujuan, Bentuk Kegiatan, Jadwal Pelaksanaan)' },
-        { key: 'q4', label: 'Rencana Anggaran Biaya' },
-        { key: 'q5', label: 'Tidak Duplikasi Anggaran' },
+        { no: 1, itemKey: 'item_1', text: 'Surat Pengantar dari Kepala Desa' },
+        { no: 2, itemKey: 'item_2', text: 'Surat Permohonan Bantuan Keuangan Perubahan' },
+        { no: 3, itemKey: 'item_3', text: 'Proposal (Latar Belakang, Maksud dan Tujuan, Bentuk Kegiatan, Jadwal Pelaksanaan)',
+          subItems: ['- Latar Belakang', '- Maksud dan Tujuan', '- Bentuk Kegiatan', '- Jadwal Pelaksanaan'] },
+        { no: 4, itemKey: 'item_4', text: 'Rencana Anggaran Biaya' },
+        { no: 5, itemKey: 'item_5', text: 'Tidak Duplikasi Anggaran' },
       ];
 
-      // Aggregate: item dianggap "Tersedia" jika MINIMAL SATU tim member centang true
-      const aggItem = (key) => questionnaires.some(q => q[key] === true || q[key] === 1);
+      // checklistData: item_N "tersedia" bila MINIMAL SATU anggota tim mencentang qN
+      const aggItem = (key) => questionnaires.some((q) => q[key] === true || q[key] === 1);
+      const checklistData = {};
+      checklistItems.forEach((it, idx) => { checklistData[it.itemKey] = aggItem(`q${idx + 1}`); });
 
-      // Override dengan optionalItems dari request (untuk item opsional)
-      doc.font('Helvetica-Bold').text('Hasil Verifikasi Kelengkapan Dokumen:');
-      checklistItems.forEach((item, idx) => {
-        let checked = aggItem(item.key);
-        // Untuk item opsional (q5, q7, q8, q9 di infra), boleh override dengan optionalItems
-        if (isInfra && optionalItems && ['q5','q7','q8','q9'].includes(item.key)) {
-          const optKey = `item_${item.key.replace('q','')}`;
-          if (typeof optionalItems[optKey] === 'boolean') checked = optionalItems[optKey] || checked;
+      beritaAcaraService.generatePage1(
+        doc, desaData, kecConfig, [proposalAdapter], timAdapter,
+        qrCode, checklistData, optionalItems || null, tanggal,
+        {
+          titleLines: ['BERITA ACARA VERIFIKASI', 'PROPOSAL BANTUAN KEUANGAN PERUBAHAN DESA'],
+          programName: 'Bantuan Keuangan Perubahan',
+          checklistItems,
         }
-        doc.font('Helvetica').text(`${idx + 1}. [${checked ? '✓' : ' '}] ${item.label}`);
-      });
-      doc.moveDown();
-
-      doc.text(
-        'Berdasarkan hasil verifikasi tersebut, Tim Verifikasi Kecamatan menyatakan bahwa proposal ' +
-        'memenuhi syarat administrasi untuk diteruskan ke DPMD Kabupaten.',
-        { align: 'justify' }
       );
-      doc.moveDown(2);
-
-      // TTD section
-      doc.font('Helvetica-Bold').text('Tim Verifikasi Kecamatan:', 50);
-      doc.moveDown(0.5);
-      if (tim.length === 0) {
-        doc.font('Helvetica').text('(Tidak ada anggota tim terdaftar)');
-      } else {
-        tim.forEach((t, idx) => {
-          const yStart = doc.y;
-          doc.font('Helvetica').fontSize(10).text(`${idx + 1}. ${getPosisiLabel(t.jabatan)}`, 50, yStart);
-          doc.text(`   ${t.nama}`, 50);
-          if (t.nip) doc.text(`   NIP. ${t.nip}`, 50);
-          // TTD image
-          if (t.ttd_path) {
-            try {
-              const ttdAbsPath = path.join(__dirname, '../../storage/uploads/signatures', t.ttd_path);
-              if (fs.existsSync(ttdAbsPath)) {
-                doc.image(ttdAbsPath, 50, doc.y + 2, { width: 60, height: 30 });
-              }
-            } catch (e) { /* ignore image errors */ }
-          }
-          doc.moveDown(2.5);
-        });
-      }
-
-      // Camat signature on the right
-      doc.fontSize(11).font('Helvetica-Bold');
-      const rightCol = 350;
-      const camatStartY = Math.max(doc.y, 600);
-      doc.text(`Mengetahui,`, rightCol, camatStartY - 80);
-      doc.text(`${config.jabatan_penandatangan || 'Camat'} ${proposal.kecamatan_nama}`, rightCol, camatStartY - 65);
-      if (config.ttd_camat_path) {
-        try {
-          const ttdAbsPath = path.join(__dirname, '../../storage/uploads/bankeu-perubahan/config', config.ttd_camat_path);
-          if (fs.existsSync(ttdAbsPath)) {
-            doc.image(ttdAbsPath, rightCol, camatStartY - 50, { width: 80, height: 40 });
-          }
-        } catch (e) { /* ignore */ }
-      }
-      doc.font('Helvetica-Bold').text(config.nama_camat, rightCol, camatStartY);
-      if (config.nip_camat) {
-        doc.font('Helvetica').fontSize(9).text(`NIP. ${config.nip_camat}`, rightCol);
-      }
 
       doc.end();
       await new Promise(resolve => writeStream.on('finish', resolve));
@@ -457,92 +410,40 @@ class BankeuPerubahanBeritaAcaraController {
       const filePath = path.join(outDir, fileName);
       const relPath = `/storage/uploads/bankeu-perubahan/surat-pengantar/${fileName}`;
 
-      const tanggalSurat = tanggal
-        ? new Date(tanggal).toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' })
-        : new Date().toLocaleDateString('id-ID', { year: 'numeric', month: 'long', day: 'numeric' });
-
-      const doc = new PDFDocument({ size: 'A4', margin: 50 });
+      const doc = new PDFDocument({
+        size: [595.28, 935.43], // F4 — samakan dengan Surat Pengantar reguler
+        margins: { top: 50, bottom: 50, left: 72, right: 72 },
+        bufferPages: true,
+      });
       const writeStream = fs.createWriteStream(filePath);
       doc.pipe(writeStream);
 
-      // Kop Surat - logo Kabupaten Bogor standar (bukan logo upload kecamatan)
-      try {
-        const logoAbs = path.join(__dirname, '../../public/logo-bogor.png');
-        if (fs.existsSync(logoAbs)) doc.image(logoAbs, 50, 45, { width: 55, height: 55 });
-      } catch (e) {}
+      // ===== Adapter data → renderer Surat Pengantar reguler (layout sama) =====
+      const spKecConfig = {
+        nama_kecamatan: proposal.kecamatan_nama,
+        nama_camat: config.nama_camat,
+        nip_camat: config.nip_camat,
+        jabatan_penandatangan: config.jabatan_penandatangan,
+        logo_path: config.logo_path,
+        alamat: config.alamat,
+        telepon: config.telepon,
+        email: config.email,
+        website: config.website,
+        kode_pos: config.kode_pos,
+        ttd_camat: config.ttd_camat_path ? `bankeu-perubahan/config/${config.ttd_camat_path}` : null,
+        stempel_path: config.stempel_path ? `bankeu-perubahan/config/${config.stempel_path}` : null,
+      };
 
-      doc.fontSize(11).font('Helvetica-Bold').text('PEMERINTAH KABUPATEN BOGOR', 120, 50, { align: 'left' });
-      doc.fontSize(13).text(`KECAMATAN ${(proposal.kecamatan_nama || '').toUpperCase()}`, 120);
-      doc.fontSize(9).font('Helvetica').text(config.alamat || '', 120);
-      if (config.telepon) doc.text(`Telp. ${config.telepon}`, 120);
-      if (config.email) doc.text(`Email: ${config.email}`, 120);
-      doc.moveTo(50, 130).lineTo(545, 130).stroke();
-      doc.moveTo(50, 133).lineTo(545, 133).stroke();
-      doc.moveDown(2);
+      const spProposalData = {
+        nomor_surat,
+        tahun_anggaran: proposal.tahun_anggaran,
+        nama_desa: proposal.desa_nama,
+      };
 
-      doc.fontSize(11);
-      doc.font('Helvetica').text(`Nomor    : ${nomor_surat}`, 50, 150);
-      doc.text(`Lampiran : 1 (satu) berkas proposal`, 50);
-      doc.text(`Perihal  : Pengantar Proposal Bantuan Keuangan Perubahan`, 50);
-      doc.moveDown();
-      doc.text(`${proposal.kecamatan_nama}, ${tanggalSurat}`, { align: 'right' });
-      doc.moveDown();
-
-      doc.text(`Kepada Yth.`, 50);
-      doc.text(`Bupati Bogor`, 50);
-      doc.text(`Cq. Kepala DPMD Kabupaten Bogor`, 50);
-      doc.text(`di -`, 50);
-      doc.text(`     Cibinong`, 50);
-      doc.moveDown();
-
-      doc.text(
-        `Bersama ini kami sampaikan Proposal Bantuan Keuangan Perubahan Tahun Anggaran ${proposal.tahun_anggaran} ` +
-        `dari Pemerintah Desa ${proposal.desa_nama}, Kecamatan ${proposal.kecamatan_nama}, dengan rincian sebagai berikut:`,
-        { align: 'justify' }
+      beritaAcaraService.generateSuratPengantarContent(
+        doc, spProposalData, spKecConfig, tanggal,
+        { jenisLabel: 'Proposal Permohonan Bantuan Keuangan Perubahan Desa' }
       );
-      doc.moveDown();
-
-      doc.font('Helvetica-Bold').text('Identitas Proposal:');
-      doc.font('Helvetica').text(`  • Judul Proposal    : ${proposal.judul_proposal}`);
-      doc.text(`  • Jenis Kegiatan    : ${proposal.jenis_kegiatan}`);
-      if (proposal.nama_kegiatan_spesifik) doc.text(`  • Kegiatan Spesifik : ${proposal.nama_kegiatan_spesifik}`);
-      if (proposal.volume) doc.text(`  • Volume            : ${proposal.volume}`);
-      if (proposal.lokasi) doc.text(`  • Lokasi            : ${proposal.lokasi}`);
-      if (proposal.anggaran_usulan) {
-        doc.text(`  • Anggaran Usulan   : Rp ${Number(proposal.anggaran_usulan).toLocaleString('id-ID')}`);
-      }
-      doc.moveDown();
-
-      doc.text(
-        'Proposal tersebut telah melalui proses verifikasi Tim Verifikasi Kecamatan dan dinyatakan memenuhi ' +
-        'syarat administrasi. Atas perhatian dan kerjasamanya, kami sampaikan terima kasih.',
-        { align: 'justify' }
-      );
-      doc.moveDown(3);
-
-      // TTD camat
-      const ttdX = 350;
-      const ttdY = doc.y;
-      doc.font('Helvetica-Bold').text(config.jabatan_penandatangan || 'Camat', ttdX, ttdY);
-      doc.text(`${proposal.kecamatan_nama},`, ttdX);
-      if (config.ttd_camat_path) {
-        try {
-          const ttdAbs = path.join(__dirname, '../../storage/uploads/bankeu-perubahan/config', config.ttd_camat_path);
-          if (fs.existsSync(ttdAbs)) doc.image(ttdAbs, ttdX, doc.y + 5, { width: 80, height: 40 });
-        } catch (e) {}
-      }
-      // Stempel (overlap with TTD)
-      if (config.stempel_path) {
-        try {
-          const stempelAbs = path.join(__dirname, '../../storage/uploads/bankeu-perubahan/config', config.stempel_path);
-          if (fs.existsSync(stempelAbs)) doc.image(stempelAbs, ttdX - 30, doc.y + 5, { width: 70, height: 70, opacity: 0.6 });
-        } catch (e) {}
-      }
-      doc.moveDown(3.5);
-      doc.font('Helvetica-Bold').text(config.nama_camat, ttdX);
-      if (config.nip_camat) {
-        doc.font('Helvetica').fontSize(9).text(`NIP. ${config.nip_camat}`, ttdX);
-      }
 
       doc.end();
       await new Promise(resolve => writeStream.on('finish', resolve));

@@ -66,14 +66,35 @@ async function recordRevisionRound({ proposalId, fileProposal, annotationData, c
   const pid = BigInt(proposalId);
 
   // Versi dokumen yang sedang dianotasi = versi terbaru
-  const latestVersion = await prisma.bankeu_perubahan_proposal_versions.findFirst({
+  let latestVersion = await prisma.bankeu_perubahan_proposal_versions.findFirst({
     where: { proposal_id: pid },
     orderBy: { version_number: 'desc' },
     select: { id: true },
   });
+  // Proposal lama belum punya riwayat versi (dibuat sebelum fitur versioning).
+  // Buat versi awal dari file proposal saat ini agar ronde revisi & PDF
+  // beranotasi tetap tercatat — jangan dilewati.
   if (!latestVersion) {
-    logger.warn(`[BankeuPerubahan Kec] Proposal #${proposalId} belum punya versi dokumen; ronde revisi dilewati`);
-    return null;
+    if (!fileProposal) {
+      logger.warn(`[BankeuPerubahan Kec] Proposal #${proposalId} tanpa versi & tanpa file; ronde revisi dilewati`);
+      return null;
+    }
+    const seeded = await prisma.bankeu_perubahan_proposal_versions.create({
+      data: {
+        proposal_id: pid,
+        version_number: 1,
+        file_proposal: fileProposal,
+        file_size: null,
+        source: 'initial',
+        uploaded_by: null,
+      },
+    });
+    await prisma.bankeu_perubahan_proposals.update({
+      where: { id: pid },
+      data: { current_version: 1 },
+    });
+    latestVersion = { id: seeded.id };
+    logger.info(`[BankeuPerubahan Kec] Proposal #${proposalId}: versi awal dibuat otomatis (backfill) sebelum ronde revisi`);
   }
 
   // Nomor ronde berikutnya
