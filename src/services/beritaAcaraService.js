@@ -659,7 +659,16 @@ class BeritaAcaraService {
       // Calculate row height
       const textHeight = doc.heightOfString(item.text, { width: colWidths.uraian - 8, lineGap: 2 });
       let estimatedHeight = Math.max(22, textHeight + 10);
-      if (hasSubItems) estimatedHeight = 100;
+      if (hasSubItems) {
+        // Tinggi dinamis: judul + total tinggi seluruh sub-item (mendukung sub-item panjang spt status lahan)
+        doc.fontSize(8).font('Helvetica');
+        let subTotal = 0;
+        item.subItems.forEach((subItem) => {
+          subTotal += doc.heightOfString(subItem, { width: colWidths.uraian - 12, lineGap: 2 }) + 4;
+        });
+        doc.fontSize(9).font('Helvetica');
+        estimatedHeight = Math.max(100, textHeight + 8 + subTotal + 10);
+      }
       const rowHeight = estimatedHeight;
 
       let xp = marginLeft;
@@ -753,29 +762,33 @@ class BeritaAcaraService {
       return startY + 20;
     };
 
-    // For infrastruktur: split items 1-9 on page 1, items 10-12 on page 2
-    // For non-infrastruktur: all items on page 1
+    // For infrastruktur: split items across 2 pages (default: 1-9 page 1, 10-12 page 2).
+    // Titik pisah dapat di-override lewat opts.pageSplitAfter (mis. Bankeu Perubahan = 4).
+    // For non-infrastruktur: all items on page 1.
     if (isInfrastruktur) {
-      // Page 1: items 1-9
-      const page1Items = checklistItems.filter(item => item.no <= 9);
+      const splitAfter = Number.isInteger(opts.pageSplitAfter) ? opts.pageSplitAfter : 9;
+
+      // Page 1: items s/d titik pisah
+      const page1Items = checklistItems.filter(item => item.no <= splitAfter);
       page1Items.forEach((item) => {
         const rowH = drawChecklistRow(item, yPos);
         yPos += rowH;
       });
 
-      // Force page 2 for items 10-12 + tim verifikasi
-      doc.addPage();
-      yPos = doc.page.margins.top + 20;
-      
-      // Redraw table header on page 2
-      yPos = drawTableHeader(yPos);
-      
-      // Items 10-12
-      const page2Items = checklistItems.filter(item => item.no >= 10);
-      page2Items.forEach((item) => {
-        const rowH = drawChecklistRow(item, yPos);
-        yPos += rowH;
-      });
+      // Sisa item (jika ada) di halaman 2 + tim verifikasi
+      const page2Items = checklistItems.filter(item => item.no > splitAfter);
+      if (page2Items.length > 0) {
+        doc.addPage();
+        yPos = doc.page.margins.top + 20;
+
+        // Redraw table header on page 2
+        yPos = drawTableHeader(yPos);
+
+        page2Items.forEach((item) => {
+          const rowH = drawChecklistRow(item, yPos);
+          yPos += rowH;
+        });
+      }
     } else {
       // Non-infrastruktur: all items on single page
       checklistItems.forEach((item) => {

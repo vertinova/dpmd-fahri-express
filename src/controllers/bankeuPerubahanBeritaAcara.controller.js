@@ -279,27 +279,33 @@ class BankeuPerubahanBeritaAcaraController {
         ttd: t.ttd_path ? `signatures/${t.ttd_path}` : null,
       }));
 
+      // Checklist mengikuti format resmi (lihat tabel Berita Acara):
+      // - Item 1–4: dokumen umum (semua jenis kegiatan)
+      // - Item 5–9: khusus INFRASTRUKTUR (kolom KET = "Infrastruktur")
       const checklistItems = isInfra ? [
         { no: 1, itemKey: 'item_1', text: 'Surat Pengantar dari Kepala Desa' },
-        { no: 2, itemKey: 'item_2', text: 'Surat Permohonan Bantuan Keuangan Perubahan' },
-        { no: 3, itemKey: 'item_3', text: 'Proposal (Latar Belakang, Maksud dan Tujuan, Bentuk Kegiatan, Jadwal Pelaksanaan)',
+        { no: 2, itemKey: 'item_2', text: 'Surat Permohonan Bantuan Keuangan Khusus Akselerasi Pembangunan Perdesaan' },
+        { no: 3, itemKey: 'item_3', text: 'Proposal Bantuan Keuangan Khusus Akselerasi Pembangunan Perdesaan',
           subItems: ['- Latar Belakang', '- Maksud dan Tujuan', '- Bentuk Kegiatan', '- Jadwal Pelaksanaan'] },
-        { no: 4, itemKey: 'item_4', text: 'RPA dan RAB' },
-        { no: 5, itemKey: 'item_5', text: 'Surat Pernyataan Kepala Desa (lokasi tidak dalam sengketa)', optional: true },
-        { no: 6, itemKey: 'item_6', text: 'Bukti kepemilikan Aset Desa (untuk Rehab Kantor Desa)', optional: true },
-        { no: 7, itemKey: 'item_7', text: 'Dokumen kesediaan peralihan hak hibah atas tanah', optional: true },
-        { no: 8, itemKey: 'item_8', text: 'Dokumen pernyataan kesanggupan (tidak minta ganti rugi)', optional: true },
-        { no: 9, itemKey: 'item_9', text: 'Persetujuan pemanfaatan barang milik Daerah/Negara', optional: true },
-        { no: 10, itemKey: 'item_10', text: 'Foto lokasi rencana pelaksanaan kegiatan' },
-        { no: 11, itemKey: 'item_11', text: 'Peta lokasi rencana kegiatan' },
-        { no: 12, itemKey: 'item_12', text: 'Berita Acara Musyawarah Desa' },
+        { no: 4, itemKey: 'item_4', text: 'Rencana Penggunaan Bantuan Keuangan dan RAB' },
+        { no: 5, itemKey: 'item_5', text: 'Foto lokasi rencana pelaksanaan kegiatan (0%)', ket: 'Infrastruktur' },
+        { no: 6, itemKey: 'item_6', text: 'Peta desa dan titik lokasi rencana kegiatan', ket: 'Infrastruktur' },
+        { no: 7, itemKey: 'item_7', text: 'Berita Acara Hasil Musyawarah Desa', ket: 'Infrastruktur' },
+        { no: 8, itemKey: 'item_8', text: 'SK Kepala Desa tentang Penetapan Tim Pelaksana Kegiatan (TPK)', ket: 'Infrastruktur' },
+        { no: 9, itemKey: 'item_9', text: 'Ketersediaan lahan dan kepastian status lahan :', ket: 'Infrastruktur',
+          subItems: [
+            '- surat pernyataan dari Kepala Desa yang menyatakan bahwa lokasi kegiatan tidak dalam keadaan bermasalah apabila merupakan Aset Desa;',
+            '- surat izin/persetujuan pemanfaatan dari perorangan selaku pemilik lahan, yang menyatakan tidak keberatan lahannya akan dipergunakan untuk pembangunan infrastruktur desa dan tanpa persyaratan apa pun, yang disetujui oleh keluarga;',
+            '- persetujuan pemanfaatan barang milik Daerah/Negara dalam hal lahan yang akan dipergunakan untuk pembangunan infrastruktur desa merupakan milik/dikuasai Pemerintah Daerah/Pemerintah Provinsi, Pemerintah Pusat;',
+            '- persetujuan pemanfaatan/penggunaan dari Badan Usaha/Badan Hukum selaku pemilik lahan, yang menyatakan tidak keberatan lahannya akan dipergunakan untuk pembangunan infrastruktur desa dan tanpa persyaratan apa pun;',
+            '- fotokopi bukti kepemilikan Aset Desa sesuai ketentuan perundang-undangan, dalam hal usulan kegiatan yang diusulkan berupa rehabilitasi kantor desa.',
+          ] },
       ] : [
         { no: 1, itemKey: 'item_1', text: 'Surat Pengantar dari Kepala Desa' },
-        { no: 2, itemKey: 'item_2', text: 'Surat Permohonan Bantuan Keuangan Perubahan' },
-        { no: 3, itemKey: 'item_3', text: 'Proposal (Latar Belakang, Maksud dan Tujuan, Bentuk Kegiatan, Jadwal Pelaksanaan)',
+        { no: 2, itemKey: 'item_2', text: 'Surat Permohonan Bantuan Keuangan Khusus Akselerasi Pembangunan Perdesaan' },
+        { no: 3, itemKey: 'item_3', text: 'Proposal Bantuan Keuangan Khusus Akselerasi Pembangunan Perdesaan',
           subItems: ['- Latar Belakang', '- Maksud dan Tujuan', '- Bentuk Kegiatan', '- Jadwal Pelaksanaan'] },
-        { no: 4, itemKey: 'item_4', text: 'Rencana Anggaran Biaya' },
-        { no: 5, itemKey: 'item_5', text: 'Tidak Duplikasi Anggaran' },
+        { no: 4, itemKey: 'item_4', text: 'Rencana Penggunaan Bantuan Keuangan dan RAB' },
       ];
 
       // checklistData: item_N "tersedia" bila MINIMAL SATU anggota tim mencentang qN
@@ -314,6 +320,8 @@ class BankeuPerubahanBeritaAcaraController {
           titleLines: ['BERITA ACARA VERIFIKASI', 'PROPOSAL BANTUAN KEUANGAN PERUBAHAN DESA'],
           programName: 'Bantuan Keuangan Perubahan',
           checklistItems,
+          // Infrastruktur: halaman 1 = dokumen umum (1–4), halaman 2 = dokumen infrastruktur (5–9)
+          pageSplitAfter: 4,
         }
       );
 
