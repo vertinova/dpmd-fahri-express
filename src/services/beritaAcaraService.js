@@ -501,87 +501,66 @@ class BeritaAcaraService {
     // Checklist Table
     yPos += 25;
     const tableTop = yPos;
-    const tableHeaders = ['NO', 'URAIAN', 'HASIL', 'KET'];
-    
-    // Column widths - HASIL dibagi 2 untuk √ dan -
+
+    // Column widths - HASIL bisa tunggal, atau dibagi 2 (Ada / Tidak Ada) bila opts.hasilDualColumn
+    const dualHasil = opts.hasilDualColumn === true;
     const colWidths = {
       no: 35,
-      uraian: contentWidth - 160,
-      hasil: 50,  // Total HASIL width
-      hasilCheck: 25,  // Sub-kolom √
-      hasilX: 25,      // Sub-kolom -
-      ket: 75
+      hasil: dualHasil ? 60 : 50,
+      ket: 75,
     };
-    
-    // Table header
-    doc.fontSize(9).font('Helvetica-Bold');
-    let xPos = marginLeft;
-    
-    // Draw header background (row 1)
-    doc.rect(marginLeft, tableTop, contentWidth, 20).fill('#f0f0f0');
-    
-    // Draw header text
-    doc.fillColor('#000000');
-    
-    xPos = marginLeft;
-    
-    // NO (centered vertically for rowspan 2)
-    doc.text('NO', xPos + 5, tableTop + 10, { 
-      width: colWidths.no - 10, 
-      align: 'center' 
-    });
-    xPos += colWidths.no;
-    
-    // URAIAN (centered vertically for rowspan 2)
-    doc.text('URAIAN', xPos + 5, tableTop + 10, { 
-      width: colWidths.uraian - 10, 
-      align: 'center' 
-    });
-    xPos += colWidths.uraian;
-    
-    // HASIL (merged header)
-    doc.text('HASIL', xPos + (colWidths.hasil / 2) - 15, tableTop + 10, { 
-      width: 30, 
-      align: 'center' 
-    });
-    xPos += colWidths.hasil;
-    
-    // KET (centered vertically for rowspan 2)
-    doc.text('KET', xPos + 5, tableTop + 10, { 
-      width: colWidths.ket - 10, 
-      align: 'center' 
-    });
+    colWidths.uraian = contentWidth - colWidths.no - colWidths.hasil - colWidths.ket;
+    colWidths.hasilHalf = colWidths.hasil / 2;
+    const headerHeight = dualHasil ? 34 : 20;
 
-    // Draw header borders - only outer borders and vertical separators
-    doc.lineWidth(1);
-    
-    // Outer border of header row 1
-    doc.rect(marginLeft, tableTop, contentWidth, 20).stroke();
-    
-    // Vertical line after NO
-    doc.moveTo(marginLeft + colWidths.no, tableTop)
-       .lineTo(marginLeft + colWidths.no, tableTop + 20)
-       .stroke();
-    
-    // Vertical line after URAIAN
-    doc.moveTo(marginLeft + colWidths.no + colWidths.uraian, tableTop)
-       .lineTo(marginLeft + colWidths.no + colWidths.uraian, tableTop + 20)
-       .stroke();
-    
-    // Vertical line after HASIL
-    doc.moveTo(marginLeft + colWidths.no + colWidths.uraian + colWidths.hasil, tableTop)
-       .lineTo(marginLeft + colWidths.no + colWidths.uraian + colWidths.hasil, tableTop + 20)
-       .stroke();
-    
-    // Extend NO column border down 
-    doc.rect(marginLeft, tableTop, colWidths.no, 20).stroke();
-    
-    // Extend URAIAN column border down
-    doc.rect(marginLeft + colWidths.no, tableTop, colWidths.uraian, 20).stroke();
-    
-    // Extend KET column border down
-    const ketX = marginLeft + colWidths.no + colWidths.uraian + colWidths.hasil;
-    doc.rect(ketX, tableTop, colWidths.ket, 20).stroke();
+    // Table header (mode HASIL tunggal, atau dua sub-kolom "Ada" / "Tidak Ada")
+    const drawTableHeader = (startY) => {
+      doc.fontSize(9).font('Helvetica-Bold');
+      doc.rect(marginLeft, startY, contentWidth, headerHeight).fill('#f0f0f0');
+      doc.fillColor('#000000');
+
+      const vCenter = startY + headerHeight / 2 - 4;
+      let xh = marginLeft;
+      doc.text('NO', xh + 5, vCenter, { width: colWidths.no - 10, align: 'center' });
+      xh += colWidths.no;
+      doc.text('URAIAN', xh + 5, vCenter, { width: colWidths.uraian - 10, align: 'center' });
+      xh += colWidths.uraian;
+
+      const hasilStart = xh;
+      const topRowH = 14;
+      if (dualHasil) {
+        doc.text('HASIL', hasilStart, startY + 4, { width: colWidths.hasil, align: 'center' });
+        doc.fontSize(7);
+        doc.text('Ada', hasilStart, startY + topRowH + 4, { width: colWidths.hasilHalf, align: 'center' });
+        doc.text('Tidak Ada', hasilStart + colWidths.hasilHalf, startY + topRowH + 2, { width: colWidths.hasilHalf, align: 'center' });
+        doc.fontSize(9);
+      } else {
+        doc.text('HASIL', hasilStart + (colWidths.hasil / 2) - 15, startY + 10, { width: 30, align: 'center' });
+      }
+      xh += colWidths.hasil;
+      doc.text('KET', xh + 5, vCenter, { width: colWidths.ket - 10, align: 'center' });
+
+      // Borders
+      doc.lineWidth(1);
+      doc.rect(marginLeft, startY, contentWidth, headerHeight).stroke();
+      let vx = marginLeft + colWidths.no;
+      doc.moveTo(vx, startY).lineTo(vx, startY + headerHeight).stroke();
+      vx += colWidths.uraian;
+      doc.moveTo(vx, startY).lineTo(vx, startY + headerHeight).stroke();
+      vx += colWidths.hasil;
+      doc.moveTo(vx, startY).lineTo(vx, startY + headerHeight).stroke();
+      if (dualHasil) {
+        // garis horizontal pemisah HASIL ↔ (Ada/Tidak Ada)
+        doc.moveTo(hasilStart, startY + topRowH).lineTo(hasilStart + colWidths.hasil, startY + topRowH).stroke();
+        // garis vertikal pemisah Ada ↔ Tidak Ada (hanya di baris bawah)
+        doc.moveTo(hasilStart + colWidths.hasilHalf, startY + topRowH).lineTo(hasilStart + colWidths.hasilHalf, startY + headerHeight).stroke();
+      }
+
+      doc.font('Helvetica').fontSize(9);
+      return startY + headerHeight;
+    };
+
+    drawTableHeader(tableTop);
 
     // Determine jenis kegiatan from proposal data
     const jenisKegiatan = proposals[0]?.jenis_kegiatan || 'infrastruktur';
@@ -640,12 +619,29 @@ class BeritaAcaraService {
       ];
     }
 
-    yPos = tableTop + 20; // Start after header
+    yPos = tableTop + headerHeight; // Start after header
     doc.font('Helvetica').fontSize(9);
 
     // Debug log
     console.log('🔍 Checklist Data:', JSON.stringify(checklistData, null, 2));
     console.log('🔍 Optional Items:', JSON.stringify(optionalItems, null, 2));
+
+    // Hitung tinggi baris (judul + sub-item) — dipakai untuk render & estimasi page-break
+    const computeRowHeight = (item) => {
+      doc.fontSize(9).font('Helvetica');
+      const textHeight = doc.heightOfString(item.text, { width: colWidths.uraian - 8, lineGap: 2 });
+      let h = Math.max(22, textHeight + 10);
+      if (item.subItems && item.subItems.length > 0) {
+        doc.fontSize(8).font('Helvetica');
+        let subTotal = 0;
+        item.subItems.forEach((subItem) => {
+          subTotal += doc.heightOfString(subItem, { width: colWidths.uraian - 12, lineGap: 2 }) + 4;
+        });
+        doc.fontSize(9).font('Helvetica');
+        h = Math.max(100, textHeight + 8 + subTotal + 10);
+      }
+      return h;
+    };
 
     // Helper function to draw a single checklist row
     const drawChecklistRow = (item, currentY) => {
@@ -653,23 +649,10 @@ class BeritaAcaraService {
       const isOptional = item.optional === true;
       const optionalIncluded = isOptional ? (optionalItems && optionalItems[item.itemKey] === true) : true;
       const checkStatus = checklistData ? checklistData[item.itemKey] : null;
-      
+
       console.log(`📋 Item ${item.no}: key=${item.itemKey}, status=${checkStatus}, optional=${isOptional}, included=${optionalIncluded}`);
-      
-      // Calculate row height
-      const textHeight = doc.heightOfString(item.text, { width: colWidths.uraian - 8, lineGap: 2 });
-      let estimatedHeight = Math.max(22, textHeight + 10);
-      if (hasSubItems) {
-        // Tinggi dinamis: judul + total tinggi seluruh sub-item (mendukung sub-item panjang spt status lahan)
-        doc.fontSize(8).font('Helvetica');
-        let subTotal = 0;
-        item.subItems.forEach((subItem) => {
-          subTotal += doc.heightOfString(subItem, { width: colWidths.uraian - 12, lineGap: 2 }) + 4;
-        });
-        doc.fontSize(9).font('Helvetica');
-        estimatedHeight = Math.max(100, textHeight + 8 + subTotal + 10);
-      }
-      const rowHeight = estimatedHeight;
+
+      const rowHeight = computeRowHeight(item);
 
       let xp = marginLeft;
       
@@ -699,24 +682,40 @@ class BeritaAcaraService {
       xp += colWidths.uraian;
       
       // HASIL column
-      const checkCenterX = xp + (colWidths.hasil / 2);
       const markY = currentY + (rowHeight / 2);
-      
-      if (isOptional && !optionalIncluded) {
-        doc.save();
-        doc.fontSize(12).font('Helvetica');
-        doc.text('-', checkCenterX - 4, markY - 6, { width: 10, align: 'center' });
-        doc.restore();
-      } else if (checkStatus === true) {
+      const drawCheckMark = (cx) => {
         doc.save();
         doc.strokeColor('#008000');
         doc.lineWidth(2);
-        const checkX = checkCenterX - 6;
-        const checkY2 = markY - 3;
-        doc.moveTo(checkX, checkY2).lineTo(checkX + 4, checkY2 + 6).lineTo(checkX + 12, checkY2 - 4).stroke();
+        doc.moveTo(cx - 6, markY - 3).lineTo(cx - 2, markY + 3).lineTo(cx + 6, markY - 7).stroke();
         doc.restore();
+      };
+
+      if (dualHasil) {
+        // Dua sub-kolom: "Ada" (kiri) dan "Tidak Ada" (kanan)
+        const adaCenterX = xp + colWidths.hasilHalf / 2;
+        const tidakCenterX = xp + colWidths.hasilHalf + colWidths.hasilHalf / 2;
+        if (isOptional && !optionalIncluded) {
+          drawCheckMark(tidakCenterX);
+        } else if (checkStatus === true) {
+          drawCheckMark(adaCenterX);
+        } else {
+          drawCheckMark(tidakCenterX);
+        }
+        doc.rect(xp, currentY, colWidths.hasil, rowHeight).stroke();
+        doc.moveTo(xp + colWidths.hasilHalf, currentY).lineTo(xp + colWidths.hasilHalf, currentY + rowHeight).stroke();
+      } else {
+        const checkCenterX = xp + (colWidths.hasil / 2);
+        if (isOptional && !optionalIncluded) {
+          doc.save();
+          doc.fontSize(12).font('Helvetica');
+          doc.text('-', checkCenterX - 4, markY - 6, { width: 10, align: 'center' });
+          doc.restore();
+        } else if (checkStatus === true) {
+          drawCheckMark(checkCenterX);
+        }
+        doc.rect(xp, currentY, colWidths.hasil, rowHeight).stroke();
       }
-      doc.rect(xp, currentY, colWidths.hasil, rowHeight).stroke();
       xp += colWidths.hasil;
       
       // KET column
@@ -734,75 +733,39 @@ class BeritaAcaraService {
       return rowHeight;
     };
 
-    // Helper function to draw table header
-    const drawTableHeader = (startY) => {
-      doc.fontSize(9).font('Helvetica-Bold');
-      
-      // Header background
-      doc.rect(marginLeft, startY, contentWidth, 20).fill('#f0f0f0');
-      doc.fillColor('#000000');
-      
-      let xh = marginLeft;
-      doc.text('NO', xh + 5, startY + 10, { width: colWidths.no - 10, align: 'center' });
-      xh += colWidths.no;
-      doc.text('URAIAN', xh + 5, startY + 10, { width: colWidths.uraian - 10, align: 'center' });
-      xh += colWidths.uraian;
-      doc.text('HASIL', xh + (colWidths.hasil / 2) - 15, startY + 10, { width: 30, align: 'center' });
-      xh += colWidths.hasil;
-      doc.text('KET', xh + 5, startY + 10, { width: colWidths.ket - 10, align: 'center' });
-      
-      // Borders
-      doc.lineWidth(1);
-      doc.rect(marginLeft, startY, contentWidth, 20).stroke();
-      doc.moveTo(marginLeft + colWidths.no, startY).lineTo(marginLeft + colWidths.no, startY + 20).stroke();
-      doc.moveTo(marginLeft + colWidths.no + colWidths.uraian, startY).lineTo(marginLeft + colWidths.no + colWidths.uraian, startY + 20).stroke();
-      doc.moveTo(marginLeft + colWidths.no + colWidths.uraian + colWidths.hasil, startY).lineTo(marginLeft + colWidths.no + colWidths.uraian + colWidths.hasil, startY + 20).stroke();
-      
-      doc.font('Helvetica').fontSize(9);
-      return startY + 20;
-    };
+    // (drawTableHeader sudah didefinisikan di atas — mendukung mode HASIL tunggal & dual)
 
-    // For infrastruktur: split items across 2 pages (default: 1-9 page 1, 10-12 page 2).
-    // Titik pisah dapat di-override lewat opts.pageSplitAfter (mis. Bankeu Perubahan = 4).
-    // For non-infrastruktur: all items on page 1.
-    if (isInfrastruktur) {
+    // Render checklist:
+    // - Reguler infrastruktur (tanpa opts.dynamicChecklist): split tetap via opts.pageSplitAfter (default 9).
+    // - Lainnya (Bankeu Perubahan & non-infrastruktur): mengalir dinamis — pindah halaman hanya bila baris
+    //   tidak muat, sehingga SELURUH poin (mis. 9 poin infrastruktur) tampil lengkap & berurutan.
+    if (isInfrastruktur && !opts.dynamicChecklist) {
       const splitAfter = Number.isInteger(opts.pageSplitAfter) ? opts.pageSplitAfter : 9;
 
-      // Page 1: items s/d titik pisah
       const page1Items = checklistItems.filter(item => item.no <= splitAfter);
       page1Items.forEach((item) => {
         const rowH = drawChecklistRow(item, yPos);
         yPos += rowH;
       });
 
-      // Sisa item (jika ada) di halaman 2 + tim verifikasi
       const page2Items = checklistItems.filter(item => item.no > splitAfter);
       if (page2Items.length > 0) {
         doc.addPage();
         yPos = doc.page.margins.top + 20;
-
-        // Redraw table header on page 2
         yPos = drawTableHeader(yPos);
-
         page2Items.forEach((item) => {
           const rowH = drawChecklistRow(item, yPos);
           yPos += rowH;
         });
       }
     } else {
-      // Non-infrastruktur: all items on single page
       checklistItems.forEach((item) => {
-        // Check if we need a new page
-        const textHeight = doc.heightOfString(item.text, { width: colWidths.uraian - 8, lineGap: 2 });
-        let estimatedHeight = Math.max(22, textHeight + 10);
-        if (item.subItems && item.subItems.length > 0) estimatedHeight = 100;
-        
-        if (yPos + estimatedHeight > doc.page.height - doc.page.margins.bottom - 50) {
+        const estH = computeRowHeight(item);
+        if (yPos + estH > doc.page.height - doc.page.margins.bottom - 50) {
           doc.addPage();
           yPos = doc.page.margins.top + 20;
           yPos = drawTableHeader(yPos);
         }
-        
         const rowH = drawChecklistRow(item, yPos);
         yPos += rowH;
       });
@@ -810,7 +773,15 @@ class BeritaAcaraService {
     
     // Add Tim Verifikasi section below the table
     yPos += 20;
-    
+
+    // Pastikan blok tanda tangan (TIM VERIFIKASI + MENGETAHUI) tidak terpotong di bawah halaman.
+    // Penting untuk mode mengalir dinamis (mis. 9 poin infrastruktur Bankeu Perubahan).
+    const signatureBlockHeight = 190;
+    if (yPos + signatureBlockHeight > doc.page.height - doc.page.margins.bottom) {
+      doc.addPage();
+      yPos = doc.page.margins.top + 30;
+    }
+
     // TIM VERIFIKASI Section - with MENGETAHUI on right side
     doc.fontSize(11).font('Helvetica-Bold');
     doc.text('TIM VERIFIKASI KECAMATAN', marginLeft, yPos);

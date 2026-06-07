@@ -320,8 +320,10 @@ class BankeuPerubahanBeritaAcaraController {
           titleLines: ['BERITA ACARA VERIFIKASI', 'PROPOSAL BANTUAN KEUANGAN PERUBAHAN DESA'],
           programName: 'Bantuan Keuangan Perubahan',
           checklistItems,
-          // Infrastruktur: halaman 1 = dokumen umum (1–4), halaman 2 = dokumen infrastruktur (5–9)
-          pageSplitAfter: 4,
+          // Kolom HASIL dibagi 2 sub-kolom: "Ada" / "Tidak Ada" (format resmi gambar)
+          hasilDualColumn: true,
+          // Checklist mengalir dinamis agar seluruh poin (9 poin utk infrastruktur) tampil berurutan & lengkap
+          dynamicChecklist: true,
         }
       );
 
