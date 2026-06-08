@@ -22,4 +22,7 @@ router.get('/proposals/:proposalId/history', controller.getProposalVerificationH
 // Statistik
 router.get('/statistics', controller.getStatistics);
 
+// Tracking lintas-tahap (semua proposal, utk tab Tracking & Partisipasi SPKED)
+router.get('/tracking', controller.getTracking);
+
 module.exports = router;
