@@ -1957,6 +1957,9 @@ model video_meeting_participants {
   user_id             BigInt?                          @db.UnsignedBigInt
   guest_name          String?                          @db.VarChar(255)
   role                video_meeting_participants_role? @default(participant)
+  hand_raised         Boolean?                         @default(false)
+  on_stage            Boolean?                         @default(false)
+  hand_raised_at      DateTime?                        @db.DateTime(0)
   joined_at           DateTime?                        @db.DateTime(0)
   left_at             DateTime?                        @db.DateTime(0)
   is_muted            Boolean?                         @default(false)
@@ -1996,6 +1999,7 @@ model video_meetings {
   host_id                    BigInt                       @db.UnsignedBigInt
   bidang_id                  BigInt?                      @db.UnsignedBigInt
   status                     video_meetings_status?       @default(scheduled)
+  mode                       String                       @default("meeting") @db.VarChar(20)
   scheduled_start            DateTime?                    @db.DateTime(0)
   scheduled_end              DateTime?                    @db.DateTime(0)
   actual_start               DateTime?                    @db.DateTime(0)

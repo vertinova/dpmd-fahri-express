@@ -40,6 +40,7 @@ class VideoMeetingController {
         is_chat_enabled = true,
         password,
         waiting_room_enabled = false,
+        mode = 'meeting',
         invited_users = []
       } = req.body;
 
@@ -71,6 +72,7 @@ class VideoMeetingController {
           is_chat_enabled,
           password: password ? await bcrypt.hash(password, 10) : null,
           waiting_room_enabled,
+          mode: mode === 'webinar' ? 'webinar' : 'meeting',
           status: scheduled_start ? 'scheduled' : 'active'
         }
       });

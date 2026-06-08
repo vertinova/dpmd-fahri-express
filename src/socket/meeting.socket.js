@@ -384,6 +384,16 @@ function initSocketServer(httpServer) {
         const isHost = hostIdStr === userIdStr;
         console.log(`[Socket] Host check for ${userName}: host_id="${hostIdStr}", socket.user.id="${userIdStr}", isHost=${isHost}`);
 
+        // Mode webinar: hanya host (dan peserta yang diangkat) yang boleh publish.
+        // Mode meeting biasa: semua peserta publish (onStage=true) seperti sebelumnya.
+        const isWebinar = (meeting.mode || 'meeting') === 'webinar';
+        const onStage = isWebinar ? (isHost || participant.on_stage === true) : true;
+        if (isWebinar && isHost && participant.on_stage !== true) {
+          await prisma.video_meeting_participants.update({
+            where: { id: participant.id }, data: { on_stage: true },
+          }).catch(() => {});
+        }
+
         safeCallback(callback, {
           success: true,
           rtpCapabilities,
@@ -395,7 +405,9 @@ function initSocketServer(httpServer) {
             isRecordingEnabled: meeting.is_recording_enabled,
             isScreenShareEnabled: meeting.is_screen_share_enabled,
             isChatEnabled: meeting.is_chat_enabled,
-            isHost: isHost
+            isHost: isHost,
+            mode: meeting.mode || 'meeting',
+            onStage,
           }
         });
       } catch (error) {
@@ -532,6 +544,84 @@ function initSocketServer(httpServer) {
         });
       } catch (error) {
         console.error('[Socket] Error closing producer:', error);
+      }
+    });
+
+    // ===== Webinar: angkat tangan & promote/demote ke panggung =====
+    // Mode webinar: hanya peserta on_stage (+ host) yang publish audio/video; sisanya penonton.
+    const findSocketByPeerId = (roomId, targetPeerId) => {
+      const ids = io.sockets.adapter.rooms.get(roomId);
+      if (!ids) return null;
+      for (const id of ids) {
+        const s = io.sockets.sockets.get(id);
+        if (s && String(s.peerId) === String(targetPeerId)) return s;
+      }
+      return null;
+    };
+    const isRoomHost = async (sock) => {
+      if (!sock.roomId || sock.user?.isGuest) return false;
+      const meeting = await prisma.video_meetings.findFirst({ where: { room_id: sock.roomId }, select: { host_id: true } });
+      return meeting && String(meeting.host_id) === String(sock.user.id);
+    };
+
+    // Peserta mengangkat / menurunkan tangan
+    socket.on('raise-hand', async (data, callback) => {
+      try {
+        if (!socket.roomId) return safeCallback(callback, { error: 'Belum di dalam room' });
+        const raised = data?.raised !== false;
+        if (socket.participantId) {
+          await prisma.video_meeting_participants.update({
+            where: { id: BigInt(socket.participantId) },
+            data: { hand_raised: raised, hand_raised_at: raised ? new Date() : null },
+          }).catch(() => {});
+        }
+        io.to(socket.roomId).emit('hand-updated', { peerId: socket.peerId, userName: socket.userName, raised });
+        safeCallback(callback, { success: true });
+      } catch (err) {
+        console.error('[Socket] raise-hand error:', err);
+        safeCallback(callback, { error: err.message });
+      }
+    });
+
+    // Host menaikkan peserta ke panggung (boleh publish)
+    socket.on('promote-to-stage', async (data, callback) => {
+      try {
+        if (!(await isRoomHost(socket))) return safeCallback(callback, { error: 'Hanya host yang bisa menaikkan ke panggung' });
+        const { targetPeerId } = data || {};
+        const target = findSocketByPeerId(socket.roomId, targetPeerId);
+        if (target?.participantId) {
+          await prisma.video_meeting_participants.update({
+            where: { id: BigInt(target.participantId) },
+            data: { on_stage: true, hand_raised: false, hand_raised_at: null },
+          }).catch(() => {});
+        }
+        io.to(socket.roomId).emit('stage-updated', { peerId: targetPeerId, onStage: true, by: socket.userName });
+        safeCallback(callback, { success: true });
+      } catch (err) {
+        console.error('[Socket] promote-to-stage error:', err);
+        safeCallback(callback, { error: err.message });
+      }
+    });
+
+    // Host menurunkan peserta dari panggung (berhenti publish)
+    socket.on('demote-from-stage', async (data, callback) => {
+      try {
+        if (!(await isRoomHost(socket))) return safeCallback(callback, { error: 'Hanya host yang bisa menurunkan dari panggung' });
+        const { targetPeerId } = data || {};
+        const target = findSocketByPeerId(socket.roomId, targetPeerId);
+        if (target?.participantId) {
+          await prisma.video_meeting_participants.update({
+            where: { id: BigInt(target.participantId) },
+            data: { on_stage: false },
+          }).catch(() => {});
+        }
+        // Peserta tetap di room (masih bisa menonton); klien target akan menutup
+        // producer-nya sendiri saat menerima event ini (berhenti tayang/bersuara).
+        io.to(socket.roomId).emit('stage-updated', { peerId: targetPeerId, onStage: false, by: socket.userName });
+        safeCallback(callback, { success: true });
+      } catch (err) {
+        console.error('[Socket] demote-from-stage error:', err);
+        safeCallback(callback, { error: err.message });
       }
     });
 
