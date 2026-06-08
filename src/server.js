@@ -395,10 +395,8 @@ app.use('/api/pemdes/profil-desa', pemdesProfilDesaRoutes);
 // Pemdes Produk Hukum routes (bidang-level, all desas)
 app.use('/api/pemdes/produk-hukum', require('./routes/pemdes-produk-hukum.routes'));
 
-// Video Meeting routes - MAINTENANCE MODE
-app.use('/api/video-meetings', (req, res) => {
-  res.status(503).json({ success: false, message: 'Fitur video meeting sedang dalam pemeliharaan.' });
-});
+// Video Meeting routes (SFU mediasoup) — aktif kembali setelah port RTC dibuka
+app.use('/api/video-meetings', require('./routes/videoMeeting.routes'));
 
 // Chatbot Smart Search routes
 app.use('/api/chatbot', chatbotRoutes);
@@ -429,9 +427,9 @@ const PORT = process.env.PORT || 3001;
 // Create HTTP server
 const server = http.createServer(app);
 
-// Socket.io for messaging (re-enabled) - mediasoup/video meeting stays DISABLED
+// Socket.io (messaging + video meeting signaling)
 const { initSocketServer } = require('./socket/meeting.socket');
-// mediasoupService intentionally NOT initialized (video meeting maintenance)
+const mediasoupService = require('./services/mediasoup.service');
 
 // Start server
 function startServer() {
@@ -444,11 +442,16 @@ function startServer() {
     logger.info(`🚀 Server running on port ${PORT}`);
     logger.info(`📝 Environment: ${process.env.NODE_ENV}`);
     logger.info(`🔗 CORS enabled for: ${process.env.CORS_ORIGIN}`);
-    logger.info('🔧 Video Meeting: DISABLED (maintenance mode)');
-
-    // Initialize Socket.io for messaging (no mediasoup workers)
+    // Initialize Socket.io (messaging + video meeting signaling)
     initSocketServer(server);
-    logger.info('🔌 Socket.io initialized (messaging only)');
+    logger.info('🔌 Socket.io initialized');
+
+    // Initialize mediasoup SFU workers untuk video meeting. Dibungkus agar
+    // kegagalan init (mis. worker binary) tidak meng-crash server — signaling
+    // akan membalas error ramah "Mediasoup not initialized" bila gagal.
+    mediasoupService.init()
+      .then(() => logger.info(`🎥 Video Meeting: ENABLED (announcedIp=${process.env.MEDIASOUP_ANNOUNCED_IP || '127.0.0.1'})`))
+      .catch((err) => logger.error('🎥 Video Meeting: gagal init mediasoup —', err.message));
 
     // Initialize scheduler for push notifications
     schedulerService.init();
