@@ -394,6 +394,14 @@ function initSocketServer(httpServer) {
           }).catch(() => {});
         }
 
+        // Cache info meeting di socket (hindari query berulang per chat/aksi) &
+        // dipakai untuk enforcement publish mode webinar.
+        socket.meetingId = meeting.id;
+        socket.meetingHostId = hostIdStr;
+        socket.meetingMode = meeting.mode || 'meeting';
+        socket.isHost = isHost;
+        socket.onStage = onStage;
+
         safeCallback(callback, {
           success: true,
           rtpCapabilities,
@@ -462,6 +470,13 @@ function initSocketServer(httpServer) {
         const peerId = socket.user.id;
         const roomId = socket.roomId;
 
+        // Enforcement webinar: hanya host / peserta on-stage yang boleh publish.
+        // (Sebelumnya gating hanya di klien — kooperatif. Ini penegakan di server.)
+        if (socket.meetingMode === 'webinar' && !socket.isHost && socket.onStage !== true) {
+          console.warn(`[Socket] Tolak produce ${kind} dari penonton ${peerId} (webinar)`);
+          return safeCallback(callback, { error: 'Hanya pembicara di panggung yang boleh menyalakan kamera/mikrofon.' });
+        }
+
         console.log(`[Socket] Producing ${kind} for peer ${peerId} in room ${roomId}`);
         const producer = await mediasoupService.produce(
           roomId,
@@ -528,6 +543,21 @@ function initSocketServer(httpServer) {
       }
     });
 
+    // Atur lapis simulcast yang diinginkan untuk video dari peer sumber tertentu.
+    // Klien meminta lapis rendah (spatialLayer 0) untuk thumbnail dan lapis penuh
+    // (2) untuk tile yang di-pin/spotlight → hemat bandwidth & realisasi simulcast.
+    socket.on('set-preferred-layers', async (data, callback) => {
+      try {
+        const { sourcePeerId, spatialLayer } = data || {};
+        const ok = await mediasoupService.setPreferredLayers(
+          socket.roomId, socket.user.id, String(sourcePeerId), spatialLayer
+        );
+        safeCallback(callback, { success: ok });
+      } catch (error) {
+        safeCallback(callback, { error: error.message });
+      }
+    });
+
     // Close producer (stop sending video/audio)
     socket.on('close-producer', async (data) => {
       try {
@@ -560,6 +590,8 @@ function initSocketServer(httpServer) {
     };
     const isRoomHost = async (sock) => {
       if (!sock.roomId || sock.user?.isGuest) return false;
+      // Pakai cache dari join-room bila ada; fallback query.
+      if (sock.meetingHostId) return String(sock.meetingHostId) === String(sock.user.id);
       const meeting = await prisma.video_meetings.findFirst({ where: { room_id: sock.roomId }, select: { host_id: true } });
       return meeting && String(meeting.host_id) === String(sock.user.id);
     };
@@ -595,6 +627,7 @@ function initSocketServer(httpServer) {
             data: { on_stage: true, hand_raised: false, hand_raised_at: null },
           }).catch(() => {});
         }
+        if (target) target.onStage = true; // izinkan publish (enforcement server)
         io.to(socket.roomId).emit('stage-updated', { peerId: targetPeerId, onStage: true, by: socket.userName });
         safeCallback(callback, { success: true });
       } catch (err) {
@@ -615,6 +648,7 @@ function initSocketServer(httpServer) {
             data: { on_stage: false },
           }).catch(() => {});
         }
+        if (target) target.onStage = false; // cabut izin publish (enforcement server)
         // Peserta tetap di room (masih bisa menonton); klien target akan menutup
         // producer-nya sendiri saat menerima event ini (berhenti tayang/bersuara).
         io.to(socket.roomId).emit('stage-updated', { peerId: targetPeerId, onStage: false, by: socket.userName });
@@ -649,12 +683,18 @@ function initSocketServer(httpServer) {
         const sanitizedMessage = message?.slice(0, 2000);
         if (!sanitizedMessage?.trim()) return;
 
+        // meeting_id dari cache socket (di-set saat join-room); fallback query bila perlu.
+        let meetingId = socket.meetingId;
+        if (!meetingId) {
+          const m = await prisma.video_meetings.findFirst({ where: { room_id: roomId }, select: { id: true } });
+          meetingId = m?.id;
+        }
+        if (!meetingId) return;
+
         // Save to database
         const chatMessage = await prisma.video_meeting_chats.create({
           data: {
-            meeting_id: BigInt(
-              (await prisma.video_meetings.findFirst({ where: { room_id: roomId } })).id
-            ),
+            meeting_id: BigInt(meetingId),
             participant_id: BigInt(participantId),
             message: sanitizedMessage,
             message_type: 'text'
@@ -820,6 +860,22 @@ function initSocketServer(httpServer) {
       }
 
       await handlePeerLeave(socket);
+    });
+  });
+
+  // Relay pembicara dominan (dari AudioLevelObserver) ke seluruh peserta room
+  // → frontend menyorot tile pembicara aktif.
+  mediasoupService.on('dominant-speaker', ({ roomId, peerId }) => {
+    io.to(roomId).emit('active-speaker', { peerId });
+  });
+
+  // Worker mediasoup mati → room di worker itu hilang. Beri tahu peserta agar
+  // tidak menggantung (klien dapat menampilkan pesan & reconnect/keluar).
+  mediasoupService.on('worker-died', ({ roomIds }) => {
+    (roomIds || []).forEach((roomId) => {
+      io.to(roomId).emit('meeting-interrupted', {
+        message: 'Server media terputus sesaat. Silakan muat ulang halaman untuk bergabung kembali.',
+      });
     });
   });
 

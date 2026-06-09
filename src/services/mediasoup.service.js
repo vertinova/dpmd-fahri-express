@@ -21,7 +21,7 @@ class MediasoupService extends EventEmitter {
   async init() {
     const numWorkers = require('os').cpus().length;
     console.log(`[Mediasoup] Creating ${numWorkers} workers...`);
-    
+
     // Check MEDIASOUP_ANNOUNCED_IP configuration
     const announcedIp = process.env.MEDIASOUP_ANNOUNCED_IP || '127.0.0.1';
     if (announcedIp === '127.0.0.1' && process.env.NODE_ENV === 'production') {
@@ -36,37 +36,54 @@ class MediasoupService extends EventEmitter {
     }
 
     for (let i = 0; i < numWorkers; i++) {
-      const worker = await mediasoup.createWorker({
-        logLevel: config.worker.logLevel,
-        logTags: config.worker.logTags,
-        rtcMinPort: config.worker.rtcMinPort,
-        rtcMaxPort: config.worker.rtcMaxPort
-      });
-
-      worker.on('died', () => {
-        console.error(`[Mediasoup] Worker ${worker.pid} died, recreating...`);
-        // Remove dead worker and create a replacement
-        const idx = this.workers.indexOf(worker);
-        if (idx !== -1) this.workers.splice(idx, 1);
-        mediasoup.createWorker({
-          logLevel: config.worker.logLevel,
-          logTags: config.worker.logTags,
-          rtcMinPort: config.worker.rtcMinPort,
-          rtcMaxPort: config.worker.rtcMaxPort
-        }).then(newWorker => {
-          newWorker.on('died', worker.listeners('died')[0]); // reuse same handler
-          this.workers.push(newWorker);
-          console.log(`[Mediasoup] Replacement worker ${newWorker.pid} created`);
-        }).catch(err => {
-          console.error('[Mediasoup] Failed to recreate worker:', err);
-        });
-      });
-
-      this.workers.push(worker);
-      console.log(`[Mediasoup] Worker ${worker.pid} created`);
+      await this._spawnWorker();
     }
 
     console.log(`[Mediasoup] ${this.workers.length} workers ready`);
+  }
+
+  /**
+   * Spawn satu worker dan pasang handler 'died' yang benar (tanpa closure ke
+   * worker lama). Saat worker mati: tutup semua room di worker itu, beri tahu
+   * klien lewat event 'worker-died' { roomIds }, lalu buat worker pengganti.
+   */
+  async _spawnWorker() {
+    const worker = await mediasoup.createWorker({
+      logLevel: config.worker.logLevel,
+      logTags: config.worker.logTags,
+      rtcMinPort: config.worker.rtcMinPort,
+      rtcMaxPort: config.worker.rtcMaxPort,
+    });
+
+    worker.once('died', () => {
+      console.error(`[Mediasoup] Worker ${worker.pid} died`);
+      // Lepas worker mati dari pool.
+      const idx = this.workers.indexOf(worker);
+      if (idx !== -1) this.workers.splice(idx, 1);
+
+      // Kumpulkan & bersihkan room yang dijalankan worker ini (router-nya ikut mati).
+      const deadRoomIds = [];
+      for (const [roomId, room] of this.rooms) {
+        if (room.worker === worker) {
+          deadRoomIds.push(roomId);
+          this.rooms.delete(roomId);
+        }
+      }
+      if (deadRoomIds.length) {
+        console.error(`[Mediasoup] Rooms hilang akibat worker mati: [${deadRoomIds.join(', ')}]`);
+        // Beri tahu lapisan signaling agar peserta tahu (bukan menggantung diam).
+        this.emit('worker-died', { roomIds: deadRoomIds });
+      }
+
+      // Buat worker pengganti agar kapasitas pulih.
+      this._spawnWorker()
+        .then((w) => console.log(`[Mediasoup] Replacement worker ${w.pid} created`))
+        .catch((err) => console.error('[Mediasoup] Failed to recreate worker:', err));
+    });
+
+    this.workers.push(worker);
+    console.log(`[Mediasoup] Worker ${worker.pid} created`);
+    return worker;
   }
 
   /**
@@ -97,6 +114,7 @@ class MediasoupService extends EventEmitter {
 
       room = {
         router,
+        worker, // simpan agar bisa tahu room mana yang terdampak bila worker mati
         peers: new Map(),
         audioLevelObserver: null,
         dominantPeerId: null,
@@ -315,6 +333,40 @@ class MediasoupService extends EventEmitter {
     if (!consumer) throw new Error('Consumer not found');
 
     await consumer.resume();
+  }
+
+  /**
+   * Atur lapis simulcast yang diinginkan untuk consumer video tertentu.
+   * Dipakai agar tile kecil/penonton menerima lapis rendah (hemat bandwidth) dan
+   * tile yang di-pin/spotlight menerima lapis penuh. Mengembalikan true bila ada
+   * consumer video yang diset. (peerId = peer yang MENONTON; producerId = sumber)
+   */
+  async setPreferredLayers(roomId, viewerPeerId, sourcePeerId, spatialLayer) {
+    const room = this.getRoom(roomId);
+    if (!room) return false;
+    const viewer = room.peers.get(viewerPeerId);
+    if (!viewer) return false;
+
+    // Kumpulkan producerId video milik peer sumber.
+    const source = room.peers.get(sourcePeerId);
+    const sourceVideoProducerIds = source
+      ? [...source.producers.values()].filter((p) => p.kind === 'video').map((p) => p.id)
+      : [];
+    if (!sourceVideoProducerIds.length) return false;
+
+    let applied = false;
+    for (const [, consumer] of viewer.consumers) {
+      if (consumer.kind !== 'video') continue;
+      if (!sourceVideoProducerIds.includes(consumer.producerId)) continue;
+      try {
+        const layer = Number.isInteger(spatialLayer) ? spatialLayer : 2;
+        await consumer.setPreferredLayers({ spatialLayer: layer, temporalLayer: 2 });
+        applied = true;
+      } catch (e) {
+        // Producer mungkin bukan simulcast (mis. 1 lapis) — abaikan.
+      }
+    }
+    return applied;
   }
 
   /**

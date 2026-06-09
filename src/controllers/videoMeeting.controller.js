@@ -21,8 +21,9 @@ class VideoMeetingController {
       if (String(meeting.host_id) !== String(req.user.id)) {
         return res.status(403).json({ success: false, message: 'Hanya host yang bisa memulai siaran' });
       }
-      const { playlist } = await hlsBroadcaster.startBroadcast(roomId);
-      return res.json({ success: true, data: { playlist, watchPath: `/watch/${roomId}` } });
+      const record = req.body?.record === true || req.body?.record === 'true';
+      const { playlist, recording } = await hlsBroadcaster.startBroadcast(roomId, null, { record });
+      return res.json({ success: true, data: { playlist, watchPath: `/watch/${roomId}`, recording } });
     } catch (error) {
       console.error('[Broadcast] start error:', error);
       return res.status(500).json({ success: false, message: error.message });
