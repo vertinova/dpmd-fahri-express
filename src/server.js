@@ -212,6 +212,14 @@ app.use('/storage', (req, res, next) => {
   next();
 }, express.static(path.join(__dirname, '../storage')));
 
+// Serve HLS (webinar broadcast). no-cache pada playlist agar pemutar ambil segmen baru.
+app.use('/hls', (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+  if (req.path.endsWith('.m3u8')) res.header('Cache-Control', 'no-cache, no-store, must-revalidate');
+  next();
+}, express.static(path.join(__dirname, '../storage/hls')));
+
 app.use('/uploads', (req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Cross-Origin-Resource-Policy', 'cross-origin');

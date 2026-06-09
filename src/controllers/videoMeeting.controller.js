@@ -7,8 +7,52 @@ const prisma = require('../config/prisma');
 const { v4: uuidv4 } = require('uuid');
 const bcrypt = require('bcrypt');
 const ActivityLogger = require('../utils/activityLogger');
+const hlsBroadcaster = require('../services/hlsBroadcaster.service');
 
 class VideoMeetingController {
+  /**
+   * Mulai siaran HLS (webinar). Host-only. Hanya untuk meeting mode 'webinar'.
+   */
+  async startBroadcast(req, res) {
+    try {
+      const { roomId } = req.params;
+      const meeting = await prisma.video_meetings.findFirst({ where: { room_id: roomId } });
+      if (!meeting) return res.status(404).json({ success: false, message: 'Meeting tidak ditemukan' });
+      if (String(meeting.host_id) !== String(req.user.id)) {
+        return res.status(403).json({ success: false, message: 'Hanya host yang bisa memulai siaran' });
+      }
+      const { playlist } = await hlsBroadcaster.startBroadcast(roomId);
+      return res.json({ success: true, data: { playlist, watchPath: `/watch/${roomId}` } });
+    } catch (error) {
+      console.error('[Broadcast] start error:', error);
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  /** Hentikan siaran HLS. Host-only. */
+  async stopBroadcast(req, res) {
+    try {
+      const { roomId } = req.params;
+      const meeting = await prisma.video_meetings.findFirst({ where: { room_id: roomId } });
+      if (!meeting) return res.status(404).json({ success: false, message: 'Meeting tidak ditemukan' });
+      if (String(meeting.host_id) !== String(req.user.id)) {
+        return res.status(403).json({ success: false, message: 'Hanya host yang bisa menghentikan siaran' });
+      }
+      hlsBroadcaster.stopBroadcast(roomId);
+      return res.json({ success: true });
+    } catch (error) {
+      console.error('[Broadcast] stop error:', error);
+      return res.status(500).json({ success: false, message: error.message });
+    }
+  }
+
+  /** Status siaran (publik — untuk halaman penonton). */
+  async broadcastStatus(req, res) {
+    const { roomId } = req.params;
+    const live = hlsBroadcaster.isLive(roomId);
+    return res.json({ success: true, data: { live, playlist: live ? `/hls/${roomId}/index.m3u8` : null } });
+  }
+
   /**
    * Generate unique room ID
    */
