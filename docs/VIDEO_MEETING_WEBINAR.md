@@ -154,12 +154,22 @@ Frontend (commit `5c2189e` @ erlanggart):
 **Alur uji:** buat meeting **Webinar** → host **Mulai Siaran** → buka `/watch/<roomId>`
 di perangkat lain → harus tampil video panggung (latensi HLS ~4–10 dtk).
 
-### ⏭️ Stage 2c / Stage 3 — berikutnya
-- **CDN** di depan `/hls` (Cloudflare/Bunny) → fan-out nyata ke 1000.
-- **Active-speaker switching** (ffmpeg ganti sumber / dominant-speaker) — v1 hanya 1 sumber.
-- **Gallery compositing** (ffmpeg filter_complex multi-input).
-- **Hard-enforcement** server: tolak `produce` bila bukan on_stage/host di mode webinar.
-- Auto start/stop broadcast saat ada/tiada peserta panggung.
+### ✅ Tier 1 — Skala (SELESAI; perlu uji server)
+Backend `8ca8221`, Frontend `919b9f2`:
+- **Simulcast** 3 lapis pada produce video (kapasitas + adaptif).
+- **Active-speaker HLS**: `AudioLevelObserver` per room → event `dominant-speaker`
+  → `hlsBroadcaster.switchSource` (debounce 1,5 dtk) alihkan siaran ke pembicara
+  dominan; guard race saat ffmpeg restart.
+- **LL-HLS**: segmen 1 dtk + keyframe per detik (latensi penonton turun).
+- **CDN**: WatchPage dukung env **`VITE_HLS_BASE_URL`** (mis. `https://cdn.dpmdbogorkab.id`)
+  → playlist disajikan dari CDN, server hanya origin → fan-out nyata ke 1000.
+
+### ⏭️ Stage 3 — berikutnya
+- **Set CDN** sungguhan di depan `/hls` + isi `VITE_HLS_BASE_URL`.
+- **Gallery compositing** (ffmpeg filter_complex multi-input) — kini 1 sumber/active-speaker.
+- **Hard-enforcement** server: tolak `produce` bila bukan on_stage/host di webinar.
+- **Auto start/stop** broadcast saat ada/tiada peserta panggung.
+- Switch active-speaker mulus tanpa restart ffmpeg (swap RTP) — kini ada blip ~1–2 dtk.
 
 ### ⏭️ Stage 3 — Polish
 - Active-speaker switching (mediasoup dominant-speaker), gallery compositing
