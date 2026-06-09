@@ -20,10 +20,32 @@ const path = require('path');
 const fs = require('fs');
 
 const SIGN_DIR = path.join(__dirname, '../../storage/uploads/signatures');
+const REG_UPLOADS = path.join(__dirname, '../../storage/uploads');
 
 function cleanupFile(req) {
   if (req.file && req.file.path) {
     try { fs.unlinkSync(req.file.path); } catch (e) { /* ignore */ }
+  }
+}
+
+/**
+ * Salin file TTD dari penyimpanan Bankeu reguler (storage/uploads/<ttd_path>,
+ * mis. kecamatan_bankeu_ttd/xxx.png) ke folder signatures milik perubahan,
+ * kembalikan nama file polos (sesuai pembaca BA perubahan). null bila gagal/kosong.
+ */
+function copyRegTtd(regTtdPath, kecamatanId, suffix) {
+  if (!regTtdPath) return null;
+  try {
+    const src = path.join(REG_UPLOADS, regTtdPath);
+    if (!fs.existsSync(src)) return null;
+    if (!fs.existsSync(SIGN_DIR)) fs.mkdirSync(SIGN_DIR, { recursive: true });
+    const ext = path.extname(regTtdPath) || '.png';
+    const name = `ttd_perubahan_${kecamatanId}_import_${suffix}_${Date.now()}${ext}`;
+    fs.copyFileSync(src, path.join(SIGN_DIR, name));
+    return name;
+  } catch (e) {
+    logger.error('[BankeuPerubahan TimConfig] import copy TTD gagal:', e.message);
+    return null;
   }
 }
 
@@ -300,6 +322,135 @@ class BankeuPerubahanTimConfigController {
     } catch (error) {
       logger.error('[BankeuPerubahan TimConfig] Error deleteAnggota:', error);
       res.status(500).json({ success: false, message: 'Gagal menghapus anggota tim', error: error.message });
+    }
+  }
+
+  /**
+   * POST /:kecamatanId/tim-config/import-from-reguler
+   * Body: { proposalId? }
+   * Salin Ketua & Sekretaris (shared, proposal_id NULL) dari Tim Verifikasi
+   * Bankeu reguler (tim_verifikasi_kecamatan) ke tim_verifikasi_bankeu_perubahan,
+   * berikut file TTD. Jika proposalId diberikan, anggota reguler (unik per nama)
+   * juga ditambahkan sebagai anggota proposal tsb (yang belum ada).
+   * (handler tidak memakai `this`)
+   */
+  async importFromReguler(req, res) {
+    try {
+      const { kecamatanId } = req.params;
+      const { proposalId } = req.body;
+      if (!(await ownsKecamatan(req.user.id, kecamatanId))) {
+        return res.status(403).json({ success: false, message: 'Akses ditolak' });
+      }
+
+      // --- Ketua & Sekretaris (shared) dari reguler ---
+      const sharedRows = await sequelize.query(
+        `SELECT jabatan AS posisi, nama, nip, jabatan_label, ttd_path
+         FROM tim_verifikasi_kecamatan
+         WHERE kecamatan_id = :kecamatanId AND is_active = 1
+           AND jabatan IN ('ketua', 'sekretaris') AND proposal_id IS NULL`,
+        { replacements: { kecamatanId }, type: sequelize.QueryTypes.SELECT }
+      );
+
+      if (!sharedRows.length) {
+        return res.status(404).json({
+          success: false,
+          message: 'Tim Verifikasi Bankeu reguler (Ketua/Sekretaris) belum dibuat untuk kecamatan ini',
+        });
+      }
+
+      let importedShared = 0;
+      for (const r of sharedRows) {
+        const copied = copyRegTtd(r.ttd_path, kecamatanId, r.posisi);
+        const jabatanLabel = r.jabatan_label || r.posisi;
+
+        const [existing] = await sequelize.query(
+          `SELECT id, ttd_path FROM tim_verifikasi_bankeu_perubahan
+           WHERE kecamatan_id = :kecamatanId AND jabatan = :posisi AND proposal_id IS NULL LIMIT 1`,
+          { replacements: { kecamatanId, posisi: r.posisi }, type: sequelize.QueryTypes.SELECT }
+        );
+
+        if (existing) {
+          // Hapus TTD lama bila digantikan hasil salin baru
+          if (copied && existing.ttd_path) {
+            const old = path.join(SIGN_DIR, existing.ttd_path);
+            if (fs.existsSync(old)) { try { fs.unlinkSync(old); } catch (e) {} }
+          }
+          await sequelize.query(
+            `UPDATE tim_verifikasi_bankeu_perubahan
+             SET nama = :nama, nip = :nip, jabatan_label = :jabatanLabel, is_active = 1,
+                 ttd_path = COALESCE(:ttd, ttd_path), updated_at = NOW()
+             WHERE id = :id`,
+            { replacements: { nama: r.nama, nip: r.nip || null, jabatanLabel, ttd: copied, id: existing.id } }
+          );
+        } else {
+          await sequelize.query(
+            `INSERT INTO tim_verifikasi_bankeu_perubahan
+               (kecamatan_id, proposal_id, jabatan, jabatan_label, nama, nip, ttd_path, is_active)
+             VALUES (:kecamatanId, NULL, :posisi, :jabatanLabel, :nama, :nip, :ttd, 1)`,
+            { replacements: { kecamatanId, posisi: r.posisi, jabatanLabel, nama: r.nama, nip: r.nip || null, ttd: copied } }
+          );
+        }
+        importedShared++;
+      }
+
+      // --- Anggota (opsional, butuh proposalId) ---
+      let importedAnggota = 0;
+      if (proposalId) {
+        const anggotaRows = await sequelize.query(
+          `SELECT nama, nip, jabatan_label, ttd_path
+           FROM tim_verifikasi_kecamatan
+           WHERE kecamatan_id = :kecamatanId AND is_active = 1
+             AND jabatan LIKE 'anggota_%' AND nama IS NOT NULL AND nama != ''
+           ORDER BY ttd_path DESC, nama ASC`,
+          { replacements: { kecamatanId }, type: sequelize.QueryTypes.SELECT }
+        );
+
+        // Dedup berdasarkan nama (case-insensitive)
+        const seen = new Set();
+        const uniqueAnggota = anggotaRows.filter(a => {
+          const key = a.nama.toLowerCase().trim();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+
+        // Anggota yang sudah ada di proposal ini
+        const existingAnggota = await sequelize.query(
+          `SELECT jabatan AS posisi, nama FROM tim_verifikasi_bankeu_perubahan
+           WHERE kecamatan_id = :kecamatanId AND proposal_id = :proposalId
+             AND jabatan LIKE 'anggota_%' AND is_active = 1`,
+          { replacements: { kecamatanId, proposalId }, type: sequelize.QueryTypes.SELECT }
+        );
+        const existingNames = new Set(existingAnggota.map(a => (a.nama || '').toLowerCase().trim()));
+        let maxN = 0;
+        existingAnggota.forEach(a => {
+          const m = a.posisi.match(/anggota_(\d+)/);
+          if (m) maxN = Math.max(maxN, parseInt(m[1], 10));
+        });
+
+        for (const a of uniqueAnggota) {
+          if (existingNames.has(a.nama.toLowerCase().trim())) continue;
+          maxN++;
+          const posisi = `anggota_${maxN}`;
+          const copied = copyRegTtd(a.ttd_path, kecamatanId, `${posisi}_p${proposalId}`);
+          await sequelize.query(
+            `INSERT INTO tim_verifikasi_bankeu_perubahan
+               (kecamatan_id, proposal_id, jabatan, jabatan_label, nama, nip, ttd_path, is_active)
+             VALUES (:kecamatanId, :proposalId, :posisi, :jabatanLabel, :nama, :nip, :ttd, 1)`,
+            { replacements: { kecamatanId, proposalId, posisi, jabatanLabel: a.jabatan_label || posisi, nama: a.nama, nip: a.nip || null, ttd: copied } }
+          );
+          importedAnggota++;
+        }
+      }
+
+      res.json({
+        success: true,
+        message: `Tim verifikasi disalin dari Bankeu reguler (${importedShared} Ketua/Sekretaris${proposalId ? `, ${importedAnggota} anggota` : ''})`,
+        data: { importedShared, importedAnggota },
+      });
+    } catch (error) {
+      logger.error('[BankeuPerubahan TimConfig] Error importFromReguler:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengimpor tim dari Bankeu reguler', error: error.message });
     }
   }
 

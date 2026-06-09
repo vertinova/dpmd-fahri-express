@@ -26,6 +26,7 @@ router.post('/tim-verifikasi/:id/upload-signature', upload.bankeuPerubahanSignat
 // Tim Verifikasi per-proposal berbasis posisi (mirror bankeu reguler)
 // anggota-list didaftarkan sebelum :posisi agar tidak tertangkap sebagai posisi
 router.get('/tim-config/:kecamatanId/anggota-list', timConfigController.getAnggotaList);
+router.post('/tim-config/:kecamatanId/import-from-reguler', timConfigController.importFromReguler);
 router.get('/tim-config/:kecamatanId', timConfigController.getAllTimConfig);
 router.post('/tim-config/:kecamatanId/:posisi/upload-ttd', upload.bankeuPerubahanSignature, timConfigController.uploadTTD);
 router.delete('/tim-config/:kecamatanId/:posisi/ttd', timConfigController.deleteTTD);
