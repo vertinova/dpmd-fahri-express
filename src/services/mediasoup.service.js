@@ -4,13 +4,15 @@
  */
 
 const mediasoup = require('mediasoup');
+const EventEmitter = require('events');
 const config = require('../config/mediasoup.config');
 
-class MediasoupService {
+class MediasoupService extends EventEmitter {
   constructor() {
+    super();
     this.workers = [];
     this.nextWorkerIdx = 0;
-    this.rooms = new Map(); // roomId -> { router, peers: Map<peerId, peer> }
+    this.rooms = new Map(); // roomId -> { router, peers: Map<peerId, peer>, audioLevelObserver, dominantPeerId }
   }
 
   /**
@@ -95,8 +97,26 @@ class MediasoupService {
 
       room = {
         router,
-        peers: new Map()
+        peers: new Map(),
+        audioLevelObserver: null,
+        dominantPeerId: null,
       };
+
+      // AudioLevelObserver → deteksi pembicara dominan (untuk active-speaker HLS/UI).
+      try {
+        const observer = await router.createAudioLevelObserver({ maxEntries: 1, threshold: -70, interval: 800 });
+        room.audioLevelObserver = observer;
+        observer.on('volumes', (volumes) => {
+          const top = volumes[0];
+          const peerId = top?.producer?.appData?.peerId;
+          if (peerId && peerId !== room.dominantPeerId) {
+            room.dominantPeerId = peerId;
+            this.emit('dominant-speaker', { roomId, peerId });
+          }
+        });
+      } catch (e) {
+        console.warn(`[Mediasoup] AudioLevelObserver gagal dibuat utk ${roomId}:`, e.message);
+      }
 
       this.rooms.set(roomId, room);
       console.log(`[Mediasoup] Room ${roomId} created with router ${router.id}`);
@@ -224,6 +244,11 @@ class MediasoupService {
     });
 
     peer.producers.set(producer.id, producer);
+
+    // Daftarkan audio ke AudioLevelObserver untuk deteksi pembicara dominan.
+    if (kind === 'audio' && room.audioLevelObserver) {
+      room.audioLevelObserver.addProducer({ producerId: producer.id }).catch(() => {});
+    }
 
     return {
       id: producer.id,

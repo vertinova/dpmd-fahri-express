@@ -24,9 +24,30 @@ const BASE_PORT = parseInt(process.env.HLS_RTP_BASE_PORT || '41000', 10);
 
 class HlsBroadcaster {
   constructor() {
-    // roomId -> { ffmpeg, transports:[], consumers:[], dir, ports:[] }
+    // roomId -> { ffmpeg, transports:[], consumers:[], dir, ports:[], sourcePeerId }
     this.sessions = new Map();
     this.nextPort = BASE_PORT;
+    this.switchTimers = new Map(); // roomId -> debounce timer
+
+    // Active-speaker: saat pembicara dominan berubah, alihkan sumber siaran.
+    mediasoupService.on('dominant-speaker', ({ roomId, peerId }) => {
+      this.switchSource(roomId, peerId);
+    });
+  }
+
+  /** Alihkan sumber siaran ke pembicara dominan (debounce agar tak flapping). */
+  switchSource(roomId, peerId) {
+    const s = this.sessions.get(roomId);
+    if (!s || s.sourcePeerId === peerId) return;
+    clearTimeout(this.switchTimers.get(roomId));
+    this.switchTimers.set(roomId, setTimeout(async () => {
+      this.switchTimers.delete(roomId);
+      if (!this.sessions.has(roomId)) return;
+      console.log(`[HLS ${roomId}] alihkan active-speaker → ${peerId}`);
+      this.stopBroadcast(roomId);
+      try { await this.startBroadcast(roomId, peerId); }
+      catch (e) { console.error(`[HLS ${roomId}] gagal switch:`, e.message); }
+    }, 1500));
   }
 
   isLive(roomId) {
@@ -47,7 +68,7 @@ class HlsBroadcaster {
    * @param {string} roomId
    * @returns {Promise<{ playlist: string }>}
    */
-  async startBroadcast(roomId) {
+  async startBroadcast(roomId, preferredPeerId = null) {
     if (this.sessions.has(roomId)) {
       return { playlist: `/hls/${roomId}/index.m3u8` };
     }
@@ -55,14 +76,21 @@ class HlsBroadcaster {
     if (!room) throw new Error('Room mediasoup tidak ditemukan (belum ada peserta di panggung).');
     const router = room.router;
 
-    // Pilih 1 video + 1 audio producer dari peserta mana pun (v1).
+    // Pilih sumber: utamakan pembicara dominan / peer yang diminta, lalu lengkapi
+    // (video/audio yang belum ada) dari peer lain.
+    const target = preferredPeerId || room.dominantPeerId;
     let videoProducer = null;
     let audioProducer = null;
-    for (const [, peer] of room.peers) {
+    const pick = (peer) => {
+      if (!peer) return;
       for (const [, prod] of peer.producers) {
         if (prod.kind === 'video' && !videoProducer) videoProducer = prod;
         if (prod.kind === 'audio' && !audioProducer) audioProducer = prod;
       }
+    };
+    if (target && room.peers.has(target)) pick(room.peers.get(target));
+    if (!videoProducer || !audioProducer) {
+      for (const [, peer] of room.peers) pick(peer);
     }
     if (!videoProducer && !audioProducer) {
       throw new Error('Tidak ada media di panggung untuk disiarkan.');
@@ -71,7 +99,7 @@ class HlsBroadcaster {
     const dir = path.join(HLS_ROOT, roomId);
     fs.mkdirSync(dir, { recursive: true });
 
-    const session = { ffmpeg: null, transports: [], consumers: [], dir, ports: [], roomId };
+    const session = { ffmpeg: null, transports: [], consumers: [], dir, ports: [], roomId, sourcePeerId: target || null };
     const sdpMedia = [];
 
     // Buat PlainTransport + consumer untuk tiap kind, kirim RTP ke port lokal ffmpeg.
@@ -126,7 +154,10 @@ class HlsBroadcaster {
       args.push(
         '-c:v', 'libx264', '-preset', 'veryfast', '-tune', 'zerolatency',
         '-profile:v', 'baseline', '-level', '3.1', '-pix_fmt', 'yuv420p',
-        '-g', '60', '-r', '30', '-b:v', '1500k', '-maxrate', '1800k', '-bufsize', '3000k',
+        // Keyframe tiap 1 dtk agar segmen 1 dtk rapi (latensi rendah).
+        '-r', '30', '-g', '30', '-keyint_min', '30', '-sc_threshold', '0',
+        '-force_key_frames', 'expr:gte(t,n_forced*1)',
+        '-b:v', '1500k', '-maxrate', '1800k', '-bufsize', '2000k',
       );
     }
     if (audioProducer) {
@@ -134,9 +165,10 @@ class HlsBroadcaster {
     }
     args.push(
       '-f', 'hls',
-      '-hls_time', '2',
-      '-hls_list_size', '6',
-      '-hls_flags', 'delete_segments+append_list+omit_endlist',
+      '-hls_time', '1',
+      '-hls_list_size', '8',
+      '-hls_flags', 'delete_segments+append_list+omit_endlist+independent_segments',
+      '-hls_segment_type', 'mpegts',
       '-hls_segment_filename', path.join(dir, 'seg_%05d.ts'),
       path.join(dir, 'index.m3u8'),
     );
@@ -149,7 +181,8 @@ class HlsBroadcaster {
     });
     ff.on('exit', (code, signal) => {
       console.log(`[HLS ${roomId}] ffmpeg exit code=${code} signal=${signal}`);
-      this._cleanup(roomId);
+      // Hanya cleanup bila sesi ini masih aktif (hindari merusak sesi baru saat switch).
+      if (this.sessions.get(roomId) === session) this._cleanup(roomId);
     });
 
     this.sessions.set(roomId, session);
