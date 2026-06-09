@@ -113,16 +113,21 @@ npx prisma generate
 pm2 restart dpmd-backend --update-env
 ```
 
-### ⏭️ Stage 1 — Frontend (BERIKUTNYA)
+### ✅ Stage 1 — Frontend (SELESAI, commit `6c6408a` @ erlanggart/dpmd-frontend)
 - Toggle **Mode: Rapat / Webinar** di form buat meeting (`VideoMeetingListPage.jsx`).
-- `VideoMeetingPage.jsx`:
-  - Baca `meetingSettings.mode` & `onStage`; **gating publish** → hanya `produce()`
-    bila `onStage` true.
-  - Tombol **Angkat Tangan** (penonton) → emit `raise-hand`.
-  - **Kontrol host** di daftar peserta → `promote-to-stage` / `demote-from-stage`.
-  - Listener `hand-updated` (badge tangan) & `stage-updated` (self → mulai/stop
-    produce; orang lain → pindah ke area panggung/penonton).
-- `PublicMeetingPage.jsx`: penonton webinar default off-stage.
+- `VideoMeetingPage.jsx` & `PublicMeetingPage.jsx`:
+  - Baca `meetingSettings.mode` & `onStage`; **gating publish** (`produceLocalTracks`
+    return awal bila `!onStageRef.current`).
+  - `goLive()` / `stopLive()` saat di-promote/demote (listener `stage-updated` cek
+    diri sendiri via peerId).
+  - Tombol **Angkat Tangan** (penonton) → emit `raise-hand`; toolbar mic/kamera
+    disembunyikan untuk penonton.
+  - Host (`VideoMeetingPage`): badge tangan terangkat + tombol naik/turun panggung
+    di daftar peserta → `promote-to-stage`/`demote-from-stage`.
+
+**Catatan:** Ini masih **SFU webinar** (skala ~puluhan, dibatasi 1-room-1-core &
+bandwidth). Skala **1000** butuh Stage 2 (HLS). Belum ada hard-enforcement server
+(produce gating saat ini kooperatif/di klien) — tambahkan di Stage 3.
 
 ### ⏭️ Stage 2 — HLS broadcaster (skala 1000)
 - Backend: service baru mis. `src/services/hlsBroadcaster.service.js`:
