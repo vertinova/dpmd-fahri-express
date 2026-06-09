@@ -129,15 +129,37 @@ pm2 restart dpmd-backend --update-env
 bandwidth). Skala **1000** butuh Stage 2 (HLS). Belum ada hard-enforcement server
 (produce gating saat ini kooperatif/di klien) — tambahkan di Stage 3.
 
-### ⏭️ Stage 2 — HLS broadcaster (skala 1000)
-- Backend: service baru mis. `src/services/hlsBroadcaster.service.js`:
-  - Buat `router.createPlainTransport` → consume audio+video panggung →
-    pipe RTP ke **ffmpeg** → output **HLS/LL-HLS** ke dir publik.
-  - Endpoint start/stop broadcast + serve playlist `.m3u8`.
-  - Prasyarat server: `apt install ffmpeg`.
-- Frontend: halaman penonton pakai **hls.js** (belum terpasang: `npm i hls.js`).
-- **CDN** (Cloudflare/Bunny) di depan origin HLS → fan-out ke 1000.
-- v1: broadcast 1 active-speaker (ffmpeg 1 audio + 1 video). Gallery compositing = v2.
+### ✅ Stage 2 — HLS broadcaster (SELESAI scaffold; perlu uji server)
+Backend (commit `b8e9e48` @ vertinova): [src/services/hlsBroadcaster.service.js](../src/services/hlsBroadcaster.service.js)
+- `router.createPlainTransport` (rtcpMux, 127.0.0.1) → consume 1 audio + 1 video
+  panggung → SDP → **ffmpeg** transcode H264/AAC → **HLS** di `storage/hls/<roomId>/`.
+- Endpoint: `POST /api/video-meetings/:roomId/broadcast/start|stop` (host-only),
+  `GET /api/video-meetings/:roomId/broadcast/status` (publik).
+- `server.js` serve `/hls` (CORS; playlist `no-cache`).
+
+Frontend (commit `5c2189e` @ erlanggart):
+- `WatchPage` rute **`/watch/:roomId`** (publik, view-only) pakai **hls.js** (sudah
+  `npm i hls.js`), polling status, autoplay-unlock.
+- Host webinar: tombol **Mulai/Stop Siaran** + salin link tonton di header.
+
+**PRASYARAT & operasional Stage 2 (WAJIB di server):**
+1. **ffmpeg**: `apt install ffmpeg` (atau set `FFMPEG_PATH`).
+2. **nginx**: tambah proxy `/hls` ke backend (port 3000), mis.:
+   ```nginx
+   location /hls/ { proxy_pass http://localhost:3000; add_header Cache-Control no-cache; }
+   ```
+   (atau arahkan `/hls` ke **CDN** untuk skala 1000 — origin = backend ini).
+3. Env opsional: `HLS_RTP_BASE_PORT` (default 41000, pisah dari RTC 10000–10500).
+
+**Alur uji:** buat meeting **Webinar** → host **Mulai Siaran** → buka `/watch/<roomId>`
+di perangkat lain → harus tampil video panggung (latensi HLS ~4–10 dtk).
+
+### ⏭️ Stage 2c / Stage 3 — berikutnya
+- **CDN** di depan `/hls` (Cloudflare/Bunny) → fan-out nyata ke 1000.
+- **Active-speaker switching** (ffmpeg ganti sumber / dominant-speaker) — v1 hanya 1 sumber.
+- **Gallery compositing** (ffmpeg filter_complex multi-input).
+- **Hard-enforcement** server: tolak `produce` bila bukan on_stage/host di mode webinar.
+- Auto start/stop broadcast saat ada/tiada peserta panggung.
 
 ### ⏭️ Stage 3 — Polish
 - Active-speaker switching (mediasoup dominant-speaker), gallery compositing
