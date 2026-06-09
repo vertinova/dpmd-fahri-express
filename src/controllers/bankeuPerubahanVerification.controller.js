@@ -263,7 +263,7 @@ class BankeuPerubahanVerificationController {
 
       const [proposals] = await sequelize.query(`
         SELECT bp.id, bp.judul_proposal, bp.kecamatan_status, bp.submitted_to_dpmd, bp.desa_id, d.kecamatan_id,
-               bp.file_proposal, bp.current_version
+               bp.file_proposal, bp.current_version, bp.berita_acara_path, bp.surat_pengantar_kecamatan_path
         FROM bankeu_perubahan_proposals bp
         INNER JOIN desas d ON bp.desa_id = d.id
         WHERE bp.id = ?
@@ -286,6 +286,20 @@ class BankeuPerubahanVerificationController {
           success: false,
           message: 'Proposal sudah dikirim ke DPMD, tidak bisa diverifikasi ulang. Batalkan dulu pengiriman ke DPMD.'
         });
+      }
+
+      if (status === 'approved') {
+        const missingDocs = [];
+        if (!proposal.berita_acara_path) missingDocs.push('Berita Acara');
+        if (!proposal.surat_pengantar_kecamatan_path) missingDocs.push('Surat Pengantar Kecamatan');
+
+        if (missingDocs.length > 0) {
+          return res.status(400).json({
+            success: false,
+            message: `Belum bisa menyetujui proposal. Generate ${missingDocs.join(' dan ')} terlebih dahulu.`,
+            data: { missing_documents: missingDocs }
+          });
+        }
       }
 
       // Update verification

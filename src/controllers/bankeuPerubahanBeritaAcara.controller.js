@@ -209,8 +209,11 @@ class BankeuPerubahanBeritaAcaraController {
       if (Number(proposal.desa_kecamatan_id) !== Number(user.kecamatan_id)) {
         return res.status(403).json({ success: false, message: 'Proposal bukan dari kecamatan Anda' });
       }
-      if (proposal.kecamatan_status !== 'approved') {
-        return res.status(400).json({ success: false, message: 'Hanya proposal yang sudah disetujui yang dapat di-generate Berita Acara' });
+      if (proposal.submitted_to_dpmd) {
+        return res.status(400).json({ success: false, message: 'Proposal sudah dikirim ke DPMD, Berita Acara tidak dapat di-generate ulang dari tahap Kecamatan' });
+      }
+      if (proposal.kecamatan_status && !['pending', 'in_review', 'approved'].includes(proposal.kecamatan_status)) {
+        return res.status(400).json({ success: false, message: 'Berita Acara hanya dapat di-generate untuk proposal yang masih dalam review atau sudah siap disetujui Kecamatan' });
       }
 
       const kecamatanId = user.kecamatan_id;
@@ -404,8 +407,11 @@ class BankeuPerubahanBeritaAcaraController {
       if (Number(proposal.desa_kecamatan_id) !== Number(user.kecamatan_id)) {
         return res.status(403).json({ success: false, message: 'Proposal bukan dari kecamatan Anda' });
       }
-      if (proposal.kecamatan_status !== 'approved') {
-        return res.status(400).json({ success: false, message: 'Hanya proposal yang sudah disetujui yang dapat di-generate Surat Pengantar' });
+      if (proposal.submitted_to_dpmd) {
+        return res.status(400).json({ success: false, message: 'Proposal sudah dikirim ke DPMD, Surat Pengantar tidak dapat di-generate ulang dari tahap Kecamatan' });
+      }
+      if (proposal.kecamatan_status && !['pending', 'in_review', 'approved'].includes(proposal.kecamatan_status)) {
+        return res.status(400).json({ success: false, message: 'Surat Pengantar hanya dapat di-generate untuk proposal yang masih dalam review atau sudah siap disetujui Kecamatan' });
       }
 
       const config = await loadConfig(user.kecamatan_id);
