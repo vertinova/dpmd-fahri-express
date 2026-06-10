@@ -1,7 +1,7 @@
 # Video Meeting & Webinar — Status, Operasional, Roadmap
 
 Dokumen handoff fitur video meeting (SFU mediasoup) dan rencana **mode webinar**
-untuk skala besar (hingga ~1000 penonton). Terakhir diperbarui: **2026-06-08**.
+untuk skala besar (hingga ~1000 penonton). Terakhir diperbarui: **2026-06-10**.
 
 ---
 
@@ -28,6 +28,26 @@ sudah dibuka Diskominfo).
 4. **Audio remote (autoplay)** — browser memblokir autoplay audio sampai ada
    gesture. Ditambah unlock pada interaksi pertama + tombol "Klik untuk mengaktifkan
    suara peserta" di `VideoMeetingPage` & `PublicMeetingPage`.
+
+### Pembaruan terbaru (2026-06-10) — commit backend `5ef9f4a`, frontend `fbb0f6c`
+Sejumlah item yang sebelumnya tertulis "Stage 3 / berikutnya" **kini sudah masuk**:
+- **Hard-enforcement produce (server)** — mode webinar menolak `produce` bila peer
+  bukan host/on-stage (sebelumnya gating hanya kooperatif di klien).
+  ([meeting.socket.js](../src/socket/meeting.socket.js) ~baris 474).
+- **Recording** — output MP4 opsional saat siaran (checkbox "rekam siaran" di host);
+  file di `storage/recordings/`. ([hlsBroadcaster.service.js](../src/services/hlsBroadcaster.service.js)).
+- **Auto-stop siaran** — broadcast berhenti otomatis saat panggung tak lagi punya media.
+- **Active-speaker → HLS** — `AudioLevelObserver` relay `dominant-speaker` →
+  `hlsBroadcaster.switchSource` (debounce 1,5 dtk). *Catatan: switch masih
+  stop/start ffmpeg → blip ~1–2 dtk (lihat sisa Stage 3).*
+- **Worker-died handling** — room ditutup + broadcast `meeting-interrupted` saat
+  worker mediasoup mati; `setPreferredLayers` untuk hemat simulcast.
+- **Frontend** — pilih kamera/mikrofon (replaceTrack), pin/spotlight + request lapis
+  simulcast, indikator kualitas jaringan (getStats: packet-loss + RTT), panel antrian
+  angkat tangan untuk host, `transports` via `VITE_SOCKET_TRANSPORTS`. Halaman duplikat
+  `pages/pegawai/*` & file `.original` dihapus.
+
+> Daftar roadmap di Bagian 4 sudah disesuaikan dengan kondisi ini.
 
 ### Catatan perilaku
 - **peerId = user.id** ([meeting.socket.js](../src/socket/meeting.socket.js)). Satu
@@ -164,17 +184,46 @@ Backend `8ca8221`, Frontend `919b9f2`:
 - **CDN**: WatchPage dukung env **`VITE_HLS_BASE_URL`** (mis. `https://cdn.dpmdbogorkab.id`)
   → playlist disajikan dari CDN, server hanya origin → fan-out nyata ke 1000.
 
-### ⏭️ Stage 3 — berikutnya
-- **Set CDN** sungguhan di depan `/hls` + isi `VITE_HLS_BASE_URL`.
-- **Gallery compositing** (ffmpeg filter_complex multi-input) — kini 1 sumber/active-speaker.
-- **Hard-enforcement** server: tolak `produce` bila bukan on_stage/host di webinar.
-- **Auto start/stop** broadcast saat ada/tiada peserta panggung.
-- Switch active-speaker mulus tanpa restart ffmpeg (swap RTP) — kini ada blip ~1–2 dtk.
+### ✅ Stage 3 — Sebagian SELESAI (commit backend `5ef9f4a`, frontend `fbb0f6c`)
+Lihat detail di Bagian 1 "Pembaruan terbaru". Ringkas:
+- ✅ Hard-enforcement produce (server) di mode webinar.
+- ✅ Recording (MP4 opsional) + checkbox di host.
+- ✅ Auto-**stop** broadcast saat panggung kosong.
+- ✅ Active-speaker switching (dominant-speaker → `switchSource`).
+- ✅ Raise-hand **queue UI** (host), device picker, pin/spotlight, indikator jaringan.
 
-### ⏭️ Stage 3 — Polish
-- Active-speaker switching (mediasoup dominant-speaker), gallery compositing
-  (ffmpeg filter_complex), recording, raise-hand queue UI, hard-enforcement
-  produce (server tolak publish bila bukan on_stage/host di mode webinar).
+**Prasyarat tambahan recording:** folder `storage/recordings/` akan dibuat otomatis;
+pastikan disk cukup & ffmpeg ada (sama dengan prasyarat HLS Stage 2).
+**Env frontend baru (opsional):** `VITE_SOCKET_TRANSPORTS` (mis. `polling` atau
+`polling,websocket`) untuk mengatur transport Socket.IO tanpa ubah kode.
+
+### ✅ Stage 3 (lanjutan) — SELESAI (perlu uji server ffmpeg)
+Diimplementasikan di [hlsBroadcaster.service.js](../src/services/hlsBroadcaster.service.js),
+[meeting.socket.js](../src/socket/meeting.socket.js), [videoMeeting.controller.js](../src/controllers/videoMeeting.controller.js),
+dan frontend `VideoMeetingPage.jsx`:
+- ✅ **Auto-start siaran** — saat peserta panggung (host/on-stage) mulai `produce` di
+  mode webinar, `hlsBroadcaster.autoStart()` memulai siaran otomatis (bila belum live &
+  belum dihentikan host). Stop manual host disuppress via `manualStopped` agar tak
+  langsung menyala lagi; reset saat panggung kosong. Kill-switch: env **`HLS_AUTOSTART=0`**.
+- ✅ **Switch active-speaker MULUS (swap RTP)** — `_swapSource()` mengonsumsi producer
+  pembicara baru pada **PlainTransport/port yang sama** sehingga ffmpeg tak di-restart
+  (tanpa blip). Bila payload-type codec sumber baru ≠ SDP yang dibaca ffmpeg → otomatis
+  **fallback** ke restart penuh (perilaku lama). `requestKeyFrame` dipanggil agar video
+  langsung tampil.
+- ✅ **Gallery compositing** — `layout: 'gallery'` membuat grid via ffmpeg
+  `filter_complex` (`scale`+`xstack`, audio `amix`). Saat record, pakai `split`/`asplit`
+  untuk 2 output (HLS + MP4). Refresh grid otomatis saat keanggotaan panggung berubah
+  (guard, restart ffmpeg). Batas tile: env **`HLS_GALLERY_MAX`** (default 4), ukuran sel
+  **`HLS_GALLERY_CELL_W/H`** (default 640×360). Host pilih tata letak via dropdown
+  "Pembicara aktif / Galeri" (param `layout` ke `POST /broadcast/start`).
+
+> **WAJIB diuji di server**: ketiga fitur menyentuh pipa ffmpeg/RTP yang tak bisa
+> diverifikasi lokal. Cek log `[HLS <roomId>]` (swap/auto-stop/refresh) & pastikan
+> ffmpeg tidak error pada filter_complex/SDP. Bila swap RTP bermasalah di produksi,
+> set codec seragam atau andalkan fallback restart.
+
+### ⏭️ Stage 3 — SISA (operasional saja)
+- **Set CDN** sungguhan di depan `/hls` + isi `VITE_HLS_BASE_URL` (operasional, bukan kode).
 
 ---
 

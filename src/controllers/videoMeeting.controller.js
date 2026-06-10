@@ -22,8 +22,9 @@ class VideoMeetingController {
         return res.status(403).json({ success: false, message: 'Hanya host yang bisa memulai siaran' });
       }
       const record = req.body?.record === true || req.body?.record === 'true';
-      const { playlist, recording } = await hlsBroadcaster.startBroadcast(roomId, null, { record });
-      return res.json({ success: true, data: { playlist, watchPath: `/watch/${roomId}`, recording } });
+      const layout = req.body?.layout === 'gallery' ? 'gallery' : 'speaker';
+      const { playlist, recording } = await hlsBroadcaster.startBroadcast(roomId, null, { record, layout });
+      return res.json({ success: true, data: { playlist, watchPath: `/watch/${roomId}`, recording, layout } });
     } catch (error) {
       console.error('[Broadcast] start error:', error);
       return res.status(500).json({ success: false, message: error.message });
@@ -39,7 +40,8 @@ class VideoMeetingController {
       if (String(meeting.host_id) !== String(req.user.id)) {
         return res.status(403).json({ success: false, message: 'Hanya host yang bisa menghentikan siaran' });
       }
-      hlsBroadcaster.stopBroadcast(roomId);
+      // manual: true → jangan auto-start ulang sampai host memulai lagi / panggung kosong.
+      hlsBroadcaster.stopBroadcast(roomId, { manual: true });
       return res.json({ success: true });
     } catch (error) {
       console.error('[Broadcast] stop error:', error);
@@ -51,7 +53,7 @@ class VideoMeetingController {
   async broadcastStatus(req, res) {
     const { roomId } = req.params;
     const live = hlsBroadcaster.isLive(roomId);
-    return res.json({ success: true, data: { live, playlist: live ? `/hls/${roomId}/index.m3u8` : null } });
+    return res.json({ success: true, data: { live, layout: hlsBroadcaster.getLayout(roomId), playlist: live ? `/hls/${roomId}/index.m3u8` : null } });
   }
 
   /**

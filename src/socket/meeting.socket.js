@@ -5,6 +5,7 @@
 
 const { Server } = require('socket.io');
 const mediasoupService = require('../services/mediasoup.service');
+const hlsBroadcaster = require('../services/hlsBroadcaster.service');
 const prisma = require('../config/prisma');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
@@ -494,6 +495,13 @@ function initSocketServer(httpServer) {
           kind: producer.kind,
           userName: socket.userName
         });
+
+        // Auto-start siaran HLS: di mode webinar, saat peserta panggung (host / on-stage)
+        // mulai publish, mulai siaran otomatis bila belum live & belum dihentikan host.
+        // Diam-diam diabaikan jika auto-start dimatikan (HLS_AUTOSTART=0).
+        if (socket.meetingMode === 'webinar' && (socket.isHost || socket.onStage === true)) {
+          hlsBroadcaster.autoStart(roomId).catch(() => {});
+        }
 
         safeCallback(callback, { success: true, id: producer.id });
       } catch (error) {
