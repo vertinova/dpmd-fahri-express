@@ -31,7 +31,7 @@ class BankeuPerubahanPublicController {
           k.nama AS kecamatan_nama,
           COUNT(bp.id) AS total_proposals,
           COUNT(DISTINCT bp.desa_id) AS total_desa,
-          SUM(CASE WHEN bp.dpmd_status = 'approved' THEN 1 ELSE 0 END) AS approved_dpmd,
+          SUM(CASE WHEN bp.submitted_to_dpmd = TRUE THEN 1 ELSE 0 END) AS diterima_dpmd,
           SUM(CASE WHEN bp.anggaran_usulan IS NOT NULL THEN bp.anggaran_usulan ELSE 0 END) AS total_anggaran
         FROM bankeu_perubahan_proposals bp
         INNER JOIN desas d ON bp.desa_id = d.id
@@ -46,7 +46,7 @@ class BankeuPerubahanPublicController {
         SELECT
           jenis_kegiatan AS kategori,
           COUNT(*) AS total,
-          SUM(CASE WHEN dpmd_status = 'approved' THEN 1 ELSE 0 END) AS approved,
+          SUM(CASE WHEN submitted_to_dpmd = TRUE THEN 1 ELSE 0 END) AS diterima,
           SUM(CASE WHEN anggaran_usulan IS NOT NULL THEN anggaran_usulan ELSE 0 END) AS total_anggaran
         FROM bankeu_perubahan_proposals
         WHERE tahun_anggaran = ?
