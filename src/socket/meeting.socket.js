@@ -551,6 +551,19 @@ function initSocketServer(httpServer) {
       }
     });
 
+    // Pause consumer — klien menjeda video tile yang tidak terlihat (di luar
+    // halaman galeri aktif) supaya tidak menghabiskan bandwidth saat peserta banyak.
+    socket.on('pause-consumer', async (data, callback) => {
+      try {
+        const { consumerId } = data;
+        await mediasoupService.pauseConsumer(socket.roomId, socket.user.id, consumerId);
+        safeCallback(callback, { success: true });
+      } catch (error) {
+        console.error('[Socket] Error pausing consumer:', error);
+        safeCallback(callback, { error: error.message });
+      }
+    });
+
     // Atur lapis simulcast yang diinginkan untuk video dari peer sumber tertentu.
     // Klien meminta lapis rendah (spatialLayer 0) untuk thumbnail dan lapis penuh
     // (2) untuk tile yang di-pin/spotlight → hemat bandwidth & realisasi simulcast.

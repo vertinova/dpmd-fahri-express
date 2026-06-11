@@ -336,6 +336,24 @@ class MediasoupService extends EventEmitter {
   }
 
   /**
+   * Pause consumer — dipakai klien untuk menghentikan aliran video tile yang
+   * sedang tidak terlihat (di luar halaman galeri aktif) → hemat bandwidth & CPU
+   * saat peserta sangat banyak. Tidak melempar error agar aman dipanggil massal.
+   */
+  async pauseConsumer(roomId, peerId, consumerId) {
+    const room = this.getRoom(roomId);
+    if (!room) return;
+
+    const peer = room.peers.get(peerId);
+    if (!peer) return;
+
+    const consumer = peer.consumers.get(consumerId);
+    if (!consumer || consumer.closed || consumer.paused) return;
+
+    await consumer.pause();
+  }
+
+  /**
    * Atur lapis simulcast yang diinginkan untuk consumer video tertentu.
    * Dipakai agar tile kecil/penonton menerima lapis rendah (hemat bandwidth) dan
    * tile yang di-pin/spotlight menerima lapis penuh. Mengembalikan true bila ada
