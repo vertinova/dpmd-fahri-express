@@ -17,7 +17,7 @@ const KEGIATAN_DATA = [
   { kategori: 'pilihan_infrastruktur', urutan: 2, nama_kegiatan: 'Jalan Lingkungan' },
   { kategori: 'pilihan_infrastruktur', urutan: 3, nama_kegiatan: 'Jembatan Desa' },
   { kategori: 'pilihan_infrastruktur', urutan: 4, nama_kegiatan: 'TPT (Tembok Penahan Tanah)' },
-  { kategori: 'pilihan_infrastruktur', urutan: 5, nama_kegiatan: 'Pembangunan/Rehab Kantor Desa' },
+  { kategori: 'pilihan_infrastruktur', urutan: 5, nama_kegiatan: 'Pembangunan/Rehabilitasi/Rekonstruksi Kantor Desa' },
   { kategori: 'pilihan_infrastruktur', urutan: 6, nama_kegiatan: 'Drainase/Gorong-gorong' },
   { kategori: 'pilihan_infrastruktur', urutan: 7, nama_kegiatan: 'Sarana Prasarana Air Bersih' },
   { kategori: 'pilihan_infrastruktur', urutan: 8, nama_kegiatan: 'Pendukung KDMP (Pengkerasan Lahan Parkir)' },
@@ -54,6 +54,19 @@ async function seedBankeuPerubahanMasterKegiatan() {
       SET kategori = 'pilihan_non_infrastruktur', urutan = 8
       WHERE nama_kegiatan = 'Sarana dan Prasarana Keagamaan'
         AND kategori = 'pilihan_infrastruktur'
+    `);
+
+    // Self-heal: rename "Pembangunan/Rehab Kantor Desa" -> versi lengkap.
+    // Sekaligus sinkronkan nama terdenormalisasi pada proposal yang sudah ada.
+    await sequelize.query(`
+      UPDATE bankeu_perubahan_master_kegiatan
+      SET nama_kegiatan = 'Pembangunan/Rehabilitasi/Rekonstruksi Kantor Desa'
+      WHERE nama_kegiatan = 'Pembangunan/Rehab Kantor Desa'
+    `);
+    await sequelize.query(`
+      UPDATE bankeu_perubahan_proposals
+      SET kegiatan_nama = 'Pembangunan/Rehabilitasi/Rekonstruksi Kantor Desa'
+      WHERE kegiatan_nama = 'Pembangunan/Rehab Kantor Desa'
     `);
 
     // Cek apakah sudah ada data

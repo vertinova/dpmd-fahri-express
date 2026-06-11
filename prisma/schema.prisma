@@ -356,6 +356,9 @@ model bankeu_perubahan_proposals {
   surat_pengantar_kecamatan_generated_at                        DateTime?                                    @db.Timestamp(0)
   quisioner_completed                                           Boolean?                                     @default(false)
   catatan_verifikasi                                            String?                                      @db.Text
+  troubleshoot_catatan                                          String?                                      @db.Text
+  troubleshoot_by                                               BigInt?                                      @db.UnsignedBigInt
+  troubleshoot_at                                               DateTime?                                    @db.Timestamp(0)
   verified_by                                                   BigInt?                                      @db.UnsignedBigInt
   verified_at                                                   DateTime?                                    @db.Timestamp(0)
   created_by                                                    BigInt                                       @db.UnsignedBigInt

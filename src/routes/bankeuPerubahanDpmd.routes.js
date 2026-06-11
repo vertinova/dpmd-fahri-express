@@ -15,6 +15,9 @@ router.patch('/proposals/:id/verify', controller.verifyProposal);
 // Batalkan persetujuan DPMD (salah pencet) -> kembali ke "Menunggu DPMD"
 router.patch('/proposals/:id/cancel-approval', controller.cancelApproval);
 
+// Troubleshoot revisi: paksa kembalikan proposal nyangkut/salah ke Desa (reset semua tahap)
+router.patch('/proposals/:id/troubleshoot-revision', controller.troubleshootRevision);
+
 // Riwayat versi dokumen & ronde revisi/anotasi
 router.get('/proposals/:id/versions', controller.getProposalVersions);
 router.get('/proposals/:id/revisions', controller.getProposalRevisions);

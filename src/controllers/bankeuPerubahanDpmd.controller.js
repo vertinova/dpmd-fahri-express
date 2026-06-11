@@ -127,7 +127,13 @@ class BankeuPerubahanDpmdController {
   }
 
   /**
-   * Verifikasi DPMD (approve/reject/revision)
+   * Verifikasi DPMD atas DOKUMEN KECAMATAN (Surat Pengantar & Berita Acara).
+   * DPMD TIDAK menilai isi proposal desa — hanya memverifikasi SP & BA dari kecamatan.
+   * (Mengikuti flow Bankeu Reguler.)
+   * - approved   : SP & BA disetujui (final) -> Disetujui DPMD.
+   * - revision   : minta kecamatan revisi SP & BA -> dikembalikan ke kecamatan,
+   *                path BA/SP dikosongkan agar kecamatan men-generate ulang.
+   *                (kecamatan_status tetap 'approved', proposal desa tidak diubah)
    * PATCH /api/dpmd/bankeu-perubahan/proposals/:id/verify
    */
   async verifyProposal(req, res) {
@@ -136,10 +142,10 @@ class BankeuPerubahanDpmdController {
       const userId = req.user.id;
       const { status, catatan } = req.body;
 
-      if (!['approved', 'rejected', 'revision'].includes(status)) {
+      if (!['approved', 'revision'].includes(status)) {
         return res.status(400).json({
           success: false,
-          message: 'Status verifikasi tidak valid'
+          message: 'Status verifikasi tidak valid. Gunakan: approved atau revision (revisi SP & BA kecamatan)'
         });
       }
 
@@ -161,8 +167,20 @@ class BankeuPerubahanDpmdController {
         });
       }
 
-      // Jika rejected/revision -> kembalikan ke kecamatan (submitted_to_dpmd = FALSE)
-      const returnToKec = (status === 'rejected' || status === 'revision');
+      const isRevision = status === 'revision';
+      if (isRevision && !catatan?.trim()) {
+        return res.status(400).json({ success: false, message: 'Catatan revisi wajib diisi' });
+      }
+
+      // Revisi SP/BA: kembalikan ke kecamatan & kosongkan dokumen kecamatan agar regenerate.
+      // kecamatan_status tetap 'approved' supaya kecamatan langsung bisa generate ulang & kirim.
+      const clearDocsSql = isRevision ? `,
+            berita_acara_path = NULL,
+            berita_acara_generated_at = NULL,
+            berita_acara_qr_code = NULL,
+            surat_pengantar_kecamatan_path = NULL,
+            surat_pengantar_kecamatan_nomor = NULL,
+            surat_pengantar_kecamatan_generated_at = NULL` : '';
 
       await sequelize.query(`
         UPDATE bankeu_perubahan_proposals
@@ -171,19 +189,19 @@ class BankeuPerubahanDpmdController {
             dpmd_verified_by = ?,
             dpmd_verified_at = NOW(),
             submitted_to_dpmd = ?,
-            status = ?,
+            status = ?${clearDocsSql},
             updated_at = NOW()
         WHERE id = ?
       `, {
         replacements: [
           status, catatan || null, userId,
-          returnToKec ? false : true,
-          status === 'approved' ? 'verified' : (status === 'revision' ? 'revision' : 'rejected'),
+          isRevision ? false : true,
+          isRevision ? 'verified' : 'verified', // tetap verified (kecamatan-approved); keputusan ada di dpmd_status
           id
         ]
       });
 
-      logger.info(`[BankeuPerubahan DPMD] Proposal #${id} ${status} by user ${userId}`);
+      logger.info(`[BankeuPerubahan DPMD] Proposal #${id} ${isRevision ? 'revisi SP/BA (kembali ke kecamatan)' : 'disetujui'} by user ${userId}`);
 
       ActivityLogger.log({
         userId,
@@ -191,19 +209,23 @@ class BankeuPerubahanDpmdController {
         userRole: req.user.role,
         bidangId: 3,
         module: MODULE_NAME,
-        action: status === 'approved' ? 'approve' : 'reject',
+        action: isRevision ? 'revision' : 'approve',
         entityType: 'bankeu_perubahan_proposal',
         entityId: parseInt(id),
         entityName: proposal.judul_proposal,
-        description: `${users[0]?.name || 'User'} ${status === 'approved' ? 'menyetujui' : (status === 'revision' ? 'meminta revisi' : 'menolak')} proposal perubahan #${id} di DPMD`,
-        newValue: { dpmd_status: status, catatan: catatan || null },
+        description: isRevision
+          ? `${users[0]?.name || 'User'} meminta kecamatan merevisi Surat Pengantar & Berita Acara proposal perubahan #${id}`
+          : `${users[0]?.name || 'User'} menyetujui Surat Pengantar & Berita Acara proposal perubahan #${id} di DPMD`,
+        newValue: { dpmd_status: status, revision_type: isRevision ? 'dokumen_kecamatan' : undefined, catatan: catatan || null },
         ipAddress: ActivityLogger.getIpFromRequest(req),
         userAgent: ActivityLogger.getUserAgentFromRequest(req)
       });
 
       res.json({
         success: true,
-        message: `Proposal berhasil di-${status === 'approved' ? 'setujui' : (status === 'revision' ? 'minta revisi' : 'tolak')} oleh DPMD`
+        message: isRevision
+          ? 'Proposal dikembalikan ke Kecamatan untuk revisi Surat Pengantar & Berita Acara'
+          : 'Surat Pengantar & Berita Acara disetujui DPMD'
       });
     } catch (error) {
       logger.error('[BankeuPerubahan DPMD] Error verify:', error);
@@ -277,6 +299,133 @@ class BankeuPerubahanDpmdController {
     } catch (error) {
       logger.error('[BankeuPerubahan DPMD] Error cancel approval:', error);
       res.status(500).json({ success: false, message: 'Gagal membatalkan persetujuan', error: error.message });
+    }
+  }
+
+  /**
+   * Troubleshoot Revisi (tool recovery DPMD/SPKED).
+   * Paksa kembalikan proposal yang nyangkut / salah-ACC di tahap manapun (Desa/Kecamatan/DPMD)
+   * KEMBALI KE DESA untuk direvisi: reset semua status verifikasi + BA/SP + quisioner.
+   * Dokumen desa (file_proposal, surat_pengantar, surat_permohonan) tetap dipertahankan.
+   * Mengikuti pola Bankeu Reguler (troubleshootRevision).
+   * PATCH /api/dpmd/bankeu-perubahan/proposals/:id/troubleshoot-revision
+   */
+  async troubleshootRevision(req, res) {
+    const transaction = await sequelize.transaction();
+    try {
+      const { id } = req.params;
+      const { catatan } = req.body;
+      const userId = req.user.id;
+      const userRole = req.user.role;
+
+      // Hanya pegawai SPKED yang boleh troubleshoot
+      const allowedRoles = ['pegawai', 'kepala_bidang', 'ketua_tim', 'kepala_dinas', 'superadmin'];
+      if (!allowedRoles.includes(userRole)) {
+        await transaction.rollback();
+        return res.status(403).json({ success: false, message: 'Hanya pegawai SPKED yang dapat melakukan troubleshoot revisi' });
+      }
+      if (!catatan || catatan.trim().length === 0) {
+        await transaction.rollback();
+        return res.status(400).json({ success: false, message: 'Catatan/alasan troubleshoot wajib diisi' });
+      }
+
+      const [proposals] = await sequelize.query(`
+        SELECT bp.id, bp.judul_proposal, bp.status, bp.kecamatan_status, bp.dpmd_status,
+               bp.submitted_to_kecamatan, bp.submitted_to_dpmd,
+               d.nama AS desa_nama, k.nama AS kecamatan_nama
+        FROM bankeu_perubahan_proposals bp
+        INNER JOIN desas d ON bp.desa_id = d.id
+        LEFT JOIN kecamatans k ON d.kecamatan_id = k.id
+        WHERE bp.id = ?
+      `, { replacements: [id], transaction });
+
+      if (!proposals.length) {
+        await transaction.rollback();
+        return res.status(404).json({ success: false, message: 'Proposal tidak ditemukan' });
+      }
+      const proposal = proposals[0];
+
+      // Tentukan tahap saat ini (untuk log & pesan)
+      let currentStage = 'di_desa';
+      if (proposal.submitted_to_dpmd) currentStage = 'di_dpmd';
+      else if (proposal.kecamatan_status === 'approved') currentStage = 'di_kecamatan';
+      else if (proposal.submitted_to_kecamatan) currentStage = 'di_kecamatan';
+
+      const desaName = proposal.desa_nama || `Desa ID`;
+      const stageLabel = currentStage === 'di_dpmd' ? 'DPMD' : currentStage === 'di_kecamatan' ? 'Kecamatan' : 'Desa';
+
+      const tsCatatan = `[${req.user.name || `User ${userId}`} - ${String(userRole).toUpperCase()}] ${catatan.trim()}`;
+
+      // Reset SEMUA status verifikasi -> kembali ke Desa (status revision).
+      // Kosongkan BA/SP kecamatan & quisioner. Dokumen desa dipertahankan.
+      await sequelize.query(`
+        UPDATE bankeu_perubahan_proposals
+        SET status = 'revision',
+            kecamatan_status = 'pending',
+            kecamatan_catatan = NULL,
+            kecamatan_verified_by = NULL,
+            kecamatan_verified_at = NULL,
+            dpmd_status = 'pending',
+            dpmd_catatan = NULL,
+            dpmd_verified_by = NULL,
+            dpmd_verified_at = NULL,
+            submitted_to_kecamatan = FALSE,
+            submitted_at = NULL,
+            submitted_to_dpmd = FALSE,
+            submitted_to_dpmd_at = NULL,
+            berita_acara_path = NULL,
+            berita_acara_generated_at = NULL,
+            berita_acara_qr_code = NULL,
+            surat_pengantar_kecamatan_path = NULL,
+            surat_pengantar_kecamatan_nomor = NULL,
+            surat_pengantar_kecamatan_generated_at = NULL,
+            quisioner_completed = FALSE,
+            verified_by = NULL,
+            verified_at = NULL,
+            catatan_verifikasi = NULL,
+            troubleshoot_catatan = ?,
+            troubleshoot_by = ?,
+            troubleshoot_at = NOW(),
+            updated_at = NOW()
+        WHERE id = ?
+      `, { replacements: [tsCatatan, userId, id], transaction });
+
+      // Hapus quisioner terkait karena semua tahap di-reset
+      await sequelize.query(
+        `DELETE FROM bankeu_perubahan_questionnaires WHERE proposal_id = ?`,
+        { replacements: [id], transaction }
+      );
+
+      await transaction.commit();
+
+      logger.info(`[BankeuPerubahan DPMD] 🔧 TROUBLESHOOT proposal #${id} (${desaName}) dari tahap ${currentStage} oleh ${req.user.name} (${userRole})`);
+
+      ActivityLogger.log({
+        userId,
+        userName: req.user.name || `User ${userId}`,
+        userRole,
+        bidangId: 3,
+        module: MODULE_NAME,
+        action: 'troubleshoot_revision',
+        entityType: 'bankeu_perubahan_proposal',
+        entityId: parseInt(id),
+        entityName: proposal.judul_proposal,
+        description: `[TROUBLESHOOT] ${req.user.name || 'User'} (${userRole}) memaksa revisi proposal perubahan #${id} (${desaName}, ${proposal.kecamatan_nama || ''}) dari tahap ${stageLabel}. Alasan: ${catatan.trim()}`,
+        oldValue: { status: proposal.status, kecamatan_status: proposal.kecamatan_status, dpmd_status: proposal.dpmd_status, current_stage: currentStage },
+        newValue: { status: 'revision', returned_to: 'desa', troubleshoot_reason: catatan.trim() },
+        ipAddress: ActivityLogger.getIpFromRequest(req),
+        userAgent: ActivityLogger.getUserAgentFromRequest(req)
+      });
+
+      res.json({
+        success: true,
+        message: `Proposal "${proposal.judul_proposal}" (${desaName}) berhasil dikembalikan ke Desa untuk direvisi dari tahap ${stageLabel}.`,
+        data: { id: Number(id), desa_name: desaName, previous_stage: currentStage, returned_to: 'desa', status: 'revision' }
+      });
+    } catch (error) {
+      try { await transaction.rollback(); } catch (e) {}
+      logger.error('[BankeuPerubahan DPMD] Error troubleshoot revision:', error);
+      res.status(500).json({ success: false, message: 'Gagal melakukan troubleshoot revisi', error: error.message });
     }
   }
 
