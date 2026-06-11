@@ -212,6 +212,75 @@ class BankeuPerubahanDpmdController {
   }
 
   /**
+   * Batalkan keputusan DPMD (mis. salah pencet approve) -> kembali ke "Menunggu DPMD".
+   * Proposal tetap berada di DPMD (submitted_to_dpmd = TRUE), hanya keputusan DPMD yang direset.
+   * PATCH /api/dpmd/bankeu-perubahan/proposals/:id/cancel-approval
+   */
+  async cancelApproval(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.id;
+
+      const [users] = await sequelize.query(`SELECT name FROM users WHERE id = ?`, { replacements: [userId] });
+
+      const [proposals] = await sequelize.query(`
+        SELECT id, judul_proposal, dpmd_status, submitted_to_dpmd
+        FROM bankeu_perubahan_proposals WHERE id = ?
+      `, { replacements: [id] });
+
+      if (!proposals.length) {
+        return res.status(404).json({ success: false, message: 'Proposal tidak ditemukan' });
+      }
+      const proposal = proposals[0];
+
+      if (!proposal.submitted_to_dpmd) {
+        return res.status(400).json({ success: false, message: 'Proposal belum berada di DPMD' });
+      }
+      if (proposal.dpmd_status !== 'approved') {
+        return res.status(400).json({
+          success: false,
+          message: 'Hanya proposal yang sudah disetujui DPMD yang dapat dibatalkan'
+        });
+      }
+
+      // Reset keputusan DPMD, kembalikan ke status menunggu (pending) di DPMD.
+      // status legacy dikembalikan ke 'verified' (sudah diverifikasi kecamatan, menunggu DPMD).
+      await sequelize.query(`
+        UPDATE bankeu_perubahan_proposals
+        SET dpmd_status = 'pending',
+            dpmd_catatan = NULL,
+            dpmd_verified_by = NULL,
+            dpmd_verified_at = NULL,
+            status = 'verified',
+            updated_at = NOW()
+        WHERE id = ?
+      `, { replacements: [id] });
+
+      logger.info(`[BankeuPerubahan DPMD] Proposal #${id} approval dibatalkan by user ${userId}`);
+
+      ActivityLogger.log({
+        userId,
+        userName: users[0]?.name || `User ${userId}`,
+        userRole: req.user.role,
+        bidangId: 3,
+        module: MODULE_NAME,
+        action: 'update',
+        entityType: 'bankeu_perubahan_proposal',
+        entityId: parseInt(id),
+        entityName: proposal.judul_proposal,
+        description: `${users[0]?.name || 'User'} membatalkan persetujuan DPMD proposal perubahan #${id}`,
+        ipAddress: ActivityLogger.getIpFromRequest(req),
+        userAgent: ActivityLogger.getUserAgentFromRequest(req)
+      });
+
+      res.json({ success: true, message: 'Persetujuan DPMD berhasil dibatalkan' });
+    } catch (error) {
+      logger.error('[BankeuPerubahan DPMD] Error cancel approval:', error);
+      res.status(500).json({ success: false, message: 'Gagal membatalkan persetujuan', error: error.message });
+    }
+  }
+
+  /**
    * Statistik proposal perubahan di DPMD
    * GET /api/dpmd/bankeu-perubahan/statistics
    */
