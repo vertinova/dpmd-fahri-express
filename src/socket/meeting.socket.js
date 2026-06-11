@@ -704,6 +704,17 @@ function initSocketServer(httpServer) {
         const sanitizedMessage = message?.slice(0, 2000);
         if (!sanitizedMessage?.trim()) return;
 
+        // Konteks balasan (opsional). Ephemeral — tidak disimpan ke DB, hanya
+        // diteruskan agar semua peserta melihat pesan yang dibalas.
+        let replyTo = null;
+        if (data.replyTo && (data.replyTo.message || data.replyTo.senderName)) {
+          replyTo = {
+            id: data.replyTo.id ? String(data.replyTo.id) : null,
+            senderName: String(data.replyTo.senderName || '').slice(0, 120),
+            message: String(data.replyTo.message || '').slice(0, 200),
+          };
+        }
+
         // meeting_id dari cache socket (di-set saat join-room); fallback query bila perlu.
         let meetingId = socket.meetingId;
         if (!meetingId) {
@@ -728,6 +739,7 @@ function initSocketServer(httpServer) {
           message: sanitizedMessage,
           senderName: socket.userName,
           senderId: socket.user.id,
+          replyTo,
           timestamp: chatMessage.created_at
         });
       } catch (error) {
