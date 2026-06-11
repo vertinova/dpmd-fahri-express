@@ -354,6 +354,48 @@ class MediasoupService extends EventEmitter {
   }
 
   /**
+   * Pause/resume producer milik peer tertentu berdasarkan kind.
+   * Default untuk video tidak menyentuh screen share, agar "matikan kamera"
+   * tidak ikut menghentikan layar yang sedang dibagikan.
+   */
+  async setProducerPausedByKind(roomId, peerId, kind, paused, options = {}) {
+    const room = this.getRoom(roomId);
+    if (!room) return [];
+
+    const peer =
+      room.peers.get(peerId) ||
+      [...room.peers.entries()].find(([id]) => String(id) === String(peerId))?.[1];
+    if (!peer) return [];
+
+    const includeScreen = options.includeScreen === true;
+    const mediaType = options.mediaType;
+    const changed = [];
+
+    for (const [, producer] of peer.producers) {
+      if (!producer || producer.closed || producer.kind !== kind) continue;
+      const producerMediaType = producer.appData?.mediaType || (producer.kind === 'audio' ? 'audio' : 'video');
+      if (mediaType && producerMediaType !== mediaType) continue;
+      if (producer.kind === 'video' && !includeScreen && producerMediaType === 'screen') continue;
+
+      if (paused && !producer.paused) {
+        await producer.pause();
+      } else if (!paused && producer.paused) {
+        await producer.resume();
+      } else {
+        continue;
+      }
+
+      changed.push({
+        producerId: producer.id,
+        kind: producer.kind,
+        mediaType: producerMediaType,
+      });
+    }
+
+    return changed;
+  }
+
+  /**
    * Atur lapis simulcast yang diinginkan untuk consumer video tertentu.
    * Dipakai agar tile kecil/penonton menerima lapis rendah (hemat bandwidth) dan
    * tile yang di-pin/spotlight menerima lapis penuh. Mengembalikan true bila ada

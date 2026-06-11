@@ -32,4 +32,7 @@ router.delete('/:id', videoMeetingController.deleteMeeting.bind(videoMeetingCont
 // Chat
 router.get('/:id/chat', videoMeetingController.getChatMessages.bind(videoMeetingController));
 
+// Laporan kehadiran (host/owner only)
+router.get('/:id/attendance', videoMeetingController.getAttendance.bind(videoMeetingController));
+
 module.exports = router;

@@ -249,7 +249,28 @@ class VideoMeetingController {
 
       const meeting = await prisma.video_meetings.findFirst({
         where: { room_id: roomId },
-        include: {
+        select: {
+          id: true,
+          uuid: true,
+          room_id: true,
+          title: true,
+          description: true,
+          host_id: true,
+          bidang_id: true,
+          status: true,
+          mode: true,
+          scheduled_start: true,
+          scheduled_end: true,
+          actual_start: true,
+          actual_end: true,
+          max_participants: true,
+          is_recording_enabled: true,
+          is_screen_share_enabled: true,
+          is_chat_enabled: true,
+          waiting_room_enabled: true,
+          created_at: true,
+          updated_at: true,
+          password: true,
           video_meeting_participants: {
             where: { left_at: null },
             select: {
@@ -292,6 +313,8 @@ class VideoMeetingController {
           id: meeting.id.toString(),
           host_id: meeting.host_id.toString(),
           bidang_id: meeting.bidang_id?.toString(),
+          password: undefined,
+          requires_password: Boolean(meeting.password),
           participants: meeting.video_meeting_participants.map(p => ({
             ...p,
             id: p.id.toString(),
@@ -557,6 +580,91 @@ class VideoMeetingController {
   }
 
   /**
+   * Laporan kehadiran sebuah meeting (host/owner atau superadmin).
+   * Mengelompokkan beberapa sesi join dari peserta yang sama (mis. reconnect)
+   * dan menghitung total durasi hadir.
+   */
+  async getAttendance(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.id;
+
+      const meeting = await prisma.video_meetings.findUnique({ where: { id: BigInt(id) } });
+      if (!meeting) {
+        return res.status(404).json({ success: false, message: 'Meeting tidak ditemukan' });
+      }
+      if (meeting.host_id.toString() !== userId.toString() && req.user.role !== 'superadmin') {
+        return res.status(403).json({ success: false, message: 'Hanya host yang dapat melihat kehadiran' });
+      }
+
+      const rows = await prisma.video_meeting_participants.findMany({
+        where: { meeting_id: BigInt(id) },
+        orderBy: { joined_at: 'asc' },
+      });
+
+      // Ambil nama untuk peserta yang login (user_id).
+      const userIds = [...new Set(rows.filter(r => r.user_id).map(r => r.user_id.toString()))];
+      const users = userIds.length
+        ? await prisma.users.findMany({ where: { id: { in: userIds.map(u => BigInt(u)) } }, select: { id: true, name: true, email: true } })
+        : [];
+      const userMap = new Map(users.map(u => [u.id.toString(), u]));
+
+      // Gabungkan per identitas (user_id atau guest_name) → satu baris kehadiran.
+      const byKey = new Map();
+      for (const r of rows) {
+        const key = r.user_id ? `u:${r.user_id}` : `g:${r.guest_name || 'Tamu'}`;
+        const u = r.user_id ? userMap.get(r.user_id.toString()) : null;
+        const name = u?.name || r.guest_name || 'Tamu';
+        const joined = r.joined_at ? new Date(r.joined_at).getTime() : null;
+        const left = r.left_at ? new Date(r.left_at).getTime() : null;
+        const dur = joined ? Math.max(0, ((left || Date.now()) - joined)) : 0;
+        if (!byKey.has(key)) {
+          byKey.set(key, {
+            name,
+            email: u?.email || null,
+            isGuest: !r.user_id,
+            role: r.role || 'participant',
+            firstJoin: r.joined_at,
+            lastLeft: r.left_at,
+            sessions: 0,
+            durationMs: 0,
+            stillIn: false,
+          });
+        }
+        const agg = byKey.get(key);
+        agg.sessions += 1;
+        agg.durationMs += dur;
+        if (!r.left_at) agg.stillIn = true;
+        if (r.joined_at && (!agg.firstJoin || new Date(r.joined_at) < new Date(agg.firstJoin))) agg.firstJoin = r.joined_at;
+        if (r.left_at && (!agg.lastLeft || new Date(r.left_at) > new Date(agg.lastLeft))) agg.lastLeft = r.left_at;
+      }
+
+      const attendance = [...byKey.values()]
+        .map(a => ({ ...a, durationMinutes: Math.round(a.durationMs / 60000) }))
+        .sort((a, b) => new Date(a.firstJoin || 0) - new Date(b.firstJoin || 0));
+
+      return res.json({
+        success: true,
+        data: {
+          meeting: {
+            id: meeting.id.toString(),
+            title: meeting.title,
+            scheduled_start: meeting.scheduled_start,
+            actual_start: meeting.actual_start,
+            actual_end: meeting.actual_end,
+            status: meeting.status,
+          },
+          total: attendance.length,
+          attendance,
+        },
+      });
+    } catch (error) {
+      console.error('[VideoMeeting] Error fetching attendance:', error);
+      return res.status(500).json({ success: false, message: 'Gagal mengambil kehadiran', error: error.message });
+    }
+  }
+
+  /**
    * Get public meeting info (no auth required)
    * Returns limited info for public join page
    */
@@ -578,6 +686,7 @@ class VideoMeetingController {
           is_screen_share_enabled: true,
           is_chat_enabled: true,
           waiting_room_enabled: true,
+          password: true,
           // Count active participants
           video_meeting_participants: {
             where: { left_at: null },
@@ -621,6 +730,7 @@ class VideoMeetingController {
           is_screen_share_enabled: meeting.is_screen_share_enabled,
           is_chat_enabled: meeting.is_chat_enabled,
           waiting_room_enabled: meeting.waiting_room_enabled,
+          requires_password: Boolean(meeting.password),
           current_participants: meeting.video_meeting_participants.length
         }
       });

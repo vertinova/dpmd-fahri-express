@@ -18,6 +18,30 @@ const chatRateLimits = new Map();
 // Online users tracker: Map<userId, Set<socketId>>
 const onlineUsers = new Map();
 
+// Kontrol host & waiting room (in-memory per room; cukup untuk siklus hidup meeting).
+const meetingLocks = new Map();   // roomId -> boolean (meeting dikunci)
+const waitingRooms = new Map();   // roomId -> Map<peerId, { socketId, userName, joinedAt }>
+const admittedPeers = new Map();  // roomId -> Set<peerId> (sudah di-admit host / host sendiri)
+
+function getAdmitted(roomId) {
+  if (!admittedPeers.has(roomId)) admittedPeers.set(roomId, new Set());
+  return admittedPeers.get(roomId);
+}
+function getWaiting(roomId) {
+  if (!waitingRooms.has(roomId)) waitingRooms.set(roomId, new Map());
+  return waitingRooms.get(roomId);
+}
+function clearRoomState(roomId) {
+  meetingLocks.delete(roomId);
+  waitingRooms.delete(roomId);
+  admittedPeers.delete(roomId);
+}
+
+function makeMeetingPeerId(socket) {
+  const userPart = socket.user?.isGuest ? socket.user.id : `user_${socket.user?.id}`;
+  return `${userPart}_${socket.id}`;
+}
+
 /**
  * Safe callback helper - prevents crash if callback is not a function
  */
@@ -207,7 +231,7 @@ function initSocketServer(httpServer) {
     socket.on('join-room', async (data, callback) => {
       try {
         const { roomId, guestName } = data;
-        const peerId = socket.user.id;
+        const peerId = makeMeetingPeerId(socket);
         const userName = socket.user.isGuest ? (guestName || socket.user.name) : socket.user.name;
 
         console.log(`[Socket] ${userName} joining room ${roomId}`);
@@ -228,12 +252,40 @@ function initSocketServer(httpServer) {
           return safeCallback(callback, { error: 'Meeting is not active' });
         }
 
-        // Check password if required
-        if (meeting.password) {
+        // Apakah peserta ini host meeting?
+        const joinIsHost = meeting.host_id.toString() === socket.user.id?.toString();
+
+        // Check password if required. Host boleh masuk tanpa password karena ia
+        // sudah terautentikasi sebagai pemilik meeting.
+        if (meeting.password && !joinIsHost) {
           const passwordMatch = await bcrypt.compare(data.password || '', meeting.password);
           if (!passwordMatch) {
             return safeCallback(callback, { error: 'Invalid password' });
           }
+        }
+
+        const admitted = getAdmitted(roomId);
+        if (joinIsHost) admitted.add(String(peerId)); // host otomatis ter-admit
+
+        // Kunci meeting: tolak peserta baru yang belum di-admit (host & yang sudah
+        // masuk daftar admit tetap boleh — mis. reconnect).
+        if (meetingLocks.get(roomId) && !joinIsHost && !admitted.has(String(peerId))) {
+          return safeCallback(callback, { error: 'Meeting sedang dikunci oleh host.' });
+        }
+
+        // Waiting room: peserta non-host yang belum di-admit masuk ruang tunggu.
+        // Host diberi tahu agar bisa menerima/menolak; peserta menunggu event 'admitted'.
+        if (meeting.waiting_room_enabled && !joinIsHost && !admitted.has(String(peerId))) {
+          const waiting = getWaiting(roomId);
+          waiting.set(String(peerId), { socketId: socket.id, userName, joinedAt: Date.now() });
+          socket.waitingRoomId = roomId;
+          socket.peerId = peerId;
+          socket.userName = userName;
+          // Beri tahu host yang sedang di room.
+          io.to(roomId).emit('waiting-updated', {
+            waiting: [...waiting.entries()].map(([pid, v]) => ({ peerId: pid, userName: v.userName })),
+          });
+          return safeCallback(callback, { waiting: true, title: meeting.title });
         }
 
         // Get or create mediasoup room
@@ -279,7 +331,8 @@ function initSocketServer(httpServer) {
         // Ensure peer exists in mediasoup (important for tracking)
         mediasoupService.ensurePeerExists(roomId, peerId, userName);
 
-        // Check if this is a reconnection (same peerId already in room from previous socket)
+        // Check if this is a reconnection (same peerId already in room from previous socket).
+        // peerId sekarang unik per koneksi, jadi satu akun bisa membuka lebih dari satu device.
         let isReconnect = false;
         const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
         if (socketsInRoom) {
@@ -297,8 +350,7 @@ function initSocketServer(httpServer) {
 
         // For reconnecting users, try to find existing participant entry
         let participant;
-        if (isReconnect || socket.user.isGuest) {
-          // For guests, try to find existing participant with same guest name in this meeting
+        if (isReconnect) {
           const existingParticipant = await prisma.video_meeting_participants.findFirst({
             where: {
               meeting_id: meeting.id,
@@ -318,7 +370,7 @@ function initSocketServer(httpServer) {
                 meeting_id: meeting.id,
                 user_id: socket.user.isGuest ? null : BigInt(socket.user.id),
                 guest_name: socket.user.isGuest ? userName : null,
-                role: meeting.host_id.toString() === socket.user.id ? 'host' : 'participant',
+                role: meeting.host_id.toString() === socket.user.id?.toString() ? 'host' : 'participant',
                 joined_at: new Date()
               }
             });
@@ -330,7 +382,7 @@ function initSocketServer(httpServer) {
               meeting_id: meeting.id,
               user_id: socket.user.isGuest ? null : BigInt(socket.user.id),
               guest_name: socket.user.isGuest ? userName : null,
-              role: meeting.host_id.toString() === socket.user.id ? 'host' : 'participant',
+              role: meeting.host_id.toString() === socket.user.id?.toString() ? 'host' : 'participant',
               joined_at: new Date()
             }
           });
@@ -402,6 +454,18 @@ function initSocketServer(httpServer) {
         socket.meetingMode = meeting.mode || 'meeting';
         socket.isHost = isHost;
         socket.onStage = onStage;
+        socket.waitingRoomId = null; // sudah masuk room, bukan menunggu lagi
+
+        // Peserta ini berhasil masuk → keluarkan dari daftar tunggu (bila ada) &
+        // tandai ter-admit (agar reconnect tidak menunggu lagi).
+        const admittedSet = getAdmitted(roomId);
+        admittedSet.add(String(peerId));
+        const waitingMap = getWaiting(roomId);
+        if (waitingMap.delete(String(peerId))) {
+          io.to(roomId).emit('waiting-updated', {
+            waiting: [...waitingMap.entries()].map(([pid, v]) => ({ peerId: pid, userName: v.userName })),
+          });
+        }
 
         safeCallback(callback, {
           success: true,
@@ -417,6 +481,12 @@ function initSocketServer(httpServer) {
             isHost: isHost,
             mode: meeting.mode || 'meeting',
             onStage,
+            waitingRoomEnabled: meeting.waiting_room_enabled === true,
+            isLocked: meetingLocks.get(roomId) === true,
+            // Host menerima daftar tunggu saat ini agar bisa langsung mengelola.
+            waiting: isHost
+              ? [...getWaiting(roomId).entries()].map(([pid, v]) => ({ peerId: pid, userName: v.userName }))
+              : [],
           }
         });
       } catch (error) {
@@ -430,7 +500,7 @@ function initSocketServer(httpServer) {
       console.log(`[Socket] create-transport received from ${socket.peerId}, direction: ${data?.direction}, roomId: ${socket.roomId}`);
       try {
         const { direction } = data; // 'send' or 'recv'
-        const peerId = socket.user.id;
+        const peerId = socket.peerId || socket.user.id;
         const roomId = socket.roomId;
 
         console.log(`[Socket] Creating ${direction} transport for peer ${peerId} in room ${roomId}`);
@@ -449,7 +519,7 @@ function initSocketServer(httpServer) {
       console.log(`[Socket] connect-transport received from ${socket.peerId}, transportId: ${data?.transportId}`);
       try {
         const { transportId, dtlsParameters } = data;
-        const peerId = socket.user.id;
+        const peerId = socket.peerId || socket.user.id;
         const roomId = socket.roomId;
 
         console.log(`[Socket] Connecting transport ${transportId} for peer ${peerId}`);
@@ -468,7 +538,7 @@ function initSocketServer(httpServer) {
       console.log(`[Socket] produce received from ${socket.peerId}, kind: ${data?.kind}`);
       try {
         const { transportId, kind, rtpParameters, appData } = data;
-        const peerId = socket.user.id;
+        const peerId = socket.peerId || socket.user.id;
         const roomId = socket.roomId;
 
         // Enforcement webinar: hanya host / peserta on-stage yang boleh publish.
@@ -488,11 +558,13 @@ function initSocketServer(httpServer) {
           { ...appData, userName: socket.userName }
         );
 
-        // Notify others about new producer
+        // Notify others about new producer (sertakan mediaType agar penerima tahu
+        // ini kamera/mic biasa atau SCREEN SHARE → ditampilkan terpisah ala Zoom).
         socket.to(roomId).emit('new-producer', {
           producerId: producer.id,
           peerId,
           kind: producer.kind,
+          mediaType: appData?.mediaType || 'video',
           userName: socket.userName
         });
 
@@ -515,7 +587,7 @@ function initSocketServer(httpServer) {
       console.log(`[Socket] consume received from ${socket.peerId}, producerId: ${data?.producerId}`);
       try {
         const { transportId, producerId, rtpCapabilities } = data;
-        const peerId = socket.user.id;
+        const peerId = socket.peerId || socket.user.id;
         const roomId = socket.roomId;
 
         console.log(`[Socket] Consuming producer ${producerId} for peer ${peerId} in room ${roomId}`);
@@ -539,7 +611,7 @@ function initSocketServer(httpServer) {
     socket.on('resume-consumer', async (data, callback) => {
       try {
         const { consumerId } = data;
-        const peerId = socket.user.id;
+        const peerId = socket.peerId || socket.user.id;
         const roomId = socket.roomId;
 
         await mediasoupService.resumeConsumer(roomId, peerId, consumerId);
@@ -556,7 +628,7 @@ function initSocketServer(httpServer) {
     socket.on('pause-consumer', async (data, callback) => {
       try {
         const { consumerId } = data;
-        await mediasoupService.pauseConsumer(socket.roomId, socket.user.id, consumerId);
+        await mediasoupService.pauseConsumer(socket.roomId, socket.peerId || socket.user.id, consumerId);
         safeCallback(callback, { success: true });
       } catch (error) {
         console.error('[Socket] Error pausing consumer:', error);
@@ -571,7 +643,7 @@ function initSocketServer(httpServer) {
       try {
         const { sourcePeerId, spatialLayer } = data || {};
         const ok = await mediasoupService.setPreferredLayers(
-          socket.roomId, socket.user.id, String(sourcePeerId), spatialLayer
+          socket.roomId, socket.peerId || socket.user.id, String(sourcePeerId), spatialLayer
         );
         safeCallback(callback, { success: ok });
       } catch (error) {
@@ -583,7 +655,7 @@ function initSocketServer(httpServer) {
     socket.on('close-producer', async (data) => {
       try {
         const { producerId } = data;
-        const peerId = socket.user.id;
+        const peerId = socket.peerId || socket.user.id;
         const roomId = socket.roomId;
 
         mediasoupService.closeProducer(roomId, peerId, producerId);
@@ -680,6 +752,240 @@ function initSocketServer(httpServer) {
       }
     });
 
+    // ===== Reactions (emoji) — efemeral, tidak disimpan ke DB =====
+    socket.on('reaction', (data) => {
+      if (!socket.roomId) return;
+      const emoji = String(data?.emoji || '').slice(0, 8);
+      if (!emoji) return;
+      io.to(socket.roomId).emit('reaction', {
+        peerId: socket.peerId,
+        userName: socket.userName,
+        emoji,
+        id: `${socket.id}-${Date.now()}`,
+      });
+    });
+
+    const emitProducerPauseState = (roomId, peerId, producers, paused) => {
+      for (const producer of producers || []) {
+        io.to(roomId).emit(paused ? 'producer-paused' : 'producer-resumed', {
+          peerId: String(peerId),
+          producerId: producer.producerId,
+          kind: producer.kind,
+          mediaType: producer.mediaType,
+        });
+      }
+    };
+
+    const setParticipantMediaState = async (sock, next) => {
+      if (!sock?.participantId) return;
+      const data = {};
+      if (typeof next.isMuted === 'boolean') data.is_muted = next.isMuted;
+      if (typeof next.isVideoOff === 'boolean') data.is_video_on = !next.isVideoOff;
+      if (Object.keys(data).length === 0) return;
+      await prisma.video_meeting_participants.update({
+        where: { id: BigInt(sock.participantId) },
+        data,
+      }).catch(() => {});
+    };
+
+    // ===== Kontrol host: mute peserta / mute semua / keluarkan / kunci =====
+    // Host mute memakai pause producer di SFU (hard enforcement), lalu tetap
+    // mengirim event ke klien target agar UI lokal ikut menampilkan status mute.
+    socket.on('host-mute-participant', async (data, callback) => {
+      try {
+        if (!(await isRoomHost(socket))) return safeCallback(callback, { error: 'Hanya host' });
+        const { targetPeerId, kind = 'audio' } = data || {};
+        const mediaKind = kind === 'video' ? 'video' : 'audio';
+        const target = findSocketByPeerId(socket.roomId, targetPeerId);
+
+        const paused = await mediasoupService.setProducerPausedByKind(
+          socket.roomId,
+          String(targetPeerId),
+          mediaKind,
+          true,
+          { includeScreen: false }
+        );
+        emitProducerPauseState(socket.roomId, targetPeerId, paused, true);
+
+        if (target) {
+          target.emit('force-muted', { kind: mediaKind, by: socket.userName });
+          await setParticipantMediaState(target, mediaKind === 'audio' ? { isMuted: true } : { isVideoOff: true });
+        }
+
+        safeCallback(callback, { success: true, paused: paused.length });
+      } catch (err) {
+        safeCallback(callback, { error: err.message });
+      }
+    });
+
+    // Host mematikan mic SEMUA peserta (kecuali dirinya).
+    socket.on('host-mute-all', async (data, callback) => {
+      try {
+        if (!(await isRoomHost(socket))) return safeCallback(callback, { error: 'Hanya host' });
+        const ids = io.sockets.adapter.rooms.get(socket.roomId);
+        if (ids) {
+          for (const id of ids) {
+            const s = io.sockets.sockets.get(id);
+            if (s && s.id !== socket.id) {
+              const paused = await mediasoupService.setProducerPausedByKind(
+                socket.roomId,
+                String(s.peerId),
+                'audio',
+                true
+              );
+              emitProducerPauseState(socket.roomId, s.peerId, paused, true);
+              s.emit('force-muted', { kind: 'audio', by: socket.userName });
+              await setParticipantMediaState(s, { isMuted: true });
+            }
+          }
+        }
+        safeCallback(callback, { success: true });
+      } catch (err) {
+        safeCallback(callback, { error: err.message });
+      }
+    });
+
+    // Host mengeluarkan peserta dari meeting.
+    socket.on('host-remove-participant', async (data, callback) => {
+      try {
+        if (!(await isRoomHost(socket))) return safeCallback(callback, { error: 'Hanya host' });
+        const { targetPeerId } = data || {};
+        const target = findSocketByPeerId(socket.roomId, targetPeerId);
+        if (target) {
+          target.emit('removed-by-host', { by: socket.userName });
+          // Beri jeda agar pesan sampai sebelum koneksi diputus.
+          setTimeout(() => { try { handlePeerLeave(target); target.disconnect(true); } catch { /* noop */ } }, 400);
+        }
+        safeCallback(callback, { success: true });
+      } catch (err) {
+        safeCallback(callback, { error: err.message });
+      }
+    });
+
+    // Host mengunci / membuka meeting (cegah peserta baru bergabung).
+    socket.on('toggle-lock', async (data, callback) => {
+      try {
+        if (!(await isRoomHost(socket))) return safeCallback(callback, { error: 'Hanya host' });
+        const locked = data?.locked === true;
+        meetingLocks.set(socket.roomId, locked);
+        io.to(socket.roomId).emit('lock-updated', { locked, by: socket.userName });
+        safeCallback(callback, { success: true, locked });
+      } catch (err) {
+        safeCallback(callback, { error: err.message });
+      }
+    });
+
+    // ===== Waiting room: host menerima / menolak peserta =====
+    const emitWaitingUpdate = (roomId) => {
+      const waiting = getWaiting(roomId);
+      io.to(roomId).emit('waiting-updated', {
+        waiting: [...waiting.entries()].map(([pid, v]) => ({ peerId: pid, userName: v.userName })),
+      });
+    };
+
+    socket.on('admit-participant', async (data, callback) => {
+      try {
+        if (!(await isRoomHost(socket))) return safeCallback(callback, { error: 'Hanya host' });
+        const { targetPeerId } = data || {};
+        getAdmitted(socket.roomId).add(String(targetPeerId));
+        const waiting = getWaiting(socket.roomId);
+        const entry = waiting.get(String(targetPeerId));
+        waiting.delete(String(targetPeerId));
+        if (entry) {
+          const s = io.sockets.sockets.get(entry.socketId);
+          if (s) s.emit('admitted', { roomId: socket.roomId });
+        }
+        emitWaitingUpdate(socket.roomId);
+        safeCallback(callback, { success: true });
+      } catch (err) {
+        safeCallback(callback, { error: err.message });
+      }
+    });
+
+    socket.on('admit-all', async (data, callback) => {
+      try {
+        if (!(await isRoomHost(socket))) return safeCallback(callback, { error: 'Hanya host' });
+        const waiting = getWaiting(socket.roomId);
+        const admitted = getAdmitted(socket.roomId);
+        for (const [pid, entry] of waiting.entries()) {
+          admitted.add(String(pid));
+          const s = io.sockets.sockets.get(entry.socketId);
+          if (s) s.emit('admitted', { roomId: socket.roomId });
+        }
+        waiting.clear();
+        emitWaitingUpdate(socket.roomId);
+        safeCallback(callback, { success: true });
+      } catch (err) {
+        safeCallback(callback, { error: err.message });
+      }
+    });
+
+    socket.on('reject-participant', async (data, callback) => {
+      try {
+        if (!(await isRoomHost(socket))) return safeCallback(callback, { error: 'Hanya host' });
+        const { targetPeerId } = data || {};
+        const waiting = getWaiting(socket.roomId);
+        const entry = waiting.get(String(targetPeerId));
+        waiting.delete(String(targetPeerId));
+        if (entry) {
+          const s = io.sockets.sockets.get(entry.socketId);
+          if (s) { s.emit('join-rejected', { by: socket.userName }); setTimeout(() => { try { s.disconnect(true); } catch { /* noop */ } }, 400); }
+        }
+        emitWaitingUpdate(socket.roomId);
+        safeCallback(callback, { success: true });
+      } catch (err) {
+        safeCallback(callback, { error: err.message });
+      }
+    });
+
+    // Klien mengubah status mic/kamera. Server menyinkronkan status DB dan
+    // pause/resume producer terkait di SFU agar media benar-benar berhenti jalan.
+    socket.on('media-state-change', async (data, callback) => {
+      try {
+        if (!socket.roomId || !socket.peerId) return safeCallback(callback, { error: 'Belum di dalam room' });
+        const updates = [];
+
+        if (typeof data?.isMuted === 'boolean') {
+          const changed = await mediasoupService.setProducerPausedByKind(
+            socket.roomId,
+            String(socket.peerId),
+            'audio',
+            data.isMuted
+          );
+          emitProducerPauseState(socket.roomId, socket.peerId, changed, data.isMuted);
+          updates.push(...changed);
+        }
+
+        if (typeof data?.isVideoOff === 'boolean') {
+          const changed = await mediasoupService.setProducerPausedByKind(
+            socket.roomId,
+            String(socket.peerId),
+            'video',
+            data.isVideoOff,
+            { includeScreen: false }
+          );
+          emitProducerPauseState(socket.roomId, socket.peerId, changed, data.isVideoOff);
+          updates.push(...changed);
+        }
+
+        await setParticipantMediaState(socket, {
+          isMuted: typeof data?.isMuted === 'boolean' ? data.isMuted : undefined,
+          isVideoOff: typeof data?.isVideoOff === 'boolean' ? data.isVideoOff : undefined,
+        });
+
+        socket.to(socket.roomId).emit('participant-media-state', {
+          peerId: String(socket.peerId),
+          isMuted: typeof data?.isMuted === 'boolean' ? data.isMuted : undefined,
+          isVideoOff: typeof data?.isVideoOff === 'boolean' ? data.isVideoOff : undefined,
+        });
+
+        safeCallback(callback, { success: true, changed: updates.length });
+      } catch (err) {
+        console.error('[Socket] media-state-change error:', err);
+        safeCallback(callback, { error: err.message });
+      }
+    });
+
     // Chat message
     socket.on('chat-message', async (data) => {
       try {
@@ -739,6 +1045,7 @@ function initSocketServer(httpServer) {
           message: sanitizedMessage,
           senderName: socket.userName,
           senderId: socket.user.id,
+          senderPeerId: socket.peerId,
           replyTo,
           timestamp: chatMessage.created_at
         });
@@ -750,21 +1057,21 @@ function initSocketServer(httpServer) {
     // Screen share status
     socket.on('screen-share-started', () => {
       socket.to(socket.roomId).emit('screen-share-started', {
-        peerId: socket.user.id,
+        peerId: socket.peerId || socket.user.id,
         userName: socket.userName
       });
     });
 
     socket.on('screen-share-stopped', () => {
       socket.to(socket.roomId).emit('screen-share-stopped', {
-        peerId: socket.user.id
+        peerId: socket.peerId || socket.user.id
       });
     });
 
     // Mute/unmute status
     socket.on('mute-status-changed', (data) => {
       socket.to(socket.roomId).emit('peer-mute-changed', {
-        peerId: socket.user.id,
+        peerId: socket.peerId || socket.user.id,
         isMuted: data.isMuted,
         kind: data.kind // 'audio' or 'video'
       });
@@ -830,6 +1137,9 @@ function initSocketServer(httpServer) {
         console.log(`[Socket] Meeting ${roomId} ended successfully`);
         safeCallback(callback, { success: true });
 
+        // Bersihkan state lock/waiting/admit room ini.
+        clearRoomState(roomId);
+
         // Remove all peers from mediasoup room
         try {
           mediasoupService.closeRoom(roomId);
@@ -873,6 +1183,17 @@ function initSocketServer(httpServer) {
     socket.on('disconnect', async () => {
       console.log(`[Socket] User disconnected: ${socket.user.name}`);
       chatRateLimits.delete(socket.id);
+
+      // Jika peserta sedang menunggu di waiting room, keluarkan & beri tahu host.
+      if (socket.waitingRoomId) {
+        const waiting = getWaiting(socket.waitingRoomId);
+        if (waiting.delete(String(socket.peerId))) {
+          io.to(socket.waitingRoomId).emit('waiting-updated', {
+            waiting: [...waiting.entries()].map(([pid, v]) => ({ peerId: pid, userName: v.userName })),
+          });
+        }
+        socket.waitingRoomId = null;
+      }
 
       // Update online status tracking
       if (!socket.user.isGuest && socket.user.id) {
