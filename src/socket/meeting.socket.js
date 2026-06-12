@@ -39,7 +39,9 @@ function clearRoomState(roomId) {
 
 function makeMeetingPeerId(socket) {
   const userPart = socket.user?.isGuest ? socket.user.id : `user_${socket.user?.id}`;
-  return `${userPart}_${socket.id}`;
+  const rawClientId = socket.handshake.auth?.meetingClientId;
+  const clientId = String(rawClientId || socket.id).replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 100);
+  return `${userPart}_${clientId || socket.id}`;
 }
 
 /**
@@ -235,8 +237,16 @@ function initSocketServer(httpServer) {
 
     // Join meeting room
     socket.on('join-room', async (data, callback) => {
+      const { roomId, guestName, displayName } = data || {};
+      if (socket.meetingJoinInProgress) {
+        return safeCallback(callback, { error: 'Proses masuk meeting masih berjalan' });
+      }
+      if (socket.roomId === roomId && socket.lastMeetingJoinResponse) {
+        return safeCallback(callback, socket.lastMeetingJoinResponse);
+      }
+      socket.meetingJoinInProgress = true;
+
       try {
-        const { roomId, guestName, displayName } = data || {};
         const peerId = makeMeetingPeerId(socket);
         const userName = normalizeDisplayName(
           displayName || guestName || socket.user.name,
@@ -337,11 +347,8 @@ function initSocketServer(httpServer) {
           }
         }
 
-        // Ensure peer exists in mediasoup (important for tracking)
-        mediasoupService.ensurePeerExists(roomId, peerId, userName);
-
-        // Check if this is a reconnection (same peerId already in room from previous socket).
-        // peerId sekarang unik per koneksi, jadi satu akun bisa membuka lebih dari satu device.
+        // Tutup sesi socket/media lama untuk client yang sama sebelum membangun
+        // transport baru. Ini mencegah transport menumpuk saat reconnect.
         let isReconnect = false;
         const socketsInRoom = io.sockets.adapter.rooms.get(roomId);
         if (socketsInRoom) {
@@ -351,7 +358,10 @@ function initSocketServer(httpServer) {
               // Found old socket with same peerId - this is a reconnection
               isReconnect = true;
               console.log(`[Socket] Reconnection detected for ${userName} (${peerId}). Disconnecting old socket.`);
-              s.disconnect(true); // Disconnect old socket
+              mediasoupService.removePeer(roomId, peerId, false);
+              s.roomId = null;
+              s.leave(roomId);
+              s.disconnect(true);
               break;
             }
           }
@@ -366,7 +376,7 @@ function initSocketServer(httpServer) {
               ...(socket.user.isGuest
                 ? { guest_name: userName, user_id: null }
                 : { user_id: BigInt(socket.user.id) }),
-              left_at: null // Still active
+              left_at: null
             },
             orderBy: { joined_at: 'desc' }
           });
@@ -406,6 +416,9 @@ function initSocketServer(httpServer) {
 
         // Join socket room
         socket.join(roomId);
+
+        // Peer harus tersedia sebelum transport WebRTC dibuat.
+        mediasoupService.ensurePeerExists(roomId, peerId, userName);
 
         // Get RTP capabilities
         const rtpCapabilities = mediasoupService.getRtpCapabilities(roomId);
@@ -477,7 +490,7 @@ function initSocketServer(httpServer) {
           });
         }
 
-        safeCallback(callback, {
+        const joinResponse = {
           success: true,
           rtpCapabilities,
           producers,
@@ -500,10 +513,14 @@ function initSocketServer(httpServer) {
               ? [...getWaiting(roomId).entries()].map(([pid, v]) => ({ peerId: pid, userName: v.userName }))
               : [],
           }
-        });
+        };
+        socket.lastMeetingJoinResponse = joinResponse;
+        safeCallback(callback, joinResponse);
       } catch (error) {
         console.error('[Socket] Error joining room:', error);
         safeCallback(callback, { error: error.message });
+      } finally {
+        socket.meetingJoinInProgress = false;
       }
     });
 
@@ -1341,7 +1358,7 @@ function initSocketServer(httpServer) {
   mediasoupService.on('worker-died', ({ roomIds }) => {
     (roomIds || []).forEach((roomId) => {
       io.to(roomId).emit('meeting-interrupted', {
-        message: 'Server media terputus sesaat. Silakan muat ulang halaman untuk bergabung kembali.',
+        message: 'Server media terputus sesaat. Mencoba menyambungkan kembali.',
       });
     });
   });
@@ -1360,6 +1377,8 @@ async function handlePeerLeave(socket) {
     const participantId = socket.participantId;
 
     if (!roomId) return;
+    socket.roomId = null;
+    socket.lastMeetingJoinResponse = null;
 
     console.log(`[Socket] Handling leave for ${socket.userName} (peerId: ${peerId}) from room ${roomId}`);
 
