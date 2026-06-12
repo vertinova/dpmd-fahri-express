@@ -18,6 +18,9 @@ router.patch('/proposals/:id/cancel-approval', controller.cancelApproval);
 // Troubleshoot revisi: paksa kembalikan proposal nyangkut/salah ke Desa (reset semua tahap)
 router.patch('/proposals/:id/troubleshoot-revision', controller.troubleshootRevision);
 
+// Edit detail proposal (admin DPMD/SPKED)
+router.patch('/proposals/:id/edit-detail', controller.editProposalDetail);
+
 // Riwayat versi dokumen & ronde revisi/anotasi
 router.get('/proposals/:id/versions', controller.getProposalVersions);
 router.get('/proposals/:id/revisions', controller.getProposalRevisions);

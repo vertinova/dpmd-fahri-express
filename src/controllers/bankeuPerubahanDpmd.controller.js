@@ -430,6 +430,127 @@ class BankeuPerubahanDpmdController {
   }
 
   /**
+   * Edit detail proposal oleh DPMD/SPKED.
+   * PATCH /api/dpmd/bankeu-perubahan/proposals/:id/edit-detail
+   */
+  async editProposalDetail(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.id;
+      const userRole = req.user.role;
+      const { anggaran_usulan, volume, lokasi, nama_kegiatan_spesifik } = req.body;
+      const allowedRoles = [
+        'pegawai',
+        'kepala_bidang',
+        'ketua_tim',
+        'kepala_dinas',
+        'sarana_prasarana',
+        'superadmin'
+      ];
+
+      if (!allowedRoles.includes(userRole)) {
+        return res.status(403).json({
+          success: false,
+          message: 'Hanya pegawai SPKED yang dapat mengedit detail proposal'
+        });
+      }
+
+      const [proposals] = await sequelize.query(`
+        SELECT bp.id, bp.judul_proposal, bp.anggaran_usulan, bp.volume,
+               bp.lokasi, bp.nama_kegiatan_spesifik, d.nama AS desa_nama
+        FROM bankeu_perubahan_proposals bp
+        INNER JOIN desas d ON bp.desa_id = d.id
+        WHERE bp.id = ?
+      `, { replacements: [id] });
+
+      if (!proposals.length) {
+        return res.status(404).json({ success: false, message: 'Proposal tidak ditemukan' });
+      }
+
+      const proposal = proposals[0];
+      const fields = [];
+      const replacements = [];
+      const newValue = {};
+
+      if (anggaran_usulan !== undefined && anggaran_usulan !== '') {
+        const anggaranNum = Number(anggaran_usulan);
+        if (!Number.isFinite(anggaranNum) || anggaranNum < 0) {
+          return res.status(400).json({
+            success: false,
+            message: 'Anggaran harus berupa angka yang valid'
+          });
+        }
+        if (anggaranNum > 1_500_000_000) {
+          return res.status(400).json({
+            success: false,
+            message: 'Anggaran tidak boleh lebih dari Rp 1.500.000.000'
+          });
+        }
+        fields.push('anggaran_usulan = ?');
+        replacements.push(Math.round(anggaranNum));
+        newValue.anggaran_usulan = Math.round(anggaranNum);
+      }
+
+      const textFields = { volume, lokasi, nama_kegiatan_spesifik };
+      Object.entries(textFields).forEach(([field, value]) => {
+        if (value === undefined) return;
+        const normalizedValue = String(value).trim().substring(0, 255);
+        fields.push(`${field} = ?`);
+        replacements.push(normalizedValue);
+        newValue[field] = normalizedValue;
+      });
+
+      if (!fields.length) {
+        return res.status(400).json({ success: false, message: 'Tidak ada data yang diubah' });
+      }
+
+      replacements.push(id);
+      await sequelize.query(`
+        UPDATE bankeu_perubahan_proposals
+        SET ${fields.join(', ')}, updated_at = NOW()
+        WHERE id = ?
+      `, { replacements });
+
+      logger.info(`[BankeuPerubahan DPMD] Detail proposal #${id} diedit oleh user ${userId}`);
+
+      ActivityLogger.log({
+        userId,
+        userName: req.user.name || `User ${userId}`,
+        userRole,
+        bidangId: 3,
+        module: MODULE_NAME,
+        action: 'update',
+        entityType: 'bankeu_perubahan_proposal',
+        entityId: parseInt(id),
+        entityName: proposal.judul_proposal || `Proposal #${id}`,
+        description: `DPMD/SPKED mengedit detail proposal perubahan #${id} (${proposal.desa_nama || 'Desa'})`,
+        oldValue: {
+          anggaran_usulan: proposal.anggaran_usulan,
+          volume: proposal.volume,
+          lokasi: proposal.lokasi,
+          nama_kegiatan_spesifik: proposal.nama_kegiatan_spesifik
+        },
+        newValue,
+        ipAddress: ActivityLogger.getIpFromRequest(req),
+        userAgent: ActivityLogger.getUserAgentFromRequest(req)
+      });
+
+      res.json({
+        success: true,
+        message: 'Detail proposal berhasil diperbarui',
+        data: { id: Number(id), ...newValue }
+      });
+    } catch (error) {
+      logger.error('[BankeuPerubahan DPMD] Error edit detail:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Gagal mengedit detail proposal',
+        error: error.message
+      });
+    }
+  }
+
+  /**
    * Statistik proposal perubahan di DPMD
    * GET /api/dpmd/bankeu-perubahan/statistics
    */
