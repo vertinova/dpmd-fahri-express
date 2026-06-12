@@ -51,6 +51,11 @@ function safeCallback(callback, data) {
   }
 }
 
+function normalizeDisplayName(value, fallback = 'Peserta') {
+  const cleaned = String(value || '').replace(/\s+/g, ' ').trim().slice(0, 80);
+  return cleaned || fallback;
+}
+
 /**
  * Initialize Socket.io server
  */
@@ -82,7 +87,8 @@ function initSocketServer(httpServer) {
   io.use(async (socket, next) => {
     try {
       const token = socket.handshake.auth.token;
-      const guestName = socket.handshake.auth.guestName;
+      const rawGuestName = socket.handshake.auth.guestName || socket.handshake.auth.displayName;
+      const guestName = normalizeDisplayName(rawGuestName, 'Guest');
       const guestId = socket.handshake.auth.guestId;
       
       // If no token or token is null/undefined, allow as guest
@@ -139,7 +145,7 @@ function initSocketServer(httpServer) {
         
         // If guestName is provided (public meeting page), allow as guest
         // Otherwise, this was an authenticated request that failed - still allow but log warning
-        if (guestName || guestId) {
+        if (rawGuestName || guestId) {
           socket.user = {
             id: guestId || `guest_${socket.id}`,
             name: guestName || 'Guest',
@@ -230,9 +236,12 @@ function initSocketServer(httpServer) {
     // Join meeting room
     socket.on('join-room', async (data, callback) => {
       try {
-        const { roomId, guestName } = data;
+        const { roomId, guestName, displayName } = data || {};
         const peerId = makeMeetingPeerId(socket);
-        const userName = socket.user.isGuest ? (guestName || socket.user.name) : socket.user.name;
+        const userName = normalizeDisplayName(
+          displayName || guestName || socket.user.name,
+          socket.user.isGuest ? 'Guest' : (socket.user.name || 'Peserta')
+        );
 
         console.log(`[Socket] ${userName} joining room ${roomId}`);
 
@@ -354,8 +363,9 @@ function initSocketServer(httpServer) {
           const existingParticipant = await prisma.video_meeting_participants.findFirst({
             where: {
               meeting_id: meeting.id,
-              guest_name: socket.user.isGuest ? userName : null,
-              user_id: socket.user.isGuest ? null : BigInt(socket.user.id),
+              ...(socket.user.isGuest
+                ? { guest_name: userName, user_id: null }
+                : { user_id: BigInt(socket.user.id) }),
               left_at: null // Still active
             },
             orderBy: { joined_at: 'desc' }
@@ -369,7 +379,7 @@ function initSocketServer(httpServer) {
               data: {
                 meeting_id: meeting.id,
                 user_id: socket.user.isGuest ? null : BigInt(socket.user.id),
-                guest_name: socket.user.isGuest ? userName : null,
+                guest_name: userName,
                 role: meeting.host_id.toString() === socket.user.id?.toString() ? 'host' : 'participant',
                 joined_at: new Date()
               }
@@ -381,7 +391,7 @@ function initSocketServer(httpServer) {
             data: {
               meeting_id: meeting.id,
               user_id: socket.user.isGuest ? null : BigInt(socket.user.id),
-              guest_name: socket.user.isGuest ? userName : null,
+              guest_name: userName,
               role: meeting.host_id.toString() === socket.user.id?.toString() ? 'host' : 'participant',
               joined_at: new Date()
             }
@@ -474,6 +484,8 @@ function initSocketServer(httpServer) {
           existingPeers,
           participantId: participant.id.toString(),
           peerId,
+          userName,
+          displayName: userName,
           meetingSettings: {
             isRecordingEnabled: meeting.is_recording_enabled,
             isScreenShareEnabled: meeting.is_screen_share_enabled,
@@ -492,6 +504,54 @@ function initSocketServer(httpServer) {
       } catch (error) {
         console.error('[Socket] Error joining room:', error);
         safeCallback(callback, { error: error.message });
+      }
+    });
+
+    socket.on('update-display-name', async (data, callback) => {
+      try {
+        if (!socket.roomId || !socket.peerId) {
+          return safeCallback(callback, { error: 'Belum bergabung ke room' });
+        }
+
+        const nextName = normalizeDisplayName(
+          data?.displayName || data?.userName,
+          socket.userName || socket.user?.name || 'Peserta'
+        );
+        const oldName = socket.userName;
+
+        socket.userName = nextName;
+        if (socket.user) socket.user.name = nextName;
+        mediasoupService.setPeerName(socket.roomId, socket.peerId, nextName);
+
+        if (socket.participantId) {
+          await prisma.video_meeting_participants.update({
+            where: { id: BigInt(socket.participantId) },
+            data: { guest_name: nextName },
+          }).catch(() => {});
+        }
+
+        if (socket.waitingRoomId) {
+          const waiting = getWaiting(socket.waitingRoomId);
+          const entry = waiting.get(String(socket.peerId));
+          if (entry) {
+            waiting.set(String(socket.peerId), { ...entry, userName: nextName });
+            io.to(socket.waitingRoomId).emit('waiting-updated', {
+              waiting: [...waiting.entries()].map(([pid, v]) => ({ peerId: pid, userName: v.userName })),
+            });
+          }
+        }
+
+        io.to(socket.roomId).emit('participant-renamed', {
+          peerId: socket.peerId,
+          userName: nextName,
+          displayName: nextName,
+          oldName,
+        });
+
+        safeCallback(callback, { success: true, userName: nextName, displayName: nextName });
+      } catch (error) {
+        console.error('[Socket] Error updating display name:', error);
+        safeCallback(callback, { error: error.message || 'Gagal mengganti nama' });
       }
     });
 
@@ -818,6 +878,33 @@ function initSocketServer(httpServer) {
       }
     });
 
+    socket.on('host-unmute-participant', async (data, callback) => {
+      try {
+        if (!(await isRoomHost(socket))) return safeCallback(callback, { error: 'Hanya host' });
+        const { targetPeerId, kind = 'audio' } = data || {};
+        const mediaKind = kind === 'video' ? 'video' : 'audio';
+        const target = findSocketByPeerId(socket.roomId, targetPeerId);
+
+        const resumed = await mediasoupService.setProducerPausedByKind(
+          socket.roomId,
+          String(targetPeerId),
+          mediaKind,
+          false,
+          { includeScreen: false }
+        );
+        emitProducerPauseState(socket.roomId, targetPeerId, resumed, false);
+
+        if (target) {
+          target.emit('force-unmuted', { kind: mediaKind, by: socket.userName });
+          await setParticipantMediaState(target, mediaKind === 'audio' ? { isMuted: false } : { isVideoOff: false });
+        }
+
+        safeCallback(callback, { success: true, resumed: resumed.length });
+      } catch (err) {
+        safeCallback(callback, { error: err.message });
+      }
+    });
+
     // Host mematikan mic SEMUA peserta (kecuali dirinya).
     socket.on('host-mute-all', async (data, callback) => {
       try {
@@ -836,6 +923,32 @@ function initSocketServer(httpServer) {
               emitProducerPauseState(socket.roomId, s.peerId, paused, true);
               s.emit('force-muted', { kind: 'audio', by: socket.userName });
               await setParticipantMediaState(s, { isMuted: true });
+            }
+          }
+        }
+        safeCallback(callback, { success: true });
+      } catch (err) {
+        safeCallback(callback, { error: err.message });
+      }
+    });
+
+    socket.on('host-unmute-all', async (data, callback) => {
+      try {
+        if (!(await isRoomHost(socket))) return safeCallback(callback, { error: 'Hanya host' });
+        const ids = io.sockets.adapter.rooms.get(socket.roomId);
+        if (ids) {
+          for (const id of ids) {
+            const s = io.sockets.sockets.get(id);
+            if (s && s.id !== socket.id) {
+              const resumed = await mediasoupService.setProducerPausedByKind(
+                socket.roomId,
+                String(s.peerId),
+                'audio',
+                false
+              );
+              emitProducerPauseState(socket.roomId, s.peerId, resumed, false);
+              s.emit('force-unmuted', { kind: 'audio', by: socket.userName });
+              await setParticipantMediaState(s, { isMuted: false });
             }
           }
         }
