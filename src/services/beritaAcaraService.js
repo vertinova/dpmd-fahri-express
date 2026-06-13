@@ -13,6 +13,16 @@ const convertBigInt = (obj) => {
   return converted;
 };
 
+const parseDocumentDate = (value) => {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  const match = String(value || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (match) {
+    return new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  }
+  const parsed = value ? new Date(value) : new Date();
+  return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+};
+
 class BeritaAcaraService {
   /**
    * Generate Berita Acara Verifikasi PDF
@@ -431,7 +441,7 @@ class BeritaAcaraService {
     let titleY = lineY + 20;
 
     // Generate current date first (dipakai utk tahun anggaran & paragraf)
-    const today = tanggal ? new Date(tanggal) : new Date();
+    const today = parseDocumentDate(tanggal);
     const dayNames = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
     const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
     const dayName = dayNames[today.getDay()];
@@ -1359,7 +1369,7 @@ class BeritaAcaraService {
 
     // Date - right aligned
     let yPos = lineY + 25;
-    const today = tanggal ? new Date(tanggal) : new Date();
+    const today = parseDocumentDate(tanggal);
     const monthNames = ['Januari', 'Februari', 'Maret', 'April', 'Mei', 'Juni', 'Juli', 'Agustus', 'September', 'Oktober', 'November', 'Desember'];
     const dateStr = `${kecamatanConfig.nama_kecamatan || '.....................'}, ${today.getDate()} ${monthNames[today.getMonth()]} ${today.getFullYear()}`;
     

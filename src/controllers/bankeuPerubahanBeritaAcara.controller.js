@@ -8,6 +8,12 @@ const PDFDocument = require('pdfkit');
 const beritaAcaraService = require('../services/beritaAcaraService');
 
 const MODULE_NAME = 'bankeu_perubahan';
+const isValidDocumentDate = (value) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(value || ''))) return false;
+  const [year, month, day] = String(value).split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  return date.getFullYear() === year && date.getMonth() === month - 1 && date.getDate() === day;
+};
 
 const POSISI_LABELS = {
   ketua: 'Ketua',
@@ -200,6 +206,9 @@ class BankeuPerubahanBeritaAcaraController {
       if (!proposalId) {
         return res.status(400).json({ success: false, message: 'proposalId wajib diisi' });
       }
+      if (!isValidDocumentDate(tanggal)) {
+        return res.status(400).json({ success: false, message: 'Tanggal Berita Acara wajib dipilih dengan format YYYY-MM-DD' });
+      }
 
       const proposal = await loadProposal(proposalId);
       if (!proposal) return res.status(404).json({ success: false, message: 'Proposal tidak ditemukan' });
@@ -209,7 +218,8 @@ class BankeuPerubahanBeritaAcaraController {
       if (Number(proposal.desa_kecamatan_id) !== Number(user.kecamatan_id)) {
         return res.status(403).json({ success: false, message: 'Proposal bukan dari kecamatan Anda' });
       }
-      if (proposal.submitted_to_dpmd) {
+      const returnedByDpmd = ['revision', 'rejected'].includes(proposal.dpmd_status);
+      if (proposal.submitted_to_dpmd && !returnedByDpmd) {
         return res.status(400).json({ success: false, message: 'Proposal sudah dikirim ke DPMD, Berita Acara tidak dapat di-generate ulang dari tahap Kecamatan' });
       }
       if (proposal.kecamatan_status && !['pending', 'in_review', 'approved'].includes(proposal.kecamatan_status)) {
@@ -401,13 +411,17 @@ class BankeuPerubahanBeritaAcaraController {
       if (!nomor_surat || !String(nomor_surat).trim()) {
         return res.status(400).json({ success: false, message: 'Nomor surat wajib diisi' });
       }
+      if (!isValidDocumentDate(tanggal)) {
+        return res.status(400).json({ success: false, message: 'Tanggal Surat Pengantar wajib dipilih dengan format YYYY-MM-DD' });
+      }
 
       const proposal = await loadProposal(proposalId);
       if (!proposal) return res.status(404).json({ success: false, message: 'Proposal tidak ditemukan' });
       if (Number(proposal.desa_kecamatan_id) !== Number(user.kecamatan_id)) {
         return res.status(403).json({ success: false, message: 'Proposal bukan dari kecamatan Anda' });
       }
-      if (proposal.submitted_to_dpmd) {
+      const returnedByDpmd = ['revision', 'rejected'].includes(proposal.dpmd_status);
+      if (proposal.submitted_to_dpmd && !returnedByDpmd) {
         return res.status(400).json({ success: false, message: 'Proposal sudah dikirim ke DPMD, Surat Pengantar tidak dapat di-generate ulang dari tahap Kecamatan' });
       }
       if (proposal.kecamatan_status && !['pending', 'in_review', 'approved'].includes(proposal.kecamatan_status)) {

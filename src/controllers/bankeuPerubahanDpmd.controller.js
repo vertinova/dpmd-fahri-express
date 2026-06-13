@@ -14,8 +14,12 @@ class BankeuPerubahanDpmdController {
     try {
       const { status, jenis_kegiatan, desa_id, kecamatan_id, tahun } = req.query;
 
-      // Hanya tampilkan proposal yang sudah disubmit ke DPMD oleh kecamatan
-      let whereClause = `WHERE bp.submitted_to_dpmd = TRUE
+      // Tetap tampilkan proposal yang sudah pernah diterima DPMD lalu
+      // dikembalikan ke kecamatan untuk revisi dokumen.
+      let whereClause = `WHERE (
+          bp.submitted_to_dpmd = TRUE
+          OR bp.dpmd_status IN ('revision', 'rejected')
+        )
         AND bp.kecamatan_status = 'approved'`;
       const replacements = [];
 
@@ -97,7 +101,7 @@ class BankeuPerubahanDpmdController {
       const [proposals] = await sequelize.query(`
         SELECT
           bp.id, bp.desa_id, bp.kecamatan_id, bp.tahun_anggaran,
-          bp.jenis_kegiatan, bp.kegiatan_nama, bp.nama_kegiatan_spesifik,
+          bp.jenis_kegiatan, bp.kegiatan_id, bp.kegiatan_nama, bp.nama_kegiatan_spesifik,
           bp.volume, bp.lokasi, bp.judul_proposal, bp.anggaran_usulan,
           bp.status,
           bp.kecamatan_status, bp.kecamatan_catatan, bp.kecamatan_verified_at,
@@ -118,6 +122,17 @@ class BankeuPerubahanDpmdController {
         ${whereClause}
         ORDER BY k.nama ASC, d.nama ASC, bp.created_at DESC
       `, { replacements });
+
+      for (const proposal of proposals) {
+        const [kegiatan] = await sequelize.query(`
+          SELECT bmk.id, bmk.kategori, bmk.nama_kegiatan, bmk.urutan
+          FROM bankeu_perubahan_proposal_kegiatan bppk
+          JOIN bankeu_perubahan_master_kegiatan bmk ON bppk.kegiatan_id = bmk.id
+          WHERE bppk.proposal_id = ?
+          ORDER BY bmk.urutan
+        `, { replacements: [proposal.id] });
+        proposal.kegiatan_list = kegiatan;
+      }
 
       res.json({ success: true, data: proposals });
     } catch (error) {
@@ -571,7 +586,11 @@ class BankeuPerubahanDpmdController {
           SUM(CASE WHEN dpmd_status = 'revision' THEN 1 ELSE 0 END) AS revision,
           SUM(CASE WHEN anggaran_usulan IS NOT NULL THEN anggaran_usulan ELSE 0 END) AS total_anggaran
         FROM bankeu_perubahan_proposals
-        WHERE submitted_to_dpmd = TRUE
+        WHERE (
+            submitted_to_dpmd = TRUE
+            OR submitted_to_dpmd_at IS NOT NULL
+            OR dpmd_verified_at IS NOT NULL
+          )
           ${whereTahun}
       `, { replacements });
 

@@ -199,7 +199,10 @@ class BankeuPerubahanProposalController {
             SELECT COUNT(*) FROM bankeu_perubahan_proposal_versions v
             WHERE v.proposal_id = bp.id AND v.source = 'revision'
               AND v.created_at > COALESCE(
-                (SELECT MAX(r.created_at) FROM bankeu_perubahan_revisions r WHERE r.proposal_id = bp.id),
+                GREATEST(
+                  COALESCE((SELECT MAX(r.created_at) FROM bankeu_perubahan_revisions r WHERE r.proposal_id = bp.id), '1970-01-01 00:00:00'),
+                  COALESCE(bp.troubleshoot_at, '1970-01-01 00:00:00')
+                ),
                 '1970-01-01 00:00:00'
               )
           ) AS reupload_after_revision_count,
@@ -217,6 +220,7 @@ class BankeuPerubahanProposalController {
           bp.surat_pengantar_kecamatan_generated_at,
           bp.quisioner_completed,
           bp.catatan_verifikasi, bp.verified_at,
+          bp.troubleshoot_catatan, bp.troubleshoot_at,
           bp.created_at, bp.updated_at,
           u_kec.name AS kecamatan_verified_by_name,
           u_dpmd.name AS dpmd_verified_by_name,
@@ -512,6 +516,7 @@ class BankeuPerubahanProposalController {
       // - dpmd_status = revision/rejected (dikembalikan dari DPMD)
       const allowUpdate =
         !proposal.submitted_to_kecamatan ||
+        ['revision', 'rejected'].includes(proposal.status) ||
         ['revision', 'rejected'].includes(proposal.kecamatan_status) ||
         ['revision', 'rejected'].includes(proposal.dpmd_status);
 
@@ -807,7 +812,7 @@ class BankeuPerubahanProposalController {
       }
 
       const [proposals] = await sequelize.query(`
-        SELECT id, file_proposal, desa_id, submitted_to_kecamatan, kecamatan_status, dpmd_status
+        SELECT id, file_proposal, status, desa_id, submitted_to_kecamatan, kecamatan_status, dpmd_status
         FROM bankeu_perubahan_proposals WHERE id = ?
       `, { replacements: [id] });
 
@@ -825,6 +830,7 @@ class BankeuPerubahanProposalController {
       // Allow replace if not yet submitted OR returned to desa
       const allowReplace =
         !proposal.submitted_to_kecamatan ||
+        ['revision', 'rejected'].includes(proposal.status) ||
         ['revision', 'rejected'].includes(proposal.kecamatan_status) ||
         ['revision', 'rejected'].includes(proposal.dpmd_status);
 
@@ -997,12 +1003,15 @@ class BankeuPerubahanProposalController {
       // setelah ronde revisi terakhir (tidak boleh kirim ulang tanpa perbaikan dokumen).
       const filters = [
         'desa_id = ?',
-        '(kecamatan_status IN ("revision","rejected") OR dpmd_status IN ("revision","rejected"))',
+        '(status IN ("revision","rejected") OR kecamatan_status IN ("revision","rejected") OR dpmd_status IN ("revision","rejected"))',
         `EXISTS (
           SELECT 1 FROM bankeu_perubahan_proposal_versions v
           WHERE v.proposal_id = bankeu_perubahan_proposals.id AND v.source = 'revision'
             AND v.created_at > COALESCE(
-              (SELECT MAX(r.created_at) FROM bankeu_perubahan_revisions r WHERE r.proposal_id = bankeu_perubahan_proposals.id),
+              GREATEST(
+                COALESCE((SELECT MAX(r.created_at) FROM bankeu_perubahan_revisions r WHERE r.proposal_id = bankeu_perubahan_proposals.id), '1970-01-01 00:00:00'),
+                COALESCE(bankeu_perubahan_proposals.troubleshoot_at, '1970-01-01 00:00:00')
+              ),
               '1970-01-01 00:00:00'
             )
         )`
