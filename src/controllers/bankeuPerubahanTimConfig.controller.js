@@ -75,7 +75,7 @@ class BankeuPerubahanTimConfigController {
       let query = `
         SELECT
           t.id, t.kecamatan_id, t.proposal_id,
-          t.jabatan AS posisi,
+          LOWER(TRIM(t.jabatan)) AS posisi,
           t.nama, t.nip,
           t.jabatan_label AS jabatan,
           t.ttd_path, t.is_active, t.created_at, t.updated_at,
@@ -98,8 +98,8 @@ class BankeuPerubahanTimConfigController {
       // Tie-breaker: bila ada baris duplikat utk posisi yang sama (mis. ketua ganda
       // sisa import lama), dahulukan yang punya nama terisi lalu yang terbaru, agar
       // frontend (yang memakai .find untuk ketua/sekretaris) tidak menampilkan baris kosong.
-      query += ` ORDER BY FIELD(t.jabatan, 'ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3', 'anggota_4', 'anggota_5'),
-                 (t.nama IS NULL OR t.nama = '') ASC, t.id DESC`;
+      query += ` ORDER BY FIELD(LOWER(TRIM(t.jabatan)), 'ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3', 'anggota_4', 'anggota_5'),
+                 (t.nama IS NULL OR TRIM(t.nama) = '') ASC, t.id DESC`;
 
       const rows = await sequelize.query(query, { replacements, type: sequelize.QueryTypes.SELECT });
       res.json({ success: true, data: rows.map(m => ({ ...m, has_questionnaire: !!m.has_questionnaire })) });
@@ -368,17 +368,23 @@ class BankeuPerubahanTimConfigController {
         // (dan agar hitungan importedShared jujur).
         if (!r.nama || !String(r.nama).trim()) continue;
 
-        const copied = copyRegTtd(r.ttd_path, kecamatanId, r.posisi);
-        const jabatanLabel = r.jabatan_label || r.posisi;
+        // Normalkan posisi (lowercase + trim) agar tidak ada baris 'Ketua'/'ketua ' yang
+        // gagal dicocokkan frontend (find case-sensitive). Pakai LOWER(TRIM(jabatan)) saat
+        // mencari baris lama agar duplikat dengan kapital/spasi berbeda ikut terbersihkan.
+        const posisi = String(r.posisi || '').trim().toLowerCase();
+        if (!posisi) continue;
+
+        const copied = copyRegTtd(r.ttd_path, kecamatanId, posisi);
+        const jabatanLabel = r.jabatan_label || posisi;
 
         // Ambil SEMUA baris shared utk posisi ini (bukan LIMIT 1). Bila ada duplikat
-        // (mis. baris ketua kosong sisa percobaan lama), pertahankan satu & hapus sisanya
-        // supaya tidak ada baris kosong yang "menang" saat dibaca frontend.
+        // (mis. baris ketua kosong sisa percobaan lama, atau beda kapital/spasi),
+        // pertahankan satu & hapus sisanya supaya tidak ada baris kosong yang "menang".
         const existingRows = await sequelize.query(
           `SELECT id, ttd_path FROM tim_verifikasi_bankeu_perubahan
-           WHERE kecamatan_id = :kecamatanId AND jabatan = :posisi AND proposal_id IS NULL
+           WHERE kecamatan_id = :kecamatanId AND LOWER(TRIM(jabatan)) = :posisi AND proposal_id IS NULL
            ORDER BY id ASC`,
-          { replacements: { kecamatanId, posisi: r.posisi }, type: sequelize.QueryTypes.SELECT }
+          { replacements: { kecamatanId, posisi }, type: sequelize.QueryTypes.SELECT }
         );
 
         if (existingRows.length) {
@@ -401,17 +407,17 @@ class BankeuPerubahanTimConfigController {
           }
           await sequelize.query(
             `UPDATE tim_verifikasi_bankeu_perubahan
-             SET nama = :nama, nip = :nip, jabatan_label = :jabatanLabel, is_active = 1,
+             SET jabatan = :posisi, nama = :nama, nip = :nip, jabatan_label = :jabatanLabel, is_active = 1,
                  ttd_path = COALESCE(:ttd, ttd_path), updated_at = NOW()
              WHERE id = :id`,
-            { replacements: { nama: r.nama, nip: r.nip || null, jabatanLabel, ttd: copied, id: keep.id } }
+            { replacements: { posisi, nama: r.nama, nip: r.nip || null, jabatanLabel, ttd: copied, id: keep.id } }
           );
         } else {
           await sequelize.query(
             `INSERT INTO tim_verifikasi_bankeu_perubahan
                (kecamatan_id, proposal_id, jabatan, jabatan_label, nama, nip, ttd_path, is_active)
              VALUES (:kecamatanId, NULL, :posisi, :jabatanLabel, :nama, :nip, :ttd, 1)`,
-            { replacements: { kecamatanId, posisi: r.posisi, jabatanLabel, nama: r.nama, nip: r.nip || null, ttd: copied } }
+            { replacements: { kecamatanId, posisi, jabatanLabel, nama: r.nama, nip: r.nip || null, ttd: copied } }
           );
         }
         importedShared++;
