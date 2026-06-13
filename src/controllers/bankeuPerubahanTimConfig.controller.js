@@ -95,7 +95,11 @@ class BankeuPerubahanTimConfigController {
         query += ` AND t.proposal_id IS NULL`;
       }
 
-      query += ` ORDER BY FIELD(t.jabatan, 'ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3', 'anggota_4', 'anggota_5')`;
+      // Tie-breaker: bila ada baris duplikat utk posisi yang sama (mis. ketua ganda
+      // sisa import lama), dahulukan yang punya nama terisi lalu yang terbaru, agar
+      // frontend (yang memakai .find untuk ketua/sekretaris) tidak menampilkan baris kosong.
+      query += ` ORDER BY FIELD(t.jabatan, 'ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3', 'anggota_4', 'anggota_5'),
+                 (t.nama IS NULL OR t.nama = '') ASC, t.id DESC`;
 
       const rows = await sequelize.query(query, { replacements, type: sequelize.QueryTypes.SELECT });
       res.json({ success: true, data: rows.map(m => ({ ...m, has_questionnaire: !!m.has_questionnaire })) });
@@ -360,19 +364,39 @@ class BankeuPerubahanTimConfigController {
 
       let importedShared = 0;
       for (const r of sharedRows) {
+        // Lewati sumber tanpa nama agar tidak menimpa data tujuan dengan baris kosong
+        // (dan agar hitungan importedShared jujur).
+        if (!r.nama || !String(r.nama).trim()) continue;
+
         const copied = copyRegTtd(r.ttd_path, kecamatanId, r.posisi);
         const jabatanLabel = r.jabatan_label || r.posisi;
 
-        const [existing] = await sequelize.query(
+        // Ambil SEMUA baris shared utk posisi ini (bukan LIMIT 1). Bila ada duplikat
+        // (mis. baris ketua kosong sisa percobaan lama), pertahankan satu & hapus sisanya
+        // supaya tidak ada baris kosong yang "menang" saat dibaca frontend.
+        const existingRows = await sequelize.query(
           `SELECT id, ttd_path FROM tim_verifikasi_bankeu_perubahan
-           WHERE kecamatan_id = :kecamatanId AND jabatan = :posisi AND proposal_id IS NULL LIMIT 1`,
+           WHERE kecamatan_id = :kecamatanId AND jabatan = :posisi AND proposal_id IS NULL
+           ORDER BY id ASC`,
           { replacements: { kecamatanId, posisi: r.posisi }, type: sequelize.QueryTypes.SELECT }
         );
 
-        if (existing) {
+        if (existingRows.length) {
+          const keep = existingRows[0];
+          // Bersihkan duplikat berlebih beserta file TTD-nya
+          for (const dup of existingRows.slice(1)) {
+            if (dup.ttd_path) {
+              const p = path.join(SIGN_DIR, dup.ttd_path);
+              if (fs.existsSync(p)) { try { fs.unlinkSync(p); } catch (e) {} }
+            }
+            await sequelize.query(
+              `DELETE FROM tim_verifikasi_bankeu_perubahan WHERE id = :id`,
+              { replacements: { id: dup.id } }
+            );
+          }
           // Hapus TTD lama bila digantikan hasil salin baru
-          if (copied && existing.ttd_path) {
-            const old = path.join(SIGN_DIR, existing.ttd_path);
+          if (copied && keep.ttd_path) {
+            const old = path.join(SIGN_DIR, keep.ttd_path);
             if (fs.existsSync(old)) { try { fs.unlinkSync(old); } catch (e) {} }
           }
           await sequelize.query(
@@ -380,7 +404,7 @@ class BankeuPerubahanTimConfigController {
              SET nama = :nama, nip = :nip, jabatan_label = :jabatanLabel, is_active = 1,
                  ttd_path = COALESCE(:ttd, ttd_path), updated_at = NOW()
              WHERE id = :id`,
-            { replacements: { nama: r.nama, nip: r.nip || null, jabatanLabel, ttd: copied, id: existing.id } }
+            { replacements: { nama: r.nama, nip: r.nip || null, jabatanLabel, ttd: copied, id: keep.id } }
           );
         } else {
           await sequelize.query(
