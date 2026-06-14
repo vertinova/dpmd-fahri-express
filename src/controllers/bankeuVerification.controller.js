@@ -647,6 +647,18 @@ class BankeuVerificationController {
       const { kegiatanId, proposalId, optionalItems, tanggal } = req.body; // proposalId untuk tim verifikasi per proposal, optionalItems untuk infra opsional
       const userId = req.user.id;
 
+      // Tolak tanggal merah (weekend / libur nasional)
+      if (tanggal) {
+        const { checkTanggalMerah } = require('../utils/tanggalMerah');
+        const cek = await checkTanggalMerah(tanggal);
+        if (cek.merah) {
+          return res.status(400).json({
+            success: false,
+            message: `Tanggal Berita Acara tidak boleh jatuh pada tanggal merah (${cek.alasan}). Silakan pilih hari kerja.`
+          });
+        }
+      }
+
       // Get user info
       const [users] = await sequelize.query(`
         SELECT kecamatan_id, name FROM users WHERE id = ?

@@ -6,6 +6,7 @@ const fs = require('fs');
 const crypto = require('crypto');
 const PDFDocument = require('pdfkit');
 const beritaAcaraService = require('../services/beritaAcaraService');
+const { checkTanggalMerah } = require('../utils/tanggalMerah');
 
 const MODULE_NAME = 'bankeu_perubahan';
 const isValidDocumentDate = (value) => {
@@ -208,6 +209,10 @@ class BankeuPerubahanBeritaAcaraController {
       }
       if (!isValidDocumentDate(tanggal)) {
         return res.status(400).json({ success: false, message: 'Tanggal Berita Acara wajib dipilih dengan format YYYY-MM-DD' });
+      }
+      const cekBA = await checkTanggalMerah(tanggal);
+      if (cekBA.merah) {
+        return res.status(400).json({ success: false, message: `Tanggal Berita Acara tidak boleh jatuh pada tanggal merah (${cekBA.alasan}). Silakan pilih hari kerja.` });
       }
 
       const proposal = await loadProposal(proposalId);
@@ -413,6 +418,10 @@ class BankeuPerubahanBeritaAcaraController {
       }
       if (!isValidDocumentDate(tanggal)) {
         return res.status(400).json({ success: false, message: 'Tanggal Surat Pengantar wajib dipilih dengan format YYYY-MM-DD' });
+      }
+      const cekSP = await checkTanggalMerah(tanggal);
+      if (cekSP.merah) {
+        return res.status(400).json({ success: false, message: `Tanggal Surat Pengantar tidak boleh jatuh pada tanggal merah (${cekSP.alasan}). Silakan pilih hari kerja.` });
       }
 
       const proposal = await loadProposal(proposalId);

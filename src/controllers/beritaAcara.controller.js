@@ -2,6 +2,7 @@ const beritaAcaraHelper = require('../services/beritaAcaraHelper');
 const beritaAcaraService = require('../services/beritaAcaraService');
 const { sequelize } = require('../models');
 const logger = require('../utils/logger');
+const { checkTanggalMerah } = require('../utils/tanggalMerah');
 const path = require('path');
 const fs = require('fs');
 
@@ -238,6 +239,17 @@ class BeritaAcaraController {
         });
       }
 
+      // Tolak tanggal merah (weekend / libur nasional)
+      if (tanggal) {
+        const cek = await checkTanggalMerah(tanggal);
+        if (cek.merah) {
+          return res.status(400).json({
+            success: false,
+            message: `Tanggal Berita Acara tidak boleh jatuh pada tanggal merah (${cek.alasan}). Silakan pilih hari kerja.`
+          });
+        }
+      }
+
       // Validate first
       const validation = await beritaAcaraHelper.validateTimCompletion(proposalId, kecamatan_id);
       
@@ -461,6 +473,17 @@ class BeritaAcaraController {
           success: false,
           message: 'Nomor surat wajib diisi'
         });
+      }
+
+      // Tolak tanggal merah (weekend / libur nasional)
+      if (tanggal) {
+        const cek = await checkTanggalMerah(tanggal);
+        if (cek.merah) {
+          return res.status(400).json({
+            success: false,
+            message: `Tanggal Surat Pengantar tidak boleh jatuh pada tanggal merah (${cek.alasan}). Silakan pilih hari kerja.`
+          });
+        }
       }
 
       // Verify proposal belongs to this kecamatan
