@@ -47,12 +47,15 @@ async function loadProposal(proposalId) {
   return rows[0] || null;
 }
 
+const JABATAN_ORDER = { ketua: 1, sekretaris: 2, anggota_1: 3, anggota_2: 4, anggota_3: 5 };
+
 async function loadActiveTim(kecamatanId, proposalId) {
   const [rows] = await sequelize.query(`
     SELECT id, jabatan, jabatan_label, nama, nip, ttd_path, proposal_id
     FROM tim_verifikasi_bankeu_perubahan
     WHERE kecamatan_id = ?
       AND is_active = TRUE
+      AND jabatan REGEXP '^(ketua|sekretaris|anggota_[0-9]+)$'
       AND (proposal_id IS NULL OR proposal_id = ?)
     ORDER BY
       CASE jabatan
@@ -65,7 +68,20 @@ async function loadActiveTim(kecamatanId, proposalId) {
       END,
       id ASC
   `, { replacements: [kecamatanId, proposalId] });
-  return rows;
+
+  // Dedupe per jabatan: satu posisi bisa punya baris ganda (proposal_id NULL = shared
+  // dan proposal_id = X = khusus proposal). Tanpa dedupe, posisi yang sama bisa
+  // ter-list dua kali & quisioner yang tersimpan di salah satu baris dianggap belum diisi.
+  // Utamakan baris khusus proposal ini, lalu baris shared (proposal_id NULL).
+  const byJabatan = new Map();
+  const scoreOf = (r) => (Number(r.proposal_id) === Number(proposalId) ? 2 : (r.proposal_id == null ? 1 : 0));
+  for (const r of rows) {
+    const existing = byJabatan.get(r.jabatan);
+    if (!existing || scoreOf(r) > scoreOf(existing)) byJabatan.set(r.jabatan, r);
+  }
+  return Array.from(byJabatan.values()).sort(
+    (a, b) => (JABATAN_ORDER[a.jabatan] || 99) - (JABATAN_ORDER[b.jabatan] || 99) || a.id - b.id
+  );
 }
 
 async function loadConfig(kecamatanId) {
@@ -98,6 +114,7 @@ async function updateProposalQuisionerFlag(proposalId) {
   const [timRows] = await sequelize.query(`
     SELECT COUNT(*) AS total FROM tim_verifikasi_bankeu_perubahan
     WHERE kecamatan_id = ? AND is_active = TRUE
+      AND jabatan REGEXP '^(ketua|sekretaris|anggota_[0-9]+)$'
       AND (proposal_id IS NULL OR proposal_id = ?)
   `, { replacements: [kecamatanId, proposalId] });
   const totalTim = Number(timRows[0].total);
@@ -147,11 +164,15 @@ class BankeuPerubahanBeritaAcaraController {
         missing_tim_members.push('Ketua Tim Verifikasi');
       }
 
-      // Untuk setiap anggota tim aktif, cek ttd dan quisioner
+      // Untuk setiap anggota tim aktif, cek ttd dan quisioner.
+      // Quisioner dicocokkan berdasarkan POSISI (jabatan), bukan id baris, karena
+      // quisioner bisa tersimpan di baris ganda (shared vs khusus proposal) dengan id berbeda.
       for (const member of tim) {
         const label = `${getPosisiLabel(member.jabatan)}${member.nama ? ` (${member.nama})` : ''}`;
         if (!member.ttd_path) missing_signatures.push(label);
-        const hasQ = questionnaires.some(q => Number(q.tim_verifikasi_id) === Number(member.id));
+        const hasQ = questionnaires.some(
+          q => Number(q.tim_verifikasi_id) === Number(member.id) || q.posisi === member.jabatan
+        );
         if (!hasQ) missing_quisioner.push(label);
       }
 
