@@ -43,9 +43,10 @@ class BeritaAcaraHelper {
           tc.proposal_id
         FROM tim_verifikasi_kecamatan tc
         WHERE tc.kecamatan_id = :kecamatanId
-          AND tc.jabatan != 'anggota'
+          AND tc.is_active = 1
+          AND tc.jabatan IN ('ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3')
           AND (
-            tc.proposal_id IS NULL 
+            tc.proposal_id IS NULL
             OR tc.proposal_id = :proposalId
           )
         ORDER BY 
@@ -331,15 +332,20 @@ class BeritaAcaraHelper {
       };
 
       // Get all tim config - shared (ketua/sekretaris) + proposal-specific anggota
+      // IMPORTANT: only active members and new jabatan format. Tanpa filter ini,
+      // baris legacy 'anggota' atau anggota yang sudah dinonaktifkan (is_active=0)
+      // ikut tervalidasi -> tidak pernah punya quisioner -> BA selalu terblokir.
       const timMembers = await sequelize.query(`
         SELECT id, jabatan as posisi, nama, nip, jabatan_label as jabatan, ttd_path, proposal_id
         FROM tim_verifikasi_kecamatan
         WHERE kecamatan_id = :kecamatanId
+          AND is_active = 1
+          AND jabatan IN ('ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3')
           AND (
-            proposal_id IS NULL 
+            proposal_id IS NULL
             OR proposal_id = :proposalId
           )
-        ORDER BY 
+        ORDER BY
           CASE jabatan
             WHEN 'ketua' THEN 1
             WHEN 'sekretaris' THEN 2
