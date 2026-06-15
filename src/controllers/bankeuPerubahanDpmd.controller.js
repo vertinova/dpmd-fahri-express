@@ -48,9 +48,11 @@ class BankeuPerubahanDpmdController {
           bp.surat_pengantar_kecamatan_nomor,
           bp.surat_pengantar_kecamatan_generated_at,
           bp.quisioner_completed,
+          bp.troubleshoot_catatan, bp.troubleshoot_at,
           bp.created_at, bp.updated_at,
           u_kec.name AS kecamatan_verified_by_name,
           u_dpmd.name AS dpmd_verified_by_name,
+          u_ts.name AS troubleshoot_by_name,
           d.nama AS desa_nama,
           d.kecamatan_id AS desa_kecamatan_id,
           k.nama AS kecamatan_nama
@@ -59,6 +61,7 @@ class BankeuPerubahanDpmdController {
         LEFT JOIN kecamatans k ON d.kecamatan_id = k.id
         LEFT JOIN users u_kec ON bp.kecamatan_verified_by = u_kec.id
         LEFT JOIN users u_dpmd ON bp.dpmd_verified_by = u_dpmd.id
+        LEFT JOIN users u_ts ON bp.troubleshoot_by = u_ts.id
         ${whereClause}
         ORDER BY bp.created_at DESC
       `, { replacements });
@@ -108,9 +111,11 @@ class BankeuPerubahanDpmdController {
           bp.dpmd_status, bp.dpmd_catatan, bp.dpmd_verified_at,
           bp.submitted_to_kecamatan, bp.submitted_at,
           bp.submitted_to_dpmd, bp.submitted_to_dpmd_at,
+          bp.troubleshoot_catatan, bp.troubleshoot_at,
           bp.created_at, bp.updated_at,
           u_kec.name AS kecamatan_verified_by_name,
           u_dpmd.name AS dpmd_verified_by_name,
+          u_ts.name AS troubleshoot_by_name,
           d.nama AS desa_nama,
           d.kecamatan_id AS desa_kecamatan_id,
           k.nama AS kecamatan_nama
@@ -119,6 +124,7 @@ class BankeuPerubahanDpmdController {
         LEFT JOIN kecamatans k ON d.kecamatan_id = k.id
         LEFT JOIN users u_kec ON bp.kecamatan_verified_by = u_kec.id
         LEFT JOIN users u_dpmd ON bp.dpmd_verified_by = u_dpmd.id
+        LEFT JOIN users u_ts ON bp.troubleshoot_by = u_ts.id
         ${whereClause}
         ORDER BY k.nama ASC, d.nama ASC, bp.created_at DESC
       `, { replacements });
