@@ -13,13 +13,13 @@ const KEGIATAN_DATA = [
   { kategori: 'wajib', urutan: 3, nama_kegiatan: 'Dayeuh Pajajaran' },
 
   // PILIHAN INFRASTRUKTUR (8)
-  { kategori: 'pilihan_infrastruktur', urutan: 1, nama_kegiatan: 'Jalan Desa' },
-  { kategori: 'pilihan_infrastruktur', urutan: 2, nama_kegiatan: 'Jalan Lingkungan' },
-  { kategori: 'pilihan_infrastruktur', urutan: 3, nama_kegiatan: 'Jembatan Desa' },
+  { kategori: 'pilihan_infrastruktur', urutan: 1, nama_kegiatan: 'Pembangunan/Peningkatan/Rehabilitasi Jalan Desa/Jalan Poros Desa dan Kelengkapannya' },
+  { kategori: 'pilihan_infrastruktur', urutan: 2, nama_kegiatan: 'Pembangunan/Peningkatan/Rehabilitasi Jalan Lingkungan' },
+  { kategori: 'pilihan_infrastruktur', urutan: 3, nama_kegiatan: 'Pembangunan/Peningkatan/Rehabilitasi Jembatan Desa' },
   { kategori: 'pilihan_infrastruktur', urutan: 4, nama_kegiatan: 'TPT (Tembok Penahan Tanah)' },
   { kategori: 'pilihan_infrastruktur', urutan: 5, nama_kegiatan: 'Pembangunan/Rehabilitasi/Rekonstruksi Kantor Desa' },
   { kategori: 'pilihan_infrastruktur', urutan: 6, nama_kegiatan: 'Drainase/Gorong-gorong' },
-  { kategori: 'pilihan_infrastruktur', urutan: 7, nama_kegiatan: 'Sarana Prasarana Air Bersih' },
+  { kategori: 'pilihan_infrastruktur', urutan: 7, nama_kegiatan: 'Pembangunan/Rehabilitasi Sarana dan Prasarana Air Bersih Berskala Desa' },
   { kategori: 'pilihan_infrastruktur', urutan: 8, nama_kegiatan: 'Pendukung KDMP (Pengkerasan Lahan Parkir)' },
 
   // PILIHAN NON INFRASTRUKTUR (8)
@@ -68,6 +68,27 @@ async function seedBankeuPerubahanMasterKegiatan() {
       SET kegiatan_nama = 'Pembangunan/Rehabilitasi/Rekonstruksi Kantor Desa'
       WHERE kegiatan_nama = 'Pembangunan/Rehab Kantor Desa'
     `);
+
+    // Self-heal: rename kegiatan infrastruktur ke versi lengkap.
+    // Sinkronkan juga nama terdenormalisasi pada proposal yang sudah ada.
+    const RENAMES = [
+      ['Jalan Desa', 'Pembangunan/Peningkatan/Rehabilitasi Jalan Desa/Jalan Poros Desa dan Kelengkapannya'],
+      ['Jalan Lingkungan', 'Pembangunan/Peningkatan/Rehabilitasi Jalan Lingkungan'],
+      ['Jembatan Desa', 'Pembangunan/Peningkatan/Rehabilitasi Jembatan Desa'],
+      ['Sarana Prasarana Air Bersih', 'Pembangunan/Rehabilitasi Sarana dan Prasarana Air Bersih Berskala Desa'],
+    ];
+    for (const [oldName, newName] of RENAMES) {
+      await sequelize.query(`
+        UPDATE bankeu_perubahan_master_kegiatan
+        SET nama_kegiatan = ?
+        WHERE nama_kegiatan = ?
+      `, { replacements: [newName, oldName] });
+      await sequelize.query(`
+        UPDATE bankeu_perubahan_proposals
+        SET kegiatan_nama = ?
+        WHERE kegiatan_nama = ?
+      `, { replacements: [newName, oldName] });
+    }
 
     // Cek apakah sudah ada data
     const [existing] = await sequelize.query(`
