@@ -53,14 +53,54 @@ class BankeuPerubahanPublicController {
         GROUP BY jenis_kegiatan
       `, { replacements: [tahun] });
 
+      // ─── Partisipasi Desa (untuk dashboard core) ──────────────────────
+      // "Mengusulkan" pada alur perubahan = proposal sudah diteruskan ke Kecamatan
+      // (submitted_to_kecamatan = TRUE), analog dengan "submit ke dinas" di Bankeu Reguler.
+      // Hanya Desa (status_pemerintahan = 'desa', bukan kelurahan) yang dihitung.
+      const [allDesaList] = await sequelize.query(`
+        SELECT d.id, d.nama, k.nama AS kecamatan_nama
+        FROM desas d
+        LEFT JOIN kecamatans k ON d.kecamatan_id = k.id
+        WHERE d.status_pemerintahan = 'desa'
+        ORDER BY d.nama ASC
+      `);
+
+      const [desaSudahRows] = await sequelize.query(`
+        SELECT DISTINCT desa_id
+        FROM bankeu_perubahan_proposals
+        WHERE tahun_anggaran = ? AND submitted_to_kecamatan = TRUE
+      `, { replacements: [tahun] });
+      const desaSudahSet = new Set(desaSudahRows.map(r => Number(r.desa_id)).filter(Boolean));
+
+      const desaPartisipasi = {};
+      allDesaList.forEach(d => {
+        const kecName = d.kecamatan_nama || 'Lainnya';
+        if (!desaPartisipasi[kecName]) desaPartisipasi[kecName] = { sudah: [], belum: [] };
+        if (desaSudahSet.has(Number(d.id))) desaPartisipasi[kecName].sudah.push(d.nama);
+        else desaPartisipasi[kecName].belum.push(d.nama);
+      });
+
+      const totalDesaCount = allDesaList.length;
+      const partisipasiSummary = {
+        ...(statusStats[0] || {}),
+        total_desa: totalDesaCount,
+        desa_mengusulkan: desaSudahSet.size,
+        desa_belum_mengusulkan: totalDesaCount - desaSudahSet.size,
+      };
+
       res.json({
         success: true,
+        // Bentuk lama (dipakai BankeuPerubahanPublicPage) — JANGAN diubah.
         data: {
           tahun_anggaran: tahun,
           summary: statusStats[0] || {},
           per_kecamatan: perKecamatan,
           per_kategori: perJenis
-        }
+        },
+        // Bentuk top-level untuk dashboard core (analog Bankeu Reguler).
+        summary: partisipasiSummary,
+        desa_partisipasi: desaPartisipasi,
+        tahun_anggaran: tahun
       });
     } catch (error) {
       logger.error('[BankeuPerubahan Public] Error tracking:', error);
