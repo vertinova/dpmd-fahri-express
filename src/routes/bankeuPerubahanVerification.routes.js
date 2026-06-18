@@ -10,6 +10,9 @@ router.use(auth);
 // List proposals
 router.get('/proposals', controller.getProposalsByKecamatan);
 
+// Tracking lintas-tahap (semua proposal di wilayah kecamatan, termasuk draft di desa)
+router.get('/tracking', controller.getTracking);
+
 // Verifikasi proposal (body boleh menyertakan annotation_data saat revision/rejected)
 router.patch('/proposals/:id/verify', controller.verifyProposal);
 router.patch('/proposals/:id/cancel-approval', controller.cancelApproval);

@@ -236,6 +236,81 @@ class BankeuPerubahanVerificationController {
   }
 
   /**
+   * Tracking lintas-tahap untuk KECAMATAN: SEMUA proposal perubahan di wilayah
+   * kecamatan user (apapun statusnya, termasuk yang masih draft/revisi di Desa &
+   * yang sudah diteruskan ke DPMD) — dipakai tab "Tracking Status" kecamatan.
+   * Berbeda dari getProposalsByKecamatan yang dibatasi submitted_to_kecamatan = TRUE.
+   * GET /api/kecamatan/bankeu-perubahan/tracking?tahun=2026
+   */
+  async getTracking(req, res) {
+    try {
+      const userId = req.user.id;
+      const { tahun } = req.query;
+
+      const [users] = await sequelize.query(`
+        SELECT kecamatan_id FROM users WHERE id = ?
+      `, { replacements: [userId] });
+
+      if (!users[0]?.kecamatan_id) {
+        return res.status(403).json({
+          success: false,
+          message: 'User tidak terkait dengan kecamatan'
+        });
+      }
+      const kecamatanId = users[0].kecamatan_id;
+
+      let whereClause = `WHERE d.kecamatan_id = ? AND d.status_pemerintahan = 'desa'`;
+      const replacements = [kecamatanId];
+      if (tahun) { whereClause += ' AND bp.tahun_anggaran = ?'; replacements.push(parseInt(tahun)); }
+
+      const [proposals] = await sequelize.query(`
+        SELECT
+          bp.id, bp.desa_id, bp.kecamatan_id, bp.tahun_anggaran,
+          bp.jenis_kegiatan, bp.kegiatan_id, bp.kegiatan_nama, bp.nama_kegiatan_spesifik,
+          bp.volume, bp.lokasi, bp.judul_proposal, bp.anggaran_usulan,
+          bp.status,
+          bp.kecamatan_status, bp.kecamatan_catatan, bp.kecamatan_verified_at,
+          bp.dpmd_status, bp.dpmd_catatan, bp.dpmd_verified_at,
+          bp.submitted_to_kecamatan, bp.submitted_at,
+          bp.submitted_to_dpmd, bp.submitted_to_dpmd_at,
+          bp.created_at, bp.updated_at,
+          u_kec.name AS kecamatan_verified_by_name,
+          u_dpmd.name AS dpmd_verified_by_name,
+          d.nama AS desa_nama,
+          d.kecamatan_id AS desa_kecamatan_id,
+          k.nama AS kecamatan_nama
+        FROM bankeu_perubahan_proposals bp
+        INNER JOIN desas d ON bp.desa_id = d.id
+        LEFT JOIN kecamatans k ON d.kecamatan_id = k.id
+        LEFT JOIN users u_kec ON bp.kecamatan_verified_by = u_kec.id
+        LEFT JOIN users u_dpmd ON bp.dpmd_verified_by = u_dpmd.id
+        ${whereClause}
+        ORDER BY d.nama ASC, bp.created_at DESC
+      `, { replacements });
+
+      for (const proposal of proposals) {
+        const [kegiatan] = await sequelize.query(`
+          SELECT bmk.id, bmk.kategori, bmk.nama_kegiatan, bmk.urutan
+          FROM bankeu_perubahan_proposal_kegiatan bppk
+          JOIN bankeu_perubahan_master_kegiatan bmk ON bppk.kegiatan_id = bmk.id
+          WHERE bppk.proposal_id = ?
+          ORDER BY bmk.urutan
+        `, { replacements: [proposal.id] });
+        proposal.kegiatan_list = kegiatan;
+      }
+
+      res.json({ success: true, data: proposals });
+    } catch (error) {
+      logger.error('[BankeuPerubahan Kec] Error fetching tracking:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Gagal mengambil data tracking perubahan',
+        error: error.message
+      });
+    }
+  }
+
+  /**
    * Verify proposal (approve/reject/revision)
    * PATCH /api/kecamatan/bankeu-perubahan/proposals/:id/verify
    */
