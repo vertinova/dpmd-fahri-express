@@ -172,6 +172,26 @@ Frontend (`dpmd-frontend/src/`):
 - `index.css` — keyframe `floatUp`. `vite.config.js` — chunk `mediapipe`.
 ---
 
+## 7b. Update 2026-06-19 — Share screen + suara (audio tab/YouTube)
+
+- **Tangkap suara saat share**: `getDisplayMedia` kini meminta `audio` (echo/noise/AGC
+  off). Track audio layar dikirim sebagai **producer terpisah** `mediaType: 'screenAudio'`
+  (Opus stereo 128 kbps). Berlaku di `VideoMeetingPage.jsx` & `PublicMeetingPage.jsx`.
+- **Audiens mendengar**: komponen baru `ScreenAudio` dirender **sekali per stream layar**
+  (tak dobel walau tile di filmstrip/spotlight); mengikuti tombol mute speaker + banner
+  "Aktifkan Suara" (atasi blokir autoplay). `consumeProducer` menggabungkan track
+  video+audio layar dalam satu MediaStream.
+- **Perbaikan bug penting (backend)**: `mediasoup.service.js` `setProducerPausedByKind`
+  dulu hanya melindungi VIDEO layar. Kini media layar (`screen` & `screenAudio`)
+  sama-sama dikecualikan kecuali `includeScreen` → peserta yang **mute mic tidak lagi
+  ikut mematikan suara tab yang dibagikan**. **WAJIB deploy backend** untuk perbaikan ini.
+- **Rekaman** lokal kini menyertakan layar + suaranya.
+- **Catatan browser**: pengguna harus mencentang **"Bagikan audio tab/sistem"** di dialog
+  share (Chrome/Edge; Firefox/Safari terbatas). Ada toast pengingat bila audio tak ikut.
+- **Status**: FE `npm run build` LULUS, BE `node -c` OK. **Belum diuji runtime** (perlu 2+ peserta).
+
+---
+
 ## 7. Update lanjutan 2026-06-11 malam
 
 - **Selesai:** host meeting sekarang tidak diminta password saat `join-room`.

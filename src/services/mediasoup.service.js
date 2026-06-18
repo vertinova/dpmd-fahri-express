@@ -355,8 +355,9 @@ class MediasoupService extends EventEmitter {
 
   /**
    * Pause/resume producer milik peer tertentu berdasarkan kind.
-   * Default untuk video tidak menyentuh screen share, agar "matikan kamera"
-   * tidak ikut menghentikan layar yang sedang dibagikan.
+   * Default tidak menyentuh media LAYAR (video 'screen' & audio 'screenAudio'),
+   * agar "matikan kamera"/"matikan mic" tidak ikut menghentikan layar atau suara
+   * tab yang sedang dibagikan. Pakai includeScreen:true untuk menyertakannya.
    */
   async setProducerPausedByKind(roomId, peerId, kind, paused, options = {}) {
     const room = this.getRoom(roomId);
@@ -375,7 +376,11 @@ class MediasoupService extends EventEmitter {
       if (!producer || producer.closed || producer.kind !== kind) continue;
       const producerMediaType = producer.appData?.mediaType || (producer.kind === 'audio' ? 'audio' : 'video');
       if (mediaType && producerMediaType !== mediaType) continue;
-      if (producer.kind === 'video' && !includeScreen && producerMediaType === 'screen') continue;
+      // Jangan sentuh media LAYAR (video 'screen' / audio 'screenAudio') saat
+      // mematikan kamera/mikrofon, kecuali includeScreen diminta. Tanpa ini, peserta
+      // yang mute mic-nya akan ikut mematikan suara tab (mis. YouTube) yang dibagikan.
+      const isScreenMedia = producerMediaType === 'screen' || producerMediaType === 'screenAudio';
+      if (isScreenMedia && !includeScreen) continue;
 
       if (paused && !producer.paused) {
         await producer.pause();
