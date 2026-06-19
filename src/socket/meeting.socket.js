@@ -23,6 +23,55 @@ const meetingLocks = new Map();   // roomId -> boolean (meeting dikunci)
 const waitingRooms = new Map();   // roomId -> Map<peerId, { socketId, userName, joinedAt }>
 const admittedPeers = new Map();  // roomId -> Set<peerId> (sudah di-admit host / host sendiri)
 
+// Grace period saat socket terputus: jangan langsung keluarkan peserta dari room
+// hanya karena koneksi sempat putus (jaringan kantor/HP sering blip). Beri waktu
+// reconnect; bila peserta kembali dalam jeda ini, pembersihan dibatalkan sehingga
+// peserta lain tidak melihat dia "keluar lalu masuk" berulang ("kepental-pental").
+const PEER_LEAVE_GRACE_MS = 12000;
+const pendingPeerLeaves = new Map(); // `${roomId}::${peerId}` -> timeout
+
+function cancelPendingLeave(roomId, peerId) {
+  if (!roomId || peerId == null) return;
+  const key = `${roomId}::${peerId}`;
+  const t = pendingPeerLeaves.get(key);
+  if (t) {
+    clearTimeout(t);
+    pendingPeerLeaves.delete(key);
+    console.log(`[Socket] Reconnect terdeteksi — batalkan keluar untuk ${peerId} di room ${roomId}`);
+  }
+}
+
+// Jadwalkan pengeluaran peserta setelah grace period. Bila peserta sudah punya
+// socket aktif lagi (reconnect) saat grace berakhir, pengeluaran dibatalkan.
+function schedulePeerLeave(socket) {
+  const roomId = socket.roomId;
+  const peerId = socket.peerId;
+  // Tidak ada room/peer aktif (mis. masih di waiting room) → bersihkan langsung.
+  if (!roomId || peerId == null) {
+    return handlePeerLeave(socket);
+  }
+  const key = `${roomId}::${peerId}`;
+  if (pendingPeerLeaves.has(key)) return; // sudah dijadwalkan
+  const timeout = setTimeout(async () => {
+    pendingPeerLeaves.delete(key);
+    // Jangan keluarkan bila peserta sudah reconnect (ada socket aktif dengan
+    // peerId sama di room tersebut).
+    const socketsInRoom = io?.sockets?.adapter?.rooms?.get(roomId);
+    if (socketsInRoom) {
+      for (const sid of socketsInRoom) {
+        const s = io.sockets.sockets.get(sid);
+        if (s && s.id !== socket.id && s.peerId === peerId) {
+          console.log(`[Socket] ${peerId} sudah reconnect ke ${roomId} — batal dikeluarkan`);
+          return;
+        }
+      }
+    }
+    await handlePeerLeave(socket);
+  }, PEER_LEAVE_GRACE_MS);
+  pendingPeerLeaves.set(key, timeout);
+  console.log(`[Socket] Jeda keluar ${PEER_LEAVE_GRACE_MS}ms untuk ${peerId} di room ${roomId}`);
+}
+
 function getAdmitted(roomId) {
   if (!admittedPeers.has(roomId)) admittedPeers.set(roomId, new Set());
   return admittedPeers.get(roomId);
@@ -82,7 +131,21 @@ function initSocketServer(httpServer) {
       methods: ['GET', 'POST'],
       credentials: true
     },
-    path: '/socket.io'
+    path: '/socket.io',
+    // Izinkan upgrade ke WebSocket (jauh lebih stabil daripada polling). Klien
+    // tetap mulai dari polling lalu upgrade; bila proxy belum meneruskan upgrade,
+    // Socket.IO otomatis tetap di polling tanpa memutus koneksi.
+    transports: ['polling', 'websocket'],
+    // Toleransi latensi: jangan anggap peserta "terputus" hanya karena jaringan
+    // (kantor/HP) sempat lambat. Default pingTimeout 20s terlalu agresif untuk
+    // polling di belakang proxy → peserta sering "kepental". Naikkan ke 60s.
+    pingInterval: 25000,
+    pingTimeout: 60000,
+    // Beri jeda lebih panjang saat upgrade WebSocket di jaringan lambat.
+    upgradeTimeout: 30000,
+    // Payload signaling (rtpCapabilities + daftar peer/producer) bisa >1MB di
+    // room ramai; default 1MB akan menutup koneksi. Naikkan ke 10MB.
+    maxHttpBufferSize: 1e7,
   });
 
   // Authentication middleware
@@ -252,6 +315,10 @@ function initSocketServer(httpServer) {
           displayName || guestName || socket.user.name,
           socket.user.isGuest ? 'Guest' : (socket.user.name || 'Peserta')
         );
+
+        // Peserta kembali (reconnect) → batalkan jadwal "keluar" yang tertunda
+        // supaya tidak terjadi peer-left/peer-joined berulang.
+        cancelPendingLeave(roomId, peerId);
 
         console.log(`[Socket] ${userName} joining room ${roomId}`);
 
@@ -1343,7 +1410,9 @@ function initSocketServer(httpServer) {
         }
       }
 
-      await handlePeerLeave(socket);
+      // Beri grace period: jangan langsung keluarkan dari room media. Bila peserta
+      // reconnect dalam jeda ini, pengeluaran dibatalkan (lihat schedulePeerLeave).
+      schedulePeerLeave(socket);
     });
   });
 
