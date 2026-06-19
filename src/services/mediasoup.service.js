@@ -238,6 +238,24 @@ class MediasoupService extends EventEmitter {
   }
 
   /**
+   * Restart ICE pada transport (pemulihan saat sinyal lemah tanpa membongkar
+   * producer/consumer). Mengembalikan iceParameters baru untuk dikirim ke klien.
+   */
+  async restartIce(roomId, peerId, transportId) {
+    const room = this.getRoom(roomId);
+    if (!room) throw new Error('Room not found');
+
+    const peer = room.peers.get(peerId);
+    if (!peer) throw new Error('Peer not found');
+
+    const transport = peer.transports.get(transportId);
+    if (!transport) throw new Error('Transport not found');
+
+    const iceParameters = await transport.restartIce();
+    return iceParameters;
+  }
+
+  /**
    * Produce media (send stream to server)
    */
   async produce(roomId, peerId, transportId, kind, rtpParameters, appData = {}) {

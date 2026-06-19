@@ -677,6 +677,25 @@ function initSocketServer(httpServer) {
       }
     });
 
+    // Restart ICE: dipakai klien saat sinyal lemah (transport disconnected/failed)
+    // untuk memulihkan jalur koneksi TANPA membongkar producer/consumer. Klien
+    // cukup nge-freeze sebentar lalu lanjut, bukan keluar dari room.
+    socket.on('restart-ice', async (data, callback) => {
+      try {
+        const { transportId } = data || {};
+        const peerId = socket.peerId || socket.user.id;
+        const roomId = socket.roomId;
+        if (!roomId || !peerId) {
+          return safeCallback(callback, { error: 'Belum berada di room' });
+        }
+        const iceParameters = await mediasoupService.restartIce(roomId, peerId, transportId);
+        safeCallback(callback, { iceParameters });
+      } catch (error) {
+        console.error('[Socket] Error restart-ice:', error.message);
+        safeCallback(callback, { error: error.message });
+      }
+    });
+
     // Produce media (start sending video/audio)
     socket.on('produce', async (data, callback) => {
       console.log(`[Socket] produce received from ${socket.peerId}, kind: ${data?.kind}`);
