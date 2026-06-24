@@ -1026,6 +1026,147 @@ const absensiController = {
   },
 
   /**
+   * Admin: Create missing attendance record manually
+   * POST /api/absensi/admin/manual
+   */
+  async adminCreateAbsensi(req, res) {
+    try {
+      const {
+        user_id,
+        tanggal,
+        status,
+        jam_masuk,
+        jam_keluar,
+        keterangan,
+        tujuan_dinas,
+      } = req.body;
+      const allowedStatuses = ['hadir', 'izin', 'sakit', 'alpha', 'cuti', 'dinas_luar', 'wfh', 'wfa'];
+      const presentStatuses = ['hadir', 'dinas_luar', 'wfh', 'wfa'];
+      const isValidTime = (value) => {
+        if (!/^\d{2}:\d{2}$/.test(value)) return false;
+        const [hours, minutes] = value.split(':').map(Number);
+        return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+      };
+
+      if (!user_id || !tanggal || !status) {
+        return res.status(400).json({
+          success: false,
+          message: 'Pegawai, tanggal, dan status wajib diisi',
+        });
+      }
+      if (!allowedStatuses.includes(status)) {
+        return res.status(400).json({ success: false, message: 'Status absensi tidak valid' });
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(tanggal)) {
+        return res.status(400).json({ success: false, message: 'Format tanggal tidak valid' });
+      }
+      if (presentStatuses.includes(status) && !jam_masuk) {
+        return res.status(400).json({
+          success: false,
+          message: 'Jam masuk wajib diisi untuk status kehadiran',
+        });
+      }
+      if (jam_masuk && !isValidTime(jam_masuk)) {
+        return res.status(400).json({ success: false, message: 'Format jam masuk tidak valid' });
+      }
+      if (jam_keluar && !isValidTime(jam_keluar)) {
+        return res.status(400).json({ success: false, message: 'Format jam keluar tidak valid' });
+      }
+      if (status === 'dinas_luar' && !String(tujuan_dinas || '').trim()) {
+        return res.status(400).json({ success: false, message: 'Tujuan dinas luar wajib diisi' });
+      }
+
+      const attendanceDate = new Date(`${tanggal}T00:00:00.000Z`);
+      if (Number.isNaN(attendanceDate.getTime())) {
+        return res.status(400).json({ success: false, message: 'Tanggal tidak valid' });
+      }
+      if (tanggal > getWIB().dateString) {
+        return res.status(400).json({
+          success: false,
+          message: 'Presensi manual tidak dapat diisi untuk tanggal yang akan datang',
+        });
+      }
+
+      const user = await prisma.users.findFirst({
+        where: {
+          id: BigInt(user_id),
+          is_active: true,
+          pegawai: { status_kepegawaian: { in: ABSENSI_REQUIRED_STATUS } },
+        },
+        select: {
+          id: true,
+          name: true,
+          pegawai: { select: { nama_pegawai: true, jabatan: true, status_kepegawaian: true } },
+        },
+      });
+      if (!user) {
+        return res.status(404).json({
+          success: false,
+          message: 'Pegawai tidak ditemukan atau tidak termasuk pegawai wajib absensi',
+        });
+      }
+
+      const existing = await prisma.absensi_pegawai.findUnique({
+        where: {
+          user_id_tanggal: {
+            user_id: BigInt(user_id),
+            tanggal: attendanceDate,
+          },
+        },
+      });
+      if (existing) {
+        return res.status(409).json({
+          success: false,
+          message: 'Pegawai sudah memiliki data presensi pada tanggal tersebut',
+        });
+      }
+
+      const result = await prisma.absensi_pegawai.create({
+        data: {
+          user_id: BigInt(user_id),
+          tanggal: attendanceDate,
+          status,
+          jam_masuk: jam_masuk ? new Date(`1970-01-01T${jam_masuk}:00+07:00`) : null,
+          jam_keluar: jam_keluar ? new Date(`1970-01-01T${jam_keluar}:00+07:00`) : null,
+          keterangan: String(keterangan || '').trim() || null,
+          tujuan_dinas: status === 'dinas_luar' ? String(tujuan_dinas).trim() : null,
+          lokasi_masuk: 'Diinput manual oleh admin',
+          created_at: new Date(),
+          updated_at: new Date(),
+        },
+        include: {
+          user: {
+            select: {
+              id: true,
+              name: true,
+              pegawai: { select: { nama_pegawai: true, jabatan: true, status_kepegawaian: true } },
+            },
+          },
+        },
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: 'Presensi pegawai berhasil diisi',
+        data: result,
+      });
+    } catch (error) {
+      if (error.code === 'P2002') {
+        return res.status(409).json({
+          success: false,
+          message: 'Pegawai sudah memiliki data presensi pada tanggal tersebut',
+        });
+      }
+      console.error('[Absensi] Admin create manual error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Gagal mengisi presensi pegawai',
+        error: error.message,
+      });
+    }
+  },
+
+  /**
    * Admin: Update an absensi record (CRUD edit)
    * PUT /api/absensi/admin/:id
    */

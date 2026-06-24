@@ -29,6 +29,7 @@ router.get('/admin/pegawai-absensi', auth, checkAbsensiAdmin, absensiController.
 router.get('/admin/settings', auth, checkAbsensiAdmin, absensiController.getSettings);
 router.put('/admin/settings', auth, checkAbsensiAdmin, absensiController.updateSettings);
 router.put('/admin/set-device/:userId', auth, checkAbsensiAdmin, absensiController.adminSetDevice);
+router.post('/admin/manual', auth, checkAbsensiAdmin, absensiController.adminCreateAbsensi);
 router.put('/admin/:id', auth, checkAbsensiAdmin, requireSuperadmin, absensiController.adminUpdateAbsensi);
 router.delete('/admin/:id', auth, checkAbsensiAdmin, requireSuperadmin, absensiController.adminDeleteAbsensi);
 router.get('/admin/success-messages', auth, checkAbsensiAdmin, absensiController.getAdminSuccessMessages);
