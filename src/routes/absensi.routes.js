@@ -19,6 +19,7 @@ router.post('/izin', auth, absensiController.submitIzin);
 router.post('/register-device', auth, absensiController.registerDevice);
 router.delete('/remove-device', auth, absensiController.removeDevice);
 router.get('/success-messages', auth, absensiController.getSuccessMessages);
+router.get('/leaderboard', auth, absensiController.getLeaderboard);
 router.get('/weekly-awards/latest', auth, async (req, res) => {
   try {
     const award = await attendanceAwardService.getLatest();

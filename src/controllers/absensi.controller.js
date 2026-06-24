@@ -2,6 +2,7 @@ const prisma = require('../config/prisma');
 const path = require('path');
 const fs = require('fs');
 const PushNotificationService = require('../services/pushNotificationService');
+const attendanceAwardService = require('../services/attendanceAward.service');
 
 // Koordinat kantor DPMD Bogor
 const KANTOR_LAT = -6.47553948391432;
@@ -1595,6 +1596,61 @@ const absensiController = {
     } catch (error) {
       console.error('[Absensi] Rekap pegawai error:', error);
       return res.status(500).json({ success: false, message: 'Gagal memuat rekap pegawai', error: error.message });
+    }
+  },
+
+  /**
+   * Pegawai: Leaderboard / peringkat absensi terbaik per kategori.
+   * Dapat diakses semua pegawai (read-only). GET /api/absensi/leaderboard
+   * Query: periode=minggu|bulan|tahun, bulan, tahun, tanggal
+   */
+  async getLeaderboard(req, res) {
+    try {
+      const { periode = 'bulan', bulan, tahun, tanggal } = req.query;
+      const wibNow = getWIB();
+      let startDate, endDate, periodeLabel;
+
+      if (periode === 'minggu') {
+        const refDate = tanggal ? new Date(tanggal) : new Date(`${wibNow.dateString}T00:00:00.000Z`);
+        const day = refDate.getUTCDay();
+        const mondayOffset = day === 0 ? -6 : 1 - day;
+        const monday = new Date(refDate);
+        monday.setUTCDate(refDate.getUTCDate() + mondayOffset);
+        monday.setUTCHours(0, 0, 0, 0);
+        const sunday = new Date(monday);
+        sunday.setUTCDate(monday.getUTCDate() + 6);
+        startDate = monday;
+        endDate = sunday;
+        periodeLabel = `${monday.toISOString().split('T')[0]} s/d ${sunday.toISOString().split('T')[0]}`;
+      } else if (periode === 'tahun') {
+        const y = tahun ? parseInt(tahun) : wibNow.year;
+        startDate = new Date(Date.UTC(y, 0, 1));
+        endDate = new Date(Date.UTC(y, 11, 31));
+        periodeLabel = `Tahun ${y}`;
+      } else {
+        const m = bulan ? parseInt(bulan) : wibNow.month;
+        const y = tahun ? parseInt(tahun) : wibNow.year;
+        startDate = new Date(Date.UTC(y, m - 1, 1));
+        endDate = new Date(Date.UTC(y, m, 0));
+        const monthNames = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+        periodeLabel = `${monthNames[m - 1]} ${y}`;
+      }
+
+      const { categories } = await attendanceAwardService.buildLeaderboardForPeriod(startDate, endDate);
+
+      return res.json({
+        success: true,
+        data: {
+          periode,
+          periode_label: periodeLabel,
+          periode_start: formatDateKey(startDate),
+          periode_end: formatDateKey(endDate),
+          categories,
+        },
+      });
+    } catch (error) {
+      console.error('[Absensi] Leaderboard error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal memuat peringkat absensi', error: error.message });
     }
   },
 

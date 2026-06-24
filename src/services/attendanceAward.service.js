@@ -153,6 +153,74 @@ function normalizeCategories(stored) {
   return Array.isArray(stored.categories) ? stored.categories : [];
 }
 
+// Kumpulkan kandidat (statistik kehadiran per pegawai) untuk satu rentang periode.
+// Dipakai bersama oleh award mingguan dan leaderboard per periode (pegawai).
+async function gatherCandidates(periodStart, periodEnd) {
+  const users = await prisma.users.findMany({
+    where: {
+      is_active: true,
+      pegawai: { status_kepegawaian: { in: ELIGIBLE_STATUSES } },
+    },
+    select: {
+      id: true,
+      name: true,
+      avatar: true,
+      pegawai: {
+        select: {
+          nama_pegawai: true,
+          jabatan: true,
+          status_kepegawaian: true,
+          bidangs: { select: { nama: true } },
+        },
+      },
+    },
+  });
+
+  const [records, attendanceSetting] = await Promise.all([
+    prisma.absensi_pegawai.findMany({
+      where: {
+        tanggal: { gte: periodStart, lte: periodEnd },
+        user_id: { in: users.map(user => user.id) },
+      },
+      select: { user_id: true, status: true, jam_masuk: true, jam_keluar: true },
+    }),
+    prisma.absensi_settings.findUnique({
+      where: { key: 'jam_masuk' },
+      select: { value: true },
+    }),
+  ]);
+  const [startHour, startMinute] = (attendanceSetting?.value || '08:00').split(':').map(Number);
+  const lateThreshold = startHour * 60 + startMinute;
+
+  const recordsByUser = new Map();
+  records.forEach(record => {
+    const key = record.user_id.toString();
+    if (!recordsByUser.has(key)) recordsByUser.set(key, []);
+    recordsByUser.get(key).push(record);
+  });
+
+  const candidates = users.map(user => {
+    const userRecords = recordsByUser.get(user.id.toString()) || [];
+    const present = userRecords.filter(record => PRESENT_STATUSES.includes(record.status) && record.jam_masuk);
+    const arrivals = present.map(record => timeToWIBMinutes(record.jam_masuk)).filter(Number.isFinite);
+    const completeDays = present.filter(record => record.jam_keluar).length;
+    const lateDays = arrivals.filter(minutes => minutes > lateThreshold).length;
+    const onTimeDays = arrivals.length - lateDays;
+    return {
+      user,
+      presentDays: present.length,
+      completeDays,
+      lateDays,
+      onTimeDays,
+      averageArrival: arrivals.length
+        ? arrivals.reduce((sum, value) => sum + value, 0) / arrivals.length
+        : null,
+    };
+  }).filter(candidate => candidate.presentDays > 0);
+
+  return { candidates, lateThreshold };
+}
+
 class AttendanceAwardService {
   async calculateAndStore(now = new Date()) {
     const period = getAwardPeriod(now);
@@ -165,75 +233,7 @@ class AttendanceAwardService {
     });
     if (existing) return { success: true, award: existing, categories: normalizeCategories(existing.winners), reused: true };
 
-    const users = await prisma.users.findMany({
-      where: {
-        is_active: true,
-        pegawai: { status_kepegawaian: { in: ELIGIBLE_STATUSES } },
-      },
-      select: {
-        id: true,
-        name: true,
-        avatar: true,
-        pegawai: {
-          select: {
-            nama_pegawai: true,
-            jabatan: true,
-            status_kepegawaian: true,
-            bidangs: { select: { nama: true } },
-          },
-        },
-      },
-    });
-
-    const [records, attendanceSetting] = await Promise.all([
-      prisma.absensi_pegawai.findMany({
-        where: {
-          tanggal: { gte: period.periodStart, lte: period.periodEnd },
-          user_id: { in: users.map(user => user.id) },
-        },
-        select: {
-          user_id: true,
-          status: true,
-          jam_masuk: true,
-          jam_keluar: true,
-        },
-      }),
-      prisma.absensi_settings.findUnique({
-        where: { key: 'jam_masuk' },
-        select: { value: true },
-      }),
-    ]);
-    const [startHour, startMinute] = (attendanceSetting?.value || '08:00')
-      .split(':')
-      .map(Number);
-    const lateThreshold = startHour * 60 + startMinute;
-
-    const recordsByUser = new Map();
-    records.forEach(record => {
-      const key = record.user_id.toString();
-      if (!recordsByUser.has(key)) recordsByUser.set(key, []);
-      recordsByUser.get(key).push(record);
-    });
-
-    const candidates = users.map(user => {
-      const userRecords = recordsByUser.get(user.id.toString()) || [];
-      const present = userRecords.filter(record => PRESENT_STATUSES.includes(record.status) && record.jam_masuk);
-      const arrivals = present.map(record => timeToWIBMinutes(record.jam_masuk)).filter(Number.isFinite);
-      const completeDays = present.filter(record => record.jam_keluar).length;
-      const lateDays = arrivals.filter(minutes => minutes > lateThreshold).length;
-      const onTimeDays = arrivals.length - lateDays;
-
-      return {
-        user,
-        presentDays: present.length,
-        completeDays,
-        lateDays,
-        onTimeDays,
-        averageArrival: arrivals.length
-          ? arrivals.reduce((sum, value) => sum + value, 0) / arrivals.length
-          : null,
-      };
-    }).filter(candidate => candidate.presentDays > 0);
+    const { candidates, lateThreshold } = await gatherCandidates(period.periodStart, period.periodEnd);
 
     // Pemenang Juara 1/2/3 dihitung terpisah per kategori (status kepegawaian).
     const categories = buildCategoryWinners(candidates, lateThreshold);
@@ -251,6 +251,26 @@ class AttendanceAwardService {
     });
 
     return { success: true, award, categories: normalizeCategories(award.winners), reused: false };
+  }
+
+  // Leaderboard per kategori untuk rentang periode apa pun (dipakai halaman pegawai).
+  // Mengembalikan setiap kategori dengan podium (top 3) + ranking lengkap.
+  async buildLeaderboardForPeriod(periodStart, periodEnd) {
+    const { candidates, lateThreshold } = await gatherCandidates(periodStart, periodEnd);
+    const categories = CATEGORY_META.map(category => {
+      const ranking = candidates
+        .filter(c => categorizeEmployee(c.user.pegawai) === category.key)
+        .sort((a, b) => compareCandidates(a, b, lateThreshold))
+        .map((c, i) => serializeWinner(c, i + 1, lateThreshold, category));
+      return {
+        key: category.key,
+        label: category.label,
+        winners: ranking.slice(0, 3),
+        ranking,
+        total: ranking.length,
+      };
+    });
+    return { categories };
   }
 
   async announceWeeklyAwards(now = new Date()) {
