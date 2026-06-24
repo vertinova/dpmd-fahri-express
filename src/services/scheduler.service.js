@@ -5,6 +5,7 @@
 
 const cron = require('node-cron');
 const pushNotificationService = require('./pushNotification.service');
+const attendanceAwardService = require('./attendanceAward.service');
 const prisma = require('../config/prisma');
 const PushNotificationServiceStatic = require('./pushNotificationService');
 
@@ -69,6 +70,20 @@ class SchedulerService {
       timezone: "Asia/Jakarta"
     });
 
+    // Weekly attendance awards every Monday at 7:00 AM
+    this.jobs.weeklyAttendanceAward = cron.schedule('0 7 * * 1', async () => {
+      console.log('[Attendance Award] Calculating weekly winners at 7:00 AM');
+      try {
+        const result = await attendanceAwardService.announceWeeklyAwards();
+        console.log(`[Attendance Award] Announcement completed: ${result.winners?.length || 0} winners`);
+      } catch (error) {
+        console.error('[Attendance Award] Failed to announce weekly winners:', error);
+      }
+    }, {
+      scheduled: true,
+      timezone: "Asia/Jakarta"
+    });
+
     // Absensi reminder - check every minute for dynamic jam_masuk/jam_pulang from settings
     this.jobs.absensiReminder = cron.schedule('* * * * *', async () => {
       try {
@@ -85,6 +100,7 @@ class SchedulerService {
     console.log('📅 Morning reminder: Every day at 7:00 AM (WIB)');
     console.log('🌙 Evening reminder: Every day at 9:00 PM (WIB)');
     console.log('🎂 Birthday check: Every day at 7:15 AM (WIB)');
+    console.log('[Attendance Award] Every Monday at 7:00 AM (WIB)');
     console.log('⏰ Absensi reminder: Every minute (checks jam_masuk/jam_pulang from settings)');
   }
 
@@ -222,6 +238,11 @@ class SchedulerService {
   async triggerBirthdayCheck() {
     console.log('🔧 Manual trigger: Birthday check');
     return await pushNotificationService.sendBirthdayNotifications();
+  }
+
+  async triggerWeeklyAttendanceAward() {
+    console.log('[Attendance Award] Manual trigger');
+    return await attendanceAwardService.announceWeeklyAwards();
   }
 
   /**

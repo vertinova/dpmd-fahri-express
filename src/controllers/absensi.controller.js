@@ -105,6 +105,21 @@ function checkHoliday(date = new Date()) {
   return { isHoliday: false, reason: null };
 }
 
+function isWeekendWorker(user) {
+  const status = user?.pegawai?.status_kepegawaian || '';
+  const jabatan = (user?.pegawai?.jabatan || '').toLowerCase();
+  return WEEKEND_WORK_STATUS.includes(status) ||
+    SECURITY_JABATAN_KEYWORDS.some(keyword => jabatan.includes(keyword));
+}
+
+function isExpectedAttendanceDay(user, date) {
+  const holidayInfo = checkHoliday(date);
+  if (!holidayInfo.isHoliday) return true;
+
+  const isWeekend = holidayInfo.reason === 'Hari Sabtu' || holidayInfo.reason === 'Hari Minggu';
+  return isWeekend && isWeekendWorker(user);
+}
+
 /**
  * Hitung jarak antara 2 titik koordinat (Haversine formula)
  * @returns jarak dalam meter
@@ -778,43 +793,108 @@ const absensiController = {
     try {
       const { tanggal, bulan, tahun } = req.query;
       let where = {};
+      let startDate;
+      let endDate;
 
       if (tanggal) {
-        const targetDate = new Date(tanggal);
          // Fix timezone: gunakan UTC date untuk query tanggal
         const t = new Date(tanggal);
         const y = t.getUTCFullYear();
         const m = String(t.getUTCMonth() + 1).padStart(2, '0');
         const d = String(t.getUTCDate()).padStart(2, '0');
-        where.tanggal = new Date(`${y}-${m}-${d}T00:00:00.000Z`);
+        startDate = new Date(`${y}-${m}-${d}T00:00:00.000Z`);
+        endDate = new Date(startDate);
+        where.tanggal = startDate;
       } else if (bulan && tahun) {
-        const startDate = new Date(Date.UTC(parseInt(tahun), parseInt(bulan) - 1, 1));
-        const endDate = new Date(Date.UTC(parseInt(tahun), parseInt(bulan), 0));
+        startDate = new Date(Date.UTC(parseInt(tahun), parseInt(bulan) - 1, 1));
+        endDate = new Date(Date.UTC(parseInt(tahun), parseInt(bulan), 0));
         where.tanggal = { gte: startDate, lte: endDate };
       } else {
         const wibNow = getWIB();
-        where.tanggal = new Date(`${wibNow.dateString}T00:00:00.000Z`);
+        startDate = new Date(`${wibNow.dateString}T00:00:00.000Z`);
+        endDate = new Date(startDate);
+        where.tanggal = startDate;
       }
 
       const settings = await getAbsensiSettings();
-      const rawRecords = await prisma.absensi_pegawai.findMany({
-        where,
-        include: {
-          user: {
-            select: {
-              id: true, name: true, email: true, avatar: true,
-              pegawai: {
-                select: { nama_pegawai: true, jabatan: true, status_kepegawaian: true, nip: true }
+      const [rawRecords, eligibleUsers] = await Promise.all([
+        prisma.absensi_pegawai.findMany({
+          where,
+          include: {
+            user: {
+              select: {
+                id: true, name: true, email: true, avatar: true,
+                pegawai: {
+                  select: { nama_pegawai: true, jabatan: true, status_kepegawaian: true, nip: true }
+                }
               }
             }
-          }
-        },
-        orderBy: [{ tanggal: 'desc' }, { jam_masuk: 'asc' }]
-      });
+          },
+          orderBy: [{ tanggal: 'desc' }, { jam_masuk: 'asc' }]
+        }),
+        prisma.users.findMany({
+          where: {
+            is_active: true,
+            pegawai: { status_kepegawaian: { in: ABSENSI_REQUIRED_STATUS } },
+          },
+          select: {
+            id: true, name: true, email: true, avatar: true,
+            pegawai: {
+              select: { nama_pegawai: true, jabatan: true, status_kepegawaian: true, nip: true },
+            },
+          },
+          orderBy: { name: 'asc' },
+        }),
+      ]);
 
       const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk);
+      const existingKeys = new Set(
+        records.map(record => `${record.user_id.toString()}-${formatDateKey(new Date(record.tanggal))}`)
+      );
+      const today = new Date(`${getWIB().dateString}T00:00:00.000Z`);
+      const lastDate = endDate < today ? endDate : today;
+      const missingRecords = [];
 
-      return res.json({ success: true, data: records, settings: { jam_masuk: settings.jamMasuk, toleransi_terlambat: settings.toleransi } });
+      if (startDate <= lastDate) {
+        const current = new Date(startDate);
+        current.setUTCHours(0, 0, 0, 0);
+
+        while (current <= lastDate) {
+          const dateKey = formatDateKey(current);
+          for (const user of eligibleUsers) {
+            const recordKey = `${user.id.toString()}-${dateKey}`;
+            if (!existingKeys.has(recordKey) && isExpectedAttendanceDay(user, current)) {
+              missingRecords.push({
+                id: `missing-${user.id.toString()}-${dateKey}`,
+                user_id: user.id,
+                tanggal: new Date(current),
+                status: 'alpha',
+                jam_masuk: null,
+                jam_keluar: null,
+                keterangan: 'Belum mengisi presensi',
+                tujuan_dinas: null,
+                jarak_masuk: null,
+                telat_masuk_menit: 0,
+                is_missing: true,
+                user,
+              });
+            }
+          }
+          current.setUTCDate(current.getUTCDate() + 1);
+        }
+      }
+
+      const combinedRecords = [...records, ...missingRecords].sort((a, b) => {
+        const dateDiff = new Date(b.tanggal) - new Date(a.tanggal);
+        if (dateDiff !== 0) return dateDiff;
+        return (a.user?.name || '').localeCompare(b.user?.name || '');
+      });
+
+      return res.json({
+        success: true,
+        data: combinedRecords,
+        settings: { jam_masuk: settings.jamMasuk, toleransi_terlambat: settings.toleransi },
+      });
     } catch (error) {
       console.error('[Absensi] Admin rekap error:', error);
       return res.status(500).json({ success: false, message: 'Gagal mengambil rekap absensi', error: error.message });
@@ -879,7 +959,8 @@ const absensiController = {
         orderBy: { name: 'asc' },
       });
 
-      return res.json({ success: true, data: users });
+      const expectedUsers = users.filter(user => isExpectedAttendanceDay(user, attendanceDate));
+      return res.json({ success: true, data: expectedUsers });
     } catch (error) {
       console.error('[Absensi] Get missing attendance error:', error);
       return res.status(500).json({
