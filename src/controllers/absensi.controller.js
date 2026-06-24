@@ -1589,6 +1589,7 @@ const absensiController = {
           periode_start: startDate ? formatDateKey(startDate) : null,
           periode_end: endDate ? formatDateKey(endDate) : null,
           total_pegawai: allUsers.length,
+          settings: { jam_masuk: settings.jamMasuk },
         }
       });
     } catch (error) {
