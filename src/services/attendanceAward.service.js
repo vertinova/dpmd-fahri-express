@@ -74,11 +74,29 @@ function scoreCandidate(candidate, lateThreshold) {
   );
 }
 
-function serializeWinner(candidate, rank, lateThreshold) {
+// Kategori penghargaan (urutan kartu di popup). Satu kategori bisa mencakup
+// beberapa status kepegawaian — PPPK PW & Tenaga Alih Daya digabung.
+const CATEGORY_META = [
+  { key: 'pppk_alihdaya', label: 'PPPK PW & Tenaga Alih Daya', statuses: ['PPPK_Paruh_Waktu', 'Tenaga_Alih_Daya'] },
+  { key: 'Tenaga_Kebersihan', label: 'Petugas Kebersihan', statuses: ['Tenaga_Kebersihan'] },
+  { key: 'Tenaga_Keamanan', label: 'Petugas Keamanan', statuses: ['Tenaga_Keamanan'] },
+];
+
+function compareCandidates(a, b, lateThreshold) {
+  return (
+    scoreCandidate(b, lateThreshold) - scoreCandidate(a, lateThreshold)
+    || b.completeDays - a.completeDays
+    || (a.averageArrival ?? Infinity) - (b.averageArrival ?? Infinity)
+    || b.onTimeDays - a.onTimeDays
+    || b.presentDays - a.presentDays
+  );
+}
+
+function serializeWinner(candidate, rank, lateThreshold, category) {
   return {
     rank,
-    category_key: 'overall',
-    category: 'Absensi Terbaik',
+    category_key: category.key,
+    category: category.label,
     subtitle: 'Paling lengkap & paling awal datang',
     metric: `${candidate.completeDays} hari lengkap`,
     score: Math.round(scoreCandidate(candidate, lateThreshold)),
@@ -95,17 +113,44 @@ function serializeWinner(candidate, rank, lateThreshold) {
   };
 }
 
+// Bangun pemenang Juara 1/2/3 untuk SETIAP kategori secara terpisah.
+function buildCategoryWinners(candidates, lateThreshold) {
+  return CATEGORY_META.map(category => {
+    const inCategory = candidates.filter(
+      c => category.statuses.includes(c.user.pegawai?.status_kepegawaian)
+    );
+    const highest = Math.max(0, ...inCategory.map(c => c.presentDays));
+    // Syarat kehadiran minimal dihitung per kategori agar adil antar kategori.
+    const minimumAttendance = Math.max(1, Math.ceil(highest * 0.6));
+    const winners = inCategory
+      .filter(c => c.presentDays >= minimumAttendance)
+      .sort((a, b) => compareCandidates(a, b, lateThreshold))
+      .slice(0, 3)
+      .map((c, i) => serializeWinner(c, i + 1, lateThreshold, category));
+    return { key: category.key, label: category.label, winners };
+  }).filter(category => category.winners.length > 0);
+}
+
+// Normalisasi data tersimpan ke bentuk { categories: [...] } (kompatibel data lama).
+function normalizeCategories(stored) {
+  if (!stored) return [];
+  if (Array.isArray(stored)) {
+    return stored.length ? [{ key: 'overall', label: 'Absensi Terbaik', winners: stored }] : [];
+  }
+  return Array.isArray(stored.categories) ? stored.categories : [];
+}
+
 class AttendanceAwardService {
   async calculateAndStore(now = new Date()) {
     const period = getAwardPeriod(now);
     if (period.periodEnd < period.periodStart) {
-      return { success: true, winners: [], reason: 'Periode belum tersedia' };
+      return { success: true, categories: [], reason: 'Periode belum tersedia' };
     }
 
     const existing = await prisma.absensi_weekly_awards.findUnique({
       where: { week_key: period.weekKey },
     });
-    if (existing) return { success: true, award: existing, winners: existing.winners, reused: true };
+    if (existing) return { success: true, award: existing, categories: normalizeCategories(existing.winners), reused: true };
 
     const users = await prisma.users.findMany({
       where: {
@@ -177,25 +222,8 @@ class AttendanceAwardService {
       };
     }).filter(candidate => candidate.presentDays > 0);
 
-    const highestAttendance = Math.max(0, ...candidates.map(candidate => candidate.presentDays));
-    // Require meaningful attendance history while keeping shift/weekend workers comparable.
-    const minimumAttendance = Math.max(1, Math.ceil(highestAttendance * 0.6));
-    const qualifiedCandidates = candidates.filter(
-      candidate => candidate.presentDays >= minimumAttendance
-    );
-    // Peringkat tunggal: urutkan seluruh kandidat berdasarkan skor absensi gabungan,
-    // lalu ambil 3 teratas sebagai Juara 1, 2, dan 3.
-    const ranked = [...qualifiedCandidates].sort((a, b) =>
-      scoreCandidate(b, lateThreshold) - scoreCandidate(a, lateThreshold)
-      || b.completeDays - a.completeDays
-      || (a.averageArrival ?? Infinity) - (b.averageArrival ?? Infinity)
-      || b.onTimeDays - a.onTimeDays
-      || b.presentDays - a.presentDays
-    );
-
-    const winners = ranked
-      .slice(0, 3)
-      .map((candidate, index) => serializeWinner(candidate, index + 1, lateThreshold));
+    // Pemenang Juara 1/2/3 dihitung terpisah per kategori (status kepegawaian).
+    const categories = buildCategoryWinners(candidates, lateThreshold);
 
     const award = await prisma.absensi_weekly_awards.upsert({
       where: { week_key: period.weekKey },
@@ -205,16 +233,18 @@ class AttendanceAwardService {
         period_start: period.periodStart,
         period_end: period.periodEnd,
         month_label: period.monthLabel,
-        winners,
+        winners: { categories },
       },
     });
 
-    return { success: true, award, winners: award.winners, reused: false };
+    return { success: true, award, categories: normalizeCategories(award.winners), reused: false };
   }
 
   async announceWeeklyAwards(now = new Date()) {
     const result = await this.calculateAndStore(now);
-    if (!result.winners?.length) return result;
+    const categories = result.categories || [];
+    const allWinners = categories.flatMap(category => category.winners);
+    if (!allWinners.length) return result;
     if (result.award.notified_at) {
       return { ...result, skipped: true, reason: 'Penghargaan minggu ini sudah dikirim' };
     }
@@ -227,10 +257,13 @@ class AttendanceAwardService {
       select: { id: true },
     });
     const userIds = eligibleUsers.map(user => Number(user.id));
-    const names = result.winners.map(winner => winner.name).join(', ');
+    const topNames = categories
+      .map(category => category.winners[0]?.name)
+      .filter(Boolean)
+      .join(', ');
     const payload = {
-      title: '🏆 Pegawai dengan Absensi Terbaik!',
-      body: `Selamat kepada ${names}. Lihat 3 apresiasi terbaik minggu ini!`,
+      title: '🏆 Juara Absensi Mingguan!',
+      body: `Juara 1 tiap kategori: ${topNames}. Lihat podium semua kategori!`,
       icon: '/logo-192.png',
       badge: '/logo-96.png',
       tag: `weekly-attendance-award-${result.award.week_key}`,
@@ -242,7 +275,7 @@ class AttendanceAwardService {
         month_label: result.award.month_label,
         period_start: dateKey(result.award.period_start),
         period_end: dateKey(result.award.period_end),
-        winners: result.winners,
+        categories,
         url: '/dpmd/dashboard',
       },
       actions: [
@@ -279,7 +312,7 @@ class AttendanceAwardService {
       period_start: dateKey(award.period_start),
       period_end: dateKey(award.period_end),
       month_label: award.month_label,
-      winners: award.winners,
+      categories: normalizeCategories(award.winners),
       generated_at: award.generated_at,
     };
   }

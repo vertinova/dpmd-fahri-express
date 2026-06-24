@@ -75,7 +75,8 @@ class SchedulerService {
       console.log('[Attendance Award] Calculating weekly winners at 7:00 AM');
       try {
         const result = await attendanceAwardService.announceWeeklyAwards();
-        console.log(`[Attendance Award] Announcement completed: ${result.winners?.length || 0} winners`);
+        const winnerCount = (result.categories || []).reduce((sum, c) => sum + (c.winners?.length || 0), 0);
+        console.log(`[Attendance Award] Announcement completed: ${winnerCount} winners across ${(result.categories || []).length} categories`);
       } catch (error) {
         console.error('[Attendance Award] Failed to announce weekly winners:', error);
       }
