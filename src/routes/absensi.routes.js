@@ -26,6 +26,7 @@ router.get('/admin/rekap-pegawai', auth, checkAbsensiAdmin, absensiController.ge
 router.get('/admin/history/:userId', auth, checkAbsensiAdmin, absensiController.getHistoryPerUser);
 router.get('/admin/rekap', auth, checkAbsensiAdmin, absensiController.getRekapAdmin);
 router.get('/admin/pegawai-absensi', auth, checkAbsensiAdmin, absensiController.getPegawaiAbsensi);
+router.get('/admin/presensi-kosong', auth, checkAbsensiAdmin, absensiController.getMissingAttendance);
 router.get('/admin/settings', auth, checkAbsensiAdmin, absensiController.getSettings);
 router.put('/admin/settings', auth, checkAbsensiAdmin, absensiController.updateSettings);
 router.put('/admin/set-device/:userId', auth, checkAbsensiAdmin, absensiController.adminSetDevice);

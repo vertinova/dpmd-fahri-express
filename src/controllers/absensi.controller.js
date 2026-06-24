@@ -849,6 +849,48 @@ const absensiController = {
   },
 
   /**
+   * Admin: Get employees without attendance on a selected date
+   * GET /api/absensi/admin/presensi-kosong?tanggal=YYYY-MM-DD
+   */
+  async getMissingAttendance(req, res) {
+    try {
+      const { tanggal } = req.query;
+      if (!tanggal || !/^\d{4}-\d{2}-\d{2}$/.test(tanggal)) {
+        return res.status(400).json({ success: false, message: 'Tanggal wajib diisi' });
+      }
+
+      const attendanceDate = new Date(`${tanggal}T00:00:00.000Z`);
+      const users = await prisma.users.findMany({
+        where: {
+          is_active: true,
+          pegawai: { status_kepegawaian: { in: ABSENSI_REQUIRED_STATUS } },
+          absensi_pegawai: {
+            none: { tanggal: attendanceDate },
+          },
+        },
+        select: {
+          id: true,
+          name: true,
+          avatar: true,
+          pegawai: {
+            select: { nama_pegawai: true, jabatan: true, status_kepegawaian: true },
+          },
+        },
+        orderBy: { name: 'asc' },
+      });
+
+      return res.json({ success: true, data: users });
+    } catch (error) {
+      console.error('[Absensi] Get missing attendance error:', error);
+      return res.status(500).json({
+        success: false,
+        message: 'Gagal mengambil daftar presensi kosong',
+        error: error.message,
+      });
+    }
+  },
+
+  /**
    * Check eligibility
    * GET /api/absensi/check-eligible
    */
