@@ -74,13 +74,26 @@ function scoreCandidate(candidate, lateThreshold) {
   );
 }
 
-// Kategori penghargaan (urutan kartu di popup). Satu kategori bisa mencakup
-// beberapa status kepegawaian — PPPK PW & Tenaga Alih Daya digabung.
+// Kategori penghargaan (urutan kartu di popup).
 const CATEGORY_META = [
-  { key: 'pppk_alihdaya', label: 'PPPK PW & Tenaga Alih Daya', statuses: ['PPPK_Paruh_Waktu', 'Tenaga_Alih_Daya'] },
-  { key: 'Tenaga_Kebersihan', label: 'Petugas Kebersihan', statuses: ['Tenaga_Kebersihan'] },
-  { key: 'Tenaga_Keamanan', label: 'Petugas Keamanan', statuses: ['Tenaga_Keamanan'] },
+  { key: 'pppk_alihdaya', label: 'PPPK PW & Tenaga Alih Daya' },
+  { key: 'kebersihan', label: 'Petugas Kebersihan' },
+  { key: 'keamanan', label: 'Petugas Keamanan' },
 ];
+
+// Peran kebersihan/keamanan dikenali dari status_kepegawaian ATAU kata kunci jabatan
+// (di banyak data, petugas kebersihan/keamanan berstatus Tenaga Alih Daya/PPPK PW
+// sehingga perannya hanya tampak di jabatan).
+const SECURITY_JABATAN_KEYWORDS = ['keamanan', 'security', 'satpam'];
+const CLEANING_JABATAN_KEYWORDS = ['kebersih', 'cleaning', 'cleaning service'];
+
+function categorizeEmployee(pegawai) {
+  const status = pegawai?.status_kepegawaian;
+  const jabatan = (pegawai?.jabatan || '').toLowerCase();
+  if (status === 'Tenaga_Keamanan' || SECURITY_JABATAN_KEYWORDS.some(k => jabatan.includes(k))) return 'keamanan';
+  if (status === 'Tenaga_Kebersihan' || CLEANING_JABATAN_KEYWORDS.some(k => jabatan.includes(k))) return 'kebersihan';
+  return 'pppk_alihdaya';
+}
 
 function compareCandidates(a, b, lateThreshold) {
   return (
@@ -117,7 +130,7 @@ function serializeWinner(candidate, rank, lateThreshold, category) {
 function buildCategoryWinners(candidates, lateThreshold) {
   return CATEGORY_META.map(category => {
     const inCategory = candidates.filter(
-      c => category.statuses.includes(c.user.pegawai?.status_kepegawaian)
+      c => categorizeEmployee(c.user.pegawai) === category.key
     );
     const highest = Math.max(0, ...inCategory.map(c => c.presentDays));
     // Syarat kehadiran minimal dihitung per kategori agar adil antar kategori.
