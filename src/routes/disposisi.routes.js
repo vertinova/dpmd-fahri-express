@@ -12,7 +12,8 @@ const storage = multer.diskStorage({
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'surat-' + uniqueSuffix + path.extname(file.originalname));
+    const prefix = file.fieldname === 'file_disposisi' ? 'disposisi-' : 'surat-';
+    cb(null, prefix + uniqueSuffix + path.extname(file.originalname));
   }
 });
 
@@ -36,7 +37,10 @@ const upload = multer({
 router.post(
   '/surat-masuk',
   auth,
-  upload.single('file_surat'),
+  upload.fields([
+    { name: 'file_surat', maxCount: 1 },
+    { name: 'file_disposisi', maxCount: 1 },
+  ]),
   disposisiController.createSuratMasuk
 );
 

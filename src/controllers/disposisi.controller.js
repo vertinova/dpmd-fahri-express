@@ -296,6 +296,7 @@ exports.getDisposisiMasuk = async (req, res, next) => {
               perihal: true,
               jenis_surat: true,
               file_path: true,
+              file_disposisi_path: true,
             },
           },
           users_disposisi_dari_user_idTousers: {
@@ -875,12 +876,26 @@ exports.createSuratMasuk = async (req, res, next) => {
     }
 
     // Handle file upload
+    const fileSurat = req.files?.file_surat?.[0];
+    const fileDisposisi = req.files?.file_disposisi?.[0];
     let file_path = null;
-    if (req.file) {
-      file_path = req.file.path.replace(/\\/g, '/');
+    let file_disposisi_path = null;
+    if (fileSurat) {
+      file_path = fileSurat.path.replace(/\\/g, '/');
       console.log('📎 File uploaded:', file_path);
     } else {
       console.warn('⚠️  No file uploaded');
+    }
+    if (fileDisposisi) {
+      file_disposisi_path = fileDisposisi.path.replace(/\\/g, '/');
+      console.log('📎 Disposition sheet uploaded:', file_disposisi_path);
+    }
+
+    if (!fileSurat || !fileDisposisi) {
+      return res.status(400).json({
+        success: false,
+        message: 'File surat dan kertas disposisi wajib diupload',
+      });
     }
 
     // Validate required fields
@@ -912,6 +927,7 @@ exports.createSuratMasuk = async (req, res, next) => {
         lokasi_kegiatan: lokasi_kegiatan || null,
         tanggal_kegiatan: tanggal_kegiatan ? new Date(tanggal_kegiatan) : null,
         file_path,
+        file_disposisi_path,
         status: 'dikirim',
         created_by: BigInt(user_id),
       },

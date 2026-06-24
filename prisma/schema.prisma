@@ -1683,6 +1683,7 @@ model surat_masuk {
   perihal          String                   @db.Text
   jenis_surat      surat_masuk_jenis_surat? @default(biasa)
   file_path        String?                  @db.VarChar(500)
+  file_disposisi_path String?                @db.VarChar(500)
   keterangan       String?                  @db.Text
   status           surat_masuk_status?      @default(draft)
   created_by       BigInt                   @db.UnsignedBigInt
