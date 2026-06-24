@@ -243,24 +243,39 @@ exports.createDisposisi = async (req, res, next) => {
 exports.getDisposisiMasuk = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { status, page = 1, limit = 20 } = req.query;
+    const { status, search = '' } = req.query;
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+    const searchTerm = String(search).trim();
 
     console.log('[getDisposisiMasuk] Query params:', {
       userId: userId?.toString(),
       userRole: req.user.role,
       status,
+      search: searchTerm,
       page,
       limit,
     });
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const take = parseInt(limit);
+    const skip = (page - 1) * limit;
+    const take = limit;
 
     const where = {
       ke_user_id: BigInt(userId),
     };
 
     if (status) where.status = status;
+    if (searchTerm) {
+      where.surat_masuk = {
+        is: {
+          OR: [
+            { nomor_surat: { contains: searchTerm } },
+            { perihal: { contains: searchTerm } },
+            { pengirim: { contains: searchTerm } },
+          ],
+        },
+      };
+    }
 
     console.log('[getDisposisiMasuk] Where clause:', {
       ke_user_id: where.ke_user_id?.toString(),
@@ -312,9 +327,9 @@ exports.getDisposisiMasuk = async (req, res, next) => {
       data: transformedDisposisi,
       pagination: {
         total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: Math.ceil(total / parseInt(limit)),
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
@@ -331,16 +346,30 @@ exports.getDisposisiMasuk = async (req, res, next) => {
 exports.getDisposisiKeluar = async (req, res, next) => {
   try {
     const userId = req.user.id;
-    const { status, page = 1, limit = 20 } = req.query;
+    const { status, search = '' } = req.query;
+    const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+    const searchTerm = String(search).trim();
 
-    const skip = (parseInt(page) - 1) * parseInt(limit);
-    const take = parseInt(limit);
+    const skip = (page - 1) * limit;
+    const take = limit;
 
     const where = {
       dari_user_id: BigInt(userId),
     };
 
     if (status) where.status = status;
+    if (searchTerm) {
+      where.surat_masuk = {
+        is: {
+          OR: [
+            { nomor_surat: { contains: searchTerm } },
+            { perihal: { contains: searchTerm } },
+            { pengirim: { contains: searchTerm } },
+          ],
+        },
+      };
+    }
 
     const [total, disposisi] = await Promise.all([
       prisma.disposisi.count({ where }),
@@ -384,9 +413,9 @@ exports.getDisposisiKeluar = async (req, res, next) => {
       data: transformedDisposisi,
       pagination: {
         total,
-        page: parseInt(page),
-        limit: parseInt(limit),
-        totalPages: Math.ceil(total / parseInt(limit)),
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit),
       },
     });
   } catch (error) {
