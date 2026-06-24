@@ -1213,6 +1213,7 @@ const absensiController = {
         endDate = sunday;
         where.tanggal = { gte: startDate, lte: endDate };
         periodeLabel = `${monday.toISOString().split('T')[0]} s/d ${sunday.toISOString().split('T')[0]}`;
+        calendarDays = buildWeekdayCalendar(startDate, endDate);
       } else if (periode === 'tahun') {
         const y = tahun ? parseInt(tahun) : wibNow.year;
         startDate = new Date(Date.UTC(y, 0, 1));

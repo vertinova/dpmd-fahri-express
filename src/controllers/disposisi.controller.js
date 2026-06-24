@@ -955,18 +955,22 @@ exports.createSuratMasuk = async (req, res, next) => {
     // Auto-create jadwal_kegiatan if kegiatan fields are filled
     if (tanggal_kegiatan) {
       try {
-        const tglKegiatan = new Date(tanggal_kegiatan);
         const jam = jam_kegiatan || '08:00';
-        const [hours, minutes] = jam.split(':').map(Number);
-        const tanggalMulai = new Date(tglKegiatan);
-        tanggalMulai.setHours(hours || 8, minutes || 0, 0, 0);
+        // Input form adalah waktu lokal WIB. Offset eksplisit mencegah server UTC
+        // menyimpan jam sebagai UTC lalu browser menambah 7 jam saat ditampilkan.
+        const tanggalMulai = new Date(`${tanggal_kegiatan}T${jam}:00+07:00`);
+        const tanggalSelesai = new Date(`${tanggal_kegiatan}T${jam}:00+07:00`);
+
+        if (Number.isNaN(tanggalMulai.getTime())) {
+          throw new Error(`Tanggal atau jam kegiatan tidak valid: ${tanggal_kegiatan} ${jam}`);
+        }
 
         const jadwal = await prisma.jadwal_kegiatan.create({
           data: {
             judul: perihal_surat,
             deskripsi: ringkasan_isi || perihal_surat,
             tanggal_mulai: tanggalMulai,
-            tanggal_selesai: tglKegiatan,
+            tanggal_selesai: tanggalSelesai,
             lokasi: lokasi_kegiatan || null,
             asal_kegiatan: asal_surat,
             surat_masuk_id: suratMasuk.id,
