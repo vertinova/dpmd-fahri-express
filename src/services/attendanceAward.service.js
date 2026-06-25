@@ -20,6 +20,7 @@ function getWIBParts(date = new Date()) {
     month: wib.getUTCMonth() + 1,
     day: wib.getUTCDate(),
     dayOfWeek: wib.getUTCDay(),
+    hour: wib.getUTCHours(),
   };
 }
 
@@ -41,20 +42,51 @@ function timeToWIBMinutes(value) {
   return wib.getUTCHours() * 60 + wib.getUTCMinutes();
 }
 
+// Tentukan periode penghargaan berdasarkan Senin minggu ini (hari pengumuman).
+// - Senin ke-1/2/3 bulan ini → penghargaan MINGGUAN (minggu lalu, Senin–Minggu).
+// - Senin ke-4 (atau lebih) → penghargaan BULANAN (seluruh bulan berjalan s.d. Minggu lalu).
 function getAwardPeriod(now = new Date()) {
   const wib = getWIBParts(now);
   const todayUTC = new Date(Date.UTC(wib.year, wib.month - 1, wib.day));
-  const daysSinceSunday = wib.dayOfWeek === 0 ? 7 : wib.dayOfWeek;
-  const periodEnd = new Date(todayUTC);
-  periodEnd.setUTCDate(periodEnd.getUTCDate() - daysSinceSunday);
-  const periodStart = new Date(Date.UTC(periodEnd.getUTCFullYear(), periodEnd.getUTCMonth(), 1));
+
+  // Senin pada minggu berjalan (acuan hari pengumuman).
+  const offsetToMonday = wib.dayOfWeek === 0 ? -6 : 1 - wib.dayOfWeek;
+  const thisMonday = new Date(todayUTC);
+  thisMonday.setUTCDate(todayUTC.getUTCDate() + offsetToMonday);
+
+  // Minggu lalu yang sudah selesai: Senin–Minggu tepat sebelum Senin ini.
+  const lastSunday = new Date(thisMonday);
+  lastSunday.setUTCDate(thisMonday.getUTCDate() - 1);
+  const lastMonday = new Date(lastSunday);
+  lastMonday.setUTCDate(lastSunday.getUTCDate() - 6);
+
+  // Senin ke-berapa dalam bulan menentukan jenis penghargaan.
+  const mondayOfMonth = Math.floor((thisMonday.getUTCDate() - 1) / 7) + 1;
+
+  if (mondayOfMonth >= 4) {
+    // Bulanan: dari tanggal 1 bulan tersebut s.d. Minggu lalu.
+    const periodStart = new Date(Date.UTC(lastSunday.getUTCFullYear(), lastSunday.getUTCMonth(), 1));
+    return {
+      type: 'monthly',
+      periodStart,
+      periodEnd: lastSunday,
+      weekKey: `${lastSunday.getUTCFullYear()}-${String(lastSunday.getUTCMonth() + 1).padStart(2, '0')}-monthly`,
+      monthLabel: `${MONTH_NAMES[lastSunday.getUTCMonth()]} ${lastSunday.getUTCFullYear()}`,
+    };
+  }
 
   return {
-    periodStart,
-    periodEnd,
-    weekKey: `${dateKey(periodEnd)}-weekly`,
-    monthLabel: `${MONTH_NAMES[periodEnd.getUTCMonth()]} ${periodEnd.getUTCFullYear()}`,
+    type: 'weekly',
+    periodStart: lastMonday,
+    periodEnd: lastSunday,
+    weekKey: `${dateKey(lastSunday)}-weekly`,
+    monthLabel: `${MONTH_NAMES[lastSunday.getUTCMonth()]} ${lastSunday.getUTCFullYear()}`,
   };
+}
+
+// Jenis penghargaan diturunkan dari sufiks week_key (tanpa kolom DB tambahan).
+function getAwardType(weekKey) {
+  return weekKey?.endsWith('-monthly') ? 'monthly' : 'weekly';
 }
 
 // Skor absensi gabungan: menggabungkan kelengkapan absen, ketepatan waktu,
@@ -127,6 +159,8 @@ function serializeWinner(candidate, rank, lateThreshold, category) {
 }
 
 // Bangun pemenang Juara 1/2/3 untuk SETIAP kategori secara terpisah.
+// Selalu kembalikan ke-3 kategori (sama seperti peringkat absensi); kategori
+// tanpa pemenang tetap disertakan dengan daftar kosong agar tab kategori utuh.
 function buildCategoryWinners(candidates, lateThreshold) {
   return CATEGORY_META.map(category => {
     const inCategory = candidates.filter(
@@ -141,7 +175,7 @@ function buildCategoryWinners(candidates, lateThreshold) {
       .slice(0, 3)
       .map((c, i) => serializeWinner(c, i + 1, lateThreshold, category));
     return { key: category.key, label: category.label, winners };
-  }).filter(category => category.winners.length > 0);
+  });
 }
 
 // Normalisasi data tersimpan ke bentuk { categories: [...] } (kompatibel data lama).
@@ -294,8 +328,10 @@ class AttendanceAwardService {
       .map(category => category.winners[0]?.name)
       .filter(Boolean)
       .join(', ');
+    const periodType = getAwardType(result.award.week_key);
+    const periodWord = periodType === 'monthly' ? 'Bulanan' : 'Mingguan';
     const payload = {
-      title: '🏆 Juara Absensi Mingguan!',
+      title: `🏆 Juara Absensi ${periodWord}!`,
       body: `Juara 1 tiap kategori: ${topNames}. Lihat podium semua kategori!`,
       icon: '/logo-192.png',
       badge: '/logo-96.png',
@@ -304,6 +340,7 @@ class AttendanceAwardService {
       vibrate: [200, 100, 200, 100, 300],
       data: {
         type: 'weekly_attendance_award',
+        period_type: periodType,
         week_key: result.award.week_key,
         month_label: result.award.month_label,
         period_start: dateKey(result.award.period_start),
@@ -328,20 +365,19 @@ class AttendanceAwardService {
   }
 
   async getLatest() {
-    const current = await this.calculateAndStore();
-    const award = current.award || await prisma.absensi_weekly_awards.findFirst({
-      orderBy: { period_end: 'desc' },
-    });
-    if (!award) return null;
-
+    // Popup hanya boleh muncul Senin pagi (mulai 08:00 s.d. < 12:00 WIB).
     const now = getWIBParts();
-    const today = new Date(Date.UTC(now.year, now.month - 1, now.day));
-    const ageDays = Math.floor((today - award.period_end) / (24 * 60 * 60 * 1000));
-    if (ageDays > 7) return null;
+    const isMondayMorning = now.dayOfWeek === 1 && now.hour >= 8 && now.hour < 12;
+    if (!isMondayMorning) return null;
+
+    const current = await this.calculateAndStore();
+    const award = current.award;
+    if (!award) return null;
 
     return {
       id: Number(award.id),
       week_key: award.week_key,
+      period_type: getAwardType(award.week_key),
       period_start: dateKey(award.period_start),
       period_end: dateKey(award.period_end),
       month_label: award.month_label,

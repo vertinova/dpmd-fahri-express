@@ -70,9 +70,9 @@ class SchedulerService {
       timezone: "Asia/Jakarta"
     });
 
-    // Weekly attendance awards every Monday at 7:00 AM
-    this.jobs.weeklyAttendanceAward = cron.schedule('0 7 * * 1', async () => {
-      console.log('[Attendance Award] Calculating weekly winners at 7:00 AM');
+    // Attendance awards every Monday at 8:00 AM (mingguan minggu 1-3, bulanan minggu 4)
+    this.jobs.weeklyAttendanceAward = cron.schedule('0 8 * * 1', async () => {
+      console.log('[Attendance Award] Calculating winners at 8:00 AM');
       try {
         const result = await attendanceAwardService.announceWeeklyAwards();
         const winnerCount = (result.categories || []).reduce((sum, c) => sum + (c.winners?.length || 0), 0);
@@ -101,7 +101,7 @@ class SchedulerService {
     console.log('📅 Morning reminder: Every day at 7:00 AM (WIB)');
     console.log('🌙 Evening reminder: Every day at 9:00 PM (WIB)');
     console.log('🎂 Birthday check: Every day at 7:15 AM (WIB)');
-    console.log('[Attendance Award] Every Monday at 7:00 AM (WIB)');
+    console.log('[Attendance Award] Every Monday at 8:00 AM (WIB)');
     console.log('⏰ Absensi reminder: Every minute (checks jam_masuk/jam_pulang from settings)');
   }
 
