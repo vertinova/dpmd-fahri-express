@@ -5,6 +5,7 @@
 
 const { sequelize } = require('../models');
 const { getHariLibur, toYmd } = require('../utils/tanggalMerah');
+const { clearHolidayCache } = require('../services/holidayCache.service');
 const logger = require('../utils/logger');
 
 class HariLiburController {
@@ -47,6 +48,7 @@ class HariLiburController {
           `UPDATE hari_libur SET keterangan = :keterangan, is_active = 1, updated_at = NOW() WHERE id = :id`,
           { replacements: { keterangan: keterangan.trim(), id: existing.id } }
         );
+        clearHolidayCache();
         return res.json({ success: true, message: 'Hari libur diperbarui', data: { id: existing.id, tanggal: ymd, keterangan: keterangan.trim() } });
       }
 
@@ -55,6 +57,7 @@ class HariLiburController {
         { replacements: { ymd, keterangan: keterangan.trim(), createdBy: req.user?.id || null } }
       );
 
+      clearHolidayCache();
       res.status(201).json({ success: true, message: 'Hari libur ditambahkan', data: { id, tanggal: ymd, keterangan: keterangan.trim() } });
     } catch (error) {
       logger.error('Error create hari libur:', error);
@@ -105,6 +108,7 @@ class HariLiburController {
         { replacements }
       );
 
+      clearHolidayCache();
       res.json({ success: true, message: 'Hari libur diperbarui' });
     } catch (error) {
       logger.error('Error update hari libur:', error);
@@ -184,6 +188,7 @@ class HariLiburController {
         }
       }
 
+      clearHolidayCache();
       const data = await getHariLibur(tahun);
       res.json({
         success: true,
@@ -207,6 +212,7 @@ class HariLiburController {
         `DELETE FROM hari_libur WHERE id = :id`,
         { replacements: { id } }
       );
+      clearHolidayCache();
       res.json({ success: true, message: 'Hari libur dihapus' });
     } catch (error) {
       logger.error('Error delete hari libur:', error);

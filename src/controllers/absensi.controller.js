@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const PushNotificationService = require('../services/pushNotificationService');
 const attendanceAwardService = require('../services/attendanceAward.service');
+const { getHolidayReason } = require('../services/holidayCache.service');
 
 // Koordinat kantor DPMD Bogor
 const KANTOR_LAT = -6.47553948391432;
@@ -26,38 +27,8 @@ const WEEKEND_WORK_STATUS = ['Tenaga_Keamanan'];
 // Jabatan keywords yang dianggap petugas keamanan (case-insensitive)
 const SECURITY_JABATAN_KEYWORDS = ['keamanan', 'security', 'satpam'];
 
-// Hari Libur Nasional & Cuti Bersama Indonesia 2026 (format: MM-DD)
-// Sumber: SKB 3 Menteri (Menag, Menaker, Menpan-RB) ditandatangani 19 September 2025.
-// 17 hari libur nasional + 8 hari cuti bersama.
-const HOLIDAYS_2026 = {
-  // --- Hari Libur Nasional ---
-  '01-01': 'Tahun Baru Masehi 2026',
-  '01-16': 'Isra Mi\'raj Nabi Muhammad SAW',
-  '02-17': 'Tahun Baru Imlek 2577 Kongzili',
-  '03-19': 'Hari Suci Nyepi Tahun Baru Saka 1948',
-  '03-21': 'Hari Raya Idul Fitri 1447 H', // Sabtu
-  '03-22': 'Hari Raya Idul Fitri 1447 H', // Minggu
-  '04-03': 'Wafat Isa Al Masih',
-  '04-05': 'Hari Paskah / Kebangkitan Isa Al Masih', // Minggu
-  '05-01': 'Hari Buruh Internasional',
-  '05-14': 'Kenaikan Isa Al Masih',
-  '05-27': 'Hari Raya Idul Adha 1447 H',
-  '05-31': 'Hari Raya Waisak 2570 BE', // Minggu
-  '06-01': 'Hari Lahir Pancasila',
-  '06-16': 'Tahun Baru Islam 1448 H (1 Muharam)',
-  '08-17': 'Proklamasi Kemerdekaan RI',
-  '08-25': 'Maulid Nabi Muhammad SAW',
-  '12-25': 'Hari Raya Natal',
-  // --- Cuti Bersama ---
-  '02-16': 'Cuti Bersama Tahun Baru Imlek',
-  '03-18': 'Cuti Bersama Hari Suci Nyepi',
-  '03-20': 'Cuti Bersama Idul Fitri 1447 H',
-  '03-23': 'Cuti Bersama Idul Fitri 1447 H',
-  '03-24': 'Cuti Bersama Idul Fitri 1447 H',
-  '05-15': 'Cuti Bersama Kenaikan Isa Al Masih',
-  '05-28': 'Cuti Bersama Idul Adha 1447 H',
-  '12-24': 'Cuti Bersama Hari Raya Natal',
-};
+// Daftar hari libur nasional/cuti bersama dipindah ke services/holidayCache.service.js
+// (sumber: tabel hari_libur, dengan fallback statis SKB 2026). Lihat checkHoliday().
 
 const REKAP_DAY_LABELS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
 
@@ -104,12 +75,15 @@ function checkHoliday(date = new Date()) {
     return { isHoliday: true, reason: 'Hari Sabtu' };
   }
   
-  // Cek tanggal merah nasional
-  const monthDay = `${String(wib.month).padStart(2, '0')}-${String(wib.day).padStart(2, '0')}`;
-  if (HOLIDAYS_2026[monthDay]) {
-    return { isHoliday: true, reason: HOLIDAYS_2026[monthDay] };
+  // Cek tanggal merah nasional / cuti bersama (dari cache tabel hari_libur)
+  const mm = String(wib.month).padStart(2, '0');
+  const dd = String(wib.day).padStart(2, '0');
+  const ymd = `${wib.year}-${mm}-${dd}`;
+  const reason = getHolidayReason(ymd, `${mm}-${dd}`);
+  if (reason) {
+    return { isHoliday: true, reason };
   }
-  
+
   return { isHoliday: false, reason: null };
 }
 
