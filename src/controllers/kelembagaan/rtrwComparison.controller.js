@@ -105,6 +105,14 @@ function normalizeAddDesaKode(value) {
   return raw;
 }
 
+function normalizeBpjsDesaKode(value) {
+  const raw = toText(value).replace(/\.+$/g, '');
+  if (/^32\.01\.\d{2}\.\d{4}$/.test(raw)) return raw;
+  const digits = raw.replace(/\D/g, '');
+  if (digits.length === 10) return `${digits.slice(0,2)}.${digits.slice(2,4)}.${digits.slice(4,6)}.${digits.slice(6,10)}`;
+  return raw;
+}
+
 function extractRtRwInfo(keterangan) {
   const text = toUpper(keterangan).replace(/\s+/g, ' ');
   const slash = text.match(/\bRT\.?\s*0*(\d{1,3})\s*\/\s*0*(\d{1,3})\b/);
@@ -298,12 +306,12 @@ function parseAddData() {
 
 function parseBpjsData() {
   const workbook = XLSX.readFile(BPJS_FILE);
-  const sheet = workbook.Sheets.DATABASE || workbook.Sheets[workbook.SheetNames[0]];
+  const sheet = workbook.Sheets.DATABASE || workbook.Sheets.data_upah || workbook.Sheets[workbook.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
   const grouped = new Map();
 
   rows.forEach((row) => {
-    const desaKode = toText(row.ID_PEGAWAI || row.ID_Pegawai || row['ID Pegawai']);
+    const desaKode = normalizeBpjsDesaKode(row.ID_PEGAWAI || row.ID_Pegawai || row['ID Pegawai']);
     const nama = normalizeName(row.NAMA_LENGKAP);
     if (!desaKode || !nama) return;
 

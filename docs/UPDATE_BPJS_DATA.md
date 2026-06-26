@@ -34,98 +34,30 @@ Periksa dengan cepat:
 node -e "const x=require('xlsx').readFile('data/rtrwbpjs_baru.xlsx'); console.log(x.SheetNames)"
 ```
 
-### 3. Jalankan konversi (inline — tidak perlu ubah file lain)
+### 3. Update `BPJS_FILE` di generate script lalu jalankan
+
+Edit satu baris di `scripts/generate-rtrw-json-cache.js`:
+
+```js
+// Ganti nilai BPJS_FILE ke file terbaru:
+const BPJS_FILE = path.join(DATA_DIR, 'rtrwbpjs20260626.xlsx'); // ← nama file baru
+```
+
+Lalu jalankan:
 
 ```bash
 cd dpmd-fahri-express
-
-node - << 'EOF'
-const fs   = require('fs');
-const path = require('path');
-const XLSX = require('xlsx');
-
-const toText       = (v) => String(v ?? '').trim();
-const toUpper      = (v) => toText(v).toUpperCase();
-const normalizeNik = (v) => { const d = String(v??'').replace(/\D/g,''); return d.length>=10?d:''; };
-const normalizeName = (v) => {
-  let n = toUpper(v).normalize('NFKD').replace(/[̀-ͯ]/g,'');
-  n = n.replace(/[.`'"]/g,' ').replace(/[()_:/\\-]/g,' ')
-       .replace(/^(H|HJ|HJA|HAJI|HAJAH)\s+/g,'').replace(/\s+/g,' ').trim();
-  return n;
-};
-const numberValue = (v) => { if(typeof v==='number')return v; const p=Number(String(v??'').replace(/[^\d.-]/g,'')); return Number.isFinite(p)?p:0; };
-const dateToStr   = (v) => {
-  if(!v) return '';
-  if(v instanceof Date && !Number.isNaN(v.getTime())) return v.toISOString().slice(0,10);
-  if(typeof v==='number' && v>1000){ const d=new Date(Math.round((v-25569)*86400*1000)); return Number.isNaN(d.getTime())?'':d.toISOString().slice(0,10); }
-  const t = toText(v);
-  const dmy = t.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
-  if(dmy) return `${dmy[3]}-${dmy[2].padStart(2,'0')}-${dmy[1].padStart(2,'0')}`;
-  const ymd = t.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
-  if(ymd) return `${ymd[1]}-${ymd[2].padStart(2,'0')}-${ymd[3].padStart(2,'0')}`;
-  return t;
-};
-
-// ← GANTI path ini ke file BPJS baru
-const SRC = path.join(__dirname, 'data', 'rtrwbpjs_BARU.xlsx');
-const OUT = path.join(__dirname, 'data', 'rtrwbpjs.json');
-
-const workbook  = XLSX.readFile(SRC);
-const sheetName = workbook.Sheets['DATABASE']  ? 'DATABASE'
-                : workbook.Sheets['data_upah'] ? 'data_upah'
-                : workbook.Sheets['Sheet1']    ? 'Sheet1'
-                : workbook.SheetNames[0];
-
-console.log('Sheet dipakai:', sheetName);
-const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
-console.log('Baris terbaca:', rows.length);
-
-const grouped = new Map();
-rows.forEach((row) => {
-  const desaKode = toText(row.ID_PEGAWAI || row.ID_Pegawai || row['ID Pegawai']);
-  const nama     = normalizeName(row.NAMA_LENGKAP);
-  if (!desaKode || !nama) return;
-  const nik = normalizeNik(row.NIK);
-  const key = `${desaKode}|${nik || nama}`;
-  const detail = {
-    nik, idPegawai: desaKode,
-    kpj: toText(row.KPJ), kodeTk: toText(row.KODE_TK),
-    namaLengkap: nama,
-    tglLahir: dateToStr(row.TGL_LAHIR),
-    upah: numberValue(row.UPAH), rapel: numberValue(row.RAPEL),
-    blth: dateToStr(row.BLTH), npp: toText(row.NPP),
-  };
-  if (!grouped.has(key)) {
-    grouped.set(key, { source:'bpjs', nama, normalized:nama, nik, desaKode, totalUpah:0, details:[] });
-  }
-  const item = grouped.get(key);
-  item.totalUpah += detail.upah;
-  item.details.push(detail);
-});
-
-const stat = fs.statSync(SRC);
-const payload = {
-  version: 1,
-  generatedAt: new Date().toISOString(),
-  source: { name: path.basename(SRC), size: stat.size, mtimeMs: stat.mtimeMs },
-  sheetName,
-  meta: {
-    totalRows: rows.length,
-    totalPenerima: grouped.size,
-    totalDesa: new Set([...grouped.values()].map(i => i.desaKode)).size,
-  },
-  data: Array.from(grouped.values()),
-};
-
-fs.writeFileSync(OUT, JSON.stringify(payload));
-const outStat = fs.statSync(OUT);
-console.log('totalPenerima :', payload.meta.totalPenerima);
-console.log('totalDesa     :', payload.meta.totalDesa);
-console.log('Output        :', OUT, `(${(outStat.size/1024/1024).toFixed(2)} MB)`);
-EOF
+node scripts/generate-rtrw-json-cache.js
 ```
 
-> **Catatan:** Ganti `rtrwbpjs_BARU.xlsx` di baris `const SRC` dengan nama file aktual.
+Script sudah menangani:
+- Deteksi sheet otomatis (`DATABASE` → `data_upah` → sheet pertama)
+- Normalisasi `ID_PEGAWAI` integer → dot-format `32.01.XX.XXXX` via `normalizeBpjsDesaKode()`
+
+> **Penting (lesson learned Juni 2026):** Format lama (`rtrwbpjs.xlsx`) menyimpan
+> `ID_PEGAWAI` sebagai teks `32.01.XX.XXXX`. Format baru (`data_upah`) menyimpannya
+> sebagai integer `3201XXXXXX`. Fungsi `normalizeBpjsDesaKode()` sudah ditambahkan
+> ke generate script dan controller untuk menangani kedua format secara otomatis.
 
 ### 4. Verifikasi output
 
