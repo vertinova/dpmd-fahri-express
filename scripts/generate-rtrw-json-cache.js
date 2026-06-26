@@ -17,14 +17,24 @@ function normalizeNik(value) {
   return digits.length >= 10 ? digits : '';
 }
 
+// Keep in sync with normalizeName in rtrwComparison.controller.js
+const DEGREE_TOKENS = new Set([
+  'SE', 'SH', 'ST', 'SPD', 'SPDI', 'SSOS', 'SAG', 'SKOM', 'SIP', 'SKM', 'SPT', 'SHUT',
+  'SPI', 'SS', 'SAB', 'SIKOM', 'SPSI', 'SKED', 'SFARM', 'SKEP', 'SSI', 'SSTP', 'SP',
+  'AMD', 'AMK', 'MM', 'MSI', 'MPD', 'MPDI', 'MH', 'MKOM', 'MAP', 'MSC', 'MT', 'MKES', 'PHD',
+]);
+
 function normalizeName(value) {
   let name = toUpper(value);
   name = name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
-  name = name.replace(/[.`'"]/g, ' ');
+  name = name.replace(/\./g, '');            // drop dots so "S.Pd" -> "SPD", "A.Md" -> "AMD"
+  name = name.replace(/[,`'"]/g, ' ');        // comma + quotes -> space (comma was being kept)
   name = name.replace(/[()_:/\\-]/g, ' ');
-  name = name.replace(/^(H|HJ|HJA|HAJI|HAJAH)\s+/g, '');
   name = name.replace(/\s+/g, ' ').trim();
-  return name;
+  name = name.replace(/^(H|HJ|HJA|HAJI|HAJAH|DRS|DRA|IR|KH)\s+/g, '');
+  const tokens = name.split(' ').filter(Boolean);
+  while (tokens.length > 1 && DEGREE_TOKENS.has(tokens[tokens.length - 1])) tokens.pop();
+  return tokens.join(' ');
 }
 
 function padNomor(value) {

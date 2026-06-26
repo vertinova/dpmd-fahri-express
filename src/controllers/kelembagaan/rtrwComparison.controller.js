@@ -46,14 +46,27 @@ function normalizeNik(value) {
   return digits.length >= 10 ? digits : '';
 }
 
+// ponytail: trailing academic-degree tokens (after dots removed). DB stores names
+// like "KARTOLI, SE" while ADD/BPJS store "KARTOLI"; stripping these is what lets the
+// three sources match. Token-set + trailing-only; ceiling: a real name token equal to
+// a degree (e.g. someone literally surnamed "SS") would be dropped \u2014 extend the list if so.
+const DEGREE_TOKENS = new Set([
+  'SE', 'SH', 'ST', 'SPD', 'SPDI', 'SSOS', 'SAG', 'SKOM', 'SIP', 'SKM', 'SPT', 'SHUT',
+  'SPI', 'SS', 'SAB', 'SIKOM', 'SPSI', 'SKED', 'SFARM', 'SKEP', 'SSI', 'SSTP', 'SP',
+  'AMD', 'AMK', 'MM', 'MSI', 'MPD', 'MPDI', 'MH', 'MKOM', 'MAP', 'MSC', 'MT', 'MKES', 'PHD',
+]);
+
 function normalizeName(value) {
   let name = toUpper(value);
   name = name.normalize('NFKD').replace(/[\u0300-\u036f]/g, '');
-  name = name.replace(/[.`'"]/g, ' ');
+  name = name.replace(/\./g, '');            // drop dots so "S.Pd" -> "SPD", "A.Md" -> "AMD"
+  name = name.replace(/[,`'"]/g, ' ');        // comma + quotes -> space (comma was being kept)
   name = name.replace(/[()_:/\\-]/g, ' ');
-  name = name.replace(/^(H|HJ|HJA|HAJI|HAJAH)\s+/g, '');
   name = name.replace(/\s+/g, ' ').trim();
-  return name;
+  name = name.replace(/^(H|HJ|HJA|HAJI|HAJAH|DRS|DRA|IR|KH)\s+/g, '');
+  const tokens = name.split(' ').filter(Boolean);
+  while (tokens.length > 1 && DEGREE_TOKENS.has(tokens[tokens.length - 1])) tokens.pop();
+  return tokens.join(' ');
 }
 
 function compactName(value) {
@@ -160,6 +173,33 @@ function primaryToken(value) {
   return nameTokens(value)[0] || '';
 }
 
+// Two name tokens count as "the same" if equal or a single spelling variant —
+// e.g. NURDIN/NOERDIN/NURDIEN, SAEPUL/SAEFUL. Short tokens must match exactly.
+function tokenSimilar(a, b) {
+  if (a === b) return true;
+  const max = Math.max(a.length, b.length);
+  if (max < 4) return false;
+  const d = levenshtein(a, b);
+  if (d <= 1) return true;
+  return max >= 6 && d <= 2 && d / max <= 0.34;
+}
+
+// Count how many tokens of t1 have a similar (greedy one-to-one) partner in t2.
+function tokenOverlap(t1, t2) {
+  const used = new Array(t2.length).fill(false);
+  let overlap = 0;
+  for (const tok of t1) {
+    for (let i = 0; i < t2.length; i++) {
+      if (!used[i] && tokenSimilar(tok, t2[i])) {
+        used[i] = true;
+        overlap += 1;
+        break;
+      }
+    }
+  }
+  return overlap;
+}
+
 function isSimilarName(a, b) {
   const n1 = normalizeName(a);
   const n2 = normalizeName(b);
@@ -175,7 +215,7 @@ function isSimilarName(a, b) {
 
   const first1 = primaryToken(n1);
   const first2 = primaryToken(n2);
-  if (first1 && first2 && first1 !== first2 && c1.slice(0, 4) !== c2.slice(0, 4)) {
+  if (first1 && first2 && !tokenSimilar(first1, first2) && c1.slice(0, 4) !== c2.slice(0, 4)) {
     return false;
   }
 
@@ -186,8 +226,7 @@ function isSimilarName(a, b) {
   const t1 = nameTokens(n1);
   const t2 = nameTokens(n2);
   if (t1.length >= 2 && t2.length >= 2) {
-    const set2 = new Set(t2);
-    const overlap = t1.filter((token) => set2.has(token)).length;
+    const overlap = tokenOverlap(t1, t2);
     const ratio = overlap / Math.min(t1.length, t2.length);
     return ratio >= 0.8 && similarity >= 0.74;
   }
@@ -689,15 +728,64 @@ function addToCanonMap(canonMap, indexes, source, item, enableFuzzy) {
   indexEntry(indexes, key, source, item);
 }
 
+function entrySourceSet(entry) {
+  const set = new Set();
+  if (entry.dbItems.length) set.add('db');
+  if (entry.addItems.length) set.add('add');
+  if (entry.bpjsItems.length) set.add('bpjs');
+  return set;
+}
+
+// Greedy in-pass fuzzy matching is order-dependent: a BPJS spelling reachable from ADD's
+// spelling but not DB's (NOERDIN <- NURDIN, not <- NURDIEN) gets stranded. This second pass
+// merges any two same-desa entries that share NO source but carry a similar name, so the three
+// sources reunite regardless of processing order. NIK/norek differences are kept and flagged.
+function consolidateBySimilarName(canonMap) {
+  const entries = [...canonMap.entries()];
+  for (let i = 0; i < entries.length; i++) {
+    const [ki, ei] = entries[i];
+    if (!canonMap.has(ki) || entrySourceSet(ei).size === 3) continue;
+    for (let j = i + 1; j < entries.length; j++) {
+      const [kj, ej] = entries[j];
+      if (!canonMap.has(kj)) continue;
+      const si = entrySourceSet(ei);
+      if (si.size === 3) break;
+      const sj = entrySourceSet(ej);
+      if ([...sj].some((s) => si.has(s))) continue; // shared source -> different people, skip
+
+      let match = false;
+      for (const na of ei.names) {
+        for (const nb of ej.names) {
+          if (isSimilarName(na, nb)) { match = true; break; }
+        }
+        if (match) break;
+      }
+      if (!match) continue;
+
+      ej.names.forEach((n) => ei.names.add(n));
+      ej.niks.forEach((n) => ei.niks.add(n));
+      ei.dbItems.push(...ej.dbItems);
+      ei.addItems.push(...ej.addItems);
+      ei.bpjsItems.push(...ej.bpjsItems);
+      canonMap.delete(kj);
+    }
+  }
+}
+
 function compareItems(dbList, addList, bpjsList, options = {}) {
   const enableFuzzy = typeof options === 'boolean' ? options : Boolean(options.enableFuzzy);
   const includeDetails = typeof options === 'object' && Boolean(options.includeDetails);
   const canonMap = new Map();
   const indexes = createMatchIndexes();
 
+  // ADD has no NIK, so it can only attach by name. Process it LAST so it matches against
+  // the already-merged DB+BPJS entry (which carries BPJS's fuller name) — e.g. DB "GUNTUR
+  // KURNIAWAN" + BPJS/ADD "GUNTUR KURNIAWAN YOGIANTO" now lands as all_three instead of splitting.
   dbList.forEach((item) => addToCanonMap(canonMap, indexes, 'db', item, enableFuzzy));
-  addList.forEach((item) => addToCanonMap(canonMap, indexes, 'add', item, enableFuzzy));
   bpjsList.forEach((item) => addToCanonMap(canonMap, indexes, 'bpjs', item, enableFuzzy));
+  addList.forEach((item) => addToCanonMap(canonMap, indexes, 'add', item, enableFuzzy));
+
+  if (enableFuzzy) consolidateBySimilarName(canonMap);
 
   const items = [];
 
@@ -819,7 +907,9 @@ class RtrwComparisonController {
    */
   async getComparison(req, res) {
     try {
-      const enableFuzzy = boolQuery(req.query?.fuzzy);
+      // Fuzzy name matching is on by default — it is what merges spelling variants
+      // (NURDIN/NOERDIN) and spacing/title differences across DB/ADD/BPJS. Pass ?fuzzy=0 to disable.
+      const enableFuzzy = req.query?.fuzzy === undefined ? true : boolQuery(req.query.fuzzy);
       const debugTiming = boolQuery(req.query?.debugTiming);
       const desaKodeFilter = toText(req.query?.desaKode);
       const itemKeyFilter = toText(req.query?.itemKey);
@@ -1090,3 +1180,5 @@ class RtrwComparisonController {
 }
 
 module.exports = new RtrwComparisonController();
+// Exposed for unit tests (see __tests__/rtrwMatching.test.js).
+module.exports._internals = { normalizeName, isSimilarName, tokenSimilar, compareItems };
