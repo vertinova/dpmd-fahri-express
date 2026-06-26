@@ -2334,6 +2334,8 @@ model penyedia {
 enum anggaran_jenis_sht {
   SSH
   SBU
+  ASB
+  HSPK
 }
 
 enum pegawai_jenis_kelamin {

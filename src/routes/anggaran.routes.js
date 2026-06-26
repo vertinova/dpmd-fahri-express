@@ -551,7 +551,7 @@ router.post('/pagu/:paguId/items', auth, checkRole(['superadmin', 'bendahara']),
 
     const { nama_item, kode_rekening, satuan, volume, harga_satuan, jenis_sht, kode_sht, keterangan, koefisien, grup } = req.body;
     if (!nama_item || !satuan) return res.status(400).json({ success: false, message: 'nama_item dan satuan wajib diisi' });
-    if (!['SSH', 'SBU'].includes(jenis_sht)) return res.status(400).json({ success: false, message: 'jenis_sht harus SSH atau SBU' });
+    if (!['SSH', 'SBU', 'ASB', 'HSPK'].includes(jenis_sht)) return res.status(400).json({ success: false, message: 'jenis_sht harus SSH, SBU, ASB, atau HSPK' });
 
     const maxUrutan = await prisma.anggaran_rka_items.aggregate({ _max: { urutan: true }, where: { pagu_id: BigInt(paguId) } });
     const item = await prisma.anggaran_rka_items.create({
@@ -589,7 +589,7 @@ router.put('/items/:id', auth, checkRole(['superadmin', 'bendahara']), async (re
     if (!existing) return res.status(404).json({ success: false, message: 'Item tidak ditemukan' });
 
     const { nama_item, kode_rekening, satuan, volume, harga_satuan, jenis_sht, kode_sht, keterangan, koefisien, grup, urutan } = req.body;
-    if (jenis_sht && !['SSH', 'SBU'].includes(jenis_sht)) return res.status(400).json({ success: false, message: 'jenis_sht harus SSH atau SBU' });
+    if (jenis_sht && !['SSH', 'SBU', 'ASB', 'HSPK'].includes(jenis_sht)) return res.status(400).json({ success: false, message: 'jenis_sht harus SSH, SBU, ASB, atau HSPK' });
 
     const data = {};
     if (nama_item !== undefined) data.nama_item = nama_item;
@@ -675,123 +675,82 @@ router.post('/pagu/:paguId/copy-from/:sourceTahun', auth, requireSuperadmin, asy
 });
 
 // ============================================================
-// SHT (Standar Harga Satuan) — SSH & SBU
+// SHT (Standar Harga Satuan) — SSH, SBU, ASB, HSPK
 // ============================================================
 
 const fs = require('fs');
 const path = require('path');
 
-let _sshCache = null;
-let _sbuCache = null;
+const SHT_TYPES = ['ssh', 'sbu', 'asb', 'hspk'];
+const _shtCache = {}; // { ssh: {...}, sbu: {...}, ... }
 
 function loadSht(type) {
+  if (_shtCache[type]) return _shtCache[type];
   const file = path.join(__dirname, `../../data/anggaran/${type}_2026.json`);
   if (!fs.existsSync(file)) return null;
-  return JSON.parse(fs.readFileSync(file, 'utf8'));
+  _shtCache[type] = JSON.parse(fs.readFileSync(file, 'utf8'));
+  return _shtCache[type];
 }
 
 /**
- * GET /api/anggaran/sht/ssh
- * Daftar SSH (Standar Harga Satuan) — cached in memory
- */
-router.get('/sht/ssh', auth, (req, res) => {
-  try {
-    if (!_sshCache) _sshCache = loadSht('ssh');
-    if (!_sshCache) return res.status(404).json({ success: false, message: 'Data SSH tidak ditemukan' });
-
-    const { search, kelompok, page = 1, limit = 100 } = req.query;
-    let items = _sshCache.items;
-
-    if (kelompok) items = items.filter(i => i.kode_kelompok === kelompok || i.kelompok === kelompok);
-    if (search) {
-      const q = search.toLowerCase();
-      items = items.filter(i =>
-        (i.uraian        || '').toLowerCase().includes(q) ||
-        (i.spesifikasi   || '').toLowerCase().includes(q) ||
-        (i.kode_barang   || '').toLowerCase().includes(q) ||
-        (i.kelompok      || '').toLowerCase().includes(q) ||
-        (i.kode_kelompok || '').toLowerCase().includes(q)
-      );
-    }
-
-    const total = items.length;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
-    const paged = items.slice(offset, offset + parseInt(limit));
-
-    res.json({ success: true, tahun: _sshCache.tahun, total, page: parseInt(page), data: paged });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Gagal memuat data SSH', error: error.message });
-  }
-});
-
-/**
- * GET /api/anggaran/sht/sbu
- * Daftar SBU (Standar Biaya Umum) — cached in memory
- */
-router.get('/sht/sbu', auth, (req, res) => {
-  try {
-    if (!_sbuCache) _sbuCache = loadSht('sbu');
-    if (!_sbuCache) return res.status(404).json({ success: false, message: 'Data SBU tidak ditemukan' });
-
-    const { search, kelompok, page = 1, limit = 100 } = req.query;
-    let items = _sbuCache.items;
-
-    if (kelompok) items = items.filter(i => i.kode_kelompok === kelompok || i.kelompok === kelompok);
-    if (search) {
-      const q = search.toLowerCase();
-      items = items.filter(i =>
-        (i.uraian        || '').toLowerCase().includes(q) ||
-        (i.spesifikasi   || '').toLowerCase().includes(q) ||
-        (i.kode_barang   || '').toLowerCase().includes(q) ||
-        (i.kelompok      || '').toLowerCase().includes(q) ||
-        (i.kode_kelompok || '').toLowerCase().includes(q)
-      );
-    }
-
-    const total = items.length;
-    const offset = (parseInt(page) - 1) * parseInt(limit);
-    const paged = items.slice(offset, offset + parseInt(limit));
-
-    res.json({ success: true, tahun: _sbuCache.tahun, total, page: parseInt(page), data: paged });
-  } catch (error) {
-    res.status(500).json({ success: false, message: 'Gagal memuat data SBU', error: error.message });
-  }
-});
-
-/**
- * GET /api/anggaran/sht/kelompok?type=ssh|sbu
+ * GET /api/anggaran/sht/kelompok?type=ssh|sbu|asb|hspk
  * Daftar kelompok unik untuk filter
+ * NOTE: harus dideklarasikan sebelum '/sht/:type' agar tidak tertangkap param.
  */
 router.get('/sht/kelompok', auth, (req, res) => {
   try {
-    const { type = 'ssh' } = req.query;
-    if (type === 'ssh') {
-      if (!_sshCache) _sshCache = loadSht('ssh');
-      if (!_sshCache) return res.status(404).json({ success: false, message: 'Data SSH tidak ditemukan' });
-      const seen = new Set();
-      const kelompoks = [];
-      for (const item of _sshCache.items) {
-        if (!seen.has(item.kode_kelompok)) {
-          seen.add(item.kode_kelompok);
-          kelompoks.push({ kode: item.kode_kelompok, nama: item.kelompok });
-        }
+    const type = String(req.query.type || 'ssh').toLowerCase();
+    if (!SHT_TYPES.includes(type)) return res.status(400).json({ success: false, message: 'Tipe SHT tidak valid' });
+    const data = loadSht(type);
+    if (!data) return res.status(404).json({ success: false, message: `Data ${type.toUpperCase()} tidak ditemukan` });
+
+    const seen = new Set();
+    const kelompoks = [];
+    for (const item of data.items) {
+      if (!seen.has(item.kode_kelompok)) {
+        seen.add(item.kode_kelompok);
+        kelompoks.push({ kode: item.kode_kelompok, nama: item.kelompok });
       }
-      res.json({ success: true, data: kelompoks });
-    } else {
-      if (!_sbuCache) _sbuCache = loadSht('sbu');
-      if (!_sbuCache) return res.status(404).json({ success: false, message: 'Data SBU tidak ditemukan' });
-      const seen = new Set();
-      const kelompoks = [];
-      for (const item of _sbuCache.items) {
-        if (!seen.has(item.kode_kelompok)) {
-          seen.add(item.kode_kelompok);
-          kelompoks.push({ kode: item.kode_kelompok, nama: item.kelompok });
-        }
-      }
-      res.json({ success: true, data: kelompoks });
     }
+    res.json({ success: true, data: kelompoks });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Gagal memuat kelompok SHT', error: error.message });
+  }
+});
+
+/**
+ * GET /api/anggaran/sht/:type  (ssh|sbu|asb|hspk)
+ * Daftar item SHT — cached in memory, dengan search/kelompok/pagination
+ */
+router.get('/sht/:type', auth, (req, res) => {
+  try {
+    const type = String(req.params.type).toLowerCase();
+    if (!SHT_TYPES.includes(type)) return res.status(400).json({ success: false, message: 'Tipe SHT tidak valid' });
+    const cache = loadSht(type);
+    if (!cache) return res.status(404).json({ success: false, message: `Data ${type.toUpperCase()} tidak ditemukan` });
+
+    const { search, kelompok, page = 1, limit = 100 } = req.query;
+    let items = cache.items;
+
+    if (kelompok) items = items.filter(i => i.kode_kelompok === kelompok || i.kelompok === kelompok);
+    if (search) {
+      const q = search.toLowerCase();
+      items = items.filter(i =>
+        (i.uraian        || '').toLowerCase().includes(q) ||
+        (i.spesifikasi   || '').toLowerCase().includes(q) ||
+        (i.kode_barang   || '').toLowerCase().includes(q) ||
+        (i.kelompok      || '').toLowerCase().includes(q) ||
+        (i.kode_kelompok || '').toLowerCase().includes(q)
+      );
+    }
+
+    const total = items.length;
+    const offset = (parseInt(page) - 1) * parseInt(limit);
+    const paged = items.slice(offset, offset + parseInt(limit));
+
+    res.json({ success: true, tahun: cache.tahun, total, page: parseInt(page), data: paged });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Gagal memuat data SHT', error: error.message });
   }
 });
 
