@@ -26,30 +26,37 @@ const WEEKEND_WORK_STATUS = ['Tenaga_Keamanan'];
 // Jabatan keywords yang dianggap petugas keamanan (case-insensitive)
 const SECURITY_JABATAN_KEYWORDS = ['keamanan', 'security', 'satpam'];
 
-// Hari Libur Nasional Indonesia 2026 (format: MM-DD)
+// Hari Libur Nasional & Cuti Bersama Indonesia 2026 (format: MM-DD)
+// Sumber: SKB 3 Menteri (Menag, Menaker, Menpan-RB) ditandatangani 19 September 2025.
+// 17 hari libur nasional + 8 hari cuti bersama.
 const HOLIDAYS_2026 = {
-  '01-01': 'Tahun Baru 2026',
-  '01-29': 'Tahun Baru Imlek 2577',
-  '03-20': 'Isra Mi\'raj Nabi Muhammad SAW',
-  '03-22': 'Hari Suci Nyepi Tahun Baru Saka 1948',
+  // --- Hari Libur Nasional ---
+  '01-01': 'Tahun Baru Masehi 2026',
+  '01-16': 'Isra Mi\'raj Nabi Muhammad SAW',
+  '02-17': 'Tahun Baru Imlek 2577 Kongzili',
+  '03-19': 'Hari Suci Nyepi Tahun Baru Saka 1948',
+  '03-21': 'Hari Raya Idul Fitri 1447 H', // Sabtu
+  '03-22': 'Hari Raya Idul Fitri 1447 H', // Minggu
   '04-03': 'Wafat Isa Al Masih',
-  '04-05': 'Hari Paskah', // Minggu
+  '04-05': 'Hari Paskah / Kebangkitan Isa Al Masih', // Minggu
   '05-01': 'Hari Buruh Internasional',
   '05-14': 'Kenaikan Isa Al Masih',
-  '05-15': 'Hari Raya Waisak 2570',
+  '05-27': 'Hari Raya Idul Adha 1447 H',
+  '05-31': 'Hari Raya Waisak 2570 BE', // Minggu
   '06-01': 'Hari Lahir Pancasila',
-  '06-26': 'Hari Raya Idul Adha 1447 H',
-  '06-27': 'Cuti Bersama Idul Adha',
-  '07-17': 'Tahun Baru Islam 1448 H',
-  '08-17': 'Hari Kemerdekaan RI',
-  '09-25': 'Maulid Nabi Muhammad SAW',
+  '06-16': 'Tahun Baru Islam 1448 H (1 Muharam)',
+  '08-17': 'Proklamasi Kemerdekaan RI',
+  '08-25': 'Maulid Nabi Muhammad SAW',
   '12-25': 'Hari Raya Natal',
-  // Cuti Bersama & Libur tambahan (sesuaikan dengan SKB Menteri)
-  '01-02': 'Cuti Bersama Tahun Baru',
-  '01-30': 'Cuti Bersama Imlek',
-  '03-23': 'Cuti Bersama Nyepi',
-  '12-24': 'Cuti Bersama Natal',
-  '12-31': 'Cuti Bersama Tahun Baru',
+  // --- Cuti Bersama ---
+  '02-16': 'Cuti Bersama Tahun Baru Imlek',
+  '03-18': 'Cuti Bersama Hari Suci Nyepi',
+  '03-20': 'Cuti Bersama Idul Fitri 1447 H',
+  '03-23': 'Cuti Bersama Idul Fitri 1447 H',
+  '03-24': 'Cuti Bersama Idul Fitri 1447 H',
+  '05-15': 'Cuti Bersama Kenaikan Isa Al Masih',
+  '05-28': 'Cuti Bersama Idul Adha 1447 H',
+  '12-24': 'Cuti Bersama Hari Raya Natal',
 };
 
 const REKAP_DAY_LABELS = ['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab'];
