@@ -7,6 +7,13 @@ const mediasoup = require('mediasoup');
 const EventEmitter = require('events');
 const config = require('../config/mediasoup.config');
 
+// Skala besar (mis. rapat 500): sebar fan-out consumer ke SEMUA worker/inti CPU
+// lewat router-piping. 1 room jadi punya 1 router per worker; producer di-pipe
+// ke semua router, consumer tiap peer ditempatkan round-robin antar-router.
+// Default OFF supaya rapat normal tetap pakai jalur lama yang terbukti stabil —
+// nyalakan dengan env MEDIASOUP_PIPE_ENABLED=1 saat menguji room besar.
+const PIPE_ENABLED = process.env.MEDIASOUP_PIPE_ENABLED === '1';
+
 class MediasoupService extends EventEmitter {
   constructor() {
     super();
@@ -64,7 +71,10 @@ class MediasoupService extends EventEmitter {
       // Kumpulkan & bersihkan room yang dijalankan worker ini (router-nya ikut mati).
       const deadRoomIds = [];
       for (const [roomId, room] of this.rooms) {
-        if (room.worker === worker) {
+        // Pipe mode: room membentang ke SEMUA worker → worker mana pun mati,
+        // room itu terdampak. Non-pipe: hanya room di worker yang mati.
+        const affected = room.worker === worker || (room.routers && room.routers.length > 1);
+        if (affected) {
           deadRoomIds.push(roomId);
           this.rooms.delete(roomId);
         }
@@ -118,7 +128,25 @@ class MediasoupService extends EventEmitter {
         peers: new Map(),
         audioLevelObserver: null,
         dominantPeerId: null,
+        // ── Pipe mode (skala besar) ──
+        routers: null,            // 1 router per worker bila pipe aktif
+        peerRouter: new Map(),    // peerId -> router yang menampung transport/consumer-nya
+        producerRouter: new Map(),// producerId -> router asal (sumber) producer
+        pipedProducers: new Set(),// `${producerId}@${router.id}` yang sudah ter-pipe
+        nextRouterIdx: 0,
       };
+
+      // Pipe mode: buat 1 router (codec sama) di SETIAP worker. Codec identik →
+      // pipeToRouter kompatibel & rtpCapabilities seragam untuk semua peer.
+      if (PIPE_ENABLED && this.workers.length > 1) {
+        const extra = [];
+        for (const w of this.workers) {
+          if (w === worker) { extra.push(router); continue; }
+          extra.push(await w.createRouter({ mediaCodecs: config.router.mediaCodecs }));
+        }
+        room.routers = extra;
+        console.log(`[Mediasoup] Room ${roomId}: pipe mode aktif — ${extra.length} router (1/worker).`);
+      }
 
       // AudioLevelObserver → deteksi pembicara dominan (untuk active-speaker HLS/UI).
       try {
@@ -179,6 +207,39 @@ class MediasoupService extends EventEmitter {
   }
 
   /**
+   * Router yang menampung transport/consumer milik sebuah peer.
+   * Non-pipe: selalu router tunggal room. Pipe: round-robin antar-worker,
+   * di-cache per peer agar send & recv transport peer ada di router yang sama.
+   */
+  _peerRouter(room, peerId) {
+    if (!room.routers || room.routers.length <= 1) return room.router;
+    let r = room.peerRouter.get(peerId);
+    if (!r) {
+      r = room.routers[room.nextRouterIdx++ % room.routers.length];
+      room.peerRouter.set(peerId, r);
+    }
+    return r;
+  }
+
+  /**
+   * Pastikan sebuah producer tersedia (ter-pipe) di router tertentu sebelum
+   * di-consume. Idempoten. Aman dipanggil walau bukan pipe mode.
+   */
+  async _ensureProducerOnRouter(room, producerId, targetRouter) {
+    if (!room.routers || room.routers.length <= 1) return;
+    const src = room.producerRouter.get(producerId);
+    if (!src || src === targetRouter) return;
+    const key = `${producerId}@${targetRouter.id}`;
+    if (room.pipedProducers.has(key)) return;
+    try {
+      await src.pipeToRouter({ producerId, router: targetRouter });
+      room.pipedProducers.add(key);
+    } catch (e) {
+      console.error(`[Mediasoup] pipe producer ${producerId} → router gagal:`, e.message);
+    }
+  }
+
+  /**
    * Create WebRTC transport for a peer
    */
   async createWebRtcTransport(roomId, peerId, direction) {
@@ -187,7 +248,9 @@ class MediasoupService extends EventEmitter {
       throw new Error('Room not found');
     }
 
-    const transport = await room.router.createWebRtcTransport(config.webRtcTransport);
+    // Pipe mode: transport peer dibuat di router milik peer (sebar antar-worker).
+    const peerRouter = this._peerRouter(room, peerId);
+    const transport = await peerRouter.createWebRtcTransport(config.webRtcTransport);
 
     transport.on('dtlsstatechange', (dtlsState) => {
       if (dtlsState === 'closed') {
@@ -281,7 +344,31 @@ class MediasoupService extends EventEmitter {
 
     peer.producers.set(producer.id, producer);
 
+    // Pipe mode: sebar producer ke SEMUA router lain agar consumer di worker mana
+    // pun bisa menontonnya. Producer biasanya sedikit (host mute mayoritas) →
+    // biaya pipe kecil, fan-out consumer tersebar ke semua inti.
+    if (room.routers && room.routers.length > 1) {
+      const srcRouter = this._peerRouter(room, peerId);
+      room.producerRouter.set(producer.id, srcRouter);
+      for (const r of room.routers) {
+        if (r === srcRouter) continue;
+        const key = `${producer.id}@${r.id}`;
+        if (room.pipedProducers.has(key)) continue;
+        try {
+          await srcRouter.pipeToRouter({ producerId: producer.id, router: r });
+          room.pipedProducers.add(key);
+        } catch (e) {
+          console.error(`[Mediasoup] pipe producer ${producer.id} saat produce gagal:`, e.message);
+        }
+      }
+      producer.on('close', () => {
+        room.producerRouter.delete(producer.id);
+        for (const r of room.routers) room.pipedProducers.delete(`${producer.id}@${r.id}`);
+      });
+    }
+
     // Daftarkan audio ke AudioLevelObserver untuk deteksi pembicara dominan.
+    // (Pipe mode: observer ada di router primary; producer sudah ter-pipe ke sana.)
     if (kind === 'audio' && room.audioLevelObserver) {
       room.audioLevelObserver.addProducer({ producerId: producer.id }).catch(() => {});
     }
@@ -305,8 +392,13 @@ class MediasoupService extends EventEmitter {
     const transport = peer.transports.get(transportId);
     if (!transport) throw new Error('Transport not found');
 
+    // Pipe mode: consumer dibuat di router peer; pastikan producer (mungkin dari
+    // worker lain) sudah ter-pipe ke router ini sebelum cek/consume.
+    const consumerRouter = this._peerRouter(room, peerId);
+    await this._ensureProducerOnRouter(room, producerId, consumerRouter);
+
     // Check if can consume
-    if (!room.router.canConsume({ producerId, rtpCapabilities })) {
+    if (!consumerRouter.canConsume({ producerId, rtpCapabilities })) {
       throw new Error('Cannot consume');
     }
 
@@ -523,13 +615,23 @@ class MediasoupService extends EventEmitter {
     }
 
     room.peers.delete(peerId);
+    room.peerRouter?.delete(peerId); // lepas penugasan router peer (pipe mode)
     console.log(`[Mediasoup] Peer ${peerId} removed from room ${roomId}`);
 
     // If room is empty and autoDeleteRoom is true, close it
     if (autoDeleteRoom && room.peers.size === 0) {
-      room.router.close();
+      this._closeRouters(room);
       this.rooms.delete(roomId);
       console.log(`[Mediasoup] Room ${roomId} closed (empty)`);
+    }
+  }
+
+  /** Tutup semua router room (pipe mode = banyak; non-pipe = 1). */
+  _closeRouters(room) {
+    if (room.routers && room.routers.length) {
+      for (const r of room.routers) { try { if (!r.closed) r.close(); } catch { /* noop */ } }
+    } else if (room.router && !room.router.closed) {
+      room.router.close();
     }
   }
 
@@ -587,9 +689,7 @@ class MediasoupService extends EventEmitter {
         }
       }
 
-      if (room.router && !room.router.closed) {
-        room.router.close();
-      }
+      this._closeRouters(room);
       this.rooms.delete(roomId);
       console.log(`[Mediasoup] Room ${roomId} forcefully closed`);
     } catch (err) {
