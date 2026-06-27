@@ -48,10 +48,11 @@ class JadwalKegiatanController {
       // Date filter - find activities on the selected date
       // Activity spans the date if: tanggal_mulai <= selected_date AND tanggal_selesai >= selected_date
       if (tanggal) {
-        // Parse the input date as local time (not UTC)
+        // tanggal_mulai/selesai disimpan sebagai wall-clock UTC (tanpa konversi timezone),
+        // jadi range filter pun dibangun di UTC agar konsisten apapun timezone server.
         const [year, month, day] = tanggal.split('-').map(Number);
-        const startOfDay = new Date(year, month - 1, day, 0, 0, 0, 0);
-        const endOfDay = new Date(year, month - 1, day, 23, 59, 59, 999);
+        const startOfDay = new Date(Date.UTC(year, month - 1, day, 0, 0, 0, 0));
+        const endOfDay = new Date(Date.UTC(year, month - 1, day, 23, 59, 59, 999));
         
         where.AND = where.AND || [];
         where.AND.push({
