@@ -27,7 +27,12 @@ const admittedPeers = new Map();  // roomId -> Set<peerId> (sudah di-admit host 
 // hanya karena koneksi sempat putus (jaringan kantor/HP sering blip). Beri waktu
 // reconnect; bila peserta kembali dalam jeda ini, pembersihan dibatalkan sehingga
 // peserta lain tidak melihat dia "keluar lalu masuk" berulang ("kepental-pental").
-const PEER_LEAVE_GRACE_MS = 12000;
+// 25s: transport polling (tanpa upgrade WebSocket) sering perlu >12s untuk pulih
+// setelah drop nyata. Grace 12s terlalu pendek → peserta yang reconnect lambat
+// terlanjur di-"peer-left" lalu masuk lagi ("kepental-pental"). 25s menutup
+// mayoritas reconnect polling tanpa membuat tile peserta yang benar-benar keluar
+// menggantung terlalu lama.
+const PEER_LEAVE_GRACE_MS = 25000;
 const pendingPeerLeaves = new Map(); // `${roomId}::${peerId}` -> timeout
 
 function cancelPendingLeave(roomId, peerId) {
