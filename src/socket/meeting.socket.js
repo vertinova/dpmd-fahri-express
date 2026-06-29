@@ -1047,7 +1047,10 @@ function initSocketServer(httpServer) {
                 true
               );
               emitProducerPauseState(socket.roomId, s.peerId, paused, true);
+              // Soft mute-all harus melepas kunci lama agar peserta tetap bisa
+              // menyalakan mic-nya sendiri; hanya "mute & kunci" yang mengunci.
               if (lock) getMicLocks(socket.roomId).add(String(s.peerId));
+              else getMicLocks(socket.roomId).delete(String(s.peerId));
               s.emit('force-muted', { kind: 'audio', by: socket.userName, locked: lock });
               await setParticipantMediaState(s, { isMuted: true });
             }
