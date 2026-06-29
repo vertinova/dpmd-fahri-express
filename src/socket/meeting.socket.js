@@ -23,6 +23,15 @@ const meetingLocks = new Map();   // roomId -> boolean (meeting dikunci)
 const waitingRooms = new Map();   // roomId -> Map<peerId, { socketId, userName, joinedAt }>
 const admittedPeers = new Map();  // roomId -> Set<peerId> (sudah di-admit host / host sendiri)
 
+// Hard-mute (kunci mic): peserta yang terkunci TIDAK bisa membuka mic-nya
+// sendiri sampai host melepas (unmute orang itu / unmute-all). Beda dengan
+// mute biasa (soft) yang masih boleh dibuka peserta sendiri.
+const mutedLocks = new Map();     // roomId -> Set<peerId(string)>
+function getMicLocks(roomId) {
+  if (!mutedLocks.has(roomId)) mutedLocks.set(roomId, new Set());
+  return mutedLocks.get(roomId);
+}
+
 // Grace period saat socket terputus: jangan langsung keluarkan peserta dari room
 // hanya karena koneksi sempat putus (jaringan kantor/HP sering blip). Beri waktu
 // reconnect; bila peserta kembali dalam jeda ini, pembersihan dibatalkan sehingga
@@ -89,6 +98,7 @@ function clearRoomState(roomId) {
   meetingLocks.delete(roomId);
   waitingRooms.delete(roomId);
   admittedPeers.delete(roomId);
+  mutedLocks.delete(roomId);
 }
 
 function makeMeetingPeerId(socket) {
@@ -962,7 +972,7 @@ function initSocketServer(httpServer) {
     socket.on('host-mute-participant', async (data, callback) => {
       try {
         if (!(await isRoomHost(socket))) return safeCallback(callback, { error: 'Hanya host' });
-        const { targetPeerId, kind = 'audio' } = data || {};
+        const { targetPeerId, kind = 'audio', lock = false } = data || {};
         const mediaKind = kind === 'video' ? 'video' : 'audio';
         const target = findSocketByPeerId(socket.roomId, targetPeerId);
 
@@ -975,12 +985,16 @@ function initSocketServer(httpServer) {
         );
         emitProducerPauseState(socket.roomId, targetPeerId, paused, true);
 
+        // Hard-mute audio: kunci agar peserta tak bisa membuka mic sendiri.
+        const locked = mediaKind === 'audio' && lock === true;
+        if (locked) getMicLocks(socket.roomId).add(String(targetPeerId));
+
         if (target) {
-          target.emit('force-muted', { kind: mediaKind, by: socket.userName });
+          target.emit('force-muted', { kind: mediaKind, by: socket.userName, locked });
           await setParticipantMediaState(target, mediaKind === 'audio' ? { isMuted: true } : { isVideoOff: true });
         }
 
-        safeCallback(callback, { success: true, paused: paused.length });
+        safeCallback(callback, { success: true, paused: paused.length, locked });
       } catch (err) {
         safeCallback(callback, { error: err.message });
       }
@@ -1002,8 +1016,11 @@ function initSocketServer(httpServer) {
         );
         emitProducerPauseState(socket.roomId, targetPeerId, resumed, false);
 
+        // Lepas kunci mic saat host membuka mic peserta ini.
+        if (mediaKind === 'audio') getMicLocks(socket.roomId).delete(String(targetPeerId));
+
         if (target) {
-          target.emit('force-unmuted', { kind: mediaKind, by: socket.userName });
+          target.emit('force-unmuted', { kind: mediaKind, by: socket.userName, locked: false });
           await setParticipantMediaState(target, mediaKind === 'audio' ? { isMuted: false } : { isVideoOff: false });
         }
 
@@ -1017,6 +1034,7 @@ function initSocketServer(httpServer) {
     socket.on('host-mute-all', async (data, callback) => {
       try {
         if (!(await isRoomHost(socket))) return safeCallback(callback, { error: 'Hanya host' });
+        const lock = data?.lock === true; // "Mute semua & kunci" → tak bisa buka sendiri
         const ids = io.sockets.adapter.rooms.get(socket.roomId);
         if (ids) {
           for (const id of ids) {
@@ -1029,12 +1047,13 @@ function initSocketServer(httpServer) {
                 true
               );
               emitProducerPauseState(socket.roomId, s.peerId, paused, true);
-              s.emit('force-muted', { kind: 'audio', by: socket.userName });
+              if (lock) getMicLocks(socket.roomId).add(String(s.peerId));
+              s.emit('force-muted', { kind: 'audio', by: socket.userName, locked: lock });
               await setParticipantMediaState(s, { isMuted: true });
             }
           }
         }
-        safeCallback(callback, { success: true });
+        safeCallback(callback, { success: true, locked: lock });
       } catch (err) {
         safeCallback(callback, { error: err.message });
       }
@@ -1043,6 +1062,7 @@ function initSocketServer(httpServer) {
     socket.on('host-unmute-all', async (data, callback) => {
       try {
         if (!(await isRoomHost(socket))) return safeCallback(callback, { error: 'Hanya host' });
+        getMicLocks(socket.roomId).clear(); // buka semua kunci mic
         const ids = io.sockets.adapter.rooms.get(socket.roomId);
         if (ids) {
           for (const id of ids) {
@@ -1055,7 +1075,7 @@ function initSocketServer(httpServer) {
                 false
               );
               emitProducerPauseState(socket.roomId, s.peerId, resumed, false);
-              s.emit('force-unmuted', { kind: 'audio', by: socket.userName });
+              s.emit('force-unmuted', { kind: 'audio', by: socket.userName, locked: false });
               await setParticipantMediaState(s, { isMuted: false });
             }
           }
@@ -1167,14 +1187,19 @@ function initSocketServer(httpServer) {
         const updates = [];
 
         if (typeof data?.isMuted === 'boolean') {
-          const changed = await mediasoupService.setProducerPausedByKind(
-            socket.roomId,
-            String(socket.peerId),
-            'audio',
-            data.isMuted
-          );
-          emitProducerPauseState(socket.roomId, socket.peerId, changed, data.isMuted);
-          updates.push(...changed);
+          // Hard-mute: peserta terkunci tak boleh membuka mic sendiri.
+          if (data.isMuted === false && getMicLocks(socket.roomId).has(String(socket.peerId))) {
+            socket.emit('mic-locked', { by: 'host' }); // klien tetap mute + beri info
+          } else {
+            const changed = await mediasoupService.setProducerPausedByKind(
+              socket.roomId,
+              String(socket.peerId),
+              'audio',
+              data.isMuted
+            );
+            emitProducerPauseState(socket.roomId, socket.peerId, changed, data.isMuted);
+            updates.push(...changed);
+          }
         }
 
         if (typeof data?.isVideoOff === 'boolean') {
