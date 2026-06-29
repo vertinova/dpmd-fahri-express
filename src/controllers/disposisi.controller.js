@@ -109,8 +109,24 @@ exports.createDisposisi = async (req, res, next) => {
     // Fetch surat_masuk for notification data
     const suratData = await prisma.surat_masuk.findUnique({
       where: { id: BigInt(surat_id) },
-      select: { perihal: true, nomor_surat: true }
+      select: { perihal: true, nomor_surat: true, file_disposisi_path: true }
     });
+
+    if (!suratData) {
+      return res.status(404).json({
+        success: false,
+        message: 'Surat masuk tidak ditemukan',
+      });
+    }
+
+    // Sekretaris Dinas mengunggah kertas disposisi sebelum surat diteruskan.
+    if (dari_user_role === 'sekretaris_dinas' && !suratData.file_disposisi_path) {
+      return res.status(422).json({
+        success: false,
+        code: 'DISPOSITION_SHEET_REQUIRED',
+        message: 'Upload kertas disposisi terlebih dahulu sebelum meneruskan surat.',
+      });
+    }
 
     const senderName = req.user.nama || req.user.name || req.user.email;
 
@@ -876,25 +892,18 @@ exports.createSuratMasuk = async (req, res, next) => {
     }
 
     // Handle file upload
-    const fileSurat = req.files?.file_surat?.[0];
-    const fileDisposisi = req.files?.file_disposisi?.[0];
+    const fileSurat = req.file;
     let file_path = null;
-    let file_disposisi_path = null;
     if (fileSurat) {
       file_path = fileSurat.path.replace(/\\/g, '/');
       console.log('📎 File uploaded:', file_path);
     } else {
       console.warn('⚠️  No file uploaded');
     }
-    if (fileDisposisi) {
-      file_disposisi_path = fileDisposisi.path.replace(/\\/g, '/');
-      console.log('📎 Disposition sheet uploaded:', file_disposisi_path);
-    }
-
-    if (!fileSurat || !fileDisposisi) {
+    if (!fileSurat) {
       return res.status(400).json({
         success: false,
-        message: 'File surat dan kertas disposisi wajib diupload',
+        message: 'File surat wajib diupload',
       });
     }
 
@@ -927,7 +936,7 @@ exports.createSuratMasuk = async (req, res, next) => {
         lokasi_kegiatan: lokasi_kegiatan || null,
         tanggal_kegiatan: tanggal_kegiatan ? new Date(tanggal_kegiatan) : null,
         file_path,
-        file_disposisi_path,
+        file_disposisi_path: null,
         status: 'dikirim',
         created_by: BigInt(user_id),
       },
@@ -1047,6 +1056,97 @@ exports.createSuratMasuk = async (req, res, next) => {
       });
     }
     
+    next(error);
+  }
+};
+
+/**
+ * @route POST /api/disposisi/surat-masuk/:suratId/kertas-disposisi
+ * @desc Upload kertas disposisi oleh Sekretaris Dinas
+ * @access Sekretaris Dinas yang menerima surat
+ */
+exports.uploadKertasDisposisi = async (req, res, next) => {
+  try {
+    const { suratId } = req.params;
+    const userId = BigInt(req.user.id);
+
+    if (!/^\d+$/.test(suratId)) {
+      return res.status(400).json({
+        success: false,
+        message: 'ID surat tidak valid',
+      });
+    }
+
+    if (!req.file) {
+      return res.status(400).json({
+        success: false,
+        message: 'File kertas disposisi wajib diupload dalam format PDF',
+      });
+    }
+
+    const surat = await prisma.surat_masuk.findUnique({
+      where: { id: BigInt(suratId) },
+      select: {
+        id: true,
+        nomor_surat: true,
+        perihal: true,
+        file_disposisi_path: true,
+        disposisi: {
+          where: { ke_user_id: userId },
+          select: { id: true },
+          take: 1,
+        },
+      },
+    });
+
+    if (!surat) {
+      return res.status(404).json({
+        success: false,
+        message: 'Surat masuk tidak ditemukan',
+      });
+    }
+
+    if (surat.disposisi.length === 0) {
+      return res.status(403).json({
+        success: false,
+        message: 'Anda bukan penerima disposisi untuk surat ini',
+      });
+    }
+
+    const filePath = req.file.path.replace(/\\/g, '/');
+    const updated = await prisma.surat_masuk.update({
+      where: { id: surat.id },
+      data: { file_disposisi_path: filePath },
+      select: {
+        id: true,
+        nomor_surat: true,
+        file_disposisi_path: true,
+      },
+    });
+
+    await ActivityLogger.log({
+      userId: req.user.id,
+      userName: req.user.nama || req.user.name || req.user.email,
+      userRole: req.user.role,
+      bidangId: 2,
+      module: 'disposisi',
+      action: surat.file_disposisi_path ? 'update_file' : 'upload_file',
+      entityType: 'surat_masuk',
+      entityId: Number(surat.id),
+      entityName: surat.perihal,
+      description: `${req.user.nama || req.user.name || req.user.email} mengunggah kertas disposisi untuk surat ${surat.nomor_surat}`,
+      oldValue: { file_disposisi_path: surat.file_disposisi_path },
+      newValue: { file_disposisi_path: filePath },
+      ipAddress: ActivityLogger.getIpFromRequest(req),
+      userAgent: ActivityLogger.getUserAgentFromRequest(req),
+    });
+
+    return res.json({
+      success: true,
+      message: 'Kertas disposisi berhasil diupload',
+      data: updated,
+    });
+  } catch (error) {
     next(error);
   }
 };

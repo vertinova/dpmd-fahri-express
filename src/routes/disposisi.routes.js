@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const disposisiController = require('../controllers/disposisi.controller');
-const { auth } = require('../middlewares/auth');
+const { auth, checkRole } = require('../middlewares/auth');
 const multer = require('multer');
 const path = require('path');
 
@@ -37,11 +37,21 @@ const upload = multer({
 router.post(
   '/surat-masuk',
   auth,
-  upload.fields([
-    { name: 'file_surat', maxCount: 1 },
-    { name: 'file_disposisi', maxCount: 1 },
-  ]),
+  upload.single('file_surat'),
   disposisiController.createSuratMasuk
+);
+
+/**
+ * @route POST /api/disposisi/surat-masuk/:suratId/kertas-disposisi
+ * @desc Upload kertas disposisi setelah surat diterima Sekretaris Dinas
+ * @access Sekretaris Dinas only
+ */
+router.post(
+  '/surat-masuk/:suratId/kertas-disposisi',
+  auth,
+  checkRole('sekretaris_dinas'),
+  upload.single('file_disposisi'),
+  disposisiController.uploadKertasDisposisi
 );
 
 /**
