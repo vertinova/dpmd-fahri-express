@@ -3,6 +3,26 @@ const { generateToken } = require('../middlewares/auth');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 
+// Password bawaan (seeder). User yang masih memakai ini WAJIB menggantinya dulu.
+const DEFAULT_PASSWORD = 'password';
+
+// Apakah hash password ini masih sama dengan password default?
+const isUsingDefaultPassword = async (passwordHash) => {
+  try {
+    return await bcrypt.compare(DEFAULT_PASSWORD, passwordHash);
+  } catch {
+    return false;
+  }
+};
+
+// Validasi koordinat lokasi yang dikirim klien (lokasi WAJIB saat login).
+const parseCoordinate = (value, min, max) => {
+  if (value === undefined || value === null || value === '') return null;
+  const num = Number(value);
+  if (!Number.isFinite(num) || num < min || num > max) return null;
+  return num;
+};
+
 /**
  * Login - Validate credentials and return Express JWT token
  */
@@ -14,6 +34,17 @@ const login = async (req, res) => {
       return res.status(400).json({
         success: false,
         message: 'Email and password are required'
+      });
+    }
+
+    // Lokasi WAJIB saat login — koordinat valid harus disertakan.
+    const latitude = parseCoordinate(req.body.latitude, -90, 90);
+    const longitude = parseCoordinate(req.body.longitude, -180, 180);
+    if (latitude === null || longitude === null) {
+      return res.status(422).json({
+        success: false,
+        code: 'LOCATION_REQUIRED',
+        message: 'Lokasi wajib diaktifkan untuk login. Izinkan akses lokasi lalu coba lagi.'
       });
     }
 
@@ -76,8 +107,8 @@ const login = async (req, res) => {
 
     logger.info(`✅ Login successful: ${user.email} (${user.role})`);
 
-    // Record success login history (fire-and-forget)
-    recordLoginHistory(req, user.id, 'success');
+    // Record success login history (fire-and-forget) — sertakan koordinat lokasi.
+    recordLoginHistory(req, user.id, 'success', { latitude, longitude });
 
     // Auto-register device_id if provided
     const { device_id } = req.body;
@@ -141,7 +172,9 @@ const login = async (req, res) => {
       status_kepegawaian: user.pegawai?.status_kepegawaian?.replace(/_/g, ' ') || null,
       pangkat: user.pegawai?.pangkat || null,
       golongan: user.pegawai?.golongan || null,
-      sub_bidang: user.pegawai?.sub_bidang || null
+      sub_bidang: user.pegawai?.sub_bidang || null,
+      // Wajib ganti password bila masih memakai password default 'password'.
+      must_change_password: await isUsingDefaultPassword(user.password)
     };
 
     // If user has desa_id, fetch related desa and kecamatan
@@ -266,7 +299,7 @@ const parseUserAgent = (ua) => {
 /**
  * Record login history (fire-and-forget, no await needed)
  */
-const recordLoginHistory = (req, userId, status = 'success') => {
+const recordLoginHistory = (req, userId, status = 'success', location = {}) => {
   try {
     const ip = req.headers['x-forwarded-for']?.split(',')[0].trim()
       || req.headers['x-real-ip']
@@ -285,7 +318,9 @@ const recordLoginHistory = (req, userId, status = 'success') => {
         device_type,
         browser,
         os,
-        status
+        status,
+        latitude: location.latitude ?? null,
+        longitude: location.longitude ?? null
       }
     }).catch(err => logger.error('Failed to record login history:', err));
   } catch (err) {
@@ -309,6 +344,7 @@ const verifyToken = async (req, res) => {
         name: true,
         email: true,
         role: true,
+        password: true,
         avatar: true,
         desa_id: true,
         kecamatan_id: true,
@@ -370,7 +406,9 @@ const verifyToken = async (req, res) => {
       status_kepegawaian: user.pegawai?.status_kepegawaian?.replace(/_/g, ' ') || null,
       pangkat: user.pegawai?.pangkat || null,
       golongan: user.pegawai?.golongan || null,
-      sub_bidang: user.pegawai?.sub_bidang || null
+      sub_bidang: user.pegawai?.sub_bidang || null,
+      // Wajib ganti password bila masih memakai password default 'password'.
+      must_change_password: await isUsingDefaultPassword(user.password)
     };
 
     // If user has desa_id, fetch desa data with kecamatan
@@ -470,6 +508,7 @@ const getProfile = async (req, res) => {
         name: true,
         email: true,
         role: true,
+        password: true,
         avatar: true,
         desa_id: true,
         kecamatan_id: true,
@@ -531,7 +570,9 @@ const getProfile = async (req, res) => {
       status_kepegawaian: user.pegawai?.status_kepegawaian?.replace(/_/g, ' ') || null,
       pangkat: user.pegawai?.pangkat || null,
       golongan: user.pegawai?.golongan || null,
-      sub_bidang: user.pegawai?.sub_bidang || null
+      sub_bidang: user.pegawai?.sub_bidang || null,
+      // Wajib ganti password bila masih memakai password default 'password'.
+      must_change_password: await isUsingDefaultPassword(user.password)
     };
 
     // If user has desa_id, fetch desa data with kecamatan
@@ -835,8 +876,55 @@ const checkTailscaleVpn = async (req, res) => {
   }
 };
 
+/**
+ * Force Change Password - khusus user yang MASIH memakai password default.
+ * Tidak butuh password lama (user terbukti default & sudah terautentikasi sesi ini).
+ */
+const forceChangePassword = async (req, res) => {
+  try {
+    const userId = req.user.id;
+    const { newPassword } = req.body;
+
+    if (!newPassword || typeof newPassword !== 'string') {
+      return res.status(400).json({ success: false, message: 'Password baru wajib diisi' });
+    }
+    if (newPassword.length < 8) {
+      return res.status(422).json({ success: false, message: 'Password baru minimal 8 karakter' });
+    }
+    if (newPassword === DEFAULT_PASSWORD) {
+      return res.status(422).json({ success: false, message: "Password tidak boleh memakai password default '" + DEFAULT_PASSWORD + "'" });
+    }
+
+    const user = await prisma.users.findUnique({ where: { id: BigInt(userId) } });
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
+    }
+
+    // Hanya boleh dipakai bila memang masih memakai password default.
+    if (!(await isUsingDefaultPassword(user.password))) {
+      return res.status(409).json({ success: false, message: 'Password Anda sudah bukan default, tidak perlu diganti di sini' });
+    }
+
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    await prisma.users.update({
+      where: { id: BigInt(userId) },
+      data: {
+        password: hashedPassword,
+        plain_password: user.role === 'superadmin' ? null : newPassword
+      }
+    });
+
+    logger.info(`🔑 Default password changed for ${user.email}`);
+    return res.json({ success: true, message: 'Password berhasil diganti' });
+  } catch (error) {
+    logger.error('forceChangePassword error:', error);
+    return res.status(500).json({ success: false, message: 'Gagal mengganti password', error: error.message });
+  }
+};
+
 module.exports = {
   login,
   verifyToken,
-  getProfile
+  getProfile,
+  forceChangePassword
 };

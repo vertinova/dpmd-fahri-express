@@ -47,6 +47,8 @@ model login_histories {
   browser     String?   @db.VarChar(100)
   os          String?   @db.VarChar(100)
   status      String    @default("success") @db.VarChar(20)
+  latitude    Decimal?  @db.Decimal(10, 7)
+  longitude   Decimal?  @db.Decimal(10, 7)
   created_at  DateTime? @default(now()) @db.Timestamp(0)
   users       users     @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_login_histories_user_id")
 

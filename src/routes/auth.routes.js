@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { login, verifyToken, getProfile } = require('../controllers/auth.controller');
+const { login, verifyToken, getProfile, forceChangePassword } = require('../controllers/auth.controller');
 const { auth } = require('../middlewares/auth');
 const loginRateLimiter = require('../middlewares/loginRateLimit');
 
@@ -10,5 +10,7 @@ router.post('/login', loginRateLimiter, login);
 // Protected routes
 router.get('/verify', auth, verifyToken);
 router.get('/profile', auth, getProfile); // Get current user profile with relations
+// Ganti password default (popup wajib ganti saat pertama login)
+router.post('/change-default-password', auth, forceChangePassword);
 
 module.exports = router;
