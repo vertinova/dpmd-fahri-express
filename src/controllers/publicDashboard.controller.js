@@ -113,55 +113,6 @@ const buildKeuanganDesaStats = (options = {}) => {
 
 const buildDashboardCards = (summary) => ([
   {
-    key: 'kecamatan',
-    label: 'Kecamatan',
-    value: summary.total_kecamatan,
-    format: 'number',
-    data_path: 'data.summary.total_kecamatan'
-  },
-  {
-    key: 'desa',
-    label: 'Desa',
-    value: summary.total_desa,
-    format: 'number',
-    data_path: 'data.summary.total_desa'
-  },
-  {
-    key: 'kelurahan',
-    label: 'Kelurahan',
-    value: summary.total_kelurahan,
-    format: 'number',
-    data_path: 'data.summary.total_kelurahan'
-  },
-  {
-    key: 'profil_desa',
-    label: 'Profil Desa Terisi',
-    value: summary.total_profil_desa,
-    format: 'number',
-    data_path: 'data.summary.total_profil_desa'
-  },
-  {
-    key: 'aparatur_desa',
-    label: 'Aparatur Desa',
-    value: summary.total_aparatur_external || summary.total_aparatur_lokal,
-    format: 'number',
-    data_path: 'data.modules.aparatur_desa.external_total'
-  },
-  {
-    key: 'produk_hukum',
-    label: 'Produk Hukum',
-    value: summary.total_produk_hukum,
-    format: 'number',
-    data_path: 'data.summary.total_produk_hukum'
-  },
-  {
-    key: 'keuangan_desa',
-    label: 'Keuangan Desa',
-    value: summary.total_keuangan_desa_realisasi,
-    format: 'currency_idr',
-    data_path: 'data.summary.total_keuangan_desa_realisasi'
-  },
-  {
     key: 'bumdes',
     label: 'BUMDes',
     value: summary.total_bumdes,
@@ -169,57 +120,29 @@ const buildDashboardCards = (summary) => ([
     data_path: 'data.summary.total_bumdes'
   },
   {
-    key: 'kelembagaan',
-    label: 'Kelembagaan',
-    value: summary.total_kelembagaan,
+    key: 'aparatur_desa',
+    label: 'Aparatur Desa',
+    value: summary.total_aparatur,
     format: 'number',
-    data_path: 'data.summary.total_kelembagaan'
+    data_path: 'data.summary.total_aparatur'
   },
   {
-    key: 'bankeu',
-    label: 'Bankeu Proposal',
-    value: summary.total_bankeu_proposal,
+    key: 'bankeu_perubahan',
+    label: 'Bankeu Perubahan',
+    value: summary.total_bankeu_perubahan_proposal,
     format: 'number',
-    data_path: 'data.summary.total_bankeu_proposal'
-  }
-]);
-
-const buildDashboardModules = (modules) => ([
-  {
-    key: 'wilayah',
-    label: 'Wilayah',
-    description: 'Jumlah kecamatan, desa, dan kelurahan.',
-    data_path: 'data.modules.wilayah',
-    data: modules.wilayah
-  },
-  {
-    key: 'profil_desa',
-    label: 'Profil Desa',
-    description: 'Status keterisian profil desa dan persentase kelengkapan.',
-    data_path: 'data.modules.profil_desa',
-    data: modules.profil_desa
+    data_path: 'data.summary.total_bankeu_perubahan_proposal'
   },
   {
     key: 'keuangan_desa',
     label: 'Keuangan Desa',
-    description: 'Rekap realisasi ADD, Dana Desa, BHPRD, Bankeu, dan Insentif DD.',
-    data_path: 'data.modules.keuangan_desa',
-    data: modules.keuangan_desa
-  },
-  {
-    key: 'aparatur_desa',
-    label: 'Aparatur Desa',
-    description: 'Rekap aparatur desa, kepala desa, perangkat desa, dan BPD.',
-    data_path: 'data.modules.aparatur_desa',
-    data: modules.aparatur_desa
-  },
-  {
-    key: 'produk_hukum',
-    label: 'Produk Hukum',
-    description: 'Rekap produk hukum desa berdasarkan jenis.',
-    data_path: 'data.modules.produk_hukum',
-    data: modules.produk_hukum
-  },
+    value: summary.total_keuangan_desa_realisasi,
+    format: 'currency_idr',
+    data_path: 'data.summary.total_keuangan_desa_realisasi'
+  }
+]);
+
+const buildDashboardModules = (modules) => ([
   {
     key: 'bumdes',
     label: 'BUMDes',
@@ -228,18 +151,25 @@ const buildDashboardModules = (modules) => ([
     data: modules.bumdes
   },
   {
-    key: 'kelembagaan',
-    label: 'Kelembagaan',
-    description: 'Rekap RT, RW, LPM, PKK, Posyandu, Karang Taruna, Satlinmas, dan lembaga lainnya.',
-    data_path: 'data.modules.kelembagaan',
-    data: modules.kelembagaan
+    key: 'aparatur_desa',
+    label: 'Aparatur Desa',
+    description: 'Total aparatur gabungan lokal dan external beserta detailnya.',
+    data_path: 'data.modules.aparatur_desa',
+    data: modules.aparatur_desa
   },
   {
-    key: 'bankeu',
-    label: 'Bantuan Keuangan',
-    description: 'Rekap proposal dan status pengajuan bantuan keuangan.',
-    data_path: 'data.modules.bankeu',
-    data: modules.bankeu
+    key: 'bankeu_perubahan',
+    label: 'Bankeu Perubahan',
+    description: 'Rekap proposal dan status pengajuan bantuan keuangan perubahan.',
+    data_path: 'data.modules.bankeu_perubahan',
+    data: modules.bankeu_perubahan
+  },
+  {
+    key: 'keuangan_desa',
+    label: 'Keuangan Desa',
+    description: 'Rekap realisasi ADD, Dana Desa, BHPRD, Bankeu, dan Insentif DD.',
+    data_path: 'data.modules.keuangan_desa',
+    data: modules.keuangan_desa
   }
 ]);
 
@@ -258,15 +188,6 @@ const safeAggregate = async (model, args = {}) => {
   } catch (error) {
     console.warn(`[PublicDashboard] Failed to aggregate ${model}:`, error.message);
     return {};
-  }
-};
-
-const safeGroupBy = async (model, args = {}) => {
-  try {
-    return await prisma[model].groupBy(args);
-  } catch (error) {
-    console.warn(`[PublicDashboard] Failed to group ${model}:`, error.message);
-    return [];
   }
 };
 
@@ -900,27 +821,26 @@ const sendCoreDashboardPage = (res) => {
 const { data } = await response.json();
 
 // Verifikasi mode + record count
-console.log(data.meta.mode);                          // "full"
-console.log(data.modules.aparatur_desa.records.length); // 9000+
-console.log(data.modules.bumdes.records.length);        // 400+
-console.log(data.modules.produk_hukum.records.length);  // ratusan</pre>
+console.log(data.meta.mode);                              // "full"
+console.log(data.modules.aparatur_desa.records.length);   // ribuan
+console.log(data.modules.bumdes.records.length);          // 400+
+console.log(data.modules.bankeu_perubahan.records.length);// proposal perubahan</pre>
               </div>
               <div class="guide-item">
                 <h4>Cara baca: ringkasan vs detail</h4>
-                <pre class="sample">data.summary                  → 10 angka rekap utama
+                <pre class="sample">data.summary                  → 4 angka rekap utama
 data.modules.X                → detail per modul (records)
 
 Modul yang tersedia:
-  wilayah, profil_desa, produk_hukum,
-  aparatur_desa, bumdes, kelembagaan,
-  bankeu, keuangan_desa</pre>
+  bumdes, aparatur_desa,
+  bankeu_perubahan, keuangan_desa</pre>
               </div>
             </div>
             <ul class="fields">
               <li><strong>Default = Full Detail.</strong> Hanya jika query berisi <code>?view=preview</code>, <code>?view=summary</code>, atau <code>?detail=preview</code> maka response hanya ringkasan.</li>
               <li><code>data.meta.mode</code> akan bernilai <code>"full"</code> atau <code>"preview"</code> — selalu cek field ini untuk memastikan apa yang Anda terima.</li>
-              <li><code>data.summary</code> = 10 angka rekap (kecamatan, desa, BUMDes, dll) untuk tampilan cepat.</li>
-              <li><code>data.modules.aparatur_desa.records</code>, <code>data.modules.bumdes.records</code>, <code>data.modules.produk_hukum.records</code>, <code>data.modules.profil_desa.records</code>, <code>data.modules.bankeu.records</code>, <code>data.modules.kelembagaan.all_records</code> — detail lengkap per record.</li>
+              <li><code>data.summary</code> = 4 angka rekap (total BUMDes, total aparatur gabungan, total proposal bankeu perubahan, total realisasi keuangan desa) untuk tampilan cepat.</li>
+              <li><code>data.modules.bumdes.records</code>, <code>data.modules.aparatur_desa.records</code>, <code>data.modules.bankeu_perubahan.records</code>, <code>data.modules.keuangan_desa.categories</code> — detail lengkap per record.</li>
               <li>Field file/foto berupa objek terstruktur dengan <code>path</code>, <code>url</code>, dan <code>download_url</code>.</li>
               <li>Halaman web ini memanggil endpoint sesuai mode yang Anda pilih di sebelah kiri — sebelumnya selalu preview. Untuk integrasi aplikasi, panggil endpoint dari backend (jangan dari frontend publik karena API key akan terekspos).</li>
               <li>Perjalanan dinas <strong>tidak</strong> termasuk di payload publik ini.</li>
@@ -1014,24 +934,14 @@ Modul yang tersedia:
       appendText(meta, 'Realtime: ' + (data.meta?.realtime ? 'Ya' : 'Tidak'));
       appendText(meta, 'Cache: ' + (data.meta?.cache || '-'));
 
-      renderCard('Kecamatan', summary.total_kecamatan);
-      renderCard('Desa', summary.total_desa);
-      renderCard('Kelurahan', summary.total_kelurahan);
-      renderCard('Profil Desa Terisi', summary.total_profil_desa);
-      renderCard('Aparatur Desa', summary.total_aparatur_external || summary.total_aparatur_lokal);
-      renderCard('Produk Hukum', summary.total_produk_hukum);
-      renderCard('Keuangan Desa', summary.total_keuangan_desa_realisasi, 'currency');
       renderCard('BUMDes', summary.total_bumdes);
-      renderCard('Kelembagaan', summary.total_kelembagaan);
-      renderCard('Bankeu Proposal', summary.total_bankeu_proposal);
+      renderCard('Aparatur Desa', summary.total_aparatur);
+      renderCard('Bankeu Perubahan', summary.total_bankeu_perubahan_proposal);
+      renderCard('Keuangan Desa', summary.total_keuangan_desa_realisasi, 'currency');
 
-      renderModuleCount('Wilayah (Kecamatan)', countOrZero(modules.wilayah?.records));
-      renderModuleCount('Profil Desa', countOrZero(modules.profil_desa?.records));
-      renderModuleCount('Produk Hukum', countOrZero(modules.produk_hukum?.records));
-      renderModuleCount('Aparatur Desa', countOrZero(modules.aparatur_desa?.records));
       renderModuleCount('BUMDes', countOrZero(modules.bumdes?.records));
-      renderModuleCount('Kelembagaan', countOrZero(modules.kelembagaan?.all_records));
-      renderModuleCount('Bankeu Proposal', countOrZero(modules.bankeu?.records));
+      renderModuleCount('Aparatur Desa', countOrZero(modules.aparatur_desa?.records));
+      renderModuleCount('Bankeu Perubahan', countOrZero(modules.bankeu_perubahan?.records));
       renderModuleCount('Keuangan Desa (records)', countOrZero(modules.keuangan_desa?.total_records));
 
       emptyState.classList.add('hidden');
@@ -1164,29 +1074,6 @@ const normalizeExternalDashboard = (externalDashboard) => {
     }
   };
 };
-
-const PROFILE_COMPLETION_FIELDS = [
-  'klasifikasi_desa',
-  'status_desa',
-  'tipologi_desa',
-  'jumlah_penduduk',
-  'luas_wilayah',
-  'alamat_kantor',
-  'no_telp',
-  'email'
-];
-
-const PROFILE_SIGNAL_FIELDS = [
-  ...PROFILE_COMPLETION_FIELDS,
-  'sejarah_desa',
-  'demografi',
-  'potensi_desa',
-  'instagram_url',
-  'youtube_url',
-  'foto_kantor_desa_path',
-  'latitude',
-  'longitude'
-];
 
 const isFilled = (value) => {
   if (value === null || value === undefined) return false;
@@ -1354,190 +1241,6 @@ const serializeProductLawShort = (productLaw, baseUrl) => {
     singkatan_jenis: productLaw.singkatan_jenis || null,
     status_peraturan: productLaw.status_peraturan || null,
     file: buildFileReference(productLaw.file, baseUrl, { folder: 'produk_hukum', root: 'storage' })
-  };
-};
-
-const calculateProfileCompletion = (profile) => {
-  const filled = PROFILE_COMPLETION_FIELDS.filter((field) => isFilled(profile?.[field])).length;
-  const total = PROFILE_COMPLETION_FIELDS.length;
-
-  return {
-    filled,
-    total,
-    percentage: total > 0 ? Math.round((filled / total) * 100) : 0
-  };
-};
-
-const hasAnyProfileContent = (profile) => PROFILE_SIGNAL_FIELDS.some((field) => isFilled(profile?.[field]));
-
-const getProfileCompletionStatus = (profile, completion) => {
-  if (!hasAnyProfileContent(profile)) {
-    return { key: 'belum_diisi', label: 'Belum diisi' };
-  }
-
-  if (completion.percentage >= 75) {
-    return { key: 'lengkap', label: 'Lengkap' };
-  }
-
-  return { key: 'perlu_dilengkapi', label: 'Perlu dilengkapi' };
-};
-
-const serializeProfileRecord = (desa, baseUrl) => {
-  const profile = desa.profil_desas;
-  const completion = calculateProfileCompletion(profile);
-  const completionStatus = getProfileCompletionStatus(profile, completion);
-  const latitude = profile?.latitude === null || profile?.latitude === undefined ? null : toNumber(profile.latitude);
-  const longitude = profile?.longitude === null || profile?.longitude === undefined ? null : toNumber(profile.longitude);
-  const hasCoordinates = latitude !== null && longitude !== null;
-  const officePhoto = buildFileReference(profile?.foto_kantor_desa_path, baseUrl, { folder: 'profil_desa' });
-
-  return {
-    ...buildLocation(desa),
-    profil_id: toId(profile?.id),
-    profil_tersimpan: Boolean(profile),
-    profil_terisi: hasAnyProfileContent(profile),
-    klasifikasi_desa: profile?.klasifikasi_desa || null,
-    klasifikasi_desa_label: formatLabel(profile?.klasifikasi_desa),
-    status_desa: profile?.status_desa || null,
-    status_desa_label: formatLabel(profile?.status_desa),
-    tipologi_desa: profile?.tipologi_desa || null,
-    tipologi_desa_label: formatLabel(profile?.tipologi_desa),
-    jumlah_penduduk: profile?.jumlah_penduduk || null,
-    luas_wilayah: profile?.luas_wilayah || null,
-    alamat_kantor: profile?.alamat_kantor || null,
-    no_telp: profile?.no_telp || null,
-    email: profile?.email || null,
-    instagram_url: profile?.instagram_url || null,
-    youtube_url: profile?.youtube_url || null,
-    radius_ke_kecamatan: profile?.radius_ke_kecamatan || null,
-    latitude,
-    longitude,
-    maps_url: hasCoordinates ? `https://www.google.com/maps?q=${latitude},${longitude}` : null,
-    sejarah_desa: profile?.sejarah_desa || null,
-    demografi: profile?.demografi || null,
-    potensi_desa: profile?.potensi_desa || null,
-    foto_kantor_desa_path: profile?.foto_kantor_desa_path || null,
-    foto_kantor_desa: officePhoto,
-    created_at: toIso(profile?.created_at),
-    updated_at: toIso(profile?.updated_at),
-    completion: {
-      ...completion,
-      status_key: completionStatus.key,
-      status_label: completionStatus.label
-    },
-    flags: {
-      has_contact: isFilled(profile?.no_telp) || isFilled(profile?.email),
-      has_coordinates: hasCoordinates,
-      has_office_photo: Boolean(officePhoto),
-      has_social_media: isFilled(profile?.instagram_url) || isFilled(profile?.youtube_url),
-      has_narratives: ['sejarah_desa', 'demografi', 'potensi_desa'].every((field) => isFilled(profile?.[field]))
-    }
-  };
-};
-
-const buildProfilDesaDetail = async (baseUrl) => {
-  const desaRows = await prisma.desas.findMany({
-    where: { status_pemerintahan: 'desa' },
-    select: {
-      ...desaLocationSelect,
-      profil_desas: {
-        select: {
-          id: true,
-          klasifikasi_desa: true,
-          status_desa: true,
-          tipologi_desa: true,
-          jumlah_penduduk: true,
-          sejarah_desa: true,
-          demografi: true,
-          potensi_desa: true,
-          no_telp: true,
-          email: true,
-          instagram_url: true,
-          youtube_url: true,
-          luas_wilayah: true,
-          alamat_kantor: true,
-          radius_ke_kecamatan: true,
-          foto_kantor_desa_path: true,
-          latitude: true,
-          longitude: true,
-          created_at: true,
-          updated_at: true
-        }
-      }
-    },
-    orderBy: { nama: 'asc' }
-  });
-
-  const records = desaRows.map((desa) => serializeProfileRecord(desa, baseUrl));
-  const totalTerisi = records.filter((record) => record.profil_terisi).length;
-  const totalLengkap = records.filter((record) => record.completion.status_key === 'lengkap').length;
-  const totalBelumDiisi = records.filter((record) => record.completion.status_key === 'belum_diisi').length;
-
-  return {
-    total_terisi: totalTerisi,
-    total_desa: records.length,
-    total_lengkap: totalLengkap,
-    total_perlu_dilengkapi: records.length - totalLengkap - totalBelumDiisi,
-    total_belum_diisi: totalBelumDiisi,
-    persentase_terisi: records.length > 0 ? Number(((totalTerisi / records.length) * 100).toFixed(2)) : 0,
-    by_completion_status: countBy(records, (record) => record.completion.status_key),
-    by_kecamatan: countBy(records, (record) => record.kecamatan?.nama),
-    records
-  };
-};
-
-const buildProdukHukumDetail = async (baseUrl) => {
-  const rows = await prisma.produk_hukums.findMany({
-    select: {
-      ...productLawSelect,
-      desa_id: true,
-      tipe_dokumen: true,
-      tempat_penetapan: true,
-      tanggal_penetapan: true,
-      sumber: true,
-      subjek: true,
-      keterangan_status: true,
-      bahasa: true,
-      bidang_hukum: true,
-      created_at: true,
-      updated_at: true,
-      desas: { select: desaLocationSelect }
-    },
-    orderBy: [
-      { tahun: 'desc' },
-      { created_at: 'desc' }
-    ]
-  });
-
-  const records = rows.map((row) => ({
-    id: row.id,
-    uuid: row.uuid || null,
-    ...buildLocation(row.desas),
-    tipe_dokumen: row.tipe_dokumen,
-    judul: row.judul,
-    nomor: row.nomor,
-    tahun: row.tahun,
-    jenis: row.jenis,
-    singkatan_jenis: row.singkatan_jenis,
-    tempat_penetapan: row.tempat_penetapan,
-    tanggal_penetapan: toIso(row.tanggal_penetapan),
-    sumber: row.sumber || null,
-    subjek: row.subjek || null,
-    status_peraturan: row.status_peraturan,
-    keterangan_status: row.keterangan_status || null,
-    bahasa: row.bahasa,
-    bidang_hukum: row.bidang_hukum,
-    file: buildFileReference(row.file, baseUrl, { folder: 'produk_hukum', root: 'storage' }),
-    created_at: toIso(row.created_at),
-    updated_at: toIso(row.updated_at)
-  }));
-
-  return {
-    total: records.length,
-    by_jenis: countBy(records, (record) => record.singkatan_jenis),
-    by_status: countBy(records, (record) => record.status_peraturan),
-    by_tahun: countBy(records, (record) => record.tahun),
-    records
   };
 };
 
@@ -1752,190 +1455,52 @@ const buildBumdesDetail = async (baseUrl) => {
   };
 };
 
-const serializeKelembagaanRecord = (row, type, baseUrl) => ({
-  id: row.id,
-  type,
-  ...buildLocation(row.desas),
-  nama: row.nama || null,
-  nomor: row.nomor || null,
-  rw_id: row.rw_id || null,
-  nomor_rw: row.rws?.nomor || null,
-  alamat: row.alamat || null,
-  status_kelembagaan: row.status_kelembagaan || null,
-  status_verifikasi: row.status_verifikasi || null,
-  imported: Boolean(row.imported),
-  jumlah_jiwa: row.jumlah_jiwa || null,
-  jumlah_kk: row.jumlah_kk || null,
-  produk_hukum_id: row.produk_hukum_id || null,
-  produk_hukum: serializeProductLawShort(row.produk_hukums, baseUrl),
-  produk_hukum_penonaktifan_id: row.produk_hukum_penonaktifan_id || null,
-  catatan_verifikasi: row.catatan_verifikasi || null,
-  verified_at: toIso(row.verified_at),
-  verifikator_nama: row.verifikator_nama || null,
-  nonaktif_at: toIso(row.nonaktif_at),
-  created_at: toIso(row.created_at),
-  updated_at: toIso(row.updated_at)
-});
-
-const buildKelembagaanDetail = async (baseUrl) => {
-  const baseSelect = {
-    id: true,
-    desa_id: true,
-    alamat: true,
-    status_kelembagaan: true,
-    status_verifikasi: true,
-    imported: true,
-    created_at: true,
-    updated_at: true,
-    produk_hukum_id: true,
-    catatan_verifikasi: true,
-    produk_hukum_penonaktifan_id: true,
-    verified_at: true,
-    verifikator_nama: true,
-    desas: { select: desaLocationSelect },
-    produk_hukums: { select: productLawSelect }
-  };
-  const namedSelect = {
-    ...baseSelect,
-    nama: true
-  };
-  const nonaktifSelect = {
-    nonaktif_at: true
-  };
-
-  const [
-    rwRows,
-    rtRows,
-    lpmRows,
-    pkkRows,
-    posyanduRows,
-    karangTarunaRows,
-    satlinmasRows,
-    lembagaLainnyaRows
-  ] = await Promise.all([
-    prisma.rws.findMany({
-      select: {
-        ...baseSelect,
-        ...nonaktifSelect,
-        nomor: true
-      }
-    }),
-    prisma.rts.findMany({
-      select: {
-        ...baseSelect,
-        ...nonaktifSelect,
-        nomor: true,
-        rw_id: true,
-        jumlah_jiwa: true,
-        jumlah_kk: true,
-        rws: { select: { id: true, nomor: true } }
-      }
-    }),
-    prisma.lpms.findMany({ select: { ...namedSelect, ...nonaktifSelect } }),
-    prisma.pkks.findMany({ select: { ...namedSelect, ...nonaktifSelect } }),
-    prisma.posyandus.findMany({ select: { ...namedSelect, ...nonaktifSelect } }),
-    prisma.karang_tarunas.findMany({ select: { ...namedSelect, ...nonaktifSelect } }),
-    prisma.satlinmas.findMany({ select: namedSelect }),
-    prisma.lembaga_lainnyas.findMany({ select: namedSelect })
-  ]);
-
-  const recordsByType = {
-    rw: rwRows.map((row) => serializeKelembagaanRecord(row, 'rw', baseUrl)),
-    rt: rtRows.map((row) => serializeKelembagaanRecord(row, 'rt', baseUrl)),
-    lpm: lpmRows.map((row) => serializeKelembagaanRecord(row, 'lpm', baseUrl)),
-    pkk: pkkRows.map((row) => serializeKelembagaanRecord(row, 'pkk', baseUrl)),
-    posyandu: posyanduRows.map((row) => serializeKelembagaanRecord(row, 'posyandu', baseUrl)),
-    karang_taruna: karangTarunaRows.map((row) => serializeKelembagaanRecord(row, 'karang_taruna', baseUrl)),
-    satlinmas: satlinmasRows.map((row) => serializeKelembagaanRecord(row, 'satlinmas', baseUrl)),
-    lembaga_lainnya: lembagaLainnyaRows.map((row) => serializeKelembagaanRecord(row, 'lembaga_lainnya', baseUrl))
-  };
-  const allRecords = Object.values(recordsByType).flat();
-
-  return {
-    total: allRecords.length,
-    rw: recordsByType.rw.length,
-    rt: recordsByType.rt.length,
-    lpm: recordsByType.lpm.length,
-    pkk: recordsByType.pkk.length,
-    posyandu: recordsByType.posyandu.length,
-    karang_taruna: recordsByType.karang_taruna.length,
-    satlinmas: recordsByType.satlinmas.length,
-    lembaga_lainnya: recordsByType.lembaga_lainnya.length,
-    by_type: Object.entries(recordsByType).map(([key, records]) => ({
-      key,
-      label: formatLabel(key),
-      total: records.length
-    })),
-    by_status_kelembagaan: countBy(allRecords, (record) => record.status_kelembagaan),
-    by_status_verifikasi: countBy(allRecords, (record) => record.status_verifikasi),
-    by_kecamatan: countBy(allRecords, (record) => record.kecamatan?.nama),
-    records: recordsByType,
-    all_records: allRecords
-  };
-};
-
-const buildBankeuDetail = async (baseUrl) => {
-  const proposals = await prisma.bankeu_proposals.findMany({
+const buildBankeuPerubahanDetail = async (baseUrl) => {
+  const proposals = await prisma.bankeu_perubahan_proposals.findMany({
     select: {
       id: true,
       desa_id: true,
       tahun_anggaran: true,
+      jenis_kegiatan: true,
       kegiatan_id: true,
-      judul_proposal: true,
+      kegiatan_nama: true,
       nama_kegiatan_spesifik: true,
       volume: true,
       lokasi: true,
+      judul_proposal: true,
       deskripsi: true,
       file_proposal: true,
-      surat_pengantar: true,
-      surat_permohonan: true,
-      dinas_reviewed_file: true,
-      dinas_reviewed_at: true,
       file_size: true,
       anggaran_usulan: true,
       status: true,
-      dinas_status: true,
-      submitted_to_dinas_at: true,
-      dinas_verified_at: true,
-      dinas_catatan: true,
       kecamatan_status: true,
-      kecamatan_verified_at: true,
       kecamatan_catatan: true,
+      kecamatan_verified_at: true,
       dpmd_status: true,
-      dpmd_verified_at: true,
       dpmd_catatan: true,
+      dpmd_verified_at: true,
       submitted_to_kecamatan: true,
       submitted_at: true,
       submitted_to_dpmd: true,
       submitted_to_dpmd_at: true,
       catatan_verifikasi: true,
       verified_at: true,
+      surat_pengantar: true,
+      surat_permohonan: true,
       berita_acara_path: true,
       berita_acara_generated_at: true,
       created_at: true,
       updated_at: true,
       desas: { select: desaLocationSelect },
-      bankeu_proposal_kegiatan: {
+      bankeu_perubahan_proposal_kegiatan: {
         select: {
-          bankeu_master_kegiatan: {
+          bankeu_perubahan_master_kegiatan: {
             select: {
               id: true,
-              jenis_kegiatan: true,
-              nama_kegiatan: true,
-              dinas_terkait: true
+              kategori: true,
+              nama_kegiatan: true
             }
           }
-        }
-      },
-      berita_acara_history: {
-        select: {
-          id: true,
-          file_path: true,
-          file_name: true,
-          file_size: true,
-          status: true,
-          generated_at: true,
-          created_at: true
         }
       }
     },
@@ -1945,25 +1510,22 @@ const buildBankeuDetail = async (baseUrl) => {
     ]
   });
 
-  const buildBankeuFile = (filePath) => buildFileReference(filePath, baseUrl, { folder: 'bankeu' });
+  const buildBankeuFile = (filePath) => buildFileReference(filePath, baseUrl, { folder: 'bankeu_perubahan' });
   const records = proposals.map((proposal) => ({
     id: toId(proposal.id),
     ...buildLocation(proposal.desas),
     tahun_anggaran: proposal.tahun_anggaran,
+    jenis_kegiatan: proposal.jenis_kegiatan || null,
     kegiatan_id: proposal.kegiatan_id || null,
-    judul_proposal: proposal.judul_proposal,
+    kegiatan_nama: proposal.kegiatan_nama || null,
     nama_kegiatan_spesifik: proposal.nama_kegiatan_spesifik || null,
+    judul_proposal: proposal.judul_proposal,
     volume: proposal.volume || null,
     lokasi: proposal.lokasi || null,
     deskripsi: proposal.deskripsi || null,
     file_size: proposal.file_size || null,
     anggaran_usulan: toNumber(proposal.anggaran_usulan),
     status: proposal.status || null,
-    dinas_status: proposal.dinas_status || null,
-    submitted_to_dinas_at: toIso(proposal.submitted_to_dinas_at),
-    dinas_verified_at: toIso(proposal.dinas_verified_at),
-    dinas_reviewed_at: toIso(proposal.dinas_reviewed_at),
-    dinas_catatan: proposal.dinas_catatan || null,
     kecamatan_status: proposal.kecamatan_status || null,
     kecamatan_verified_at: toIso(proposal.kecamatan_verified_at),
     kecamatan_catatan: proposal.kecamatan_catatan || null,
@@ -1977,26 +1539,16 @@ const buildBankeuDetail = async (baseUrl) => {
     catatan_verifikasi: proposal.catatan_verifikasi || null,
     verified_at: toIso(proposal.verified_at),
     berita_acara_generated_at: toIso(proposal.berita_acara_generated_at),
-    kegiatan: proposal.bankeu_proposal_kegiatan.map((item) => ({
-      id: item.bankeu_master_kegiatan.id,
-      jenis_kegiatan: item.bankeu_master_kegiatan.jenis_kegiatan,
-      nama_kegiatan: item.bankeu_master_kegiatan.nama_kegiatan,
-      dinas_terkait: item.bankeu_master_kegiatan.dinas_terkait || null
+    kegiatan: proposal.bankeu_perubahan_proposal_kegiatan.map((item) => ({
+      id: item.bankeu_perubahan_master_kegiatan.id,
+      kategori: item.bankeu_perubahan_master_kegiatan.kategori,
+      nama_kegiatan: item.bankeu_perubahan_master_kegiatan.nama_kegiatan
     })),
     files: {
       proposal: buildBankeuFile(proposal.file_proposal),
       surat_pengantar: buildBankeuFile(proposal.surat_pengantar),
       surat_permohonan: buildBankeuFile(proposal.surat_permohonan),
-      dinas_reviewed_file: buildBankeuFile(proposal.dinas_reviewed_file),
-      berita_acara: buildBankeuFile(proposal.berita_acara_path),
-      berita_acara_history: proposal.berita_acara_history.map((item) => ({
-        id: toId(item.id),
-        status: item.status,
-        generated_at: toIso(item.generated_at),
-        created_at: toIso(item.created_at),
-        file_size: item.file_size || null,
-        file: buildBankeuFile(item.file_path || item.file_name)
-      }))
+      berita_acara: buildBankeuFile(proposal.berita_acara_path)
     },
     created_at: toIso(proposal.created_at),
     updated_at: toIso(proposal.updated_at)
@@ -2009,60 +1561,11 @@ const buildBankeuDetail = async (baseUrl) => {
     approved_by_dpmd: records.filter((record) => record.dpmd_status === 'approved').length,
     total_anggaran_usulan: records.reduce((total, record) => total + record.anggaran_usulan, 0),
     by_status: countBy(records, (record) => record.status),
-    by_dinas_status: countBy(records, (record) => record.dinas_status),
     by_kecamatan_status: countBy(records, (record) => record.kecamatan_status),
     by_dpmd_status: countBy(records, (record) => record.dpmd_status),
+    by_jenis_kegiatan: countBy(records, (record) => record.jenis_kegiatan),
     by_tahun_anggaran: countBy(records, (record) => record.tahun_anggaran),
     by_kecamatan: countBy(records, (record) => record.kecamatan?.nama),
-    records
-  };
-};
-
-const buildWilayahDetail = async () => {
-  const kecamatanRows = await prisma.kecamatans.findMany({
-    select: {
-      id: true,
-      kode: true,
-      nama: true,
-      alamat: true,
-      logo_path: true,
-      nama_camat: true,
-      nip_camat: true,
-      desas: {
-        select: {
-          id: true,
-          kode: true,
-          nama: true,
-          status_pemerintahan: true
-        },
-        orderBy: { nama: 'asc' }
-      }
-    },
-    orderBy: { nama: 'asc' }
-  });
-
-  const records = kecamatanRows.map((row) => ({
-    id: toId(row.id),
-    kode: row.kode,
-    nama: row.nama,
-    alamat: row.alamat || null,
-    logo_path: row.logo_path || null,
-    nama_camat: row.nama_camat || null,
-    nip_camat: row.nip_camat || null,
-    total_desa: row.desas.filter((desa) => desa.status_pemerintahan === 'desa').length,
-    total_kelurahan: row.desas.filter((desa) => desa.status_pemerintahan === 'kelurahan').length,
-    desas: row.desas.map((desa) => ({
-      id: toId(desa.id),
-      kode: desa.kode,
-      nama: desa.nama,
-      status_pemerintahan: desa.status_pemerintahan
-    }))
-  }));
-
-  return {
-    total_kecamatan: records.length,
-    total_desa: records.reduce((total, row) => total + row.total_desa, 0),
-    total_kelurahan: records.reduce((total, row) => total + row.total_kelurahan, 0),
     records
   };
 };
@@ -2107,48 +1610,20 @@ const buildPublicDashboardPayload = async (req) => {
   const keuanganDesaStats = buildKeuanganDesaStats({ includeRecords: !previewMode });
 
   const [
-    totalKecamatan,
-    totalDesa,
-    totalKelurahan,
-    totalPegawai,
-    totalProfilDesa,
-    totalProdukHukum,
     totalAparaturLokal,
     totalBumdes,
     bumdesAktif,
-    bankeuProposalTotal,
-    bankeuSubmittedKecamatan,
-    bankeuSubmittedDpmd,
-    bankeuApprovedDpmd,
-    kelembagaanCounts,
     bumdesFinancials,
-    bankeuFinancials,
-    produkHukumByJenis,
+    bankeuPerubahanTotal,
+    bankeuPerubahanSubmittedKecamatan,
+    bankeuPerubahanSubmittedDpmd,
+    bankeuPerubahanApprovedDpmd,
+    bankeuPerubahanFinancials,
     externalDashboardResult
   ] = await Promise.all([
-    safeCount('kecamatans'),
-    safeCount('desas', { where: { status_pemerintahan: 'desa' } }),
-    safeCount('desas', { where: { status_pemerintahan: 'kelurahan' } }),
-    safeCount('pegawai'),
-    safeCount('profil_desas'),
-    safeCount('produk_hukums'),
     safeCount('aparatur_desa', { where: { status: 'Aktif' } }),
     safeCount('bumdes'),
     safeCount('bumdes', { where: { status: 'aktif' } }),
-    safeCount('bankeu_proposals'),
-    safeCount('bankeu_proposals', { where: { submitted_to_kecamatan: true } }),
-    safeCount('bankeu_proposals', { where: { submitted_to_dpmd: true } }),
-    safeCount('bankeu_proposals', { where: { dpmd_status: 'approved' } }),
-    Promise.all([
-      safeCount('rws'),
-      safeCount('rts'),
-      safeCount('lpms'),
-      safeCount('pkks'),
-      safeCount('posyandus'),
-      safeCount('karang_tarunas'),
-      safeCount('satlinmas'),
-      safeCount('lembaga_lainnyas')
-    ]),
     safeAggregate('bumdes', {
       _sum: {
         NilaiAset: true,
@@ -2157,40 +1632,17 @@ const buildPublicDashboardPayload = async (req) => {
         TotalTenagaKerja: true
       }
     }),
-    safeAggregate('bankeu_proposals', {
+    safeCount('bankeu_perubahan_proposals'),
+    safeCount('bankeu_perubahan_proposals', { where: { submitted_to_kecamatan: true } }),
+    safeCount('bankeu_perubahan_proposals', { where: { submitted_to_dpmd: true } }),
+    safeCount('bankeu_perubahan_proposals', { where: { dpmd_status: 'approved' } }),
+    safeAggregate('bankeu_perubahan_proposals', {
       _sum: {
         anggaran_usulan: true
       }
     }),
-    safeGroupBy('produk_hukums', {
-      by: ['singkatan_jenis'],
-      _count: { _all: true },
-      orderBy: { _count: { singkatan_jenis: 'desc' } },
-      take: 10
-    }),
     fetchExternalDashboardStatsWithTimeout(previewMode ? 1200 : 3000)
   ]);
-
-  const [
-    totalRw,
-    totalRt,
-    totalLpm,
-    totalPkk,
-    totalPosyandu,
-    totalKarangTaruna,
-    totalSatlinmas,
-    totalLembagaLainnya
-  ] = kelembagaanCounts;
-
-  const totalKelembagaan =
-    totalRw +
-    totalRt +
-    totalLpm +
-    totalPkk +
-    totalPosyandu +
-    totalKarangTaruna +
-    totalSatlinmas +
-    totalLembagaLainnya;
 
   const externalAparatur = normalizeExternalDashboard(
     externalDashboardResult.success ? externalDashboardResult.data : null
@@ -2199,27 +1651,9 @@ const buildPublicDashboardPayload = async (req) => {
     externalAparatur.kepala_desa.total +
     externalAparatur.perangkat_desa.total +
     externalAparatur.bpd.total;
+  const totalAparaturGabungan = totalAparaturLokal + totalAparaturExternal;
 
   const detailFallbacks = {
-    wilayah: {
-      total_kecamatan: totalKecamatan,
-      total_desa: totalDesa,
-      total_kelurahan: totalKelurahan,
-      records: []
-    },
-    profil_desa: {
-      total_terisi: totalProfilDesa,
-      total_desa: totalDesa,
-      records: []
-    },
-    produk_hukum: {
-      total: totalProdukHukum,
-      by_jenis: produkHukumByJenis.map((item) => ({
-        jenis: item.singkatan_jenis || 'Tidak Diketahui',
-        total: toNumber(item._count?._all)
-      })),
-      records: []
-    },
     aparatur_desa: {
       total: totalAparaturLokal,
       aktif: totalAparaturLokal,
@@ -2235,88 +1669,42 @@ const buildPublicDashboardPayload = async (req) => {
       total_tenaga_kerja: toNumber(bumdesFinancials._sum?.TotalTenagaKerja),
       records: []
     },
-    kelembagaan: {
-      total: totalKelembagaan,
-      rw: totalRw,
-      rt: totalRt,
-      lpm: totalLpm,
-      pkk: totalPkk,
-      posyandu: totalPosyandu,
-      karang_taruna: totalKarangTaruna,
-      satlinmas: totalSatlinmas,
-      lembaga_lainnya: totalLembagaLainnya,
-      records: {}
-    },
-    bankeu: {
-      total_proposal: bankeuProposalTotal,
-      submitted_to_kecamatan: bankeuSubmittedKecamatan,
-      submitted_to_dpmd: bankeuSubmittedDpmd,
-      approved_by_dpmd: bankeuApprovedDpmd,
-      total_anggaran_usulan: toNumber(bankeuFinancials._sum?.anggaran_usulan),
+    bankeu_perubahan: {
+      total_proposal: bankeuPerubahanTotal,
+      submitted_to_kecamatan: bankeuPerubahanSubmittedKecamatan,
+      submitted_to_dpmd: bankeuPerubahanSubmittedDpmd,
+      approved_by_dpmd: bankeuPerubahanApprovedDpmd,
+      total_anggaran_usulan: toNumber(bankeuPerubahanFinancials._sum?.anggaran_usulan),
       records: []
     }
   };
 
   const [
-    wilayahDetail,
-    profilDesaDetail,
-    produkHukumDetail,
     aparaturDesaDetail,
     bumdesDetail,
-    kelembagaanDetail,
-    bankeuDetail
+    bankeuPerubahanDetail
   ] = previewMode
     ? [
-        detailFallbacks.wilayah,
-        detailFallbacks.profil_desa,
-        detailFallbacks.produk_hukum,
         detailFallbacks.aparatur_desa,
         detailFallbacks.bumdes,
-        detailFallbacks.kelembagaan,
-        detailFallbacks.bankeu
+        detailFallbacks.bankeu_perubahan
       ]
     : await Promise.all([
-        safeBuildModule('wilayah detail', () => buildWilayahDetail(), detailFallbacks.wilayah),
-        safeBuildModule('profil desa detail', () => buildProfilDesaDetail(baseUrl), detailFallbacks.profil_desa),
-        safeBuildModule('produk hukum detail', () => buildProdukHukumDetail(baseUrl), detailFallbacks.produk_hukum),
         safeBuildModule('aparatur desa detail', () => buildAparaturDesaDetail(baseUrl), detailFallbacks.aparatur_desa),
         safeBuildModule('bumdes detail', () => buildBumdesDetail(baseUrl), detailFallbacks.bumdes),
-        safeBuildModule('kelembagaan detail', () => buildKelembagaanDetail(baseUrl), detailFallbacks.kelembagaan),
-        safeBuildModule('bankeu detail', () => buildBankeuDetail(baseUrl), detailFallbacks.bankeu)
+        safeBuildModule('bankeu perubahan detail', () => buildBankeuPerubahanDetail(baseUrl), detailFallbacks.bankeu_perubahan)
       ]);
 
   const summary = {
-    total_kecamatan: totalKecamatan,
-    total_desa: totalDesa,
-    total_kelurahan: totalKelurahan,
-    total_pegawai: totalPegawai,
     total_bumdes: totalBumdes,
+    total_aparatur: totalAparaturGabungan,
     total_aparatur_lokal: totalAparaturLokal,
     total_aparatur_external: totalAparaturExternal,
-    total_kelembagaan: totalKelembagaan,
-    total_produk_hukum: totalProdukHukum,
-    total_profil_desa: totalProfilDesa,
-    total_keuangan_desa_realisasi: keuanganDesaStats.total_realisasi,
-    total_bankeu_proposal: bankeuProposalTotal
+    total_bankeu_perubahan_proposal: bankeuPerubahanTotal,
+    total_keuangan_desa_realisasi: keuanganDesaStats.total_realisasi
   };
 
   const modules = {
-    wilayah: {
-      total_kecamatan: totalKecamatan,
-      total_desa: totalDesa,
-      total_kelurahan: totalKelurahan,
-      records: wilayahDetail.records || []
-    },
-    aparatur_desa: {
-      source: externalAparatur.available ? 'external_dapur_desa' : 'local_database',
-      external_available: externalAparatur.available,
-      local_total_aktif: totalAparaturLokal,
-      external_total: totalAparaturExternal,
-      kepala_desa: externalAparatur.kepala_desa,
-      perangkat_desa: externalAparatur.perangkat_desa,
-      bpd: externalAparatur.bpd,
-      ...aparaturDesaDetail
-    },
     bumdes: {
       total: totalBumdes,
       aktif: bumdesAktif,
@@ -2327,48 +1715,33 @@ const buildPublicDashboardPayload = async (req) => {
       total_tenaga_kerja: toNumber(bumdesFinancials._sum?.TotalTenagaKerja),
       ...bumdesDetail
     },
-    kelembagaan: {
-      total: totalKelembagaan,
-      rw: totalRw,
-      rt: totalRt,
-      lpm: totalLpm,
-      pkk: totalPkk,
-      posyandu: totalPosyandu,
-      karang_taruna: totalKarangTaruna,
-      satlinmas: totalSatlinmas,
-      lembaga_lainnya: totalLembagaLainnya,
-      ...kelembagaanDetail
+    aparatur_desa: {
+      source: externalAparatur.available ? 'gabungan_lokal_external' : 'local_database',
+      external_available: externalAparatur.available,
+      total_gabungan: totalAparaturGabungan,
+      local_total_aktif: totalAparaturLokal,
+      external_total: totalAparaturExternal,
+      kepala_desa: externalAparatur.kepala_desa,
+      perangkat_desa: externalAparatur.perangkat_desa,
+      bpd: externalAparatur.bpd,
+      ...aparaturDesaDetail
     },
-    bankeu: {
-      total_proposal: bankeuProposalTotal,
-      submitted_to_kecamatan: bankeuSubmittedKecamatan,
-      submitted_to_dpmd: bankeuSubmittedDpmd,
-      approved_by_dpmd: bankeuApprovedDpmd,
-      total_anggaran_usulan: toNumber(bankeuFinancials._sum?.anggaran_usulan),
-      ...bankeuDetail
+    bankeu_perubahan: {
+      total_proposal: bankeuPerubahanTotal,
+      submitted_to_kecamatan: bankeuPerubahanSubmittedKecamatan,
+      submitted_to_dpmd: bankeuPerubahanSubmittedDpmd,
+      approved_by_dpmd: bankeuPerubahanApprovedDpmd,
+      total_anggaran_usulan: toNumber(bankeuPerubahanFinancials._sum?.anggaran_usulan),
+      ...bankeuPerubahanDetail
     },
-    keuangan_desa: keuanganDesaStats,
-    produk_hukum: {
-      total: totalProdukHukum,
-      by_jenis: produkHukumByJenis.map((item) => ({
-        jenis: item.singkatan_jenis || 'Tidak Diketahui',
-        total: toNumber(item._count?._all)
-      })),
-      ...produkHukumDetail
-    },
-    profil_desa: {
-      total_terisi: totalProfilDesa,
-      total_desa: totalDesa,
-      persentase_terisi: totalDesa > 0 ? Number(((totalProfilDesa / totalDesa) * 100).toFixed(2)) : 0,
-      ...profilDesaDetail
-    }
+    keuangan_desa: keuanganDesaStats
   };
 
   return {
     meta: {
       generated_at: now.toISOString(),
       timezone: 'Asia/Jakarta',
-      version: '1.0',
+      version: '2.0',
       access: 'protected_api_key',
       auth_required: true,
       realtime: true,
