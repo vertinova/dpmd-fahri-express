@@ -780,7 +780,7 @@ const sendCoreDashboardPage = (res) => {
           <div id="moduleCounts" class="cards"></div>
 
           <h3 style="margin: 22px 0 10px; font-size: 16px; letter-spacing: 0;">Rincian Keuangan Desa per Kategori</h3>
-          <p class="subtitle" style="margin-bottom: 12px; font-size: 13px;">Total <strong>Keuangan Desa</strong> adalah penjumlahan realisasi dari kategori berikut (sumber data tahun <span id="keuanganTahun">-</span>). Angka per kategori hanya muncul di mode <strong>Full Detail</strong>.</p>
+          <p class="subtitle" style="margin-bottom: 12px; font-size: 13px;">Total <strong>Keuangan Desa</strong> adalah penjumlahan realisasi dari kategori berikut (sumber data tahun <span id="keuanganTahun">-</span>). Angka realisasi per kategori tampil di mode Preview maupun Full Detail; rincian per record hanya di Full Detail.</p>
           <div id="keuanganBreakdown" class="cards"></div>
 
           <div class="guide">
