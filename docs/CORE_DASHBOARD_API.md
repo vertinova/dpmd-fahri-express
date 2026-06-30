@@ -194,13 +194,15 @@ Total gabungan + breakdown external (kades/perangkat/BPD) + `records` lokal.
 
 ### 5.3 `bankeu_perubahan`
 
-Proposal Bankeu **Perubahan** yang **sudah masuk DPMD** (`submitted_to_dpmd = true`) —
-selaras dengan halaman verifikasi DPMD/SPKED. Proposal yang masih draft / di desa /
-di kecamatan **tidak** dihitung. `scope: "submitted_to_dpmd"` menegaskan hal ini.
+Proposal Bankeu **Perubahan** yang **sudah masuk DPMD** — disamakan dengan statistik
+halaman verifikasi DPMD/SPKED: `submitted_to_dpmd = true` **atau** pernah dikirim ke
+DPMD (`submitted_to_dpmd_at`) **atau** pernah diverifikasi DPMD (`dpmd_verified_at`).
+Termasuk yang dikembalikan DPMD (revision/rejected). Proposal yang masih draft / di
+desa / di kecamatan **tidak** dihitung. `scope: "masuk_dpmd"` menegaskan hal ini.
 
 ```jsonc
 {
-  "scope": "submitted_to_dpmd",
+  "scope": "masuk_dpmd",
   "total_proposal": 0,
   "approved_by_dpmd": 0,
   "total_anggaran_usulan": 0,
