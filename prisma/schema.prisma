@@ -2338,6 +2338,7 @@ enum anggaran_jenis_sht {
   SBU
   ASB
   HSPK
+  Lainnya
 }
 
 enum pegawai_jenis_kelamin {

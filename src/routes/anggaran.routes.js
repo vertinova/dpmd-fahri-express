@@ -551,7 +551,7 @@ router.post('/pagu/:paguId/items', auth, checkRole(['superadmin', 'bendahara']),
 
     const { nama_item, kode_rekening, satuan, volume, harga_satuan, jenis_sht, kode_sht, keterangan, koefisien, grup } = req.body;
     if (!nama_item || !satuan) return res.status(400).json({ success: false, message: 'nama_item dan satuan wajib diisi' });
-    if (!['SSH', 'SBU', 'ASB', 'HSPK'].includes(jenis_sht)) return res.status(400).json({ success: false, message: 'jenis_sht harus SSH, SBU, ASB, atau HSPK' });
+    if (!['SSH', 'SBU', 'ASB', 'HSPK', 'Lainnya'].includes(jenis_sht)) return res.status(400).json({ success: false, message: 'jenis_sht harus SSH, SBU, ASB, HSPK, atau Lainnya' });
 
     const maxUrutan = await prisma.anggaran_rka_items.aggregate({ _max: { urutan: true }, where: { pagu_id: BigInt(paguId) } });
     const item = await prisma.anggaran_rka_items.create({
@@ -589,7 +589,7 @@ router.put('/items/:id', auth, checkRole(['superadmin', 'bendahara']), async (re
     if (!existing) return res.status(404).json({ success: false, message: 'Item tidak ditemukan' });
 
     const { nama_item, kode_rekening, satuan, volume, harga_satuan, jenis_sht, kode_sht, keterangan, koefisien, grup, urutan } = req.body;
-    if (jenis_sht && !['SSH', 'SBU', 'ASB', 'HSPK'].includes(jenis_sht)) return res.status(400).json({ success: false, message: 'jenis_sht harus SSH, SBU, ASB, atau HSPK' });
+    if (jenis_sht && !['SSH', 'SBU', 'ASB', 'HSPK', 'Lainnya'].includes(jenis_sht)) return res.status(400).json({ success: false, message: 'jenis_sht harus SSH, SBU, ASB, HSPK, atau Lainnya' });
 
     const data = {};
     if (nama_item !== undefined) data.nama_item = nama_item;
