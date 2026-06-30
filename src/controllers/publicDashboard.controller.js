@@ -779,6 +779,10 @@ const sendCoreDashboardPage = (res) => {
           <p class="subtitle" style="margin-bottom: 12px; font-size: 13px;">Angka 0 saat mode <strong>Full Detail</strong> berarti detail builder gagal di server (cek log). Saat mode <strong>Preview</strong>, semuanya 0 — itu memang perilaku normal.</p>
           <div id="moduleCounts" class="cards"></div>
 
+          <h3 style="margin: 22px 0 10px; font-size: 16px; letter-spacing: 0;">Rincian Keuangan Desa per Kategori</h3>
+          <p class="subtitle" style="margin-bottom: 12px; font-size: 13px;">Total <strong>Keuangan Desa</strong> adalah penjumlahan realisasi dari kategori berikut (sumber data tahun <span id="keuanganTahun">-</span>). Angka per kategori hanya muncul di mode <strong>Full Detail</strong>.</p>
+          <div id="keuanganBreakdown" class="cards"></div>
+
           <div class="guide">
             <div class="guide-head">
               <div>
@@ -863,8 +867,15 @@ Modul yang tersedia:
     const meta = document.getElementById('meta');
     const cards = document.getElementById('cards');
     const moduleCounts = document.getElementById('moduleCounts');
+    const keuanganBreakdown = document.getElementById('keuanganBreakdown');
+    const keuanganTahun = document.getElementById('keuanganTahun');
     const jsonOutput = document.getElementById('jsonOutput');
     const formatter = new Intl.NumberFormat('id-ID');
+    const fullCurrencyFormatter = new Intl.NumberFormat('id-ID', {
+      style: 'currency',
+      currency: 'IDR',
+      maximumFractionDigits: 0
+    });
     const compactCurrencyFormatter = new Intl.NumberFormat('id-ID', {
       style: 'currency',
       currency: 'IDR',
@@ -911,6 +922,35 @@ Modul yang tersedia:
       moduleCounts.appendChild(card);
     };
 
+    const KEUANGAN_LABELS = {
+      add: 'ADD (Alokasi Dana Desa)',
+      dana_desa: 'Dana Desa (DD)',
+      bhprd: 'BHPRD (Bagi Hasil Pajak & Retribusi)',
+      bankeu: 'Bantuan Keuangan (Bankeu)',
+      insentif_dd: 'Insentif Dana Desa'
+    };
+
+    const renderKeuanganCategory = (key, category) => {
+      const realisasi = Number(category?.total_realisasi || 0);
+      const records = Number(category?.total_records || 0);
+      const desa = Number(category?.total_desa || 0);
+
+      const card = document.createElement('div');
+      card.className = 'card';
+      appendText(card, KEUANGAN_LABELS[key] || key);
+
+      const strong = document.createElement('strong');
+      strong.textContent = fullCurrencyFormatter.format(realisasi);
+      card.appendChild(strong);
+
+      const note = document.createElement('span');
+      note.style.cssText = 'margin-top:8px;text-transform:none;font-weight:500;color:#667085;';
+      note.textContent = formatter.format(records) + ' record' + (desa ? ' · ' + formatter.format(desa) + ' desa' : '');
+      card.appendChild(note);
+
+      keuanganBreakdown.appendChild(card);
+    };
+
     const countOrZero = (value) => {
       if (Array.isArray(value)) return value.length;
       if (typeof value === 'number') return value;
@@ -925,6 +965,7 @@ Modul yang tersedia:
       meta.innerHTML = '';
       cards.innerHTML = '';
       moduleCounts.innerHTML = '';
+      keuanganBreakdown.innerHTML = '';
       jsonOutput.textContent = JSON.stringify(payload, null, 2);
 
       const mode = data.meta?.mode || '-';
@@ -943,6 +984,26 @@ Modul yang tersedia:
       renderModuleCount('Aparatur Desa', countOrZero(modules.aparatur_desa?.records));
       renderModuleCount('Bankeu Perubahan', countOrZero(modules.bankeu_perubahan?.records));
       renderModuleCount('Keuangan Desa (records)', countOrZero(modules.keuangan_desa?.total_records));
+
+      const keuangan = modules.keuangan_desa || {};
+      const categories = keuangan.categories || {};
+      keuanganTahun.textContent = keuangan.tahun || '-';
+      const keuanganOrder = ['add', 'dana_desa', 'bhprd', 'bankeu', 'insentif_dd'];
+      keuanganOrder.forEach((key) => {
+        if (categories[key]) renderKeuanganCategory(key, categories[key]);
+      });
+      const totalCard = document.createElement('div');
+      totalCard.className = 'card';
+      totalCard.style.cssText = 'border-color:#0f766e;background:#ecfdf3;';
+      appendText(totalCard, 'TOTAL KEUANGAN DESA');
+      const totalStrong = document.createElement('strong');
+      totalStrong.textContent = fullCurrencyFormatter.format(Number(keuangan.total_realisasi || 0));
+      totalCard.appendChild(totalStrong);
+      const totalNote = document.createElement('span');
+      totalNote.style.cssText = 'margin-top:8px;text-transform:none;font-weight:500;color:#667085;';
+      totalNote.textContent = formatter.format(Number(keuangan.total_records || 0)) + ' record total';
+      totalCard.appendChild(totalNote);
+      keuanganBreakdown.appendChild(totalCard);
 
       emptyState.classList.add('hidden');
       dataView.classList.remove('hidden');
