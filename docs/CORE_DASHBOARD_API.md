@@ -122,7 +122,7 @@ console.log(data.modules.bankeu_perubahan.records.length);
 | `total_aparatur` | number | **Gabungan** aparatur lokal (aktif) + external (dapur desa) |
 | `total_aparatur_lokal` | number | Rincian: aparatur aktif dari DB lokal |
 | `total_aparatur_external` | number | Rincian: kepala desa + perangkat + BPD (dapur desa) |
-| `total_bankeu_perubahan_proposal` | number | Jumlah proposal Bankeu **Perubahan** (semua tahun) |
+| `total_bankeu_perubahan_proposal` | number | Jumlah proposal Bankeu **Perubahan** yang **sudah masuk DPMD** (`submitted_to_dpmd = true`), semua tahun |
 | `total_keuangan_desa_realisasi` | number | Total realisasi keuangan desa (Rupiah) |
 
 > `total_aparatur` = `total_aparatur_lokal` + `total_aparatur_external` (penjumlahan langsung).
@@ -194,16 +194,17 @@ Total gabungan + breakdown external (kades/perangkat/BPD) + `records` lokal.
 
 ### 5.3 `bankeu_perubahan`
 
-Proposal Bankeu **Perubahan** (alur 3 tahap: Desa → Kecamatan → DPMD).
+Proposal Bankeu **Perubahan** yang **sudah masuk DPMD** (`submitted_to_dpmd = true`) —
+selaras dengan halaman verifikasi DPMD/SPKED. Proposal yang masih draft / di desa /
+di kecamatan **tidak** dihitung. `scope: "submitted_to_dpmd"` menegaskan hal ini.
 
 ```jsonc
 {
+  "scope": "submitted_to_dpmd",
   "total_proposal": 0,
-  "submitted_to_kecamatan": 0,
-  "submitted_to_dpmd": 0,
   "approved_by_dpmd": 0,
   "total_anggaran_usulan": 0,
-  "by_status": [], "by_kecamatan_status": [], "by_dpmd_status": [],
+  "by_status": [], "by_dpmd_status": [],
   "by_jenis_kegiatan": [], "by_tahun_anggaran": [], "by_kecamatan": [],
   "records": [
     {
@@ -213,7 +214,7 @@ Proposal Bankeu **Perubahan** (alur 3 tahap: Desa → Kecamatan → DPMD).
       "judul_proposal": "...", "kegiatan_nama": "...", "nama_kegiatan_spesifik": "...",
       "volume": "...", "lokasi": "...", "anggaran_usulan": 0,
       "status": "...", "kecamatan_status": "...", "dpmd_status": "...",
-      "submitted_to_kecamatan": true, "submitted_to_dpmd": false,
+      "submitted_to_dpmd": true,
       "kegiatan": [ { "id": 1, "kategori": "...", "nama_kegiatan": "..." } ],
       "files": { "proposal": {}, "surat_pengantar": {}, "surat_permohonan": {}, "berita_acara": {} }
     }

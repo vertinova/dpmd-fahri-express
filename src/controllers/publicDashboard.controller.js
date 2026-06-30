@@ -1518,6 +1518,9 @@ const buildBumdesDetail = async (baseUrl) => {
 
 const buildBankeuPerubahanDetail = async (baseUrl) => {
   const proposals = await prisma.bankeu_perubahan_proposals.findMany({
+    // Hanya proposal yang sudah masuk ke DPMD (selaras dgn halaman SPKED),
+    // bukan global (draft / masih di desa / di kecamatan).
+    where: { submitted_to_dpmd: true },
     select: {
       id: true,
       desa_id: true,
@@ -1616,13 +1619,11 @@ const buildBankeuPerubahanDetail = async (baseUrl) => {
   }));
 
   return {
+    // Scope: hanya proposal yang sudah masuk DPMD (submitted_to_dpmd = true).
     total_proposal: records.length,
-    submitted_to_kecamatan: records.filter((record) => record.submitted_to_kecamatan).length,
-    submitted_to_dpmd: records.filter((record) => record.submitted_to_dpmd).length,
     approved_by_dpmd: records.filter((record) => record.dpmd_status === 'approved').length,
     total_anggaran_usulan: records.reduce((total, record) => total + record.anggaran_usulan, 0),
     by_status: countBy(records, (record) => record.status),
-    by_kecamatan_status: countBy(records, (record) => record.kecamatan_status),
     by_dpmd_status: countBy(records, (record) => record.dpmd_status),
     by_jenis_kegiatan: countBy(records, (record) => record.jenis_kegiatan),
     by_tahun_anggaran: countBy(records, (record) => record.tahun_anggaran),
@@ -1676,8 +1677,6 @@ const buildPublicDashboardPayload = async (req) => {
     bumdesAktif,
     bumdesFinancials,
     bankeuPerubahanTotal,
-    bankeuPerubahanSubmittedKecamatan,
-    bankeuPerubahanSubmittedDpmd,
     bankeuPerubahanApprovedDpmd,
     bankeuPerubahanFinancials,
     externalDashboardResult
@@ -1693,11 +1692,10 @@ const buildPublicDashboardPayload = async (req) => {
         TotalTenagaKerja: true
       }
     }),
-    safeCount('bankeu_perubahan_proposals'),
-    safeCount('bankeu_perubahan_proposals', { where: { submitted_to_kecamatan: true } }),
     safeCount('bankeu_perubahan_proposals', { where: { submitted_to_dpmd: true } }),
     safeCount('bankeu_perubahan_proposals', { where: { dpmd_status: 'approved' } }),
     safeAggregate('bankeu_perubahan_proposals', {
+      where: { submitted_to_dpmd: true },
       _sum: {
         anggaran_usulan: true
       }
@@ -1732,8 +1730,6 @@ const buildPublicDashboardPayload = async (req) => {
     },
     bankeu_perubahan: {
       total_proposal: bankeuPerubahanTotal,
-      submitted_to_kecamatan: bankeuPerubahanSubmittedKecamatan,
-      submitted_to_dpmd: bankeuPerubahanSubmittedDpmd,
       approved_by_dpmd: bankeuPerubahanApprovedDpmd,
       total_anggaran_usulan: toNumber(bankeuPerubahanFinancials._sum?.anggaran_usulan),
       records: []
@@ -1788,9 +1784,8 @@ const buildPublicDashboardPayload = async (req) => {
       ...aparaturDesaDetail
     },
     bankeu_perubahan: {
+      scope: 'submitted_to_dpmd',
       total_proposal: bankeuPerubahanTotal,
-      submitted_to_kecamatan: bankeuPerubahanSubmittedKecamatan,
-      submitted_to_dpmd: bankeuPerubahanSubmittedDpmd,
       approved_by_dpmd: bankeuPerubahanApprovedDpmd,
       total_anggaran_usulan: toNumber(bankeuPerubahanFinancials._sum?.anggaran_usulan),
       ...bankeuPerubahanDetail
