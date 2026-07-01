@@ -20,7 +20,13 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   fileFilter: (req, file, cb) => {
-    if (file.mimetype === 'application/pdf') {
+    // Terima jika mimetype PDF ATAU ekstensi .pdf. Sebagian browser/OS (Windows)
+    // mengirim mimetype 'application/octet-stream' untuk PDF asli, sehingga
+    // pengecekan mimetype saja bisa menolak file PDF yang valid.
+    const isPdf =
+      file.mimetype === 'application/pdf' ||
+      path.extname(file.originalname).toLowerCase() === '.pdf';
+    if (isPdf) {
       cb(null, true);
     } else {
       cb(new Error('Only PDF files are allowed!'), false);
