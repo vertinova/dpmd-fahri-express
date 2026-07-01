@@ -836,6 +836,8 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
       dbNama: [...new Set(entry.dbItems.map((item) => item.nama))],
       addNama: [...new Set(entry.addItems.map((item) => item.nama))],
       bpjsNama: [...new Set(entry.bpjsItems.map((item) => item.nama))],
+      dbNik: dbNiks,
+      bpjsNik: bpjsNiks,
       inDb: hasDb,
       inAdd: hasAdd,
       inBpjs: hasBpjs,
@@ -901,47 +903,20 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
   });
 }
 
-class RtrwComparisonController {
-  /**
-   * GET /api/kelembagaan/rtrw-comparison
-   */
-  async getComparison(req, res) {
-    try {
-      // Fuzzy name matching is on by default — it is what merges spelling variants
-      // (NURDIN/NOERDIN) and spacing/title differences across DB/ADD/BPJS. Pass ?fuzzy=0 to disable.
-      const enableFuzzy = req.query?.fuzzy === undefined ? true : boolQuery(req.query.fuzzy);
-      const debugTiming = boolQuery(req.query?.debugTiming);
-      const desaKodeFilter = toText(req.query?.desaKode);
-      const itemKeyFilter = toText(req.query?.itemKey);
-      const includeDetails = boolQuery(req.query?.includeDetails) || Boolean(itemKeyFilter);
-      const waitForCache = boolQuery(req.query?.waitForCache);
-      const startedAt = Date.now();
-      const logTiming = (label) => {
-        if (debugTiming) console.log(`[rtrw-comparison] ${label}: ${Date.now() - startedAt}ms`);
-      };
-
-      if (!isSourceCacheReady()) {
-        const warming = warmSourceCache();
-        if (!waitForCache && !hasPreparedJsonCache()) {
-          return res.status(202).json({
-            success: true,
-            processing: true,
-            message: 'Cache persandingan RT/RW sedang disiapkan, silakan coba lagi beberapa saat.',
-            data: {
-              summary: null,
-              comparison: [],
-              meta: {
-                cacheReady: false,
-                includeDetails,
-                filteredDesaKode: desaKodeFilter || null,
-                filteredItemKey: itemKeyFilter || null,
-              },
-            },
-          });
-        }
-        await warming;
-      }
-
+/**
+ * Core computation for the RT/RW comparison. Reused by the HTTP handler and by
+ * the offline analytics export script so both stay in sync. Assumes the source
+ * cache is already warm (caller is responsible for warming it).
+ *
+ * @returns {Promise<{summary, comparison, tangkilUnresolved, meta}>}
+ */
+async function computeComparison({
+  enableFuzzy = false,
+  includeDetails = false,
+  desaKodeFilter = '',
+  itemKeyFilter = '',
+  logTiming = () => {},
+} = {}) {
       const [allDesa, allPengurus, allRws, allRts] = await Promise.all([
         prisma.desas.findMany({
           ...(desaKodeFilter ? { where: { kode: desaKodeFilter } } : {}),
@@ -1153,19 +1128,76 @@ class RtrwComparisonController {
         bpjsCandidates: item.bpjsTangkilCandidates || [],
       }));
 
+  return {
+    summary,
+    comparison,
+    tangkilUnresolved: tangkilUnresolvedForResponse,
+    meta: {
+      cacheReady: true,
+      sourceType,
+      includeDetails,
+      filteredDesaKode: desaKodeFilter || null,
+      filteredItemKey: itemKeyFilter || null,
+    },
+  };
+}
+
+class RtrwComparisonController {
+  /**
+   * GET /api/kelembagaan/rtrw-comparison
+   */
+  async getComparison(req, res) {
+    try {
+      // Fuzzy name matching is on by default — it is what merges spelling variants
+      // (NURDIN/NOERDIN) and spacing/title differences across DB/ADD/BPJS. Pass ?fuzzy=0 to disable.
+      const enableFuzzy = req.query?.fuzzy === undefined ? true : boolQuery(req.query.fuzzy);
+      const debugTiming = boolQuery(req.query?.debugTiming);
+      const desaKodeFilter = toText(req.query?.desaKode);
+      const itemKeyFilter = toText(req.query?.itemKey);
+      const includeDetails = boolQuery(req.query?.includeDetails) || Boolean(itemKeyFilter);
+      const waitForCache = boolQuery(req.query?.waitForCache);
+      const startedAt = Date.now();
+      const logTiming = (label) => {
+        if (debugTiming) console.log(`[rtrw-comparison] ${label}: ${Date.now() - startedAt}ms`);
+      };
+
+      if (!isSourceCacheReady()) {
+        const warming = warmSourceCache();
+        if (!waitForCache && !hasPreparedJsonCache()) {
+          return res.status(202).json({
+            success: true,
+            processing: true,
+            message: 'Cache persandingan RT/RW sedang disiapkan, silakan coba lagi beberapa saat.',
+            data: {
+              summary: null,
+              comparison: [],
+              meta: {
+                cacheReady: false,
+                includeDetails,
+                filteredDesaKode: desaKodeFilter || null,
+                filteredItemKey: itemKeyFilter || null,
+              },
+            },
+          });
+        }
+        await warming;
+      }
+
+      const { summary, comparison, tangkilUnresolved, meta } = await computeComparison({
+        enableFuzzy,
+        includeDetails,
+        desaKodeFilter,
+        itemKeyFilter,
+        logTiming,
+      });
+
       res.json({
         success: true,
         data: {
           summary,
           comparison,
-          tangkilUnresolved: tangkilUnresolvedForResponse,
-          meta: {
-            cacheReady: true,
-            sourceType,
-            includeDetails,
-            filteredDesaKode: desaKodeFilter || null,
-            filteredItemKey: itemKeyFilter || null,
-          },
+          tangkilUnresolved,
+          meta,
         },
       });
     } catch (error) {
@@ -1180,5 +1212,8 @@ class RtrwComparisonController {
 }
 
 module.exports = new RtrwComparisonController();
+module.exports.computeComparison = computeComparison;
+module.exports.warmSourceCache = warmSourceCache;
+module.exports.isSourceCacheReady = isSourceCacheReady;
 // Exposed for unit tests (see __tests__/rtrwMatching.test.js).
 module.exports._internals = { normalizeName, isSimilarName, tokenSimilar, compareItems };
