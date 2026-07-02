@@ -924,6 +924,7 @@ async function computeComparison({
             id: true,
             kode: true,
             nama: true,
+            status_pemerintahan: true,
             kecamatans: {
               select: { id: true, kode: true, nama: true },
             },
@@ -1049,6 +1050,7 @@ async function computeComparison({
           desaId: desa.id.toString(),
           desaNama: desa.nama,
           desaKode: desa.kode,
+          statusPemerintahan: desa.status_pemerintahan,
           kecamatanNama: desa.kecamatans.nama,
           kecamatanId: desa.kecamatans.id.toString(),
           totalDb: dbList.length,
@@ -1077,15 +1079,16 @@ async function computeComparison({
         .filter((kode) => !desaByKode.has(kode))
         .sort();
 
-      const desaWithoutDb = comparison
-        .filter((desa) => desa.totalDb === 0)
-        .map((desa) => `${desa.desaNama} (${desa.kecamatanNama})`);
-      const desaWithoutAdd = comparison
-        .filter((desa) => desa.totalAdd === 0)
-        .map((desa) => `${desa.desaNama} (${desa.kecamatanNama})`);
-      const desaWithoutBpjs = comparison
-        .filter((desa) => desa.totalBpjs === 0)
-        .map((desa) => `${desa.desaNama} (${desa.kecamatanNama})`);
+      const emptyEntries = (predicate) => comparison
+        .filter(predicate)
+        .map((desa) => ({
+          nama: desa.desaNama,
+          kecamatan: desa.kecamatanNama,
+          jenis: desa.statusPemerintahan, // 'desa' | 'kelurahan'
+        }));
+      const desaWithoutDb = emptyEntries((desa) => desa.totalDb === 0);
+      const desaWithoutAdd = emptyEntries((desa) => desa.totalAdd === 0);
+      const desaWithoutBpjs = emptyEntries((desa) => desa.totalBpjs === 0);
 
       const summary = {
         totalDesa: allDesa.length,
