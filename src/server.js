@@ -92,6 +92,7 @@ const bankeuMasterKegiatanRoutes = require('./routes/bankeuMasterKegiatan.routes
 const bankeuPerubahanProposalRoutes = require('./routes/bankeuPerubahanProposal.routes');
 const bankeuPerubahanVerificationRoutes = require('./routes/bankeuPerubahanVerification.routes');
 const bankeuPerubahanDpmdRoutes = require('./routes/bankeuPerubahanDpmd.routes');
+const dinasBankeuPerubahanRoutes = require('./routes/dinasBankeuPerubahan.routes');
 const bankeuPerubahanConfigRoutes = require('./routes/bankeuPerubahanConfig.routes');
 const bankeuPerubahanLpjRoutes = require('./routes/bankeuPerubahanLpj.routes');
 const dpmdBankeuPerubahanLpjRoutes = require('./routes/dpmdBankeuPerubahanLpj.routes');
@@ -343,6 +344,7 @@ app.use('/api/desa/bankeu-perubahan', bankeuPerubahanProposalRoutes);
 app.use('/api/kecamatan/bankeu-perubahan', bankeuPerubahanVerificationRoutes);
 app.use('/api/kecamatan/bankeu-perubahan', bankeuPerubahanConfigRoutes); // Config & tim verifikasi
 app.use('/api/dpmd/bankeu-perubahan', bankeuPerubahanDpmdRoutes);
+app.use('/api/dinas/bankeu-perubahan', dinasBankeuPerubahanRoutes); // Arsip & statistik read-only untuk Dinas/OPD (mis. DLH)
 app.use('/api/desa/bankeu-perubahan-lpj', bankeuPerubahanLpjRoutes);
 app.use('/api/dpmd/bankeu-perubahan-lpj', dpmdBankeuPerubahanLpjRoutes);
 app.use('/api/public/bankeu-perubahan', bankeuPerubahanPublicRoutes);
