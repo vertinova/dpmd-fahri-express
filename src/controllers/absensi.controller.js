@@ -468,7 +468,7 @@ const absensiController = {
       }
 
       let message = `Absen masuk ${modeLabel[absensiMode]} berhasil (jarak: ${Math.round(jarak)}m)`;
-      if (telatMenit > 0) {
+      if (process.env.ABSENSI_SHOW_LATE_MESSAGE === 'true' && telatMenit > 0) {
         const jam = Math.floor(telatMenit / 60);
         const menit = telatMenit % 60;
         const telatStr = jam > 0 ? `${jam} jam ${menit} menit` : `${menit} menit`;
