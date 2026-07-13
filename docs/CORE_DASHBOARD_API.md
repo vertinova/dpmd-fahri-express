@@ -8,10 +8,11 @@ Dokumen integrasi untuk mitra/rekan yang mengonsumsi data agregat DPMD Kabupaten
 - **Auth:** API key (header)
 - **Format:** JSON, realtime (tanpa cache di sisi server)
 
-> Catatan v2.0: payload diringkas menjadi **4 modul inti** saja
-> (BUMDes, Aparatur Desa gabungan, Bankeu **Perubahan**, Keuangan Desa).
-> Modul lama (wilayah, profil desa, produk hukum, kelembagaan, bankeu reguler)
-> **sudah tidak lagi dikembalikan**.
+> Catatan v2.1: payload diringkas menjadi **3 modul inti** saja
+> (BUMDes, Aparatur Desa gabungan, Bankeu **Perubahan**).
+> Modul lama (wilayah, profil desa, produk hukum, kelembagaan, keuangan desa/
+> bankeu reguler) **sudah tidak lagi dikembalikan** — data penyaluran dana desa
+> pindah ke endpoint terpisah `GET /api/public/sipanda`.
 
 ---
 
@@ -114,7 +115,7 @@ console.log(data.modules.bankeu_perubahan.records.length);
 }
 ```
 
-### 4.2 `data.summary` — 4 angka inti
+### 4.2 `data.summary` — 3 angka inti
 
 | Field | Tipe | Keterangan |
 |---|---|---|
@@ -123,7 +124,7 @@ console.log(data.modules.bankeu_perubahan.records.length);
 | `total_aparatur_lokal` | number | Rincian: aparatur aktif dari DB lokal |
 | `total_aparatur_external` | number | Rincian: kepala desa + perangkat + BPD (dapur desa) |
 | `total_bankeu_perubahan_proposal` | number | Jumlah proposal Bankeu **Perubahan** yang **sudah masuk DPMD** (`submitted_to_dpmd = true`), semua tahun |
-| `total_keuangan_desa_realisasi` | number | Total realisasi keuangan desa (Rupiah) |
+| `total_bankeu_perubahan_anggaran` | number | Total nominal anggaran usulan (Rupiah) dari proposal yang sudah masuk DPMD (scope sama dgn count) |
 
 > `total_aparatur` = `total_aparatur_lokal` + `total_aparatur_external` (penjumlahan langsung).
 
@@ -227,21 +228,9 @@ desa / di kecamatan **tidak** dihitung. `scope: "masuk_dpmd"` menegaskan hal ini
 > Mencakup **semua tahun anggaran** — gunakan `by_tahun_anggaran` atau filter
 > field `record.tahun_anggaran` di sisi mitra bila hanya butuh satu tahun.
 
-### 5.4 `keuangan_desa` (Bankeu Reguler)
-
-Realisasi **Bantuan Keuangan (bankeu) reguler** saja. Data ADD, Dana Desa, BHPRD, dan penyaluran SIPANDA lain **TIDAK** ada di sini — gunakan endpoint terpisah **`GET /api/public/sipanda`** (lihat §8).
-
-```jsonc
-{
-  "total_realisasi": 0,
-  "total_records": 0,
-  "tahun": 2025,
-  "source": "static_json",
-  "categories": {
-    "bankeu": { "total_records": 0, "total_desa": 0, "total_realisasi": 0, "by_status": [], "records": [] }
-  }
-}
-```
+> **Catatan:** modul keuangan desa (ADD/DD/BHPRD/Bankeu reguler) **TIDAK** ada di
+> core-dashboard. Seluruh data penyaluran dana desa dipindahkan ke endpoint terpisah
+> **`GET /api/public/sipanda`** (lihat §8).
 
 ---
 

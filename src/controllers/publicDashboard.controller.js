@@ -2,8 +2,6 @@ const prisma = require('../config/prisma');
 const externalApiService = require('../services/externalApiProxy.service');
 const sipandaService = require('../services/sipanda.service');
 const crypto = require('crypto');
-const fs = require('fs');
-const path = require('path');
 
 const CORE_DASHBOARD_API_KEY_ENV = 'CORE_DASHBOARD_API_KEY';
 
@@ -13,74 +11,8 @@ const toNumber = (value) => {
   return Number.isFinite(number) ? number : 0;
 };
 
-const toCurrencyNumber = (value) => {
-  if (value === null || value === undefined) return 0;
-  const normalized = String(value).replace(/[^\d-]/g, '');
-  const number = Number(normalized);
-  return Number.isFinite(number) ? number : 0;
-};
-
-const readPublicJsonRows = (fileName) => {
-  try {
-    const filePath = path.join(__dirname, '../../public', fileName);
-    if (!fs.existsSync(filePath)) return [];
-
-    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
-    if (Array.isArray(parsed)) return parsed;
-    if (Array.isArray(parsed?.data)) return parsed.data;
-    return [];
-  } catch (error) {
-    console.warn(`[PublicDashboard] Failed to read ${fileName}:`, error.message);
-    return [];
-  }
-};
-
-const aggregateFinanceFiles = (fileNames, includeRecords = true) => {
-  const rows = fileNames.flatMap(readPublicJsonRows);
-  const statusMap = new Map();
-  const desaSet = new Set();
-  const records = [];
-
-  let totalRealisasi = 0;
-
-  rows.forEach((row, index) => {
-    const realisasi = toCurrencyNumber(row.Realisasi ?? row.realisasi ?? row.total_realisasi ?? row.nilai);
-    const status = row.sts || row.status || 'Tidak Diketahui';
-    const desaKey = `${row.kecamatan || ''}|${row.desa || row.nama_desa || ''}`;
-
-    totalRealisasi += realisasi;
-    if (desaKey.trim() !== '|') desaSet.add(desaKey);
-    if (includeRecords) {
-      records.push({
-        nomor: index + 1,
-        kecamatan: row.kecamatan || null,
-        desa: row.desa || row.nama_desa || null,
-        status,
-        realisasi,
-        realisasi_label: row.Realisasi || row.realisasi || row.total_realisasi || row.nilai || null,
-        raw_status: row.sts || row.status || null
-      });
-    }
-
-    const current = statusMap.get(status) || { status, total: 0, total_realisasi: 0 };
-    current.total += 1;
-    current.total_realisasi += realisasi;
-    statusMap.set(status, current);
-  });
-
-  const result = {
-    total_records: rows.length,
-    total_desa: desaSet.size,
-    total_realisasi: totalRealisasi,
-    by_status: Array.from(statusMap.values()).sort((a, b) => b.total - a.total)
-  };
-
-  if (includeRecords) result.records = records;
-  return result;
-};
-
 // ── SIPANDA — dipakai HANYA oleh endpoint terpisah /api/public/sipanda ────────
-// Core dashboard TIDAK memakai SIPANDA (lihat buildKeuanganDesaStats di bawah).
+// Core dashboard TIDAK memakai SIPANDA maupun data keuangan desa (KKD).
 // Ringkas baris SIPANDA (granular per-desa per-tahap) untuk SATU sumber_dana:
 // total, rekap per kecamatan, dan (opsional) record per desa.
 // PENTING: `anggaran` SIPANDA berformat "220190608.00" (ada desimal) — gunakan
@@ -147,22 +79,6 @@ const SIPANDA_SUMBER = [
   { key: 'bp', sumber: 'BP', label: 'Bantuan Provinsi' }
 ];
 
-// Core dashboard: keuangan desa = BANKEU REGULER saja (dari JSON statis).
-// ADD/DD/BHPRD & data SIPANDA lain SENGAJA dipisah ke endpoint /api/public/sipanda
-// agar core dashboard tidak bentrok / tidak menampilkan data KKD-SIPANDA.
-const buildKeuanganDesaStats = (options = {}) => {
-  const includeRecords = options.includeRecords !== false;
-  const bankeu = aggregateFinanceFiles(['bankeu2025.json'], includeRecords);
-
-  return {
-    total_realisasi: bankeu.total_realisasi,
-    total_records: bankeu.total_records,
-    tahun: 2025,
-    source: 'static_json',
-    categories: { bankeu }
-  };
-};
-
 const buildDashboardCards = (summary) => ([
   {
     key: 'bumdes',
@@ -183,14 +99,11 @@ const buildDashboardCards = (summary) => ([
     label: 'Bankeu Perubahan',
     value: summary.total_bankeu_perubahan_proposal,
     format: 'number',
-    data_path: 'data.summary.total_bankeu_perubahan_proposal'
-  },
-  {
-    key: 'keuangan_desa',
-    label: 'Bankeu Reguler',
-    value: summary.total_keuangan_desa_realisasi,
-    format: 'currency_idr',
-    data_path: 'data.summary.total_keuangan_desa_realisasi'
+    data_path: 'data.summary.total_bankeu_perubahan_proposal',
+    // Total nominal anggaran usulan (scope sama: proposal yang sudah masuk DPMD)
+    value_anggaran: summary.total_bankeu_perubahan_anggaran,
+    format_anggaran: 'currency_idr',
+    anggaran_data_path: 'data.summary.total_bankeu_perubahan_anggaran'
   }
 ]);
 
@@ -215,13 +128,6 @@ const buildDashboardModules = (modules) => ([
     description: 'Rekap proposal dan status pengajuan bantuan keuangan perubahan.',
     data_path: 'data.modules.bankeu_perubahan',
     data: modules.bankeu_perubahan
-  },
-  {
-    key: 'keuangan_desa',
-    label: 'Bankeu Reguler',
-    description: 'Rekap realisasi Bantuan Keuangan (bankeu) reguler. Data ADD/DD/BHPRD & SIPANDA lain tersedia di endpoint terpisah /api/public/sipanda.',
-    data_path: 'data.modules.keuangan_desa',
-    data: modules.keuangan_desa
   }
 ]);
 
@@ -831,10 +737,6 @@ const sendCoreDashboardPage = (res) => {
           <p class="subtitle" style="margin-bottom: 12px; font-size: 13px;">Angka 0 saat mode <strong>Full Detail</strong> berarti detail builder gagal di server (cek log). Saat mode <strong>Preview</strong>, semuanya 0 — itu memang perilaku normal.</p>
           <div id="moduleCounts" class="cards"></div>
 
-          <h3 style="margin: 22px 0 10px; font-size: 16px; letter-spacing: 0;">Rincian Keuangan Desa per Kategori</h3>
-          <p class="subtitle" style="margin-bottom: 12px; font-size: 13px;">Total <strong>Keuangan Desa</strong> adalah penjumlahan realisasi dari kategori berikut (sumber data tahun <span id="keuanganTahun">-</span>). Angka realisasi per kategori tampil di mode Preview maupun Full Detail; rincian per record hanya di Full Detail.</p>
-          <div id="keuanganBreakdown" class="cards"></div>
-
           <div class="guide">
             <div class="guide-head">
               <div>
@@ -889,14 +791,14 @@ data.modules.X                → detail per modul (records)
 
 Modul yang tersedia:
   bumdes, aparatur_desa,
-  bankeu_perubahan, keuangan_desa</pre>
+  bankeu_perubahan</pre>
               </div>
             </div>
             <ul class="fields">
               <li><strong>Default = Full Detail.</strong> Hanya jika query berisi <code>?view=preview</code>, <code>?view=summary</code>, atau <code>?detail=preview</code> maka response hanya ringkasan.</li>
               <li><code>data.meta.mode</code> akan bernilai <code>"full"</code> atau <code>"preview"</code> — selalu cek field ini untuk memastikan apa yang Anda terima.</li>
-              <li><code>data.summary</code> = 4 angka rekap (total BUMDes, total aparatur gabungan, total proposal bankeu perubahan, total realisasi keuangan desa) untuk tampilan cepat.</li>
-              <li><code>data.modules.bumdes.records</code>, <code>data.modules.aparatur_desa.records</code>, <code>data.modules.bankeu_perubahan.records</code>, <code>data.modules.keuangan_desa.categories</code> — detail lengkap per record.</li>
+              <li><code>data.summary</code> = 3 angka rekap (total BUMDes, total aparatur gabungan, total proposal bankeu perubahan) untuk tampilan cepat.</li>
+              <li><code>data.modules.bumdes.records</code>, <code>data.modules.aparatur_desa.records</code>, <code>data.modules.bankeu_perubahan.records</code> — detail lengkap per record.</li>
               <li>Field file/foto berupa objek terstruktur dengan <code>path</code>, <code>url</code>, dan <code>download_url</code>.</li>
               <li>Halaman web ini memanggil endpoint sesuai mode yang Anda pilih di sebelah kiri — sebelumnya selalu preview. Untuk integrasi aplikasi, panggil endpoint dari backend (jangan dari frontend publik karena API key akan terekspos).</li>
               <li>Perjalanan dinas <strong>tidak</strong> termasuk di payload publik ini.</li>
@@ -919,8 +821,6 @@ Modul yang tersedia:
     const meta = document.getElementById('meta');
     const cards = document.getElementById('cards');
     const moduleCounts = document.getElementById('moduleCounts');
-    const keuanganBreakdown = document.getElementById('keuanganBreakdown');
-    const keuanganTahun = document.getElementById('keuanganTahun');
     const jsonOutput = document.getElementById('jsonOutput');
     const formatter = new Intl.NumberFormat('id-ID');
     const fullCurrencyFormatter = new Intl.NumberFormat('id-ID', {
@@ -954,13 +854,19 @@ Modul yang tersedia:
       return formatter.format(Number(value || 0));
     };
 
-    const renderCard = (label, value, type) => {
+    const renderCard = (label, value, type, subtitle) => {
       const card = document.createElement('div');
       card.className = 'card';
       appendText(card, label);
       const strong = document.createElement('strong');
       strong.textContent = formatCardValue(value, type);
       card.appendChild(strong);
+      if (subtitle) {
+        const note = document.createElement('span');
+        note.style.cssText = 'margin-top:8px;text-transform:none;font-weight:600;color:#0f766e;';
+        note.textContent = subtitle;
+        card.appendChild(note);
+      }
       cards.appendChild(card);
     };
 
@@ -972,35 +878,6 @@ Modul yang tersedia:
       strong.textContent = formatter.format(Number(value || 0));
       card.appendChild(strong);
       moduleCounts.appendChild(card);
-    };
-
-    const KEUANGAN_LABELS = {
-      add: 'ADD (Alokasi Dana Desa)',
-      dana_desa: 'Dana Desa (DD)',
-      bhprd: 'BHPRD (Bagi Hasil Pajak & Retribusi)',
-      bankeu: 'Bantuan Keuangan (Bankeu)',
-      insentif_dd: 'Insentif Dana Desa'
-    };
-
-    const renderKeuanganCategory = (key, category) => {
-      const realisasi = Number(category?.total_realisasi || 0);
-      const records = Number(category?.total_records || 0);
-      const desa = Number(category?.total_desa || 0);
-
-      const card = document.createElement('div');
-      card.className = 'card';
-      appendText(card, KEUANGAN_LABELS[key] || key);
-
-      const strong = document.createElement('strong');
-      strong.textContent = fullCurrencyFormatter.format(realisasi);
-      card.appendChild(strong);
-
-      const note = document.createElement('span');
-      note.style.cssText = 'margin-top:8px;text-transform:none;font-weight:500;color:#667085;';
-      note.textContent = formatter.format(records) + ' record' + (desa ? ' · ' + formatter.format(desa) + ' desa' : '');
-      card.appendChild(note);
-
-      keuanganBreakdown.appendChild(card);
     };
 
     const countOrZero = (value) => {
@@ -1017,7 +894,6 @@ Modul yang tersedia:
       meta.innerHTML = '';
       cards.innerHTML = '';
       moduleCounts.innerHTML = '';
-      keuanganBreakdown.innerHTML = '';
       jsonOutput.textContent = JSON.stringify(payload, null, 2);
 
       const mode = data.meta?.mode || '-';
@@ -1029,33 +905,12 @@ Modul yang tersedia:
 
       renderCard('BUMDes', summary.total_bumdes);
       renderCard('Aparatur Desa', summary.total_aparatur);
-      renderCard('Bankeu Perubahan', summary.total_bankeu_perubahan_proposal);
-      renderCard('Keuangan Desa', summary.total_keuangan_desa_realisasi, 'currency');
+      renderCard('Bankeu Perubahan', summary.total_bankeu_perubahan_proposal, undefined,
+        'Anggaran: ' + fullCurrencyFormatter.format(Number(summary.total_bankeu_perubahan_anggaran || 0)));
 
       renderModuleCount('BUMDes', countOrZero(modules.bumdes?.records));
       renderModuleCount('Aparatur Desa', countOrZero(modules.aparatur_desa?.records));
       renderModuleCount('Bankeu Perubahan', countOrZero(modules.bankeu_perubahan?.records));
-      renderModuleCount('Keuangan Desa (records)', countOrZero(modules.keuangan_desa?.total_records));
-
-      const keuangan = modules.keuangan_desa || {};
-      const categories = keuangan.categories || {};
-      keuanganTahun.textContent = keuangan.tahun || '-';
-      const keuanganOrder = ['add', 'dana_desa', 'bhprd', 'bankeu', 'insentif_dd'];
-      keuanganOrder.forEach((key) => {
-        if (categories[key]) renderKeuanganCategory(key, categories[key]);
-      });
-      const totalCard = document.createElement('div');
-      totalCard.className = 'card';
-      totalCard.style.cssText = 'border-color:#0f766e;background:#ecfdf3;';
-      appendText(totalCard, 'TOTAL KEUANGAN DESA');
-      const totalStrong = document.createElement('strong');
-      totalStrong.textContent = fullCurrencyFormatter.format(Number(keuangan.total_realisasi || 0));
-      totalCard.appendChild(totalStrong);
-      const totalNote = document.createElement('span');
-      totalNote.style.cssText = 'margin-top:8px;text-transform:none;font-weight:500;color:#667085;';
-      totalNote.textContent = formatter.format(Number(keuangan.total_records || 0)) + ' record total';
-      totalCard.appendChild(totalNote);
-      keuanganBreakdown.appendChild(totalCard);
 
       emptyState.classList.add('hidden');
       dataView.classList.remove('hidden');
@@ -1730,7 +1585,6 @@ const buildPublicDashboardPayload = async (req) => {
   const now = new Date();
   const previewMode = isPreviewPayloadRequest(req);
   const baseUrl = getRequestBaseUrl(req);
-  const keuanganDesaStats = buildKeuanganDesaStats({ includeRecords: !previewMode });
 
   const [
     totalAparaturLokal,
@@ -1819,7 +1673,7 @@ const buildPublicDashboardPayload = async (req) => {
     total_aparatur_lokal: totalAparaturLokal,
     total_aparatur_external: totalAparaturExternal,
     total_bankeu_perubahan_proposal: bankeuPerubahanTotal,
-    total_keuangan_desa_realisasi: keuanganDesaStats.total_realisasi
+    total_bankeu_perubahan_anggaran: toNumber(bankeuPerubahanFinancials._sum?.anggaran_usulan)
   };
 
   const modules = {
@@ -1850,8 +1704,7 @@ const buildPublicDashboardPayload = async (req) => {
       approved_by_dpmd: bankeuPerubahanApprovedDpmd,
       total_anggaran_usulan: toNumber(bankeuPerubahanFinancials._sum?.anggaran_usulan),
       ...bankeuPerubahanDetail
-    },
-    keuangan_desa: keuanganDesaStats
+    }
   };
 
   return {
