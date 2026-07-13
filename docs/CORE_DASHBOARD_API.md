@@ -227,21 +227,18 @@ desa / di kecamatan **tidak** dihitung. `scope: "masuk_dpmd"` menegaskan hal ini
 > Mencakup **semua tahun anggaran** — gunakan `by_tahun_anggaran` atau filter
 > field `record.tahun_anggaran` di sisi mitra bila hanya butuh satu tahun.
 
-### 5.4 `keuangan_desa`
+### 5.4 `keuangan_desa` (Bankeu Reguler)
 
-Realisasi keuangan desa per kategori (sumber data tahun 2025).
+Realisasi **Bantuan Keuangan (bankeu) reguler** saja. Data ADD, Dana Desa, BHPRD, dan penyaluran SIPANDA lain **TIDAK** ada di sini — gunakan endpoint terpisah **`GET /api/public/sipanda`** (lihat §8).
 
 ```jsonc
 {
   "total_realisasi": 0,
   "total_records": 0,
   "tahun": 2025,
+  "source": "static_json",
   "categories": {
-    "add":         { "total_records": 0, "total_desa": 0, "total_realisasi": 0, "by_status": [], "records": [] },
-    "dana_desa":   { "...": 0 },
-    "bhprd":       { "...": 0 },
-    "bankeu":      { "...": 0 },
-    "insentif_dd": { "...": 0 }
+    "bankeu": { "total_records": 0, "total_desa": 0, "total_realisasi": 0, "by_status": [], "records": [] }
   }
 }
 ```
@@ -274,3 +271,38 @@ Bila tidak ada file, nilainya `null`.
 - **Perjalanan dinas tidak** termasuk dalam payload ini.
 - `data.dashboard.cards` & `data.dashboard.modules` adalah bentuk siap-render
   (label + data_path), opsional untuk dipakai.
+
+---
+
+## 8. Endpoint terpisah: SIPANDA (penyaluran dana desa)
+
+`GET /api/public/sipanda` — **endpoint berbeda** dari core-dashboard, tapi **auth-nya sama** (header `x-api-key` / `Authorization: Bearer` dgn `CORE_DASHBOARD_API_KEY`).
+
+Berisi realisasi penyaluran dana desa **live dari SIPANDA** tahun berjalan, dipecah per `sumber_dana`: `add`, `dd_reguler`, `bhprd`, `bankeu_infras_desa`, `bp`. Setiap sumber punya total, rekap **per kecamatan** (`by_kecamatan`), dan (mode full) `records[]` per desa. Pakai `?view=preview` untuk tanpa `records`.
+
+> Catatan: `bankeu_infras_desa` & `bp` bisa `Rp 0` bila belum ada pencairan di SIPANDA untuk tahun berjalan. Bila SIPANDA tidak dapat dijangkau, endpoint membalas `502` (tidak ada fallback statis — ini memang endpoint live SIPANDA).
+
+```jsonc
+{
+  "success": true,
+  "data": {
+    "meta": { "source": "sipanda", "mode": "full", "...": "..." },
+    "tahun": 2026,
+    "total_realisasi": 913524546142,
+    "sumber_dana": {
+      "add": {
+        "label": "Alokasi Dana Desa (ADD)",
+        "sumber_dana": "ADD",
+        "total_realisasi": 406865146624,
+        "total_desa": 416,
+        "by_kecamatan": [ { "kecamatan": "GUNUNG PUTRI", "total_realisasi": 0, "total_desa": 0 } ],
+        "records": [ { "nomor": 1, "kecamatan": "JASINGA", "desa": "CURUG", "realisasi": 0, "realisasi_label": "Rp 0" } ]
+      },
+      "dd_reguler":         { "...": "..." },
+      "bhprd":              { "...": "..." },
+      "bankeu_infras_desa": { "...": "..." },
+      "bp":                 { "...": "..." }
+    }
+  }
+}
+```

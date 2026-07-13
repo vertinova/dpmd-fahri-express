@@ -106,4 +106,12 @@ router.get('/landing-stats', async (req, res) => {
  */
 router.get(['/core-dashboard', '/dashboard'], publicDashboardController.getCoreDashboard);
 
+/**
+ * @route   GET /api/public/sipanda
+ * @desc    Data SIPANDA (penyaluran dana desa: ADD, DD, BHPRD, Bankeu Infras, BP)
+ *          per sumber dana + rekap per kecamatan. Endpoint terpisah dari core-dashboard.
+ * @access  Protected by CORE_DASHBOARD_API_KEY header
+ */
+router.get('/sipanda', publicDashboardController.getSipandaDashboard);
+
 module.exports = router;

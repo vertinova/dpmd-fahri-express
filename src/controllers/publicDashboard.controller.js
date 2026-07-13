@@ -1,5 +1,6 @@
 const prisma = require('../config/prisma');
 const externalApiService = require('../services/externalApiProxy.service');
+const sipandaService = require('../services/sipanda.service');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
@@ -78,36 +79,87 @@ const aggregateFinanceFiles = (fileNames, includeRecords = true) => {
   return result;
 };
 
-const buildKeuanganDesaStats = (options = {}) => {
-  const includeRecords = options.includeRecords !== false;
-  const add = aggregateFinanceFiles(['add2025.json'], includeRecords);
-  const danaDesa = aggregateFinanceFiles(['dd2025.json'], includeRecords);
-  const bhprd = aggregateFinanceFiles(['bhprd2025.json'], includeRecords);
-  const bankeuPublik = aggregateFinanceFiles(['bankeu2025.json'], includeRecords);
-  const insentifDd = aggregateFinanceFiles(['insentif-dd.json'], includeRecords);
+// ── SIPANDA — dipakai HANYA oleh endpoint terpisah /api/public/sipanda ────────
+// Core dashboard TIDAK memakai SIPANDA (lihat buildKeuanganDesaStats di bawah).
+// Ringkas baris SIPANDA (granular per-desa per-tahap) untuk SATU sumber_dana:
+// total, rekap per kecamatan, dan (opsional) record per desa.
+// PENTING: `anggaran` SIPANDA berformat "220190608.00" (ada desimal) — gunakan
+// toNumber, JANGAN toCurrencyNumber yang membuang titik desimal (nilai jadi 100x).
+const aggregateSipandaSumber = (rows, sumberDana, includeRecords = true) => {
+  const perDesa = new Map();      // desaKey -> { kecamatan, desa, realisasi }
+  const perKecamatan = new Map(); // kecamatan -> { total_realisasi, desaSet }
+  let totalRealisasi = 0;
 
-  const categories = {
-    add,
-    dana_desa: danaDesa,
-    bhprd,
-    bankeu: bankeuPublik,
-    insentif_dd: insentifDd
+  rows.forEach((row) => {
+    if (row.sumber_dana !== sumberDana) return;
+    const anggaran = toNumber(row.anggaran);
+    const kecamatan = row.kecamatan || 'Lainnya';
+    const desaKey = row.id_desa || `${kecamatan}|${row.desa || ''}`;
+
+    const desaEntry = perDesa.get(desaKey) || { kecamatan, desa: row.desa || null, realisasi: 0 };
+    desaEntry.realisasi += anggaran;
+    perDesa.set(desaKey, desaEntry);
+
+    const kecEntry = perKecamatan.get(kecamatan) || { total_realisasi: 0, desaSet: new Set() };
+    kecEntry.total_realisasi += anggaran;
+    kecEntry.desaSet.add(desaKey);
+    perKecamatan.set(kecamatan, kecEntry);
+
+    totalRealisasi += anggaran;
+  });
+
+  const by_kecamatan = Array.from(perKecamatan.entries())
+    .map(([kecamatan, v]) => ({
+      kecamatan,
+      total_realisasi: v.total_realisasi,
+      total_desa: v.desaSet.size
+    }))
+    .sort((a, b) => b.total_realisasi - a.total_realisasi);
+
+  const result = {
+    total_realisasi: totalRealisasi,
+    total_desa: perDesa.size,
+    by_kecamatan
   };
 
-  const totalRealisasi = Object.values(categories).reduce(
-    (total, category) => total + category.total_realisasi,
-    0
-  );
-  const totalRecords = Object.values(categories).reduce(
-    (total, category) => total + category.total_records,
-    0
-  );
+  if (includeRecords) {
+    let nomor = 0;
+    result.records = Array.from(perDesa.values())
+      .sort((a, b) => b.realisasi - a.realisasi)
+      .map((entry) => ({
+        nomor: (nomor += 1),
+        kecamatan: entry.kecamatan,
+        desa: entry.desa,
+        realisasi: entry.realisasi,
+        realisasi_label: `Rp ${Math.round(entry.realisasi).toLocaleString('id-ID')}`
+      }));
+  }
+
+  return result;
+};
+
+// Sumber dana yang tersedia di SIPANDA (untuk endpoint /api/public/sipanda).
+const SIPANDA_SUMBER = [
+  { key: 'add', sumber: 'ADD', label: 'Alokasi Dana Desa (ADD)' },
+  { key: 'dd_reguler', sumber: 'DD REGULER', label: 'Dana Desa (DD Reguler)' },
+  { key: 'bhprd', sumber: 'BHPRD', label: 'Bagi Hasil Pajak & Retribusi Daerah' },
+  { key: 'bankeu_infras_desa', sumber: 'BANKEU INFRAS DESA', label: 'Bankeu Infrastruktur Desa' },
+  { key: 'bp', sumber: 'BP', label: 'Bantuan Provinsi' }
+];
+
+// Core dashboard: keuangan desa = BANKEU REGULER saja (dari JSON statis).
+// ADD/DD/BHPRD & data SIPANDA lain SENGAJA dipisah ke endpoint /api/public/sipanda
+// agar core dashboard tidak bentrok / tidak menampilkan data KKD-SIPANDA.
+const buildKeuanganDesaStats = (options = {}) => {
+  const includeRecords = options.includeRecords !== false;
+  const bankeu = aggregateFinanceFiles(['bankeu2025.json'], includeRecords);
 
   return {
-    total_realisasi: totalRealisasi,
-    total_records: totalRecords,
+    total_realisasi: bankeu.total_realisasi,
+    total_records: bankeu.total_records,
     tahun: 2025,
-    categories
+    source: 'static_json',
+    categories: { bankeu }
   };
 };
 
@@ -135,7 +187,7 @@ const buildDashboardCards = (summary) => ([
   },
   {
     key: 'keuangan_desa',
-    label: 'Keuangan Desa',
+    label: 'Bankeu Reguler',
     value: summary.total_keuangan_desa_realisasi,
     format: 'currency_idr',
     data_path: 'data.summary.total_keuangan_desa_realisasi'
@@ -166,8 +218,8 @@ const buildDashboardModules = (modules) => ([
   },
   {
     key: 'keuangan_desa',
-    label: 'Keuangan Desa',
-    description: 'Rekap realisasi ADD, Dana Desa, BHPRD, Bankeu, dan Insentif DD.',
+    label: 'Bankeu Reguler',
+    description: 'Rekap realisasi Bantuan Keuangan (bankeu) reguler. Data ADD/DD/BHPRD & SIPANDA lain tersedia di endpoint terpisah /api/public/sipanda.',
     data_path: 'data.modules.keuangan_desa',
     data: modules.keuangan_desa
   }
@@ -1869,6 +1921,74 @@ const getCoreDashboard = async (req, res) => {
   }
 };
 
+// ── Endpoint TERPISAH: data SIPANDA (penyaluran dana desa) ────────────────────
+// GET /api/public/sipanda — auth API key sama dgn core dashboard.
+// Berisi ADD, DD Reguler, BHPRD, Bankeu Infras Desa, BP: total + per kecamatan
+// + (opsional) record per desa. Sengaja dipisah dari core dashboard.
+const buildSipandaPayload = async (req) => {
+  const now = new Date();
+  const previewMode = isPreviewPayloadRequest(req);
+  const tahun = Number(sipandaService.SIPANDA_TAHUN);
+
+  const rows = await sipandaService.fetchSipandaRows({
+    timeoutMs: previewMode ? 3000 : undefined
+  });
+
+  const sumber_dana = {};
+  let totalRealisasi = 0;
+  SIPANDA_SUMBER.forEach(({ key, sumber, label }) => {
+    const agg = aggregateSipandaSumber(rows, sumber, !previewMode);
+    totalRealisasi += agg.total_realisasi;
+    sumber_dana[key] = { label, sumber_dana: sumber, ...agg };
+  });
+
+  return {
+    meta: {
+      generated_at: now.toISOString(),
+      timezone: 'Asia/Jakarta',
+      version: '1.0',
+      access: 'protected_api_key',
+      auth_required: true,
+      realtime: true,
+      cache: 'no-store',
+      mode: previewMode ? 'preview' : 'full',
+      source: 'sipanda',
+      source_url: sipandaService.SIPANDA_BASE_URL
+    },
+    tahun,
+    total_realisasi: totalRealisasi,
+    sumber_dana
+  };
+};
+
+const getSipandaDashboard = async (req, res) => {
+  try {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+
+    if (!validateCoreDashboardAccess(req, res)) {
+      return;
+    }
+
+    const data = await buildSipandaPayload(req);
+
+    res.status(200).json({
+      success: true,
+      message: 'Data SIPANDA (penyaluran dana desa) berhasil diambil',
+      data
+    });
+  } catch (error) {
+    console.error('Error fetching SIPANDA dashboard:', error);
+    res.status(502).json({
+      success: false,
+      message: 'Gagal mengambil data SIPANDA',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
-  getCoreDashboard
+  getCoreDashboard,
+  getSipandaDashboard
 };
