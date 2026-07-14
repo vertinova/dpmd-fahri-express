@@ -6,6 +6,101 @@
 const prisma = require('../config/prisma');
 const bcrypt = require('bcryptjs');
 const path = require('path');
+const { generateToken } = require('../middlewares/auth');
+
+const DEFAULT_PASSWORD = 'password';
+
+const convertBigInt = (value) => {
+  if (value === null || value === undefined) return value;
+  return typeof value === 'bigint' ? value.toString() : value;
+};
+
+const isUsingDefaultPassword = async (passwordHash) => {
+  try {
+    return await bcrypt.compare(DEFAULT_PASSWORD, passwordHash);
+  } catch {
+    return false;
+  }
+};
+
+const buildAuthUserResponse = async (user, finalBidangId, bidangName) => {
+  const responseData = {
+    id: convertBigInt(user.id),
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    avatar: user.avatar || null,
+    desa_id: convertBigInt(user.desa_id),
+    kecamatan_id: convertBigInt(user.kecamatan_id),
+    bidang_id: finalBidangId,
+    bidang_name: bidangName,
+    dinas_id: convertBigInt(user.dinas_id),
+    pegawai_id: convertBigInt(user.pegawai_id),
+    nip: user.pegawai?.nip || null,
+    jabatan: user.pegawai?.jabatan || null,
+    tanggal_lahir: user.pegawai?.tanggal_lahir || null,
+    status_kepegawaian: user.pegawai?.status_kepegawaian?.replace(/_/g, ' ') || null,
+    pangkat: user.pegawai?.pangkat || null,
+    golongan: user.pegawai?.golongan || null,
+    sub_bidang: user.pegawai?.sub_bidang || null,
+    is_active: user.is_active,
+    must_change_password: await isUsingDefaultPassword(user.password)
+  };
+
+  if (user.desa_id) {
+    const desa = await prisma.desas.findUnique({
+      where: { id: user.desa_id },
+      select: {
+        id: true,
+        nama: true,
+        kode: true,
+        kecamatan_id: true,
+        status_pemerintahan: true
+      }
+    });
+
+    if (desa) {
+      responseData.desa = {
+        id: convertBigInt(desa.id),
+        nama: desa.nama,
+        kode: desa.kode,
+        kecamatan_id: convertBigInt(desa.kecamatan_id),
+        status_pemerintahan: desa.status_pemerintahan
+      };
+
+      const kecamatan = await prisma.kecamatans.findUnique({
+        where: { id: desa.kecamatan_id },
+        select: { id: true, nama: true, kode: true }
+      });
+
+      if (kecamatan) {
+        responseData.desa.kecamatan = {
+          id: convertBigInt(kecamatan.id),
+          nama: kecamatan.nama,
+          kode: kecamatan.kode
+        };
+      }
+    }
+  }
+
+  if (user.kecamatan_id && !responseData.desa) {
+    const kecamatan = await prisma.kecamatans.findUnique({
+      where: { id: user.kecamatan_id },
+      select: { id: true, nama: true, kode: true }
+    });
+
+    if (kecamatan) {
+      responseData.kecamatan_name = kecamatan.nama;
+      responseData.kecamatan = {
+        id: convertBigInt(kecamatan.id),
+        nama: kecamatan.nama,
+        kode: kecamatan.kode
+      };
+    }
+  }
+
+  return responseData;
+};
 
 class UserController {
   /**
@@ -312,6 +407,134 @@ class UserController {
       res.status(500).json({
         success: false,
         message: 'Failed to fetch user',
+        error: error.message
+      });
+    }
+  }
+
+  /**
+   * Superadmin impersonates another user and receives a scoped JWT for that user.
+   */
+  async impersonateUser(req, res) {
+    try {
+      if (req.user?.role !== 'superadmin') {
+        return res.status(403).json({
+          success: false,
+          message: 'Hanya superadmin yang dapat masuk sebagai user lain'
+        });
+      }
+
+      const { id } = req.params;
+      let targetId;
+      try {
+        targetId = BigInt(String(id));
+      } catch {
+        return res.status(400).json({
+          success: false,
+          message: 'ID user tidak valid'
+        });
+      }
+
+      if (BigInt(String(req.user.id)) === targetId) {
+        return res.status(400).json({
+          success: false,
+          message: 'Anda sudah berada di akun superadmin ini'
+        });
+      }
+
+      const targetUser = await prisma.users.findUnique({
+        where: { id: targetId },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          password: true,
+          role: true,
+          avatar: true,
+          desa_id: true,
+          kecamatan_id: true,
+          bidang_id: true,
+          dinas_id: true,
+          pegawai_id: true,
+          is_active: true,
+          pegawai: {
+            select: {
+              id_pegawai: true,
+              id_bidang: true,
+              sub_bidang: true,
+              nip: true,
+              jabatan: true,
+              tanggal_lahir: true,
+              status_kepegawaian: true,
+              pangkat: true,
+              golongan: true,
+              bidangs: {
+                select: {
+                  id: true,
+                  nama: true
+                }
+              }
+            }
+          }
+        }
+      });
+
+      if (!targetUser) {
+        return res.status(404).json({
+          success: false,
+          message: 'User tidak ditemukan'
+        });
+      }
+
+      if (targetUser.is_active === false) {
+        return res.status(400).json({
+          success: false,
+          message: 'User tidak aktif, tidak dapat masuk sebagai akun ini'
+        });
+      }
+
+      let finalBidangId = targetUser.bidang_id;
+      let bidangName = null;
+
+      if (targetUser.pegawai?.bidangs) {
+        finalBidangId = Number(targetUser.pegawai.id_bidang);
+        bidangName = targetUser.pegawai.bidangs.nama;
+
+        if (targetUser.bidang_id !== finalBidangId) {
+          await prisma.users.update({
+            where: { id: targetUser.id },
+            data: { bidang_id: finalBidangId }
+          });
+        }
+      }
+
+      const userForToken = {
+        ...targetUser,
+        bidang_id: finalBidangId
+      };
+      const token = generateToken(userForToken);
+      const userResponse = await buildAuthUserResponse(targetUser, finalBidangId, bidangName);
+
+      console.info(`[Impersonate] Superadmin ${req.user.email} (${req.user.id}) masuk sebagai ${targetUser.email} (${targetUser.id})`);
+
+      res.json({
+        success: true,
+        message: `Berhasil masuk sebagai ${targetUser.name}`,
+        data: {
+          token,
+          user: userResponse,
+          impersonated_by: {
+            id: req.user.id,
+            name: req.user.name,
+            email: req.user.email
+          }
+        }
+      });
+    } catch (error) {
+      console.error('Error impersonating user:', error);
+      res.status(500).json({
+        success: false,
+        message: 'Gagal masuk sebagai user',
         error: error.message
       });
     }

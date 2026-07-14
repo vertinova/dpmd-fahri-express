@@ -46,6 +46,9 @@ router.get('/', auth, userController.getAllUsers);
 // Change own password (authenticated user) - MUST be before /:id routes
 router.put('/change-password', auth, userController.changePassword);
 
+// Superadmin masuk sebagai user lain
+router.post('/:id/impersonate', auth, userController.impersonateUser);
+
 // Get user by ID
 router.get('/:id', auth, userController.getUserById);
 
