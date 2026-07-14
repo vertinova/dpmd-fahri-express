@@ -416,6 +416,34 @@ const uploadBankeuLpj = multer({
   }
 });
 
+// Storage configuration for BANTUAN PROVINSI LPJ (PDF only)
+const storageBantuanProvinsiLpj = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = 'storage/uploads/bantuan_provinsi_lpj/temp';
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    const nameWithoutExt = path.basename(file.originalname, ext)
+      .replace(/[^a-zA-Z0-9]/g, '_')
+      .substring(0, 50);
+    const filename = `lpj_bp_${timestamp}_${nameWithoutExt}${ext}`;
+    cb(null, filename);
+  }
+});
+
+const uploadBantuanProvinsiLpj = multer({
+  storage: storageBantuanProvinsiLpj,
+  fileFilter: pdfFilter,
+  limits: {
+    fileSize: 100 * 1024 * 1024 // 100MB for LPJ
+  }
+});
+
 // Storage configuration for BANKEU PROPOSAL
 const storageBankeuProposal = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -655,5 +683,6 @@ module.exports = {
   bankeuPerubahanConfigFile: uploadBankeuPerubahanConfig.single('file'),
   bankeuPerubahanSignature: uploadBankeuPerubahanSignature.single('file'),
   bankeuLpj: uploadBankeuLpj.array('files', 10),
+  bantuanProvinsiLpj: uploadBantuanProvinsiLpj.array('files', 10),
   contohProposalUpload: uploadContohProposal.single('file')
 };

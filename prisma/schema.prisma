@@ -162,6 +162,32 @@ model bankeu_lpj {
   @@index([uploaded_by], map: "fk_bankeu_lpj_user")
 }
 
+model bantuan_provinsi_lpj {
+  id                                                  BigInt                      @id @default(autoincrement()) @db.UnsignedBigInt
+  desa_id                                             BigInt                      @db.UnsignedBigInt
+  tahun_anggaran                                      Int                         @default(2026) @db.Year
+  nama_file                                           String                      @db.VarChar(255)
+  file_path                                           String                      @db.VarChar(500)
+  file_size                                           Int?                        @db.UnsignedInt
+  keterangan                                          String?                     @db.Text
+  status                                              bantuan_provinsi_lpj_status @default(pending)
+  dpmd_catatan                                        String?                     @db.Text
+  dpmd_verified_by                                    BigInt?                     @db.UnsignedBigInt
+  dpmd_verified_at                                    DateTime?                   @db.Timestamp(0)
+  uploaded_by                                         BigInt                      @db.UnsignedBigInt
+  created_at                                          DateTime                    @default(now()) @db.Timestamp(0)
+  updated_at                                          DateTime                    @default(now()) @db.Timestamp(0)
+  desas                                               desas                       @relation(fields: [desa_id], references: [id], onDelete: Cascade, map: "fk_bantuan_provinsi_lpj_desa")
+  users_bantuan_provinsi_lpj_uploaded_byTousers       users                       @relation("bantuan_provinsi_lpj_uploaded_by", fields: [uploaded_by], references: [id], onDelete: Cascade, map: "fk_bantuan_provinsi_lpj_user")
+  users_bantuan_provinsi_lpj_dpmd_verified_byTousers  users?                      @relation("bantuan_provinsi_lpj_dpmd_verified_by", fields: [dpmd_verified_by], references: [id], onDelete: SetNull, map: "fk_bantuan_provinsi_lpj_verified_by")
+
+  @@index([desa_id], map: "idx_bantuan_provinsi_lpj_desa_id")
+  @@index([tahun_anggaran], map: "idx_bantuan_provinsi_lpj_tahun")
+  @@index([status], map: "idx_bantuan_provinsi_lpj_status")
+  @@index([uploaded_by], map: "idx_bantuan_provinsi_lpj_uploaded_by")
+  @@index([dpmd_verified_by], map: "idx_bantuan_provinsi_lpj_verified_by")
+}
+
 model bankeu_proposals {
   id                                                  BigInt                               @id @default(autoincrement()) @db.UnsignedBigInt
   desa_id                                             BigInt                               @db.UnsignedBigInt
@@ -813,6 +839,7 @@ model desas {
   updated_at                DateTime?                   @db.Timestamp(0)
   aparatur_desa             aparatur_desa[]
   bankeu_lpj                bankeu_lpj[]
+  bantuan_provinsi_lpj      bantuan_provinsi_lpj[]
   bankeu_perubahan_lpj      bankeu_perubahan_lpj[]
   bankeu_perubahan_proposals bankeu_perubahan_proposals[]
   bankeu_proposals          bankeu_proposals[]
@@ -1778,6 +1805,8 @@ model users {
   anggaran_rka_items                                             anggaran_rka_items[]        @relation("anggaran_rka_items_created_by")
   app_settings                                                   app_settings[]
   bankeu_lpj                                                     bankeu_lpj[]
+  bantuan_provinsi_lpj_dpmd_verified_byTousers                   bantuan_provinsi_lpj[]      @relation("bantuan_provinsi_lpj_dpmd_verified_by")
+  bantuan_provinsi_lpj_uploaded_byTousers                        bantuan_provinsi_lpj[]      @relation("bantuan_provinsi_lpj_uploaded_by")
   bankeu_perubahan_lpj_dpmd_verified_byTousers                   bankeu_perubahan_lpj[]      @relation("bp_perubahan_lpj_dpmd_verified_by")
   bankeu_perubahan_lpj_uploaded_byTousers                        bankeu_perubahan_lpj[]      @relation("bp_perubahan_lpj_uploaded_by")
   bankeu_perubahan_proposals_created_byTousers                   bankeu_perubahan_proposals[] @relation("bp_perubahan_created_by")
@@ -2639,6 +2668,13 @@ enum bankeu_lpj_status {
   revision
 }
 
+enum bantuan_provinsi_lpj_status {
+  pending
+  approved
+  rejected
+  revision
+}
+
 enum bankeu_perubahan_master_kegiatan_kategori {
   wajib
   pilihan_infrastruktur
@@ -2759,6 +2795,7 @@ enum conversations_type {
 enum conversations_reference_type {
   bankeu_lpj
   bankeu_proposal
+  bantuan_provinsi_lpj
 }
 
 enum messages_message_type {

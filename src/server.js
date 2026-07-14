@@ -44,6 +44,7 @@ const requiredDirs = [
   path.join(__dirname, '../storage/uploads/bankeu-perubahan/berita-acara'),
   path.join(__dirname, '../storage/uploads/bankeu-perubahan/surat-pengantar'),
   path.join(__dirname, '../storage/uploads/bankeu-perubahan/annotated'),
+  path.join(__dirname, '../storage/uploads/bantuan_provinsi_lpj/temp'),
   path.join(__dirname, '../public/backups')
 ];
 
@@ -104,6 +105,8 @@ const dinasVerificationRoutes = require('./routes/dinasVerification.routes');
 const dpmdVerificationRoutes = require('./routes/dpmdVerification.routes');
 const bankeuLpjRoutes = require('./routes/bankeuLpj.routes');
 const dpmdBankeuLpjRoutes = require('./routes/dpmdBankeuLpj.routes');
+const bantuanProvinsiLpjRoutes = require('./routes/bantuanProvinsiLpj.routes');
+const dpmdBantuanProvinsiLpjRoutes = require('./routes/dpmdBantuanProvinsiLpj.routes');
 const dinasVerifikatorRoutes = require('./routes/dinasVerifikator.routes');
 const verifikatorAksesDesaRoutes = require('./routes/verifikatorAksesDesa.routes');
 const beritaAcaraRoutes = require('./routes/beritaAcara.routes');
@@ -274,6 +277,36 @@ app.get('/storage/uploads/bankeu_lpj/:filename', (req, res) => {
   }
 });
 
+// Serve Bantuan Provinsi LPJ files (supports nested kecamatan/desa folder structure)
+app.get('/storage/uploads/bantuan_provinsi_lpj/:kecamatanId/:desaId/:filename', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+  const kecamatanId = path.basename(req.params.kecamatanId);
+  const desaId = path.basename(req.params.desaId);
+  const filename = path.basename(req.params.filename);
+  const filePath = path.join(__dirname, '../storage/uploads/bantuan_provinsi_lpj', kecamatanId, desaId, filename);
+
+  if (fs.existsSync(filePath)) {
+    return res.sendFile(filePath);
+  } else {
+    return res.status(404).json({ success: false, message: 'File tidak ditemukan' });
+  }
+});
+
+// Backward compatibility: serve old flat Bantuan Provinsi LPJ files
+app.get('/storage/uploads/bantuan_provinsi_lpj/:filename', (req, res) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
+  const filename = path.basename(req.params.filename);
+  const filePath = path.join(__dirname, '../storage/uploads/bantuan_provinsi_lpj', filename);
+
+  if (fs.existsSync(filePath)) {
+    return res.sendFile(filePath);
+  } else {
+    return res.status(404).json({ success: false, message: 'File tidak ditemukan' });
+  }
+});
+
 // Serve public files (bankeu2025.json, etc)
 app.use('/public', (req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
@@ -355,6 +388,8 @@ app.use('/api/bankeu-perubahan/berita-acara', bankeuPerubahanBeritaAcaraRoutes);
 app.use('/api/bankeu-perubahan/questionnaire', bankeuPerubahanQuestionnaireRoutes);
 app.use('/api/desa/bankeu-lpj', bankeuLpjRoutes); // Bankeu LPJ upload routes for desa
 app.use('/api/dpmd/bankeu-lpj', dpmdBankeuLpjRoutes); // Bankeu LPJ monitoring routes for DPMD/SPKED
+app.use('/api/desa/bantuan-provinsi-lpj', bantuanProvinsiLpjRoutes); // Bantuan Provinsi LPJ upload routes for desa
+app.use('/api/dpmd/bantuan-provinsi-lpj', dpmdBantuanProvinsiLpjRoutes); // Bantuan Provinsi LPJ monitoring routes for DPMD/SPKED
 app.use('/api/bankeu/master-kegiatan', bankeuMasterKegiatanRoutes); // Master kegiatan CRUD
 app.use('/api/master/dinas', dinasRoutes); // Dinas master data CRUD
 app.use('/api/dinas', require('./routes/dinasConfig.routes')); // Dinas configuration (TTD + PIC)
