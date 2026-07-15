@@ -271,7 +271,8 @@ function parseFile(filePath, agg, warnings) {
 
   // ---- AKTIF ----
   aktifRows.forEach((r) => {
-    const nama = normalizeName(at(r, aCol.nama));
+    const namaRaw = toText(at(r, aCol.nama));
+    const nama = normalizeName(namaRaw);
     const nik = normalizeNik(at(r, aCol.nik));
     const kpj = toText(at(r, aCol.kpj));
     if (!nama && !nik && !kpj) return;
@@ -288,6 +289,10 @@ function parseFile(filePath, agg, warnings) {
       tglLahir: birthDate(at(r, aCol.tgl)), upah: numberValue(at(r, aCol.upah)),
       sourceFile: fileName,
     };
+    agg.aktifList.push({
+      desaKode: rowKode, namaRaw: namaRaw || nama, nik, kpj,
+      tglLahir: rec.tglLahir, upah: rec.upah, sourceFile: fileName,
+    });
     if (nik) {
       if (agg.byNik.has(nik) && agg.byNik.get(nik).sourceFile !== fileName) {
         warnings.push({ level: 'info', file: fileName, message: `NIK ${nik} (${nama}) duplikat lintas file dengan ${agg.byNik.get(nik).sourceFile}` });
@@ -300,7 +305,8 @@ function parseFile(filePath, agg, warnings) {
 
   // ---- NON AKTIF (tanpa NIK, hanya KPJ) ----
   nonAktifRows.forEach((r) => {
-    const nama = normalizeName(at(r, nCol.nama));
+    const namaRaw = toText(at(r, nCol.nama));
+    const nama = normalizeName(namaRaw);
     const kpj = toText(at(r, nCol.kpj));
     if (!nama && !kpj) return;
     bucket.nonAktif += 1;
@@ -314,6 +320,10 @@ function parseFile(filePath, agg, warnings) {
       keterangan: '',
       sourceFile: fileName,
     };
+    agg.nonAktifList.push({
+      desaKode: fileDesaKode, namaRaw: namaRaw || nama, normalized: nama, kpj,
+      tglLahir: rec.tglLahir, sebab: rec.sebab, sourceFile: fileName,
+    });
     if (kpj) {
       // Non-aktif menang atas aktif untuk KPJ yang sama (status terbaru).
       agg.byKpj.set(kpj, rec);
@@ -406,7 +416,79 @@ async function buildReport(agg) {
       };
     });
 
-  return { desas, perDesaRows, emptyRows, unknownKodes };
+  // Perkaya AKTIF dengan JENIS/RW/RT dari database (match via NIK ke pengurus).
+  const aktifNiks = [...new Set(agg.aktifList.map((a) => a.nik).filter(Boolean))];
+  const pengurusByNik = new Map();
+  if (aktifNiks.length) {
+    const pengurus = await prisma.pengurus.findMany({
+      where: { nik: { in: aktifNiks }, pengurusable_type: { in: ['rw', 'rt', 'rws', 'rts'] } },
+      select: { nik: true, pengurusable_type: true, pengurusable_id: true, jabatan: true },
+    });
+    // Normalisasi tipe (rt->rts, rw->rws) seperti di controller.
+    const norm = (t) => (t === 'rt' ? 'rts' : t === 'rw' ? 'rws' : t);
+    const rtIds = pengurus.filter((p) => norm(p.pengurusable_type) === 'rts').map((p) => p.pengurusable_id);
+    const rwIds = pengurus.filter((p) => norm(p.pengurusable_type) === 'rws').map((p) => p.pengurusable_id);
+    const [rts, rws] = await Promise.all([
+      rtIds.length ? prisma.rts.findMany({ where: { id: { in: rtIds } }, select: { id: true, nomor: true, rws: { select: { nomor: true } } } }) : [],
+      rwIds.length ? prisma.rws.findMany({ where: { id: { in: rwIds } }, select: { id: true, nomor: true } }) : [],
+    ]);
+    const rtById = new Map(rts.map((rt) => [rt.id, rt]));
+    const rwById = new Map(rws.map((rw) => [rw.id, rw]));
+    pengurus.forEach((p) => {
+      const nik = normalizeNik(p.nik);
+      if (!nik || pengurusByNik.has(nik)) return;
+      const type = norm(p.pengurusable_type);
+      const rt = type === 'rts' ? rtById.get(p.pengurusable_id) : null;
+      const rw = type === 'rws' ? rwById.get(p.pengurusable_id) : null;
+      pengurusByNik.set(nik, {
+        jenis: type === 'rts' ? 'RT' : 'RW',
+        rwNomor: type === 'rts' ? (rt?.rws?.nomor ?? '') : (rw?.nomor ?? ''),
+        rtNomor: type === 'rts' ? (rt?.nomor ?? '') : '',
+        jabatan: p.jabatan || '',
+      });
+    });
+  }
+
+  const sortLoc = (a, b) => String(a.KECAMATAN).localeCompare(String(b.KECAMATAN))
+    || String(a.DESA).localeCompare(String(b.DESA))
+    || String(a.NAMA).localeCompare(String(b.NAMA));
+
+  const aktifRows = agg.aktifList.map((a) => {
+    const desa = desaByKode.get(a.desaKode);
+    const info = a.nik ? pengurusByNik.get(a.nik) : null;
+    return {
+      'KECAMATAN': desa?.kecamatans?.nama || '',
+      'DESA': desa?.nama || '',
+      'KODE DESA': a.desaKode,
+      'JENIS': info?.jenis || '',
+      'RW': info?.rwNomor || '',
+      'RT': info?.rtNomor || '',
+      'NAMA': a.namaRaw,
+      'NIK': a.nik || '',
+      'KPJ': a.kpj || '',
+      'TGL LAHIR': a.tglLahir || '',
+      'UPAH': a.upah || 0,
+      'JABATAN (DB)': info?.jabatan || '',
+      'ADA DI DB': info ? 'Ya' : 'Tidak',
+      'FILE SUMBER': a.sourceFile,
+    };
+  }).sort(sortLoc);
+
+  const nonAktifRows = agg.nonAktifList.map((n) => {
+    const desa = desaByKode.get(n.desaKode);
+    return {
+      'KECAMATAN': desa?.kecamatans?.nama || '',
+      'DESA': desa?.nama || '',
+      'KODE DESA': n.desaKode,
+      'NAMA': n.namaRaw,
+      'KPJ': n.kpj || '',
+      'TGL LAHIR': n.tglLahir || '',
+      'SEBAB NON-AKTIF': n.sebab || '',
+      'FILE SUMBER': n.sourceFile,
+    };
+  }).sort(sortLoc);
+
+  return { desas, perDesaRows, emptyRows, unknownKodes, aktifRows, nonAktifRows };
 }
 
 function writeReportExcel(agg, report, warnings) {
@@ -420,6 +502,7 @@ function writeReportExcel(agg, report, warnings) {
     { INFO: 'Desa punya data (aktif/nonaktif/baru)', NILAI: desaWithData },
     { INFO: 'Desa KOSONG (belum ada data)', NILAI: totalDesaDb - desaWithData },
     { INFO: 'Total peserta AKTIF', NILAI: agg.totals.aktif },
+    { INFO: 'AKTIF dpt RT/RW dari DB', NILAI: report.aktifRows.filter((r) => r['ADA DI DB'] === 'Ya').length },
     { INFO: 'Total peserta NON AKTIF', NILAI: agg.totals.nonAktif },
     { INFO: 'Total pengurus BARU', NILAI: agg.totals.baru },
     { INFO: 'Kode desa file tak dikenal DB', NILAI: report.unknownKodes.length },
@@ -441,6 +524,8 @@ function writeReportExcel(agg, report, warnings) {
 
   addSheet('Ringkasan', summaryRows);
   addSheet('Jumlah per Desa', report.perDesaRows);
+  addSheet('Daftar Aktif', report.aktifRows);
+  addSheet('Daftar Non-Aktif', report.nonAktifRows);
   addSheet('Desa Kosong', report.emptyRows);
   addSheet('Kode Tak Dikenal', report.unknownKodes);
   addSheet('Warnings', warnings.map((w) => ({ LEVEL: w.level, FILE: w.file, PESAN: w.message })));
@@ -467,6 +552,20 @@ function writeJsonCache(agg) {
     };
   }
 
+  // Fallback join non-aktif via nama+desa: dipakai controller saat KPJ/NIK gagal
+  // (mis. KPJ peserta di master BPJS kosong). Key = `${normalized}|${desaKode}`.
+  const membershipByNameDesa = {};
+  for (const n of agg.nonAktifList) {
+    if (!n.normalized || !n.desaKode) continue;
+    const key = `${n.normalized}|${n.desaKode}`;
+    if (membershipByNameDesa[key]) continue; // deterministik: pertama menang
+    membershipByNameDesa[key] = {
+      status: 'non_aktif', desaKode: n.desaKode,
+      sebab: n.sebab || '', tglTidakAktif: '', tglLahir: n.tglLahir || '',
+      sourceFile: n.sourceFile,
+    };
+  }
+
   const payload = {
     version: CACHE_VERSION,
     generatedAt: new Date().toISOString(),
@@ -480,6 +579,7 @@ function writeJsonCache(agg) {
     },
     membershipByNik,
     membershipByKpj,
+    membershipByNameDesa,
     baru: agg.baru,
   };
   fs.writeFileSync(OUTPUT_JSON, JSON.stringify(payload));
@@ -500,14 +600,23 @@ async function main() {
     byKpj: new Map(),
     baru: [],
     nonAktifNoKpj: [],
+    aktifList: [],     // semua baris AKTIF (untuk sheet Daftar Aktif)
+    nonAktifList: [],  // semua baris NON AKTIF (untuk sheet Daftar Non-Aktif)
   };
   const warnings = [];
 
   files.forEach((f) => { parseFile(f, agg, warnings); agg.filesProcessed += 1; });
 
   const report = await buildReport(agg);
-  const jsonSize = writeJsonCache(agg);
-  writeReportExcel(agg, report, warnings);
+  const jsonSize = writeJsonCache(agg); // tulis JSON dulu (yang dipakai aplikasi)
+  let reportError = null;
+  try {
+    writeReportExcel(agg, report, warnings);
+  } catch (err) {
+    // Umumnya EBUSY karena file laporan sedang dibuka di Excel. JSON sudah aman.
+    reportError = err.message;
+    console.warn(`\n[!] Laporan Excel GAGAL ditulis (${err.code || 'error'}): ${err.message}\n    -> JSON cache tetap tersimpan. Tutup file Excel lalu jalankan ulang untuk laporan.`);
+  }
 
   console.log(JSON.stringify({
     ms: Date.now() - startedAt,
@@ -521,7 +630,7 @@ async function main() {
     nonAktifNoKpj: agg.nonAktifNoKpj.length,
     warnings: warnings.length,
     jsonCache: `${(jsonSize / 1024 / 1024).toFixed(2)} MB -> ${path.relative(process.cwd(), OUTPUT_JSON)}`,
-    report: path.relative(process.cwd(), OUTPUT_REPORT),
+    report: reportError ? `GAGAL (file terkunci?) -> ${reportError}` : path.relative(process.cwd(), OUTPUT_REPORT),
   }, null, 2));
 
   await prisma.$disconnect();

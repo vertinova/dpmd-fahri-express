@@ -110,6 +110,31 @@ describe('overlay status kepesertaan BPJS', () => {
     expect(statusOf(items, 'DEDI').bpjsMembership).toBeNull();
   });
 
+  it('fallback nama+desa: non-aktif ketika KPJ master kosong (kasus OBAY)', () => {
+    const items = compareItems(
+      [db('OBAY SOBARI', '3201051505860004')], [],
+      // detail master: KPJ kosong, NIK ada (persis kasus OBAY)
+      [bpjs('OBAY SOBARI', '3201051505860004', { desaKode: '32.01.05.2001', details: [{ nik: '3201051505860004', kpj: '', namaLengkap: 'OBAY SOBARI', tglLahir: '1986-05-15' }] })],
+      {
+        enableFuzzy: true,
+        membershipByNik: {}, membershipByKpj: {},
+        membershipByNameDesa: { 'OBAY SOBARI|32.01.05.2001': { status: 'non_aktif', sebab: 'Mengundurkan Diri', tglLahir: '1986-05-15' } },
+      },
+    );
+    const it = statusOf(items, 'OBAY');
+    expect(it.bpjsMembership).toBe('non_aktif');
+    expect(it.bpjsNonAktifSebab).toBe('Mengundurkan Diri');
+  });
+
+  it('fallback nama+desa: DITOLAK bila tgl lahir beda', () => {
+    const res = resolveMembership(
+      [{ desaKode: 'D1', details: [{ nik: 'X', kpj: '', namaLengkap: 'BUDI', tglLahir: '1980-01-01' }] }],
+      {}, {},
+      { 'BUDI|D1': { status: 'non_aktif', sebab: 'x', tglLahir: '1999-09-09' } },
+    );
+    expect(res.membership).toBe('unmarked');
+  });
+
   it('resolveMembership: aktif+non-aktif -> mixed', () => {
     const res = resolveMembership(
       [{ details: [{ nik: '1', kpj: '' }, { nik: '', kpj: 'K2' }] }],

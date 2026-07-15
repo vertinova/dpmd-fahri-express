@@ -32,6 +32,7 @@ let sourceCache = {
   sourceType: null,
   membershipByNik: {},
   membershipByKpj: {},
+  membershipByNameDesa: {},
   baruData: [],
   statusMeta: null,
 };
@@ -269,13 +270,14 @@ function hasPreparedJsonCache() {
 
 // Muat overlay status BPJS + daftar BARU. Aman bila file tidak ada.
 function readBpjsStatus() {
-  const empty = { membershipByNik: {}, membershipByKpj: {}, baruData: [], statusMeta: null };
+  const empty = { membershipByNik: {}, membershipByKpj: {}, membershipByNameDesa: {}, baruData: [], statusMeta: null };
   if (!fs.existsSync(BPJS_STATUS_JSON_FILE)) return empty;
   try {
     const payload = JSON.parse(fs.readFileSync(BPJS_STATUS_JSON_FILE, 'utf8'));
     return {
       membershipByNik: payload.membershipByNik || {},
       membershipByKpj: payload.membershipByKpj || {},
+      membershipByNameDesa: payload.membershipByNameDesa || {},
       baruData: Array.isArray(payload.baru) ? payload.baru : [],
       statusMeta: payload.meta || null,
     };
@@ -448,6 +450,7 @@ function readSourceData() {
     sourceType: usingJsonCache ? 'json' : 'excel',
     membershipByNik: status.membershipByNik,
     membershipByKpj: status.membershipByKpj,
+    membershipByNameDesa: status.membershipByNameDesa,
     baruData: status.baruData,
     statusMeta: status.statusMeta,
   };
@@ -815,14 +818,24 @@ function consolidateBySimilarName(canonMap) {
 // Tentukan status kepesertaan (aktif/non-aktif) sebuah item BPJS dari overlay.
 // Match per-detail: NIK dulu (peserta aktif punya NIK), lalu KPJ (non-aktif hanya
 // punya KPJ). Item bisa mengagregasi beberapa peserta -> hitung aktif & non-aktif.
-function resolveMembership(bpjsItems, byNik, byKpj) {
+function resolveMembership(bpjsItems, byNik, byKpj, byNameDesa = {}) {
   let aktif = 0;
   let nonAktif = 0;
   let sebab = '';
   let tglTidakAktif = '';
   (bpjsItems || []).forEach((bi) => {
     (bi.details || []).forEach((d) => {
-      const hit = (d.nik && byNik[d.nik]) || (d.kpj && byKpj[d.kpj]) || null;
+      let hit = (d.nik && byNik[d.nik]) || (d.kpj && byKpj[d.kpj]) || null;
+      // Fallback non-aktif via nama+desa: dipakai saat NIK & KPJ gagal (mis. KPJ
+      // peserta di master BPJS kosong). Diverifikasi dgn tgl lahir bila tersedia.
+      if (!hit && bi.desaKode) {
+        const nm = normalizeName(d.namaLengkap);
+        const cand = nm ? byNameDesa[`${nm}|${bi.desaKode}`] : null;
+        if (cand) {
+          const dl = dateToStr(d.tglLahir);
+          if (!cand.tglLahir || !dl || cand.tglLahir === dl) hit = cand;
+        }
+      }
       if (!hit) return;
       if (hit.status === 'non_aktif') {
         nonAktif += 1;
@@ -876,6 +889,7 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
   const includeDetails = typeof options === 'object' && Boolean(options.includeDetails);
   const membershipByNik = (typeof options === 'object' && options.membershipByNik) || {};
   const membershipByKpj = (typeof options === 'object' && options.membershipByKpj) || {};
+  const membershipByNameDesa = (typeof options === 'object' && options.membershipByNameDesa) || {};
   const canonMap = new Map();
   const indexes = createMatchIndexes();
 
@@ -931,7 +945,7 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
     const addDetails = entry.addItems.flatMap((item) => item.details || []);
     const bpjsDetails = entry.bpjsItems.flatMap((item) => item.details || []);
     const membership = hasBpjs
-      ? resolveMembership(entry.bpjsItems, membershipByNik, membershipByKpj)
+      ? resolveMembership(entry.bpjsItems, membershipByNik, membershipByKpj, membershipByNameDesa)
       : { membership: null, aktif: 0, nonAktif: 0, sebab: '', tglTidakAktif: '' };
     const item = {
       key,
@@ -1098,7 +1112,7 @@ async function computeComparison({
       ]);
       logTiming('database loaded');
 
-      const { addData, bpjsData, addMeta, bpjsMeta, sourceType, membershipByNik, membershipByKpj, baruData, statusMeta } = readSourceData();
+      const { addData, bpjsData, addMeta, bpjsMeta, sourceType, membershipByNik, membershipByKpj, membershipByNameDesa, baruData, statusMeta } = readSourceData();
       logTiming('excel loaded');
       const desaByKode = new Map(allDesa.map((desa) => [desa.kode, desa]));
       const rwById = new Map(allRws.map((rw) => [rw.id, rw]));
@@ -1164,7 +1178,7 @@ async function computeComparison({
         const dbList = dbByKode[desaKode] || [];
         const addList = addByKode[desaKode] || [];
         const bpjsList = bpjsByKode[desaKode] || [];
-        const items = compareItems(dbList, addList, bpjsList, { enableFuzzy, includeDetails, membershipByNik, membershipByKpj })
+        const items = compareItems(dbList, addList, bpjsList, { enableFuzzy, includeDetails, membershipByNik, membershipByKpj, membershipByNameDesa })
           .filter((item) => !itemKeyFilter || item.key === itemKeyFilter);
 
         // Tandai pengurus BARU pada item DB-yang-belum-di-BPJS (join NIK -> nama).
