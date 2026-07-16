@@ -626,6 +626,83 @@ function applyTangkilBpjsFallback(bpjsData, addData, dbItems, desaByKode) {
   return { confirmed, unresolved, stats };
 }
 
+// Generalisasi Tangkil: peserta BPJS yang NIK-nya TIDAK ada di DB desanya sendiri
+// namun ADA di DB desa lain. Bila unik + nama mirip + tgl lahir tak bentrok ->
+// di-reassign ke desa DB (bpjsDesaConfirmedByNik). Bila NIK muncul di >1 desa,
+// atau ketemu tapi nama berbeda -> ditandai NIK Invalid (tidak dipindah, tetap
+// di desanya, jadi bahan verifikasi).
+function applyCrossDesaNikFallback(bpjsData, dbItems, desaByKode) {
+  const dbByNik = new Map();       // nik -> [dbItem...]
+  const dbNikByDesa = new Map();   // desaKode -> Set(nik)
+  dbItems.forEach((d) => {
+    if (!d.nik) return;
+    if (!dbByNik.has(d.nik)) dbByNik.set(d.nik, []);
+    dbByNik.get(d.nik).push(d);
+    if (!dbNikByDesa.has(d.desaKode)) dbNikByDesa.set(d.desaKode, new Set());
+    dbNikByDesa.get(d.desaKode).add(d.nik);
+  });
+
+  const kandidatOf = (recs) => recs.map((d) => ({
+    desaKode: d.desaKode,
+    desaNama: d.desaNama || desaByKode.get(d.desaKode)?.nama || '',
+    kecamatanNama: d.kecamatanNama || desaByKode.get(d.desaKode)?.kecamatans?.nama || '',
+    nama: d.namaLengkap || d.nama || '',
+  }));
+
+  const stats = { confirmed: 0, nikInvalidNama: 0, nikInvalidTgl: 0, nikInvalidBanyakDesa: 0 };
+  const reassigned = bpjsData.map((item) => {
+    if (item.bpjsTangkilDbConfirmed || !item.nik) return item;          // sudah ditangani / tak ada NIK
+    if (dbNikByDesa.get(item.desaKode)?.has(item.nik)) return item;      // ada match SE-DESA -> path normal
+
+    const raw = (dbByNik.get(item.nik) || []).filter((d) => d.desaKode !== item.desaKode);
+    if (!raw.length) return item;                                        // NIK tak ada di DB manapun
+
+    const bpjsTgl = (item.details || [])[0]?.tglLahir || '';
+    const nameOk = raw.filter((d) => isSimilarName(item.normalized, d.normalized));
+    const fullyVerified = nameOk.filter((d) => !d.tglLahir || !bpjsTgl || d.tglLahir === bpjsTgl);
+    const verifiedDesa = new Set(fullyVerified.map((d) => d.desaKode));
+
+    if (verifiedDesa.size === 1) {
+      stats.confirmed += 1;
+      const dbMatch = fullyVerified[0];
+      const asal = desaByKode.get(item.desaKode);
+      return {
+        ...item,
+        desaKode: dbMatch.desaKode,
+        bpjsOriginalDesaKode: item.desaKode,
+        bpjsOriginalDesaNama: asal?.nama || '',
+        bpjsOriginalKecamatanNama: asal?.kecamatans?.nama || '',
+        bpjsDesaConfirmedByNik: true,
+        details: (item.details || []).map((detail) => ({
+          ...detail,
+          originalIdPegawai: detail.idPegawai,
+          idPegawai: dbMatch.desaKode,
+          bpjsOriginalDesaKode: item.desaKode,
+        })),
+      };
+    }
+
+    // Tidak bisa dikonfirmasi unik -> NIK Invalid (tetap di desa asal BPJS).
+    //  banyak_desa   : cocok penuh di >1 desa
+    //  tgl_lahir_beda: nama mirip namun tanggal lahir bentrok
+    //  nama_berbeda  : NIK sama tapi nama tak mirip (indikasi NIK salah/dipakai ganda)
+    const sebab = verifiedDesa.size > 1 ? 'banyak_desa'
+      : nameOk.length > 0 ? 'tgl_lahir_beda'
+        : 'nama_berbeda';
+    if (sebab === 'banyak_desa') stats.nikInvalidBanyakDesa += 1;
+    else if (sebab === 'tgl_lahir_beda') stats.nikInvalidTgl += 1;
+    else stats.nikInvalidNama += 1;
+    return {
+      ...item,
+      bpjsNikInvalid: true,
+      bpjsNikInvalidSebab: sebab,
+      bpjsNikInvalidKandidat: kandidatOf(nameOk.length ? nameOk : raw),
+    };
+  });
+
+  return { reassigned, stats };
+}
+
 function statusFromSources(hasDb, hasAdd, hasBpjs) {
   if (hasDb && hasAdd && hasBpjs) return 'all_three';
   if (hasDb && hasAdd) return 'db_add';
@@ -815,26 +892,43 @@ function consolidateBySimilarName(canonMap) {
   }
 }
 
+// Verifikasi kandidat status BPJS thd peserta BPJS: desa WAJIB termasuk salah satu
+// desa peserta (supaya status tidak "berpindah desa" saat NIK/KPJ kebetulan sama
+// antar-desa) dan tgl lahir cocok bila kedua sisi tersedia. desaSet = himpunan desa
+// peserta (desa efektif + desa asal BPJS bila di-reassign); dl = tgl lahir peserta.
+function membershipMatches(cand, desaSet, dl) {
+  if (!cand) return false;
+  if (cand.desaKode && desaSet && desaSet.size && !desaSet.has(cand.desaKode)) return false;
+  if (cand.tglLahir && dl && cand.tglLahir !== dl) return false;
+  return true;
+}
+
 // Tentukan status kepesertaan (aktif/non-aktif) sebuah item BPJS dari overlay.
 // Match per-detail: NIK dulu (peserta aktif punya NIK), lalu KPJ (non-aktif hanya
-// punya KPJ). Item bisa mengagregasi beberapa peserta -> hitung aktif & non-aktif.
+// punya KPJ). Tiap kandidat divalidasi via membershipMatches (desa + tgl lahir) agar
+// status tidak terbawa ke desa lain. Item bisa mengagregasi beberapa peserta.
 function resolveMembership(bpjsItems, byNik, byKpj, byNameDesa = {}) {
   let aktif = 0;
   let nonAktif = 0;
   let sebab = '';
   let tglTidakAktif = '';
   (bpjsItems || []).forEach((bi) => {
+    // Desa peserta: desa efektif + desa asal BPJS (bila di-reassign lintas-desa/Tangkil).
+    const desaSet = new Set([bi.desaKode, bi.bpjsOriginalDesaKode].filter(Boolean));
     (bi.details || []).forEach((d) => {
-      let hit = (d.nik && byNik[d.nik]) || (d.kpj && byKpj[d.kpj]) || null;
+      const dl = dateToStr(d.tglLahir);
+      // Coba NIK lalu KPJ; ambil kandidat pertama yang lolos verifikasi desa+tgl lahir.
+      const nikCand = d.nik ? byNik[d.nik] : null;
+      const kpjCand = d.kpj ? byKpj[d.kpj] : null;
+      let hit = membershipMatches(nikCand, desaSet, dl) ? nikCand
+        : membershipMatches(kpjCand, desaSet, dl) ? kpjCand
+          : null;
       // Fallback non-aktif via nama+desa: dipakai saat NIK & KPJ gagal (mis. KPJ
-      // peserta di master BPJS kosong). Diverifikasi dgn tgl lahir bila tersedia.
+      // peserta di master BPJS kosong). Key sudah desa-scoped; verifikasi tgl lahir.
       if (!hit && bi.desaKode) {
         const nm = normalizeName(d.namaLengkap);
         const cand = nm ? byNameDesa[`${nm}|${bi.desaKode}`] : null;
-        if (cand) {
-          const dl = dateToStr(d.tglLahir);
-          if (!cand.tglLahir || !dl || cand.tglLahir === dl) hit = cand;
-        }
+        if (cand && (!cand.tglLahir || !dl || cand.tglLahir === dl)) hit = cand;
       }
       if (!hit) return;
       if (hit.status === 'non_aktif') {
@@ -924,6 +1018,12 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
     const sourceNames = new Set();
     const bpjsTangkilItems = entry.bpjsItems.filter((item) => item.bpjsTangkilSuspect);
     const bpjsTangkilConfirmedItems = entry.bpjsItems.filter((item) => item.bpjsTangkilDbConfirmed);
+    const bpjsCrossDesaItems = entry.bpjsItems.filter((item) => item.bpjsDesaConfirmedByNik);
+    const bpjsNikInvalidItems = entry.bpjsItems.filter((item) => item.bpjsNikInvalid);
+    // "Desa Berbeda" = anomali Tangkil terkonfirmasi ATAU NIK cocok DB di desa lain.
+    const bpjsDesaBerbedaItems = [...bpjsTangkilConfirmedItems, ...bpjsCrossDesaItems];
+    // Sumber kode desa asal BPJS (Tangkil-confirmed & cross-desa membawa field ini).
+    const bpjsOriginSrc = bpjsTangkilItems[0] || bpjsTangkilConfirmedItems[0] || bpjsCrossDesaItems[0] || null;
     const bpjsTangkilCandidates = bpjsTangkilItems.flatMap((item) => item.bpjsTangkilCandidates || []);
     const bpjsTangkilCandidateCount = Math.max(
       0,
@@ -962,9 +1062,13 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
       status,
       keterangan: bpjsTangkilConfirmedItems.length > 0
         ? `${buildKeterangan(hasDb, hasAdd, hasBpjs)}. BPJS memakai kode ${TANGKIL_CITEUREUP_NAMA} (${TANGKIL_CITEUREUP_KODE}), dikonfirmasi cocok via NIK database.`
-        : bpjsTangkilItems.length > 0
-          ? `${buildKeterangan(hasDb, hasAdd, hasBpjs)}. BPJS memakai kode ${TANGKIL_CITEUREUP_NAMA} (${TANGKIL_CITEUREUP_KODE}) dan disandingkan berdasarkan nama, perlu verifikasi.`
-          : buildKeterangan(hasDb, hasAdd, hasBpjs),
+        : bpjsCrossDesaItems.length > 0
+          ? `${buildKeterangan(hasDb, hasAdd, hasBpjs)}. Cocok via NIK database; BPJS mencatat di ${bpjsOriginSrc?.bpjsOriginalDesaNama || bpjsOriginSrc?.bpjsOriginalDesaKode || 'desa lain'}, sedangkan database mendaftarkannya di desa ini.`
+          : bpjsNikInvalidItems.length > 0
+            ? `${buildKeterangan(hasDb, hasAdd, hasBpjs)}. NIK ditemukan di database desa lain namun ${({ nama_berbeda: 'dengan nama berbeda', tgl_lahir_beda: 'dengan tanggal lahir berbeda', banyak_desa: 'tersebar di lebih dari satu desa' })[bpjsNikInvalidItems[0].bpjsNikInvalidSebab] || 'tak dapat dipastikan'} — ditandai NIK Invalid, perlu verifikasi.`
+            : bpjsTangkilItems.length > 0
+              ? `${buildKeterangan(hasDb, hasAdd, hasBpjs)}. BPJS memakai kode ${TANGKIL_CITEUREUP_NAMA} (${TANGKIL_CITEUREUP_KODE}) dan disandingkan berdasarkan nama, perlu verifikasi.`
+              : buildKeterangan(hasDb, hasAdd, hasBpjs),
       isFuzzy,
       nikMatch,
       nikMismatch,
@@ -976,8 +1080,15 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
       bpjsTangkilDbConfirmed: bpjsTangkilConfirmedItems.length > 0,
       bpjsTangkilAmbiguous: bpjsTangkilItems.some((item) => item.bpjsTangkilAmbiguous),
       bpjsTangkilCandidateCount,
-      bpjsOriginalDesaKode: bpjsTangkilItems[0]?.bpjsOriginalDesaKode || null,
-      bpjsOriginalDesaNama: bpjsTangkilItems[0]?.bpjsOriginalDesaNama || null,
+      // "Desa Berbeda" (Tangkil + NIK lintas-desa) & klasifikasi NIK Invalid.
+      bpjsDesaBerbeda: bpjsDesaBerbedaItems.length > 0,
+      bpjsDesaBerbedaSumber: bpjsTangkilConfirmedItems.length > 0 ? 'tangkil'
+        : bpjsCrossDesaItems.length > 0 ? 'nik_lintas_desa' : '',
+      bpjsNikInvalid: bpjsNikInvalidItems.length > 0,
+      bpjsNikInvalidSebab: bpjsNikInvalidItems[0]?.bpjsNikInvalidSebab || '',
+      bpjsNikInvalidKandidat: bpjsNikInvalidItems.flatMap((item) => item.bpjsNikInvalidKandidat || []),
+      bpjsOriginalDesaKode: bpjsOriginSrc?.bpjsOriginalDesaKode || null,
+      bpjsOriginalDesaNama: bpjsOriginSrc?.bpjsOriginalDesaNama || null,
       bpjsTangkilSelectedSources: [
         ...new Set(bpjsTangkilItems.flatMap((item) => item.bpjsTangkilSelectedSources || [])),
       ],
@@ -1161,7 +1272,8 @@ async function computeComparison({
       }).filter((item) => item.nama && item.desaKode);
 
       const tangkilBpjsFallback = applyTangkilBpjsFallback(bpjsData, addData, dbItems, desaByKode);
-      const effectiveBpjsData = tangkilBpjsFallback.confirmed;
+      const crossDesaFallback = applyCrossDesaNikFallback(tangkilBpjsFallback.confirmed, dbItems, desaByKode);
+      const effectiveBpjsData = crossDesaFallback.reassigned;
       const tangkilUnresolved = tangkilBpjsFallback.unresolved;
       const dbByKode = groupBy(dbItems, (item) => item.desaKode);
       const addByKode = groupBy(addData, (item) => item.desaKode);
@@ -1205,6 +1317,9 @@ async function computeComparison({
           nikMismatch: items.filter((item) => item.nikMismatch).length,
           bpjsTangkilSuspect: items.filter((item) => item.bpjsTangkilSuspect).length,
           bpjsTangkilConfirmed: items.filter((item) => item.bpjsTangkilDbConfirmed).length,
+          bpjsDesaBerbeda: items.filter((item) => item.bpjsDesaBerbeda).length,
+          bpjsDesaBerbedaNik: items.filter((item) => item.bpjsDesaBerbedaSumber === 'nik_lintas_desa').length,
+          nikInvalid: items.filter((item) => item.bpjsNikInvalid).length,
           bpjsAktif: items.filter((item) => item.bpjsMembership === 'aktif').length,
           bpjsNonAktif: items.filter((item) => item.bpjsMembership === 'non_aktif' || item.bpjsMembership === 'mixed').length,
           bpjsUnmarked: items.filter((item) => item.bpjsMembership === 'unmarked').length,
@@ -1311,6 +1426,13 @@ async function computeComparison({
         totalBpjsTangkilPool: tangkilBpjsFallback.stats.pool,
         totalBpjsTangkilConfirmed: tangkilBpjsFallback.stats.confirmed,
         totalBpjsTangkilUnresolved: tangkilBpjsFallback.stats.unresolved,
+        // Desa Berbeda (gabungan) & generalisasi NIK lintas-desa + NIK Invalid.
+        totalDesaBerbeda: comparison.reduce((sum, desa) => sum + desa.bpjsDesaBerbeda, 0),
+        totalDesaBerbedaNik: crossDesaFallback.stats.confirmed,
+        totalNikInvalid: comparison.reduce((sum, desa) => sum + desa.nikInvalid, 0),
+        totalNikInvalidNama: crossDesaFallback.stats.nikInvalidNama,
+        totalNikInvalidTgl: crossDesaFallback.stats.nikInvalidTgl,
+        totalNikInvalidBanyakDesa: crossDesaFallback.stats.nikInvalidBanyakDesa,
         // Overlay status kepesertaan BPJS (DESK BPJS JULI 2026).
         totalBpjsAktif: comparison.reduce((sum, desa) => sum + desa.bpjsAktif, 0),
         totalBpjsNonAktif: comparison.reduce((sum, desa) => sum + desa.bpjsNonAktif, 0),
@@ -1432,4 +1554,4 @@ module.exports.computeComparison = computeComparison;
 module.exports.warmSourceCache = warmSourceCache;
 module.exports.isSourceCacheReady = isSourceCacheReady;
 // Exposed for unit tests (see __tests__/rtrwMatching.test.js).
-module.exports._internals = { normalizeName, isSimilarName, tokenSimilar, compareItems, resolveMembership, markBaruOnItems };
+module.exports._internals = { normalizeName, isSimilarName, tokenSimilar, compareItems, resolveMembership, markBaruOnItems, applyCrossDesaNikFallback };

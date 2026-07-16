@@ -135,6 +135,38 @@ describe('overlay status kepesertaan BPJS', () => {
     expect(res.membership).toBe('unmarked');
   });
 
+  it('match NIK DITOLAK bila desa status berbeda (status tak berpindah desa)', () => {
+    const res = resolveMembership(
+      [{ desaKode: 'D1', details: [{ nik: '111', kpj: '' }] }],
+      { 111: { status: 'aktif', desaKode: 'D2' } }, {},
+    );
+    expect(res.membership).toBe('unmarked');
+  });
+
+  it('match KPJ DITOLAK bila desa status berbeda', () => {
+    const res = resolveMembership(
+      [{ desaKode: 'D1', details: [{ nik: '', kpj: 'K9' }] }],
+      {}, { K9: { status: 'non_aktif', sebab: 'x', desaKode: 'D2' } },
+    );
+    expect(res.membership).toBe('unmarked');
+  });
+
+  it('match NIK DITOLAK bila tgl lahir berbeda walau desa sama', () => {
+    const res = resolveMembership(
+      [{ desaKode: 'D1', details: [{ nik: '111', kpj: '', tglLahir: '1980-01-01' }] }],
+      { 111: { status: 'aktif', desaKode: 'D1', tglLahir: '1990-09-09' } }, {},
+    );
+    expect(res.membership).toBe('unmarked');
+  });
+
+  it('match NIK DITERIMA bila desa & tgl lahir cocok', () => {
+    const res = resolveMembership(
+      [{ desaKode: 'D1', details: [{ nik: '111', kpj: '', tglLahir: '1980-01-01' }] }],
+      { 111: { status: 'aktif', desaKode: 'D1', tglLahir: '1980-01-01' } }, {},
+    );
+    expect(res.membership).toBe('aktif');
+  });
+
   it('resolveMembership: aktif+non-aktif -> mixed', () => {
     const res = resolveMembership(
       [{ details: [{ nik: '1', kpj: '' }, { nik: '', kpj: 'K2' }] }],
@@ -172,5 +204,90 @@ describe('penandaan pengurus BARU', () => {
     markBaruOnItems(items, [{ nik: '222', normalized: 'SITI', nama: 'SITI', desaKode: 'D2' }], matched);
     expect(items[0].inBaru).toBe(true);
     expect(items[0].baruAnomali).toBe(false);
+  });
+});
+
+describe('applyCrossDesaNikFallback (generalisasi Tangkil + NIK Invalid)', () => {
+  const { applyCrossDesaNikFallback } = _internals;
+  const desaByKode = new Map([
+    ['D1', { nama: 'Desa Satu', kecamatans: { nama: 'Kec A' } }],
+    ['D2', { nama: 'Desa Dua', kecamatans: { nama: 'Kec A' } }],
+    ['D3', { nama: 'Desa Tiga', kecamatans: { nama: 'Kec B' } }],
+  ]);
+  const dbItem = (nik, desaKode, nama, extra = {}) => ({
+    source: 'db', nik, desaKode, nama, normalized: normalizeName(nama), namaLengkap: nama,
+    desaNama: desaByKode.get(desaKode)?.nama || '', kecamatanNama: desaByKode.get(desaKode)?.kecamatans?.nama || '', ...extra,
+  });
+  const bpjsItem = (nik, desaKode, nama, tglLahir = '') => ({
+    source: 'bpjs', nik, desaKode, nama, normalized: normalizeName(nama),
+    details: [{ nik, tglLahir, idPegawai: desaKode }],
+  });
+
+  it('reassign ketika NIK ada di DB desa lain (nama mirip, unik)', () => {
+    const { reassigned, stats } = applyCrossDesaNikFallback(
+      [bpjsItem('111', 'D1', 'BUDI SANTOSO')], [dbItem('111', 'D2', 'BUDI SANTOSO')], desaByKode);
+    expect(reassigned[0].desaKode).toBe('D2');
+    expect(reassigned[0].bpjsDesaConfirmedByNik).toBe(true);
+    expect(reassigned[0].bpjsOriginalDesaKode).toBe('D1');
+    expect(reassigned[0].details[0].idPegawai).toBe('D2');
+    expect(stats.confirmed).toBe(1);
+  });
+
+  it('TIDAK reassign bila NIK juga ada di DB desa yang sama', () => {
+    const { reassigned, stats } = applyCrossDesaNikFallback(
+      [bpjsItem('111', 'D1', 'BUDI')], [dbItem('111', 'D1', 'BUDI'), dbItem('111', 'D2', 'BUDI')], desaByKode);
+    expect(reassigned[0].desaKode).toBe('D1');
+    expect(reassigned[0].bpjsDesaConfirmedByNik).toBeUndefined();
+    expect(stats.confirmed).toBe(0);
+  });
+
+  it('NIK Invalid: NIK cocok penuh di >1 desa (banyak_desa)', () => {
+    const { reassigned, stats } = applyCrossDesaNikFallback(
+      [bpjsItem('111', 'D1', 'BUDI SANTOSO')],
+      [dbItem('111', 'D2', 'BUDI SANTOSO'), dbItem('111', 'D3', 'BUDI SANTOSO')], desaByKode);
+    expect(reassigned[0].bpjsNikInvalid).toBe(true);
+    expect(reassigned[0].bpjsNikInvalidSebab).toBe('banyak_desa');
+    expect(reassigned[0].desaKode).toBe('D1'); // tidak dipindah
+    expect(stats.nikInvalidBanyakDesa).toBe(1);
+  });
+
+  it('NIK Invalid: NIK ada di DB desa lain tapi nama berbeda (nama_berbeda)', () => {
+    const { reassigned, stats } = applyCrossDesaNikFallback(
+      [bpjsItem('111', 'D1', 'BUDI SANTOSO')], [dbItem('111', 'D2', 'SITI AMINAH')], desaByKode);
+    expect(reassigned[0].bpjsNikInvalid).toBe(true);
+    expect(reassigned[0].bpjsNikInvalidSebab).toBe('nama_berbeda');
+    expect(stats.nikInvalidNama).toBe(1);
+  });
+
+  it('NIK Invalid: nama mirip tapi tanggal lahir bentrok (tgl_lahir_beda)', () => {
+    const { reassigned, stats } = applyCrossDesaNikFallback(
+      [bpjsItem('111', 'D1', 'BUDI SANTOSO', '1980-01-01')],
+      [dbItem('111', 'D2', 'BUDI SANTOSO', { tglLahir: '1990-09-09' })], desaByKode);
+    expect(reassigned[0].bpjsNikInvalid).toBe(true);
+    expect(reassigned[0].bpjsNikInvalidSebab).toBe('tgl_lahir_beda');
+    expect(stats.nikInvalidTgl).toBe(1);
+  });
+
+  it('tgl lahir cocok mendisambiguasi 2 desa -> reassign ke yang cocok', () => {
+    const { reassigned, stats } = applyCrossDesaNikFallback(
+      [bpjsItem('111', 'D1', 'BUDI SANTOSO', '1980-01-01')],
+      [dbItem('111', 'D2', 'BUDI SANTOSO', { tglLahir: '1980-01-01' }),
+        dbItem('111', 'D3', 'BUDI SANTOSO', { tglLahir: '1990-09-09' })], desaByKode);
+    expect(reassigned[0].desaKode).toBe('D2');
+    expect(stats.confirmed).toBe(1);
+  });
+
+  it('lewat apa adanya bila NIK tak ada di DB manapun', () => {
+    const { reassigned } = applyCrossDesaNikFallback(
+      [bpjsItem('999', 'D1', 'BUDI')], [dbItem('111', 'D2', 'BUDI')], desaByKode);
+    expect(reassigned[0].desaKode).toBe('D1');
+    expect(reassigned[0].bpjsNikInvalid).toBeUndefined();
+  });
+
+  it('item Tangkil-confirmed dilewati (tidak diproses ulang)', () => {
+    const t = { ...bpjsItem('111', 'D2', 'BUDI'), bpjsTangkilDbConfirmed: true };
+    const { reassigned, stats } = applyCrossDesaNikFallback([t], [dbItem('111', 'D3', 'BUDI')], desaByKode);
+    expect(reassigned[0]).toBe(t);
+    expect(stats.confirmed).toBe(0);
   });
 });
