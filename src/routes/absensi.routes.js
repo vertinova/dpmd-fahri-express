@@ -43,6 +43,13 @@ router.get('/admin/pegawai-absensi', auth, checkAbsensiAdmin, absensiController.
 router.get('/admin/presensi-kosong', auth, checkAbsensiAdmin, absensiController.getMissingAttendance);
 router.get('/admin/settings', auth, checkAbsensiAdmin, absensiController.getSettings);
 router.put('/admin/settings', auth, checkAbsensiAdmin, absensiController.updateSettings);
+
+// Titik lokasi khusus absen reguler — khusus superadmin.
+// Didaftarkan sebelum '/admin/:id' agar tidak tertangkap sebagai id absensi.
+router.get('/admin/lokasi-khusus', auth, checkAbsensiAdmin, requireSuperadmin, absensiController.getLokasiKhusus);
+router.post('/admin/lokasi-khusus', auth, checkAbsensiAdmin, requireSuperadmin, absensiController.createLokasiKhusus);
+router.put('/admin/lokasi-khusus/:id', auth, checkAbsensiAdmin, requireSuperadmin, absensiController.updateLokasiKhusus);
+router.delete('/admin/lokasi-khusus/:id', auth, checkAbsensiAdmin, requireSuperadmin, absensiController.deleteLokasiKhusus);
 router.put('/admin/set-device/:userId', auth, checkAbsensiAdmin, absensiController.adminSetDevice);
 router.post('/admin/manual', auth, checkAbsensiAdmin, absensiController.adminCreateAbsensi);
 router.put('/admin/:id', auth, checkAbsensiAdmin, requireSuperadmin, absensiController.adminUpdateAbsensi);

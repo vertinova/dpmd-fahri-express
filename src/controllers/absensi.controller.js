@@ -118,6 +118,134 @@ function calculateDistance(lat1, lon1, lat2, lon2) {
 }
 
 /**
+ * Ambil titik lokasi khusus milik user yang berlaku pada tanggal tertentu.
+ * Titik tanpa berlaku_mulai/berlaku_sampai dianggap berlaku terus.
+ */
+async function getLokasiKhususAktif(userId, tanggal) {
+  return prisma.absensi_lokasi_khusus.findMany({
+    where: {
+      user_id: userId,
+      is_active: true,
+      AND: [
+        { OR: [{ berlaku_mulai: null }, { berlaku_mulai: { lte: tanggal } }] },
+        { OR: [{ berlaku_sampai: null }, { berlaku_sampai: { gte: tanggal } }] }
+      ]
+    },
+    orderBy: { created_at: 'asc' }
+  });
+}
+
+/** Titik khusus tidak bernama — koordinat inilah identitasnya. */
+const formatKoordinat = (lat, lng) => `${Number(lat).toFixed(6)}, ${Number(lng).toFixed(6)}`;
+
+/**
+ * Tentukan dari titik mana pegawai absen reguler.
+ *
+ * Kantor DPMD selalu berlaku untuk semua pegawai. Titik khusus hanya MENAMBAH
+ * pilihan bagi pegawai yang ditugaskan superadmin — jadi pegawai berlokasi
+ * khusus tetap bisa absen saat kebetulan datang ke kantor.
+ *
+ * @returns {{ diterima: boolean, jarak: number, titikKhusus: string|null, terdekat: {label: string, jarak: number, radius: number} }}
+ *          titikKhusus null berarti kantor DPMD (konsisten dengan data lama).
+ */
+async function resolveTitikAbsen(userId, lat, lng, tanggal) {
+  const jarakKantor = calculateDistance(lat, lng, KANTOR_LAT, KANTOR_LNG);
+
+  if (jarakKantor <= MAX_DISTANCE_METERS) {
+    return {
+      diterima: true,
+      jarak: jarakKantor,
+      titikKhusus: null,
+      terdekat: { label: 'Kantor DPMD', jarak: jarakKantor, radius: MAX_DISTANCE_METERS }
+    };
+  }
+
+  const titikKhusus = await getLokasiKhususAktif(userId, tanggal);
+
+  // Titik terdekat dipakai untuk pesan error yang berguna, bukan sekadar "terlalu jauh".
+  let terdekat = { label: 'Kantor DPMD', jarak: jarakKantor, radius: MAX_DISTANCE_METERS };
+
+  for (const titik of titikKhusus) {
+    const jarak = calculateDistance(lat, lng, titik.latitude, titik.longitude);
+    const koordinat = formatKoordinat(titik.latitude, titik.longitude);
+
+    if (jarak <= titik.radius_meter) {
+      return {
+        diterima: true,
+        jarak,
+        titikKhusus: koordinat,
+        terdekat: { label: 'titik lokasi khusus Anda', jarak, radius: titik.radius_meter }
+      };
+    }
+
+    if (jarak < terdekat.jarak) {
+      terdekat = { label: 'titik lokasi khusus Anda', jarak, radius: titik.radius_meter };
+    }
+  }
+
+  return { diterima: false, jarak: jarakKantor, titikKhusus: null, terdekat };
+}
+
+/**
+ * Pesan penolakan yang menyebut titik terdekat yang diizinkan, supaya pegawai
+ * tahu harus mendekat ke mana — bukan selalu "kantor".
+ */
+function pesanTerlaluJauh(hasil) {
+  const { label, jarak, radius } = hasil.terdekat;
+  return `Anda berada ${Math.round(jarak)} meter dari ${label}. ` +
+    `Absensi reguler hanya bisa dilakukan dalam radius ${radius} meter dari titik tersebut.`;
+}
+
+/**
+ * Validasi input titik lokasi khusus.
+ * Koordinat salah ketik tidak akan pernah ketahuan sampai pegawai gagal absen
+ * di lapangan, jadi rentang lat/lng dan radius diperiksa ketat di sini.
+ * @param {boolean} opts.wajibLengkap true saat create, false saat update parsial
+ */
+function validateLokasiKhusus(body, { wajibLengkap }) {
+  const data = {};
+
+  if (wajibLengkap && !body.user_id) return { error: 'Pegawai wajib dipilih' };
+
+  const punya = (k) => body[k] !== undefined && body[k] !== null && body[k] !== '';
+
+  for (const [field, min, max] of [['latitude', -90, 90], ['longitude', -180, 180]]) {
+    if (wajibLengkap || punya(field)) {
+      const nilai = parseFloat(body[field]);
+      if (Number.isNaN(nilai)) return { error: `${field} wajib diisi angka` };
+      if (nilai < min || nilai > max) return { error: `${field} harus antara ${min} dan ${max}` };
+      data[field] = nilai;
+    }
+  }
+
+  if (punya('radius_meter')) {
+    const radius = parseInt(body.radius_meter, 10);
+    if (Number.isNaN(radius) || radius < 20 || radius > 10000) {
+      return { error: 'Radius harus antara 20 dan 10000 meter' };
+    }
+    data.radius_meter = radius;
+  }
+
+  for (const field of ['berlaku_mulai', 'berlaku_sampai']) {
+    if (body[field] !== undefined) {
+      if (!body[field]) {
+        data[field] = null; // dikosongkan = tanpa batas
+      } else {
+        const tanggal = new Date(`${body[field]}T00:00:00.000Z`);
+        if (Number.isNaN(tanggal.getTime())) return { error: `${field} tidak valid` };
+        data[field] = tanggal;
+      }
+    }
+  }
+
+  if (data.berlaku_mulai && data.berlaku_sampai && data.berlaku_mulai > data.berlaku_sampai) {
+    return { error: 'Tanggal mulai tidak boleh setelah tanggal selesai' };
+  }
+
+  return { data };
+}
+
+/**
  * Simpan foto base64 ke file
  */
 function saveBase64Photo(base64Data, userId, type) {
@@ -352,22 +480,30 @@ const absensiController = {
         });
       }
 
-      // Hitung jarak dari kantor
-      const jarak = calculateDistance(parseFloat(latitude), parseFloat(longitude), KANTOR_LAT, KANTOR_LNG);
-
-      // Cek jarak hanya untuk mode 'hadir' (WFH/WFA/dinas luar bebas lokasi)
-      if (absensiMode === 'hadir' && jarak > MAX_DISTANCE_METERS) {
-        return res.status(400).json({
-          success: false,
-          message: `Anda berada ${Math.round(jarak)} meter dari kantor. Maksimal jarak absensi adalah ${MAX_DISTANCE_METERS} meter.`
-        });
-      }
-
       // Gunakan WIB (UTC+7) untuk tanggal dan waktu
       const now = new Date();
       const wib = getWIB(now);
       const todayStr = wib.dateString;
       const today = new Date(`${todayStr}T00:00:00.000Z`);
+
+      // Cek lokasi hanya untuk mode 'hadir' (WFH/WFA/dinas luar bebas lokasi).
+      // Titik absen bisa kantor DPMD atau titik khusus yang ditetapkan superadmin
+      // untuk pegawai ini — tanggal dipakai untuk mengecek masa berlaku titik.
+      let jarak;
+      let titikAbsenKhusus = null;
+
+      if (absensiMode === 'hadir') {
+        const titik = await resolveTitikAbsen(userId, parseFloat(latitude), parseFloat(longitude), today);
+
+        if (!titik.diterima) {
+          return res.status(400).json({ success: false, message: pesanTerlaluJauh(titik) });
+        }
+
+        jarak = titik.jarak;
+        titikAbsenKhusus = titik.titikKhusus;
+      } else {
+        jarak = calculateDistance(parseFloat(latitude), parseFloat(longitude), KANTOR_LAT, KANTOR_LNG);
+      }
 
       // Cek jam buka/tutup absensi dari settings sekretariat
       const absensiSettings = await getAbsensiSettings();
@@ -426,6 +562,7 @@ const absensiController = {
         longitude_masuk: parseFloat(longitude),
         jarak_masuk: Math.round(jarak),
         lokasi_masuk: `${latitude},${longitude}`,
+        titik_absen_khusus: titikAbsenKhusus, // null = kantor DPMD
         device_id: device_id,
         tujuan_dinas: absensiMode === 'dinas_luar' ? tujuan_dinas : null,
         updated_at: new Date(),
@@ -533,9 +670,6 @@ const absensiController = {
         });
       }
 
-      // Hitung jarak
-      const jarak = calculateDistance(parseFloat(latitude), parseFloat(longitude), KANTOR_LAT, KANTOR_LNG);
-
       // Gunakan WIB date yang sama dengan clockIn untuk konsistensi
       const now = new Date();
       const wib = getWIB(now);
@@ -553,12 +687,21 @@ const absensiController = {
         return res.status(400).json({ success: false, message: 'Anda sudah melakukan absen keluar hari ini' });
       }
 
-      // Cek jarak hanya jika clock-in mode adalah 'hadir'
-      if (existing.status === 'hadir' && jarak > MAX_DISTANCE_METERS) {
-        return res.status(400).json({
-          success: false,
-          message: `Anda berada ${Math.round(jarak)} meter dari kantor. Maksimal jarak absensi adalah ${MAX_DISTANCE_METERS} meter.`
-        });
+      // Cek lokasi hanya jika clock-in mode adalah 'hadir'.
+      // Titik khusus juga berlaku saat absen pulang — kalau tidak, pegawai bisa
+      // absen masuk dari lokasi tugasnya tapi gagal absen pulang di tempat sama.
+      let jarak;
+
+      if (existing.status === 'hadir') {
+        const titik = await resolveTitikAbsen(userId, parseFloat(latitude), parseFloat(longitude), today);
+
+        if (!titik.diterima) {
+          return res.status(400).json({ success: false, message: pesanTerlaluJauh(titik) });
+        }
+
+        jarak = titik.jarak;
+      } else {
+        jarak = calculateDistance(parseFloat(latitude), parseFloat(longitude), KANTOR_LAT, KANTOR_LNG);
       }
 
       const fotoPath = saveBase64Photo(foto, userId.toString(), 'keluar');
@@ -985,6 +1128,14 @@ const absensiController = {
       const effectiveHoliday = isWeekendWorker && isWeekendOnly ? false : holidayInfo.isHoliday;
       const effectiveReason = effectiveHoliday ? holidayInfo.reason : null;
 
+      // Titik khusus yang berlaku hari ini, supaya pegawai tahu di mana saja ia
+      // boleh absen reguler — tidak perlu mencoba dulu baru ditolak.
+      const wibToday = getWIB(new Date());
+      const lokasiKhusus = await getLokasiKhususAktif(
+        userId,
+        new Date(`${wibToday.dateString}T00:00:00.000Z`)
+      );
+
       return res.json({
         success: true,
         data: {
@@ -995,6 +1146,16 @@ const absensiController = {
           device_registered: !!user?.device_id,
           is_holiday: effectiveHoliday,
           holiday_reason: effectiveReason,
+          lokasi_absen: [
+            { label: 'Kantor DPMD', latitude: KANTOR_LAT, longitude: KANTOR_LNG, radius_meter: MAX_DISTANCE_METERS, khusus: false },
+            ...lokasiKhusus.map((l) => ({
+              label: formatKoordinat(l.latitude, l.longitude),
+              latitude: l.latitude,
+              longitude: l.longitude,
+              radius_meter: l.radius_meter,
+              khusus: true
+            }))
+          ]
         }
       });
     } catch (error) {
@@ -1071,6 +1232,164 @@ const absensiController = {
     } catch (error) {
       console.error('[Absensi] Admin set device error:', error);
       return res.status(500).json({ success: false, message: 'Gagal set device', error: error.message });
+    }
+  },
+
+  /**
+   * Superadmin: Daftar titik lokasi khusus absensi reguler
+   * GET /api/absensi/admin/lokasi-khusus?user_id=&q=
+   */
+  async getLokasiKhusus(req, res) {
+    try {
+      const { user_id, q } = req.query;
+      const where = {};
+
+      if (user_id) where.user_id = BigInt(user_id);
+      // Titik tidak bernama, jadi pencarian hanya masuk akal lewat nama pegawai.
+      if (q && q.trim()) {
+        where.users_absensi_lokasi_khusus_user_idTousers = { name: { contains: q.trim() } };
+      }
+
+      const rows = await prisma.absensi_lokasi_khusus.findMany({
+        where,
+        orderBy: [{ is_active: 'desc' }, { created_at: 'desc' }],
+        include: {
+          users_absensi_lokasi_khusus_user_idTousers: {
+            select: { id: true, name: true, email: true, pegawai: { select: { jabatan: true } } }
+          }
+        }
+      });
+
+      const todayStr = getWIB(new Date()).dateString;
+
+      const data = rows.map((r) => {
+        // Titik bisa aktif tapi belum/sudah lewat masa berlakunya — bedakan agar
+        // admin tidak bingung kenapa pegawai masih ditolak.
+        const mulai = r.berlaku_mulai ? r.berlaku_mulai.toISOString().substring(0, 10) : null;
+        const sampai = r.berlaku_sampai ? r.berlaku_sampai.toISOString().substring(0, 10) : null;
+        const belumMulai = mulai && todayStr < mulai;
+        const sudahLewat = sampai && todayStr > sampai;
+
+        return {
+          id: r.id.toString(),
+          user_id: r.user_id.toString(),
+          pegawai: {
+            id: r.users_absensi_lokasi_khusus_user_idTousers.id.toString(),
+            nama: r.users_absensi_lokasi_khusus_user_idTousers.name,
+            email: r.users_absensi_lokasi_khusus_user_idTousers.email,
+            jabatan: r.users_absensi_lokasi_khusus_user_idTousers.pegawai?.jabatan || null
+          },
+          latitude: r.latitude,
+          longitude: r.longitude,
+          koordinat: formatKoordinat(r.latitude, r.longitude),
+          radius_meter: r.radius_meter,
+          berlaku_mulai: mulai,
+          berlaku_sampai: sampai,
+          is_active: r.is_active,
+          berlaku_hari_ini: r.is_active && !belumMulai && !sudahLewat,
+          status_berlaku: !r.is_active ? 'nonaktif' : belumMulai ? 'belum_mulai' : sudahLewat ? 'kedaluwarsa' : 'berlaku',
+          created_at: r.created_at
+        };
+      });
+
+      return res.json({ success: true, data });
+    } catch (error) {
+      console.error('[Absensi] Get lokasi khusus error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal mengambil lokasi khusus', error: error.message });
+    }
+  },
+
+  /**
+   * Superadmin: Tambah titik lokasi khusus
+   * POST /api/absensi/admin/lokasi-khusus
+   */
+  async createLokasiKhusus(req, res) {
+    try {
+      const validasi = validateLokasiKhusus(req.body, { wajibLengkap: true });
+      if (validasi.error) {
+        return res.status(400).json({ success: false, message: validasi.error });
+      }
+
+      const targetUser = await prisma.users.findUnique({
+        where: { id: BigInt(req.body.user_id) },
+        select: { id: true, name: true }
+      });
+      if (!targetUser) {
+        return res.status(404).json({ success: false, message: 'Pegawai tidak ditemukan' });
+      }
+
+      const dibuat = await prisma.absensi_lokasi_khusus.create({
+        data: {
+          user_id: targetUser.id,
+          ...validasi.data,
+          created_by: BigInt(req.user.id)
+        }
+      });
+
+      return res.status(201).json({
+        success: true,
+        message: `Titik absen ${formatKoordinat(dibuat.latitude, dibuat.longitude)} ditambahkan untuk ${targetUser.name}`,
+        data: { id: dibuat.id.toString() }
+      });
+    } catch (error) {
+      console.error('[Absensi] Create lokasi khusus error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal menambah lokasi khusus', error: error.message });
+    }
+  },
+
+  /**
+   * Superadmin: Ubah titik lokasi khusus
+   * PUT /api/absensi/admin/lokasi-khusus/:id
+   */
+  async updateLokasiKhusus(req, res) {
+    try {
+      const id = BigInt(req.params.id);
+      const ada = await prisma.absensi_lokasi_khusus.findUnique({ where: { id } });
+      if (!ada) {
+        return res.status(404).json({ success: false, message: 'Lokasi khusus tidak ditemukan' });
+      }
+
+      const validasi = validateLokasiKhusus(req.body, { wajibLengkap: false });
+      if (validasi.error) {
+        return res.status(400).json({ success: false, message: validasi.error });
+      }
+
+      // updated_at diisi manual: kolom ini tidak punya ON UPDATE saat tabel
+      // dibuat lewat `prisma db push` (Prisma tidak memodelkan ON UPDATE).
+      const data = { ...validasi.data, updated_at: new Date() };
+      if (req.body.is_active !== undefined) {
+        data.is_active = req.body.is_active === true || req.body.is_active === 'true';
+      }
+
+      await prisma.absensi_lokasi_khusus.update({ where: { id }, data });
+
+      return res.json({ success: true, message: 'Lokasi khusus diperbarui' });
+    } catch (error) {
+      console.error('[Absensi] Update lokasi khusus error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal memperbarui lokasi khusus', error: error.message });
+    }
+  },
+
+  /**
+   * Superadmin: Hapus titik lokasi khusus
+   * DELETE /api/absensi/admin/lokasi-khusus/:id
+   */
+  async deleteLokasiKhusus(req, res) {
+    try {
+      const id = BigInt(req.params.id);
+      const ada = await prisma.absensi_lokasi_khusus.findUnique({ where: { id } });
+      if (!ada) {
+        return res.status(404).json({ success: false, message: 'Lokasi khusus tidak ditemukan' });
+      }
+
+      await prisma.absensi_lokasi_khusus.delete({ where: { id } });
+
+      // Riwayat absensi tetap utuh: nama lokasi disimpan sebagai snapshot di
+      // absensi_pegawai.titik_absen_khusus, bukan foreign key ke tabel ini.
+      return res.json({ success: true, message: 'Lokasi khusus dihapus' });
+    } catch (error) {
+      console.error('[Absensi] Delete lokasi khusus error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal menghapus lokasi khusus', error: error.message });
     }
   },
 

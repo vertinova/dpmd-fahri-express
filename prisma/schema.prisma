@@ -1325,28 +1325,29 @@ model pegawai {
 }
 
 model absensi_pegawai {
-  id               BigInt                 @id @default(autoincrement()) @db.UnsignedBigInt
-  user_id          BigInt                 @db.UnsignedBigInt
-  tanggal          DateTime               @db.Date
-  jam_masuk        DateTime?              @db.Time(0)
-  jam_keluar       DateTime?              @db.Time(0)
-  status           absensi_pegawai_status @default(hadir)
-  keterangan       String?                @db.Text
-  foto_masuk       String?                @db.VarChar(255)
-  foto_keluar      String?                @db.VarChar(255)
-  latitude_masuk   Float?
-  longitude_masuk  Float?
-  jarak_masuk      Float?
-  latitude_keluar  Float?
-  longitude_keluar Float?
-  jarak_keluar     Float?
-  lokasi_masuk     String?                @db.VarChar(255)
-  lokasi_keluar    String?                @db.VarChar(255)
-  device_id        String?                @db.VarChar(100)
-  tujuan_dinas     String?                @db.VarChar(500)
-  created_at       DateTime?              @db.Timestamp(0)
-  updated_at       DateTime?              @db.Timestamp(0)
-  user             users                  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  id                 BigInt                 @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id            BigInt                 @db.UnsignedBigInt
+  tanggal            DateTime               @db.Date
+  jam_masuk          DateTime?              @db.Time(0)
+  jam_keluar         DateTime?              @db.Time(0)
+  status             absensi_pegawai_status @default(hadir)
+  keterangan         String?                @db.Text
+  foto_masuk         String?                @db.VarChar(255)
+  foto_keluar        String?                @db.VarChar(255)
+  latitude_masuk     Float?
+  longitude_masuk    Float?
+  jarak_masuk        Float?
+  latitude_keluar    Float?
+  longitude_keluar   Float?
+  jarak_keluar       Float?
+  lokasi_masuk       String?                @db.VarChar(255)
+  lokasi_keluar      String?                @db.VarChar(255)
+  titik_absen_khusus String?                @db.VarChar(64)
+  device_id          String?                @db.VarChar(100)
+  tujuan_dinas       String?                @db.VarChar(500)
+  created_at         DateTime?              @db.Timestamp(0)
+  updated_at         DateTime?              @db.Timestamp(0)
+  user               users                  @relation(fields: [user_id], references: [id], onDelete: Cascade)
 
   @@unique([user_id, tanggal], map: "absensi_pegawai_user_tanggal_unique")
   @@index([user_id], map: "absensi_pegawai_user_id_index")
@@ -1788,6 +1789,8 @@ model users {
   pegawai_id                                                     BigInt?                              @db.UnsignedBigInt
   device_id                                                      String?                              @db.VarChar(100)
   last_active_at                                                 DateTime?                            @db.Timestamp(0)
+  absensi_lokasi_khusus_absensi_lokasi_khusus_created_byTousers  absensi_lokasi_khusus[]              @relation("absensi_lokasi_khusus_created_byTousers")
+  absensi_lokasi_khusus_absensi_lokasi_khusus_user_idTousers     absensi_lokasi_khusus[]              @relation("absensi_lokasi_khusus_user_idTousers")
   absensi_pegawai                                                absensi_pegawai[]
   activity_logs                                                  activity_logs[]
   anggaran_master_kegiatan                                       anggaran_master_kegiatan[]           @relation("anggaran_master_kegiatan_created_by")
@@ -2451,6 +2454,27 @@ model arsip_barang_scan_log {
 
   @@index([user_id], map: "fk_arsip_barang_scan_user")
   @@index([barang_id, created_at], map: "idx_arsip_barang_scan_barang")
+}
+
+/// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+model absensi_lokasi_khusus {
+  id                                            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id                                       BigInt    @db.UnsignedBigInt
+  latitude                                      Float
+  longitude                                     Float
+  radius_meter                                  Int       @default(500) @db.UnsignedInt
+  berlaku_mulai                                 DateTime? @db.Date
+  berlaku_sampai                                DateTime? @db.Date
+  is_active                                     Boolean   @default(true)
+  created_by                                    BigInt?   @db.UnsignedBigInt
+  created_at                                    DateTime? @default(now()) @db.Timestamp(0)
+  updated_at                                    DateTime? @default(now()) @db.Timestamp(0)
+  users_absensi_lokasi_khusus_created_byTousers users?    @relation("absensi_lokasi_khusus_created_byTousers", fields: [created_by], references: [id], onUpdate: NoAction, map: "fk_alk_creator")
+  users_absensi_lokasi_khusus_user_idTousers    users     @relation("absensi_lokasi_khusus_user_idTousers", fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "fk_alk_user")
+
+  @@index([created_by], map: "fk_alk_creator")
+  @@index([berlaku_mulai, berlaku_sampai], map: "idx_alk_berlaku")
+  @@index([user_id, is_active], map: "idx_alk_user_aktif")
 }
 
 enum bankeu_perubahan_proposal_versions_source {
