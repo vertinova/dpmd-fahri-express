@@ -822,6 +822,34 @@ async function seedBerita() {
 }
 
 // ============================================
+// DATA: Kategori Arsip Barang (Sekretariat)
+// ============================================
+// Wajib di-seed: `prisma db push` hanya membuat struktur tabel, tidak mengisi
+// data. Tanpa ini pilihan kategori di form Arsip Barang kosong di server baru.
+const arsipBarangKategoriData = [
+  { nama: 'Elektronik', kode: 'ELK', deskripsi: 'Komputer, laptop, printer, proyektor' },
+  { nama: 'Meubelair', kode: 'MBL', deskripsi: 'Meja, kursi, lemari, filing cabinet' },
+  { nama: 'Kendaraan Dinas', kode: 'KND', deskripsi: 'Kendaraan roda dua dan roda empat' },
+  { nama: 'Alat Rumah Tangga', kode: 'ART', deskripsi: 'AC, dispenser, perlengkapan kantor' },
+  { nama: 'Jaringan & Server', kode: 'JRS', deskripsi: 'Perangkat jaringan, server, UPS' },
+  { nama: 'Lainnya', kode: 'LNY', deskripsi: 'Barang di luar kategori di atas' },
+];
+
+async function seedArsipBarangKategori() {
+  console.log('📦 Seeding kategori arsip barang...');
+  for (const k of arsipBarangKategoriData) {
+    // Upsert by kode (unique) — aman dijalankan berulang, tidak menimpa
+    // kategori tambahan yang dibuat manual.
+    await prisma.arsip_barang_kategori.upsert({
+      where: { kode: k.kode },
+      update: { nama: k.nama, deskripsi: k.deskripsi },
+      create: { ...k, created_at: new Date(), updated_at: new Date() },
+    });
+  }
+  console.log(`   ✅ ${arsipBarangKategoriData.length} kategori arsip barang seeded\n`);
+}
+
+// ============================================
 // MAIN
 // ============================================
 async function main() {
@@ -838,6 +866,7 @@ async function main() {
   await seedPegawai();
   await seedUsers();
   await seedBerita();
+  await seedArsipBarangKategori();
 
   console.log('='.repeat(60));
   console.log('🎉 All seeders completed successfully!');

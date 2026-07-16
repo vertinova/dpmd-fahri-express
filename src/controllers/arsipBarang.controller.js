@@ -440,7 +440,9 @@ class ArsipBarangController {
       if (!lama) return res.status(404).json({ success: false, message: 'Barang tidak ditemukan' });
 
       const user = req.user;
-      const data = { updated_by: user?.id ? BigInt(user.id) : null };
+      // updated_at diisi manual: kolom ini tidak punya ON UPDATE saat tabel dibuat
+      // lewat `prisma db push` (Prisma tidak memodelkan ON UPDATE CURRENT_TIMESTAMP).
+      const data = { updated_by: user?.id ? BigInt(user.id) : null, updated_at: new Date() };
 
       if (req.body.nama !== undefined) {
         if (!req.body.nama.trim()) {
@@ -571,7 +573,9 @@ class ArsipBarangController {
       }
 
       const barang = await prisma.$transaction(async (tx) => {
-        const data = { updated_by: user?.id ? BigInt(user.id) : null };
+        // updated_at diisi manual: kolom ini tidak punya ON UPDATE saat tabel dibuat
+      // lewat `prisma db push` (Prisma tidak memodelkan ON UPDATE CURRENT_TIMESTAMP).
+      const data = { updated_by: user?.id ? BigInt(user.id) : null, updated_at: new Date() };
 
         if (lokasi !== undefined && emptyToNull(lokasi) !== lama.lokasi) {
           data.lokasi = emptyToNull(lokasi);
@@ -674,7 +678,8 @@ class ArsipBarangController {
               tanggal_penghapusan: null,
               alasan_penghapusan: null,
               nomor_ba_penghapusan: null,
-              updated_by: user?.id ? BigInt(user.id) : null
+              updated_by: user?.id ? BigInt(user.id) : null,
+              updated_at: new Date()
             },
             include: includeRelasi
           });
@@ -702,7 +707,8 @@ class ArsipBarangController {
             tanggal_penghapusan: parseDateOrNull(tanggal_penghapusan) || new Date(),
             alasan_penghapusan: alasan_penghapusan.trim(),
             nomor_ba_penghapusan: emptyToNull(nomor_ba_penghapusan),
-            updated_by: user?.id ? BigInt(user.id) : null
+            updated_by: user?.id ? BigInt(user.id) : null,
+            updated_at: new Date()
           },
           include: includeRelasi
         });
