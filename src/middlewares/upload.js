@@ -13,6 +13,7 @@ const uploadDirs = [
   'storage/uploads/berita',
   'storage/uploads/surat-masuk',
   'storage/uploads/aparatur_desa_files',
+  'storage/uploads/arsip-barang',
   'storage/produk_hukum'
 ];
 
@@ -664,6 +665,17 @@ const uploadContohProposal = multer({
   }
 });
 
+// ARSIP BARANG (foto barang)
+// Pakai memoryStorage: foto selalu di-re-encode sharp ke WebP di controller,
+// jadi file asli tidak perlu menyentuh disk.
+const uploadArsipBarang = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: imageFilter,
+  limits: {
+    fileSize: 12 * 1024 * 1024 // 12MB — foto kamera HP mentah
+  }
+});
+
 module.exports = {
   uploadBumdes,
   uploadMusdesus,
@@ -676,6 +688,7 @@ module.exports = {
   uploadPengurus,
   uploadProfilDesa,
   uploadInformasi,
+  uploadArsipBarang,
   bankeuProposal: uploadBankeuProposal.single('file'),
   bankeuPerubahanProposal: uploadBankeuPerubahanProposal.single('file'),
   bankeuPerubahanSurat: uploadBankeuPerubahanSurat.single('file'),

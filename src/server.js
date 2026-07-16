@@ -408,6 +408,7 @@ app.use('/api/status', require('./routes/status.routes')); // User status/story 
 app.use('/api/perjadin', perjadinRoutes); // Perjadin (Perjalanan Dinas) routes
 app.use('/api/berita', require('./routes/berita.routes')); // Berita routes
 app.use('/api/informasi', require('./routes/informasi.routes')); // Informasi banner routes (Sekretariat)
+app.use('/api/arsip-barang', require('./routes/arsipBarang.routes')); // Arsip Barang / inventaris (Sekretariat)
 app.use('/api/activity-logs', require('./routes/activityLog.routes')); // Global Activity Logs (Superadmin)
 app.use('/api/kelembagaan', kelembagaanRoutes); // Kelembagaan routes (admin/global)
 app.use('/api/kelembagaan/activity-logs', require('./routes/kelembagaanActivityLogs.routes')); // Activity logs
