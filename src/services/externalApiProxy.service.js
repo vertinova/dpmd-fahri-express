@@ -12,9 +12,24 @@ const axios = require('axios');
 let apiJWT = null;
 let jwtExpiry = null;
 
-const EXTERNAL_API_BASE = process.env.EXTERNAL_DPMD_API_URL || 'https://dpmd.bogorkab.go.id/api';
+// Integrasi Dapur Desa dipensiunkan 23 Juli 2026 bersamaan migrasi domain.
+// Host lama sudah mati DAN alamatnya (dpmd.bogorkab.go.id) kini dipakai aplikasi
+// ini sendiri — default hardcoded lama membuat backend memanggil dirinya sendiri.
+// Karena itu tidak ada fallback URL: integrasi mati selama env belum diisi.
+// Menyalakan kembali = set EXTERNAL_DPMD_API_URL + USERNAME + PASSWORD, restart.
+const EXTERNAL_API_BASE = process.env.EXTERNAL_DPMD_API_URL || '';
 const EXTERNAL_API_USERNAME = process.env.EXTERNAL_DPMD_USERNAME;
 const EXTERNAL_API_PASSWORD = process.env.EXTERNAL_DPMD_PASSWORD;
+
+const DISABLED_MESSAGE =
+	'Integrasi Dapur Desa dinonaktifkan. Set EXTERNAL_DPMD_API_URL, ' +
+	'EXTERNAL_DPMD_USERNAME, dan EXTERNAL_DPMD_PASSWORD di .env untuk mengaktifkan.';
+
+/**
+ * Integrasi dianggap aktif hanya bila ketiga konfigurasi terisi.
+ */
+const isExternalApiEnabled = () =>
+	Boolean(EXTERNAL_API_BASE && EXTERNAL_API_USERNAME && EXTERNAL_API_PASSWORD);
 
 // Create axios instance for external API
 const externalApi = axios.create({
@@ -31,6 +46,13 @@ const externalApi = axios.create({
  * Token di-cache dan digunakan untuk request selanjutnya
  */
 const getAPIToken = async () => {
+	// Gerbang tunggal: semua fetch* melewati makeExternalRequest → getAPIToken,
+	// jadi cukup di sini. Gagal cepat tanpa menyentuh jaringan, supaya pemanggil
+	// (mis. core dashboard) tidak menunggu timeout 30 detik untuk host yang mati.
+	if (!isExternalApiEnabled()) {
+		throw new Error(DISABLED_MESSAGE);
+	}
+
 	// Return cached token jika masih valid
 	if (apiJWT && jwtExpiry && jwtExpiry > Date.now()) {
 		return apiJWT;
@@ -245,6 +267,7 @@ const clearTokenCache = () => {
  */
 const getTokenStatus = () => {
 	return {
+		enabled: isExternalApiEnabled(),
 		hasToken: !!apiJWT,
 		expiresAt: jwtExpiry ? new Date(jwtExpiry).toISOString() : null,
 		expiresIn: jwtExpiry ? Math.max(0, Math.floor((jwtExpiry - Date.now()) / 1000)) : null,
@@ -270,6 +293,7 @@ const fetchDashboardStats = async () => {
 };
 
 module.exports = {
+	isExternalApiEnabled,
 	getAPIToken,
 	makeExternalRequest,
 	fetchAparaturDesa,

@@ -8,7 +8,7 @@ const vapidKeys = {
 
 // Setup web-push dengan VAPID details
 webpush.setVapidDetails(
-  'mailto:admin@dpmdbogorkab.id',
+  'mailto:admin@dpmd.bogorkab.go.id',
   vapidKeys.publicKey,
   vapidKeys.privateKey
 );
