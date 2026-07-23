@@ -130,7 +130,7 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      frameAncestors: ["'self'", "http://localhost:5173", "https://dpmd.bogorkab.go.id", "https://dpmdbogorkab.id"],
+      frameAncestors: ["'self'", "http://localhost:5173", "https://dpmd.bogorkab.go.id"],
       objectSrc: ["'self'", "data:", "blob:"],
       frameSrc: ["'self'", "data:", "blob:"],
       scriptSrc: ["'self'", "'unsafe-inline'"],
@@ -150,8 +150,7 @@ const allowedOrigins = process.env.CORS_ORIGIN
       'http://localhost:5174',
       'http://127.0.0.1:5173',
       'http://127.0.0.1:5174',
-      'https://dpmdbogorkab.id',
-      'http://dpmdbogorkab.id'
+      'https://dpmd.bogorkab.go.id'
     ];
 
 app.use(cors({

@@ -748,11 +748,11 @@ const sendCoreDashboardPage = (res) => {
             <div class="guide-grid">
               <div class="guide-item">
                 <h4>Full Detail (default) — records lengkap</h4>
-                <pre class="sample">GET https://dpmdbogorkab.id/api/public/core-dashboard</pre>
+                <pre class="sample">GET https://dpmd.bogorkab.go.id/api/public/core-dashboard</pre>
               </div>
               <div class="guide-item">
                 <h4>Preview — hanya summary, cepat</h4>
-                <pre class="sample">GET https://dpmdbogorkab.id/api/public/core-dashboard?view=preview</pre>
+                <pre class="sample">GET https://dpmd.bogorkab.go.id/api/public/core-dashboard?view=preview</pre>
               </div>
               <div class="guide-item">
                 <h4>Required Header</h4>
@@ -761,13 +761,13 @@ const sendCoreDashboardPage = (res) => {
               <div class="guide-item">
                 <h4>cURL — ambil semua detail</h4>
                 <pre class="sample">curl -H "x-api-key: YOUR_API_KEY" \
-  https://dpmdbogorkab.id/api/public/core-dashboard \
+  https://dpmd.bogorkab.go.id/api/public/core-dashboard \
   -o core-dashboard.json</pre>
               </div>
               <div class="guide-item">
                 <h4>JavaScript Fetch — ambil semua detail</h4>
                 <pre class="sample">const response = await fetch(
-  "https://dpmdbogorkab.id/api/public/core-dashboard",
+  "https://dpmd.bogorkab.go.id/api/public/core-dashboard",
   {
     headers: {
       "x-api-key": "YOUR_API_KEY",
@@ -1082,7 +1082,7 @@ const getRequestBaseUrl = (req) => {
   const forwardedProto = (req.get('x-forwarded-proto') || '').split(',')[0].trim();
   const forwardedHost = (req.get('x-forwarded-host') || '').split(',')[0].trim();
   const protocol = forwardedProto || req.protocol || 'https';
-  const host = forwardedHost || req.get('host') || 'dpmdbogorkab.id';
+  const host = forwardedHost || req.get('host') || 'dpmd.bogorkab.go.id';
 
   return `${protocol}://${host}`.replace(/\/+$/, '');
 };

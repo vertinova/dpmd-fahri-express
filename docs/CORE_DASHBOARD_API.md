@@ -3,7 +3,7 @@
 Dokumen integrasi untuk mitra/rekan yang mengonsumsi data agregat DPMD Kabupaten Bogor.
 
 - **Versi payload:** `2.0`
-- **Base URL produksi:** `https://dpmdbogorkab.id`
+- **Base URL produksi:** `https://dpmd.bogorkab.go.id`
 - **Endpoint:** `GET /api/public/core-dashboard` (alias: `GET /api/public/dashboard`)
 - **Auth:** API key (header)
 - **Format:** JSON, realtime (tanpa cache di sisi server)
@@ -57,17 +57,17 @@ Selalu cek `data.meta.mode` (`"full"` / `"preview"`) untuk memastikan apa yang d
 ```bash
 # Full detail
 curl -H "x-api-key: YOUR_API_KEY" \
-  https://dpmdbogorkab.id/api/public/core-dashboard \
+  https://dpmd.bogorkab.go.id/api/public/core-dashboard \
   -o core-dashboard.json
 
 # Preview (ringkasan saja, cepat)
 curl -H "x-api-key: YOUR_API_KEY" \
-  "https://dpmdbogorkab.id/api/public/core-dashboard?view=preview"
+  "https://dpmd.bogorkab.go.id/api/public/core-dashboard?view=preview"
 ```
 
 ```javascript
 const res = await fetch(
-  "https://dpmdbogorkab.id/api/public/core-dashboard",
+  "https://dpmd.bogorkab.go.id/api/public/core-dashboard",
   { headers: { "x-api-key": process.env.DPMD_API_KEY, Accept: "application/json" } }
 );
 const { data } = await res.json();
@@ -242,8 +242,8 @@ Setiap field file/foto/PDF dikembalikan sebagai objek terstruktur:
 {
   "path": "uploads/bumdes_laporan_keuangan/xxx.pdf",
   "filename": "xxx.pdf",
-  "url": "https://dpmdbogorkab.id/uploads/bumdes_laporan_keuangan/xxx.pdf",
-  "download_url": "https://dpmdbogorkab.id/uploads/bumdes_laporan_keuangan/xxx.pdf"
+  "url": "https://dpmd.bogorkab.go.id/uploads/bumdes_laporan_keuangan/xxx.pdf",
+  "download_url": "https://dpmd.bogorkab.go.id/uploads/bumdes_laporan_keuangan/xxx.pdf"
 }
 ```
 

@@ -134,10 +134,7 @@ function initSocketServer(httpServer) {
         'http://localhost:5174',
         'http://127.0.0.1:5173',
         'http://127.0.0.1:5174',
-        'https://dpmdbogorkab.id',
-        'http://dpmdbogorkab.id',
-        'https://dpmd.bogorkab.go.id',
-        'http://dpmd.bogorkab.go.id'
+        'https://dpmd.bogorkab.go.id'
       ];
 
   io = new Server(httpServer, {
