@@ -118,6 +118,7 @@ const chatbotRoutes = require('./routes/chatbot.routes');
 const anggaranRoutes = require('./routes/anggaran.routes');
 const penyediaRoutes = require('./routes/penyedia.routes');
 const pencairanRoutes = require('./routes/pencairan.routes');
+const pencairanSkRefRoutes = require('./routes/pencairanSkRef.routes');
 
 const app = express();
 
@@ -456,6 +457,7 @@ app.use('/api/anggaran', anggaranRoutes);
 
 // Pencairan & master Penyedia (modul realisasi anggaran)
 app.use('/api/penyedia', penyediaRoutes);
+app.use('/api/pencairan-sk', pencairanSkRefRoutes);
 app.use('/api/pencairan', pencairanRoutes);
 
 // 404 handler

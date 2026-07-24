@@ -180,6 +180,81 @@ const VALID_JENIS = ['atk', 'cetak', 'makmin', 'perjadin', 'jasa', 'hibah', 'lai
 const computeTotal = (items = []) =>
   items.reduce((s, i) => s + (decOrZero(i.qty) * decOrZero(i.harga_satuan)), 0);
 
+// ─── Kontrol kuantitas item RKA ────────────────────────────────────────────────
+// Sisa qty per item = volume rencana − Σ qty item tsb di pencairan lain yang
+// masih AKTIF (draft + finalized). Pencairan arsip (cancelled) tidak dihitung.
+// excludeId dipakai saat edit agar qty pencairan itu sendiri tidak menghitung
+// dirinya sendiri.
+const computeRkaUsage = async (paguId, excludeId = null) => {
+  const where = {
+    rka_item_id: { not: null },
+    pencairan: {
+      pagu_id: BigInt(paguId),
+      status: { in: ['draft', 'finalized'] },
+    },
+  };
+  if (excludeId) where.pencairan.id = { not: BigInt(excludeId) };
+
+  const grouped = await prisma.pencairan_items.groupBy({
+    by: ['rka_item_id'],
+    where,
+    _sum: { qty: true },
+  });
+  const map = new Map();
+  grouped.forEach((g) => map.set(Number(g.rka_item_id), Number(g._sum.qty) || 0));
+  return map;
+};
+
+// Kembalikan daftar item yang qty-nya melebihi sisa rencana. Kosong = valid.
+const findQtyViolations = async (items = [], paguId, excludeId = null) => {
+  const rkaIds = [...new Set(
+    items.filter((i) => i.rka_item_id).map((i) => Number(i.rka_item_id)),
+  )];
+  if (rkaIds.length === 0) return [];
+
+  const rkaRows = await prisma.anggaran_rka_items.findMany({
+    where: { id: { in: rkaIds.map((x) => BigInt(x)) } },
+    select: { id: true, nama_item: true, volume: true, satuan: true },
+  });
+  const rkaMap = new Map(rkaRows.map((r) => [Number(r.id), r]));
+  const usage = await computeRkaUsage(paguId, excludeId);
+
+  // Jumlahkan qty per rka_item bila item muncul lebih dari sekali di payload.
+  const reqByItem = new Map();
+  items.forEach((i) => {
+    if (!i.rka_item_id) return;
+    const key = Number(i.rka_item_id);
+    reqByItem.set(key, (reqByItem.get(key) || 0) + decOrZero(i.qty));
+  });
+
+  const violations = [];
+  reqByItem.forEach((diminta, rkaId) => {
+    const rka = rkaMap.get(rkaId);
+    if (!rka) return;
+    const volume = Number(rka.volume) || 0;
+    const used = usage.get(rkaId) || 0;
+    const sisa = volume - used;
+    if (diminta > sisa + 1e-9) {
+      violations.push({
+        rka_item_id: rkaId,
+        nama_item: rka.nama_item,
+        satuan: rka.satuan,
+        volume,
+        terpakai: used,
+        sisa: Math.max(0, sisa),
+        diminta,
+      });
+    }
+  });
+  return violations;
+};
+
+const qtyViolationMessage = (violations) =>
+  'Kuantitas melebihi sisa rencana untuk: '
+  + violations
+    .map((v) => `${v.nama_item} (minta ${v.diminta} ${v.satuan}, sisa ${v.sisa} ${v.satuan})`)
+    .join('; ');
+
 // ─── GET /api/pencairan ───────────────────────────────────────────────────────
 router.get('/', auth, checkRole(ALLOWED_ROLES), async (req, res) => {
   try {
@@ -227,6 +302,28 @@ router.get('/', auth, checkRole(ALLOWED_ROLES), async (req, res) => {
   } catch (error) {
     console.error('Error fetching pencairan list:', error);
     res.status(500).json({ success: false, message: 'Gagal mengambil daftar pencairan', error: error.message });
+  }
+});
+
+// ─── GET /api/pencairan/rka-usage ─────────────────────────────────────────────
+// Peta pemakaian qty per item RKA (draft + finalized) untuk satu pagu.
+// Dipakai form pencairan untuk menghitung sisa qty per item.
+// Query: pagu_id (wajib), exclude (opsional, id pencairan yang sedang diedit).
+// PENTING: definisikan sebelum '/:id' agar tidak tertangkap sebagai id.
+router.get('/rka-usage', auth, checkRole(ALLOWED_ROLES), async (req, res) => {
+  try {
+    const { pagu_id, exclude } = req.query;
+    if (!pagu_id || !/^\d+$/.test(String(pagu_id))) {
+      return res.status(400).json({ success: false, message: 'pagu_id wajib diisi' });
+    }
+    const excludeId = exclude && /^\d+$/.test(String(exclude)) ? exclude : null;
+    const usage = await computeRkaUsage(pagu_id, excludeId);
+    const data = {};
+    usage.forEach((v, k) => { data[k] = v; });
+    res.json({ success: true, data });
+  } catch (error) {
+    console.error('Error computing rka usage:', error);
+    res.status(500).json({ success: false, message: 'Gagal menghitung pemakaian qty', error: error.message });
   }
 });
 
@@ -301,6 +398,12 @@ router.post('/', auth, checkRole(ALLOWED_ROLES), async (req, res) => {
       return res.status(400).json({ success: false, message: 'Minimal 1 item harus dipilih' });
     }
 
+    // Guard: qty tiap item tidak boleh melebihi sisa rencana (volume − terpakai).
+    const violations = await findQtyViolations(body.items, body.pagu_id, null);
+    if (violations.length > 0) {
+      return res.status(400).json({ success: false, message: qtyViolationMessage(violations), violations });
+    }
+
     const total = computeTotal(body.items);
 
     // Transaction: create header → items → pemeriksa
@@ -343,7 +446,10 @@ router.post('/', auth, checkRole(ALLOWED_ROLES), async (req, res) => {
           total_nilai: total,
           total_terbilang: body.total_terbilang || null,
           metadata: body.metadata || null,
-          status: body.status || 'draft',
+          // Pencairan baru SELALU draft. Status hanya boleh berubah lewat
+          // endpoint /finalize atau /cancel — jangan percaya body.status,
+          // karena finalize via body akan melewati pencatatan finalized_at/by.
+          status: 'draft',
           created_by: BigInt(req.user.id),
         },
       });
@@ -404,7 +510,10 @@ router.put('/:id', auth, checkRole(ALLOWED_ROLES), async (req, res) => {
 
     const existing = await prisma.pencairan.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ success: false, message: 'Pencairan tidak ditemukan' });
-    if (existing.status === 'finalized') {
+    // Pencairan yang sudah pernah final tidak boleh diedit — termasuk saat sedang
+    // diarsipkan (status cancelled tapi finalized_at terisi). Arsip hanya boleh
+    // dipulihkan (restore), bukan diubah isinya.
+    if (existing.status === 'finalized' || existing.finalized_at) {
       return res.status(400).json({ success: false, message: 'Pencairan yang sudah final tidak dapat diubah' });
     }
 
@@ -439,7 +548,14 @@ router.put('/:id', auth, checkRole(ALLOWED_ROLES), async (req, res) => {
 
     // Hitung ulang total kalau items diupdate
     const itemsProvided = Array.isArray(body.items);
-    if (itemsProvided) data.total_nilai = computeTotal(body.items);
+    if (itemsProvided) {
+      // Guard qty: kecualikan pencairan ini sendiri dari perhitungan terpakai.
+      const violations = await findQtyViolations(body.items, existing.pagu_id, id);
+      if (violations.length > 0) {
+        return res.status(400).json({ success: false, message: qtyViolationMessage(violations), violations });
+      }
+      data.total_nilai = computeTotal(body.items);
+    }
 
     await prisma.$transaction(async (tx) => {
       await tx.pencairan.update({ where: { id }, data });
@@ -523,6 +639,9 @@ router.post('/:id/finalize', auth, checkRole(ALLOWED_ROLES), async (req, res) =>
 });
 
 // ─── POST /api/pencairan/:id/cancel ───────────────────────────────────────────
+// Arsipkan pencairan (draft maupun final). Data tetap tersimpan & bisa dipulihkan
+// via /restore. Status final asli disimpan lewat finalized_at agar restore tahu
+// harus kembali ke 'finalized' atau 'draft'.
 router.post('/:id/cancel', auth, checkRole(ALLOWED_ROLES), async (req, res) => {
   try {
     const id = parseIdParam(req.params.id);
@@ -533,15 +652,47 @@ router.post('/:id/cancel', auth, checkRole(ALLOWED_ROLES), async (req, res) => {
     const existing = await prisma.pencairan.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ success: false, message: 'Pencairan tidak ditemukan' });
     if (existing.status === 'cancelled') {
-      return res.status(400).json({ success: false, message: 'Pencairan sudah dibatalkan' });
+      return res.status(400).json({ success: false, message: 'Pencairan sudah diarsipkan' });
     }
     const updated = await prisma.pencairan.update({
       where: { id },
       data: { status: 'cancelled' },
     });
-    res.json({ success: true, message: 'Pencairan dibatalkan', data: serialize(updated) });
+    res.json({ success: true, message: 'Pencairan diarsipkan', data: serialize(updated) });
   } catch (error) {
-    res.status(500).json({ success: false, message: 'Gagal membatalkan pencairan', error: error.message });
+    res.status(500).json({ success: false, message: 'Gagal mengarsipkan pencairan', error: error.message });
+  }
+});
+
+// ─── POST /api/pencairan/:id/restore ──────────────────────────────────────────
+// Pulihkan pencairan yang diarsipkan. Kembali ke 'finalized' jika sebelumnya
+// sudah final (finalized_at terisi), atau ke 'draft' jika belum pernah final.
+router.post('/:id/restore', auth, checkRole(ALLOWED_ROLES), async (req, res) => {
+  try {
+    const id = parseIdParam(req.params.id);
+    if (id === null) {
+      return res.status(400).json({ success: false, message: 'ID pencairan tidak valid' });
+    }
+
+    const existing = await prisma.pencairan.findUnique({ where: { id } });
+    if (!existing) return res.status(404).json({ success: false, message: 'Pencairan tidak ditemukan' });
+    if (existing.status !== 'cancelled') {
+      return res.status(400).json({ success: false, message: 'Hanya pencairan yang diarsipkan yang bisa dipulihkan' });
+    }
+    const restoredStatus = existing.finalized_at ? 'finalized' : 'draft';
+    const updated = await prisma.pencairan.update({
+      where: { id },
+      data: { status: restoredStatus },
+    });
+    res.json({
+      success: true,
+      message: restoredStatus === 'finalized'
+        ? 'Pencairan dipulihkan ke status final'
+        : 'Pencairan dipulihkan ke draft',
+      data: serialize(updated),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Gagal memulihkan pencairan', error: error.message });
   }
 });
 
@@ -555,8 +706,10 @@ router.delete('/:id', auth, checkRole(ALLOWED_ROLES), async (req, res) => {
 
     const existing = await prisma.pencairan.findUnique({ where: { id } });
     if (!existing) return res.status(404).json({ success: false, message: 'Pencairan tidak ditemukan' });
-    if (existing.status === 'finalized') {
-      return res.status(400).json({ success: false, message: 'Pencairan yang sudah final tidak bisa dihapus. Batalkan terlebih dahulu.' });
+    // Pencairan yang sudah pernah final tidak boleh dihapus permanen — termasuk
+    // yang sedang diarsipkan (cancelled + finalized_at). Gunakan arsip/pulihkan.
+    if (existing.status === 'finalized' || existing.finalized_at) {
+      return res.status(400).json({ success: false, message: 'Pencairan yang sudah final tidak bisa dihapus. Arsipkan saja bila perlu.' });
     }
     await prisma.pencairan.delete({ where: { id } });
     res.json({ success: true, message: 'Pencairan berhasil dihapus' });
