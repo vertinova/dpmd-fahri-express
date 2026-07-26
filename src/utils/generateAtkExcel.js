@@ -97,9 +97,8 @@ function fmtBulanTahun(value, tahun) {
 }
 
 function noPesanan(d) {
-  const a = d.no_pesanan_a || '000.3.1 /';
-  const b = d.no_pesanan_b || '- Umpeg';
-  return `${a} ${b}`.replace(/\s+/g, ' ').trim();
+  // Nomor Surat Pesanan kini satu nilai tunggal (disimpan di no_pesanan_b).
+  return (d.no_pesanan_b || d.no_pesanan_a || '000.3.1 / ................').trim();
 }
 
 function jenisBelanja(d) {

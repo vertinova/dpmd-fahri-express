@@ -2487,6 +2487,23 @@ enum bankeu_perubahan_revisions_decision {
   rejected
 }
 
+/// Referensi SK yang dipakai berulang di dokumen pencairan (SK Bupati KPA & SK Kepala Dinas PPK).
+/// Bersifat statis per tahun anggaran, dikategorikan per `tahun`.
+model pencairan_sk_ref {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  jenis      String    @db.VarChar(20) // 'bupati_kpa' | 'kadis_ppk'
+  tahun      Int
+  nomor      String    @db.VarChar(255)
+  tanggal    DateTime? @db.Date
+  keterangan String?   @db.VarChar(255)
+  created_by BigInt?   @db.UnsignedBigInt
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+  updated_at DateTime? @default(now()) @db.Timestamp(0)
+
+  @@unique([jenis, tahun, nomor], map: "uq_sk_ref_jenis_tahun_nomor")
+  @@index([jenis, tahun], map: "idx_sk_ref_jenis_tahun")
+}
+
 enum anggaran_jenis_sht {
   SSH
   SBU
