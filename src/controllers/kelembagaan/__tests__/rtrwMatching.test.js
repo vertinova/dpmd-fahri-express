@@ -2,7 +2,7 @@
 jest.mock('../base.controller', () => ({ prisma: {} }));
 
 const { _internals } = require('../rtrwComparison.controller');
-const { normalizeName, isSimilarName, compareItems, resolveMembership, markBaruOnItems } = _internals;
+const { normalizeName, isSimilarName, compareItems, resolveMembership, markBaruOnItems, isKetuaRtRw } = _internals;
 
 const db = (nama, nik, extra = {}) => ({ source: 'db', nama, normalized: normalizeName(nama), nik, ...extra });
 const add = (nama, extra = {}) => ({ source: 'add', nama, normalized: normalizeName(nama), totalNilai: 0, details: [], ...extra });
@@ -17,6 +17,19 @@ describe('normalizeName', () => {
     expect(normalizeName('KARTOLI, SE')).toBe('KARTOLI');
     expect(normalizeName('BUDI SANTOSO, ST')).toBe('BUDI SANTOSO');
     expect(normalizeName('H. AHMAD, S.Pd')).toBe('AHMAD');
+  });
+});
+
+describe('isKetuaRtRw', () => {
+  it('accepts ketua RT/RW in any capitalisation or spacing', () => {
+    ['KETUA RT', 'Ketua RW', 'ketua rt', '  KETUA  RW '].forEach((j) => expect(isKetuaRtRw(j)).toBe(true));
+  });
+  it('accepts the long spelling stored in the database', () => {
+    ['KETUA RUKUN TANGGA', 'KETUA RUKUN WARGA', 'Ketua Rukun Warga'].forEach((j) => expect(isKetuaRtRw(j)).toBe(true));
+  });
+  it('rejects pengurus lain dan nilai kosong', () => {
+    ['SEKRETARIS RT', 'BENDAHARA RW', 'SEKSI PEMBANGUNAN', 'KETUA RT 01', '', null, undefined]
+      .forEach((j) => expect(isKetuaRtRw(j)).toBe(false));
   });
 });
 

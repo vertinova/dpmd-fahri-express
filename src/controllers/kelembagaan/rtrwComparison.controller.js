@@ -18,6 +18,13 @@ const BPJS_JSON_FILE = path.join(DATA_DIR, 'rtrwbpjs.json');
 // persandingan tetap jalan tanpa overlay (backward-compatible).
 const BPJS_STATUS_JSON_FILE = path.join(DATA_DIR, 'rtrwbpjsstatus.json');
 const RT_RW_TYPES = ['rw', 'rt', 'rws', 'rts'];
+// Persandingan hanya untuk Ketua RT/RW: ADD & BPJS memang hanya menanggung ketua,
+// sedangkan kelembagaan RT/RW juga memuat sekretaris/bendahara/seksi yang bukan
+// peserta. Dicek via regex (bukan `where jabatan in [...]`) karena kolomnya teks
+// bebas: selain beragam kapitalisasi, database juga memuat ejaan panjang
+// "KETUA RUKUN TANGGA"/"KETUA RUKUN WARGA" (30 baris per Juli 2026).
+const isKetuaRtRw = (jabatan) => /^KETUA\s+(R[TW]|RUKUN\s+(TANGGA|WARGA))$/
+  .test(String(jabatan || '').trim().toUpperCase());
 const TANGKIL_CITEUREUP_KODE = '32.01.03.2011';
 const TANGKIL_CITEUREUP_NAMA = 'Tangkil';
 const TANGKIL_CITEUREUP_KECAMATAN = 'Citeureup';
@@ -1142,6 +1149,10 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
       bpjsNama: [...new Set(entry.bpjsItems.map((item) => item.nama))],
       dbNik: dbNiks,
       bpjsNik: bpjsNiks,
+      // Status jabatan pengurus di database: 'aktif' | 'selesai' | 'nonaktif'.
+      // Array karena satu entri hasil merge bisa membawa >1 record DB.
+      dbStatusJabatan: [...new Set(entry.dbItems.map((item) => item.statusJabatan).filter(Boolean))],
+      dbJabatan: [...new Set(entry.dbItems.map((item) => item.jabatan).filter(Boolean))],
       inDb: hasDb,
       inAdd: hasAdd,
       inBpjs: hasBpjs,
@@ -1355,7 +1366,7 @@ async function computeComparison({
           alamat: toText(p.alamat),
           pendidikan: toText(p.pendidikan),
         };
-      }).filter((item) => item.nama && item.desaKode);
+      }).filter((item) => item.nama && item.desaKode && isKetuaRtRw(item.jabatan));
 
       const tangkilBpjsFallback = applyTangkilBpjsFallback(bpjsData, addData, dbItems, desaByKode);
       const crossDesaFallback = applyCrossDesaNikFallback(tangkilBpjsFallback.confirmed, dbItems, desaByKode);
@@ -1501,6 +1512,8 @@ async function computeComparison({
         totalAddRows: addMeta.filteredRows,
         totalBpjsPenerima: bpjsMeta.totalPenerima,
         totalDbDesa: new Set(dbItems.map((item) => item.desaKode)).size,
+        totalDbAktif: dbItems.filter((item) => item.statusJabatan === 'aktif').length,
+        totalDbNonAktif: dbItems.filter((item) => item.statusJabatan && item.statusJabatan !== 'aktif').length,
         totalAddDesa: addMeta.totalDesa,
         totalBpjsDesa: bpjsMeta.totalDesa,
         totalAllThree: comparison.reduce((sum, desa) => sum + desa.allThree, 0),
@@ -1649,4 +1662,4 @@ module.exports.computeComparison = computeComparison;
 module.exports.warmSourceCache = warmSourceCache;
 module.exports.isSourceCacheReady = isSourceCacheReady;
 // Exposed for unit tests (see __tests__/rtrwMatching.test.js).
-module.exports._internals = { normalizeName, isSimilarName, tokenSimilar, compareItems, resolveMembership, markBaruOnItems, applyCrossDesaNikFallback, buildBpjsStatusList };
+module.exports._internals = { normalizeName, isSimilarName, tokenSimilar, compareItems, resolveMembership, markBaruOnItems, applyCrossDesaNikFallback, buildBpjsStatusList, isKetuaRtRw };
