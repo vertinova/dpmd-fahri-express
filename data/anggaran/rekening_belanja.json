@@ -1,0 +1,30 @@
+{
+  "_meta": {
+    "keterangan": "Peta kode rekening belanja -> nama/uraian. Rujukan: Permendagri 90/2019 jo. Kepmendagri 050-3708/2020 (Bagan Akun Standar). Nama diselesaikan berjenjang: kode penuh dulu, jika tidak ada dipakai prefix terpanjang yang cocok. AMAN DIEDIT/DITAMBAH — cukup tambahkan pasangan \"kode\": \"nama\".",
+    "verifikasi": "Nama level hierarki (5, 5.1, 5.1.02, objek, rincian objek) sudah baku. Nama SUB RINCIAN OBJEK (segmen terakhir, mis. .00024) mohon dicocokkan dgn daftar resmi SIPD Kab Bogor; yang belum terdaftar akan tampil memakai nama rincian objek induknya.",
+    "_verify_pending": [
+      "5.1.02.01.001.00026", "5.1.02.01.001.00029", "5.1.02.01.001.00039", "5.1.02.01.001.00052",
+      "5.1.02.02.001.00003", "5.1.02.02.001.00026", "5.1.02.02.001.00029", "5.1.02.02.001.00086",
+      "5.1.02.02.002.00005", "5.1.02.02.002.00006", "5.1.02.02.002.00007", "5.1.02.02.002.00017",
+      "5.1.02.02.002.00025", "5.1.02.02.002.00033",
+      "5.1.02.04.001.00001", "5.1.02.04.001.00003", "5.1.02.04.001.00004",
+      "5.2.03.01.01.0011"
+    ]
+  },
+  "5": "Belanja",
+  "5.1": "Belanja Operasi",
+  "5.1.02": "Belanja Barang dan Jasa",
+  "5.1.02.01": "Belanja Barang",
+  "5.1.02.01.001": "Belanja Barang Pakai Habis",
+  "5.1.02.01.001.00024": "Belanja Alat Tulis Kantor",
+  "5.1.02.01.001.00025": "Belanja Kertas dan Cover",
+  "5.1.02.02": "Belanja Jasa",
+  "5.1.02.02.001": "Belanja Jasa Kantor",
+  "5.1.02.02.002": "Belanja Premi Asuransi",
+  "5.1.02.04": "Belanja Perjalanan Dinas",
+  "5.1.02.04.001": "Belanja Perjalanan Dinas Dalam Negeri",
+  "5.2": "Belanja Modal",
+  "5.2.03": "Belanja Modal Gedung dan Bangunan",
+  "5.2.03.01": "Belanja Modal Bangunan Gedung",
+  "5.2.03.01.01": "Belanja Modal Bangunan Gedung Tempat Kerja"
+}

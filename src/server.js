@@ -116,6 +116,8 @@ const pemdesAparaturRoutes = require('./routes/pemdes-aparatur.routes');
 const pemdesProfilDesaRoutes = require('./routes/pemdes-profil-desa.routes');
 const chatbotRoutes = require('./routes/chatbot.routes');
 const anggaranRoutes = require('./routes/anggaran.routes');
+const anggaranKasRoutes = require('./routes/anggaranKas.routes');
+const rekeningRefRoutes = require('./routes/rekeningRef.routes');
 const penyediaRoutes = require('./routes/penyedia.routes');
 const pencairanRoutes = require('./routes/pencairan.routes');
 const pencairanSkRefRoutes = require('./routes/pencairanSkRef.routes');
@@ -453,6 +455,8 @@ app.use('/api/messaging', require('./routes/messaging.routes'));
 
 // Anggaran Bidang routes
 app.use('/api/anggaran', anggaranRoutes);
+app.use('/api/anggaran-kas', anggaranKasRoutes);
+app.use('/api/rekening-ref', rekeningRefRoutes);
 
 // Pencairan & master Penyedia (modul realisasi anggaran)
 app.use('/api/penyedia', penyediaRoutes);

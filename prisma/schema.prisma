@@ -673,10 +673,51 @@ model anggaran_pagu {
   users              users                    @relation("anggaran_pagu_created_by", fields: [created_by], references: [id], map: "fk_ap_user")
   rka_items          anggaran_rka_items[]
   pencairan          pencairan[]
+  anggaran_kas       anggaran_kas[]
 
   @@unique([master_kegiatan_id, tahun], map: "uk_pagu_kegiatan_tahun")
   @@index([tahun], map: "idx_tahun")
   @@index([created_by], map: "fk_ap_user")
+}
+
+/// Master nama rekening custom — override nama untuk tiap kode rekening,
+/// diisi user lewat halaman pengaturan. Fallback: rekening_belanja.json.
+model rekening_ref {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  kode_rekening String    @unique(map: "uq_rekening_ref_kode") @db.VarChar(500)
+  nama          String    @db.VarChar(255)
+  created_by    BigInt?   @db.UnsignedBigInt
+  created_at    DateTime? @default(now()) @db.Timestamp(0)
+  updated_at    DateTime? @default(now()) @db.Timestamp(0)
+}
+
+/// Anggaran Kas (Angkas) — rencana penarikan/pencairan dana per BULAN dalam
+/// satu tahun, disimpan per kode rekening. Total sub kegiatan = Σ rekening;
+/// tampilan triwulan dihitung dari agregasi bulanan.
+model anggaran_kas {
+  id            BigInt        @id @default(autoincrement()) @db.UnsignedBigInt
+  pagu_id       BigInt        @db.UnsignedBigInt
+  kode_rekening String        @default("") @db.VarChar(500)
+  m1            Decimal       @default(0.00) @db.Decimal(20, 2)
+  m2            Decimal       @default(0.00) @db.Decimal(20, 2)
+  m3            Decimal       @default(0.00) @db.Decimal(20, 2)
+  m4            Decimal       @default(0.00) @db.Decimal(20, 2)
+  m5            Decimal       @default(0.00) @db.Decimal(20, 2)
+  m6            Decimal       @default(0.00) @db.Decimal(20, 2)
+  m7            Decimal       @default(0.00) @db.Decimal(20, 2)
+  m8            Decimal       @default(0.00) @db.Decimal(20, 2)
+  m9            Decimal       @default(0.00) @db.Decimal(20, 2)
+  m10           Decimal       @default(0.00) @db.Decimal(20, 2)
+  m11           Decimal       @default(0.00) @db.Decimal(20, 2)
+  m12           Decimal       @default(0.00) @db.Decimal(20, 2)
+  keterangan    String?       @db.VarChar(255)
+  created_by    BigInt?       @db.UnsignedBigInt
+  created_at    DateTime?     @default(now()) @db.Timestamp(0)
+  updated_at    DateTime?     @default(now()) @db.Timestamp(0)
+  pagu          anggaran_pagu @relation(fields: [pagu_id], references: [id], onDelete: Cascade, map: "fk_angkas_pagu")
+
+  @@unique([pagu_id, kode_rekening], map: "uq_angkas_pagu_rekening")
+  @@index([pagu_id], map: "idx_angkas_pagu")
 }
 
 /// Item RKA per pagu (per tahun) - berubah setiap tahun
