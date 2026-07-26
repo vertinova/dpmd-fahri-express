@@ -287,6 +287,92 @@ function readBpjsStatus() {
   }
 }
 
+// Daftar mentah Data Status BPJS (rtrwbpjsstatus.json) untuk ditampilkan sebagai
+// sumber data tersendiri — beda dari Data BPJS (rtrwbpjs.json). Cache status tidak
+// menyimpan nama peserta AKTIF (indexnya NIK), jadi nama diambil dari master BPJS
+// via NIK/KPJ; peserta NON-AKTIF namanya ada di key `nama|desaKode`.
+function buildBpjsStatusList(membershipByNik, membershipByKpj, membershipByNameDesa, bpjsData, desaByKode) {
+  const namaByNik = new Map();
+  const namaByKpj = new Map();
+  const masterByNameDesa = new Map();
+  bpjsData.forEach((p) => {
+    if (p.nik && !namaByNik.has(p.nik)) namaByNik.set(p.nik, p.nama);
+    const key = `${p.normalized}|${p.desaKode}`;
+    if (!masterByNameDesa.has(key)) masterByNameDesa.set(key, p);
+    (p.details || []).forEach((d) => {
+      if (d.kpj && !namaByKpj.has(d.kpj)) namaByKpj.set(d.kpj, d.namaLengkap || p.nama);
+    });
+  });
+
+  // Kode desa dari file DESK bisa tidak dikenal database — barisnya tetap ditampilkan
+  // dengan label eksplisit supaya tidak terlihat sebagai desa kosong.
+  const wilayah = (desaKode) => {
+    const desa = desaByKode.get(desaKode);
+    return {
+      desaKode: desaKode || '',
+      desaNama: desa?.nama || `${desaKode || '-'} (tidak dikenal DB)`,
+      kecamatanNama: desa?.kecamatans?.nama || 'Tidak Dikenal',
+    };
+  };
+
+  // adaDiMaster: peserta ini ketemu di master Data BPJS. Yang false = selisih —
+  // tercatat di DESK BPJS tapi tak ada di rtrwbpjs.json (dipakai tab "Selisih vs Master").
+  const aktif = [];
+  Object.entries(membershipByNik).forEach(([nik, rec]) => {
+    if (rec.status !== 'aktif') return;
+    const nama = namaByNik.get(nik) || namaByKpj.get(rec.kpj) || '';
+    aktif.push({
+      ...wilayah(rec.desaKode),
+      sheet: 'AKTIF',
+      nama,
+      nik,
+      kpj: rec.kpj || '',
+      kodeTk: rec.kodeTk || '',
+      upah: rec.upah || 0,
+      tglLahir: rec.tglLahir || '',
+      adaDiMaster: Boolean(nama),
+      cocokVia: namaByNik.has(nik) ? 'nik' : namaByKpj.has(rec.kpj) ? 'kpj' : '',
+    });
+  });
+  // Peserta AKTIF yang hanya terindeks via KPJ (NIK kosong / tergeser duplikat).
+  Object.entries(membershipByKpj).forEach(([kpj, rec]) => {
+    if (rec.status !== 'aktif') return;
+    if (rec.nik && membershipByNik[rec.nik]) return;
+    const nama = namaByKpj.get(kpj) || (rec.nik ? namaByNik.get(rec.nik) : '') || '';
+    aktif.push({
+      ...wilayah(rec.desaKode),
+      sheet: 'AKTIF',
+      nama,
+      nik: rec.nik || '',
+      kpj,
+      kodeTk: '',
+      upah: 0,
+      tglLahir: rec.tglLahir || '',
+      adaDiMaster: Boolean(nama),
+      cocokVia: namaByKpj.has(kpj) ? 'kpj' : rec.nik && namaByNik.has(rec.nik) ? 'nik' : '',
+    });
+  });
+
+  const nonAktif = Object.entries(membershipByNameDesa).map(([key, rec]) => {
+    const nama = key.slice(0, key.lastIndexOf('|'));
+    const master = masterByNameDesa.get(`${nama}|${rec.desaKode}`);
+    return {
+      ...wilayah(rec.desaKode),
+      sheet: 'NON AKTIF',
+      nama,
+      nik: master?.nik || '',
+      kpj: (master?.details || [])[0]?.kpj || '',
+      sebab: rec.sebab || '',
+      tglLahir: rec.tglLahir || '',
+      adaDiMaster: Boolean(master),
+      cocokVia: master ? 'nama_desa' : '',
+    };
+  });
+
+  const bySort = (a, b) => a.desaKode.localeCompare(b.desaKode) || String(a.nama).localeCompare(String(b.nama));
+  return { aktif: aktif.sort(bySort), nonAktif: nonAktif.sort(bySort) };
+}
+
 function readPreparedJson(filePath, label) {
   const payload = JSON.parse(fs.readFileSync(filePath, 'utf8'));
   if (!payload || !Array.isArray(payload.data)) {
@@ -1387,6 +1473,9 @@ async function computeComparison({
       });
       logTiming('baru list built');
 
+      const bpjsStatus = buildBpjsStatusList(membershipByNik, membershipByKpj, membershipByNameDesa, bpjsData, desaByKode);
+      logTiming('bpjs status list built');
+
       const unmatchedAddDesa = [...new Set(addData.map((item) => item.desaKode))]
         .filter((kode) => !desaByKode.has(kode))
         .sort();
@@ -1441,6 +1530,10 @@ async function computeComparison({
         totalBaruMatchedDb: baruList.filter((b) => b.matchedDb).length,
         totalBaruUnmatched: baruList.filter((b) => !b.matchedDb).length,
         totalBaruAnomali: baruList.filter((b) => b.anomaliBpjs).length,
+        // Data Status BPJS sebagai sumber tersendiri (bukan hasil persandingan).
+        totalStatusAktif: bpjsStatus.aktif.length,
+        totalStatusNonAktif: bpjsStatus.nonAktif.length,
+        totalStatusTanpaMaster: [...bpjsStatus.aktif, ...bpjsStatus.nonAktif].filter((r) => !r.adaDiMaster).length,
         statusOverlayAvailable: Boolean(statusMeta),
         statusOverlayMeta: statusMeta,
         fuzzyEnabled: enableFuzzy,
@@ -1468,6 +1561,7 @@ async function computeComparison({
     comparison,
     tangkilUnresolved: tangkilUnresolvedForResponse,
     baruList,
+    bpjsStatus,
     meta: {
       cacheReady: true,
       sourceType,
@@ -1520,7 +1614,7 @@ class RtrwComparisonController {
         await warming;
       }
 
-      const { summary, comparison, tangkilUnresolved, baruList, meta } = await computeComparison({
+      const { summary, comparison, tangkilUnresolved, baruList, bpjsStatus, meta } = await computeComparison({
         enableFuzzy,
         includeDetails,
         desaKodeFilter,
@@ -1535,6 +1629,7 @@ class RtrwComparisonController {
           comparison,
           tangkilUnresolved,
           baruList,
+          bpjsStatus,
           meta,
         },
       });
@@ -1554,4 +1649,4 @@ module.exports.computeComparison = computeComparison;
 module.exports.warmSourceCache = warmSourceCache;
 module.exports.isSourceCacheReady = isSourceCacheReady;
 // Exposed for unit tests (see __tests__/rtrwMatching.test.js).
-module.exports._internals = { normalizeName, isSimilarName, tokenSimilar, compareItems, resolveMembership, markBaruOnItems, applyCrossDesaNikFallback };
+module.exports._internals = { normalizeName, isSimilarName, tokenSimilar, compareItems, resolveMembership, markBaruOnItems, applyCrossDesaNikFallback, buildBpjsStatusList };

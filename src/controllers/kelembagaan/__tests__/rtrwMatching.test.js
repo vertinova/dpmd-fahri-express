@@ -291,3 +291,71 @@ describe('applyCrossDesaNikFallback (generalisasi Tangkil + NIK Invalid)', () =>
     expect(stats.confirmed).toBe(0);
   });
 });
+
+describe('buildBpjsStatusList (Data Status BPJS sebagai sumber tersendiri)', () => {
+  const { buildBpjsStatusList } = _internals;
+  const desaByKode = new Map([
+    ['D1', { nama: 'DESA SATU', kecamatans: { nama: 'KEC A' } }],
+  ]);
+  const master = [
+    { nama: 'BUDI SANTOSO', normalized: 'BUDI SANTOSO', nik: '111', desaKode: 'D1', details: [{ kpj: 'K1', namaLengkap: 'BUDI SANTOSO' }] },
+    { nama: 'SITI AMINAH', normalized: 'SITI AMINAH', nik: '222', desaKode: 'D1', details: [{ kpj: 'K2', namaLengkap: 'SITI AMINAH' }] },
+  ];
+
+  it('mengambil nama peserta AKTIF dari master BPJS via NIK', () => {
+    const { aktif } = buildBpjsStatusList(
+      { 111: { status: 'aktif', desaKode: 'D1', kpj: 'K1', kodeTk: 'TK1', upah: 2000000, tglLahir: '1980-01-01' } },
+      {}, {}, master, desaByKode,
+    );
+    expect(aktif).toHaveLength(1);
+    expect(aktif[0]).toMatchObject({ nama: 'BUDI SANTOSO', nik: '111', kpj: 'K1', desaNama: 'DESA SATU', kecamatanNama: 'KEC A', upah: 2000000 });
+  });
+
+  it('menyertakan peserta AKTIF yang hanya terindeks KPJ, tanpa menggandakan yang sudah ada di index NIK', () => {
+    const { aktif } = buildBpjsStatusList(
+      { 111: { status: 'aktif', desaKode: 'D1', kpj: 'K1' } },
+      {
+        K1: { status: 'aktif', desaKode: 'D1', nik: '111' },   // duplikat -> dilewati
+        K2: { status: 'aktif', desaKode: 'D1', nik: '' },      // hanya KPJ -> ikut
+      },
+      {}, master, desaByKode,
+    );
+    expect(aktif.map((r) => r.kpj).sort()).toEqual(['K1', 'K2']);
+    expect(aktif.find((r) => r.kpj === 'K2').nama).toBe('SITI AMINAH');
+  });
+
+  it('membaca NON-AKTIF dari index nama|desa dan melengkapi NIK/KPJ dari master', () => {
+    const { nonAktif } = buildBpjsStatusList({}, {}, {
+      'SITI AMINAH|D1': { status: 'non_aktif', desaKode: 'D1', sebab: 'Berakhir Masa Bakti', tglLahir: '1975-05-05' },
+    }, master, desaByKode);
+    expect(nonAktif).toEqual([expect.objectContaining({
+      nama: 'SITI AMINAH', nik: '222', kpj: 'K2', sebab: 'Berakhir Masa Bakti', desaNama: 'DESA SATU',
+    })]);
+  });
+
+  it('menandai desa yang tidak dikenal database tanpa membuang barisnya', () => {
+    const { aktif } = buildBpjsStatusList(
+      { 111: { status: 'aktif', desaKode: 'DX', kpj: 'K1' } }, {}, {}, master, desaByKode,
+    );
+    expect(aktif[0]).toMatchObject({ desaKode: 'DX', desaNama: 'DX (tidak dikenal DB)', kecamatanNama: 'Tidak Dikenal' });
+  });
+
+  it('menandai adaDiMaster=false untuk peserta yang tak ada di master Data BPJS (bahan tab Selisih)', () => {
+    const { aktif, nonAktif } = buildBpjsStatusList(
+      {
+        111: { status: 'aktif', desaKode: 'D1', kpj: 'K1' },   // ada di master via NIK
+        999: { status: 'aktif', desaKode: 'D1', kpj: 'K9' },   // selisih: NIK & KPJ asing
+      },
+      {},
+      {
+        'SITI AMINAH|D1': { status: 'non_aktif', desaKode: 'D1', sebab: 'Meninggal' },  // ada di master
+        'ORANG ASING|D1': { status: 'non_aktif', desaKode: 'D1', sebab: 'Mengundurkan Diri' }, // selisih
+      },
+      master, desaByKode,
+    );
+    expect(aktif.find((r) => r.nik === '111')).toMatchObject({ adaDiMaster: true, cocokVia: 'nik', sheet: 'AKTIF' });
+    expect(aktif.find((r) => r.nik === '999')).toMatchObject({ adaDiMaster: false, cocokVia: '', nama: '' });
+    expect(nonAktif.find((r) => r.nama === 'SITI AMINAH')).toMatchObject({ adaDiMaster: true, sheet: 'NON AKTIF' });
+    expect(nonAktif.find((r) => r.nama === 'ORANG ASING')).toMatchObject({ adaDiMaster: false, nik: '', kpj: '' });
+  });
+});
