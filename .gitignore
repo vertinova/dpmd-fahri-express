@@ -124,3 +124,10 @@ prisma/migrations/
 # DBML files and folder
 *.dbml
 dbml/
+
+# Laporan/analisis xlsx di root repo (output, bukan sumber). File data
+# yang memang perlu di-track tetap di folder data/ (tidak terkena aturan ini).
+/*.xlsx
+
+# Skrip inspeksi/coret-coret sementara
+cmp_tmp.js

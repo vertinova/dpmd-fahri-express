@@ -216,19 +216,41 @@ function detectColumns(dataRows, roles) {
   return picked;
 }
 
+// Cocokkan nama sheet secara toleran (abaikan spasi & besar-kecil huruf), jadi
+// "NON AKTIF" / "NONAKTIF" / "Non Aktif" -> NONAKTIF; "Aktif" -> AKTIF; dst.
+const normSheet = (name) => String(name).toUpperCase().replace(/[^A-Z]/g, '');
+
 function parseFile(filePath, agg, warnings) {
   const fileName = path.basename(filePath);
+  // Baca nama sheet dulu (cepat, tanpa parse sel) untuk temukan variasi nama.
+  let sheetNames;
+  try {
+    sheetNames = XLSX.readFile(filePath, { bookSheets: true }).SheetNames || [];
+  } catch (err) {
+    warnings.push({ level: 'error', file: fileName, message: `Gagal baca daftar sheet: ${err.message}` });
+    return;
+  }
+  const pickSheet = (target) => sheetNames.find((n) => normSheet(n) === target);
+  const sAktif = pickSheet('AKTIF');
+  const sNon = pickSheet('NONAKTIF');
+  const sBaru = pickSheet('BARU');
+  const wanted = [sAktif, sNon, sBaru].filter(Boolean);
+  if (!wanted.length) {
+    warnings.push({ level: 'warn', file: fileName, message: 'Tak ada sheet AKTIF/NON AKTIF/BARU yang dikenali — dilewati.' });
+    return;
+  }
+
   let wb;
   try {
-    wb = XLSX.readFile(filePath, { sheets: ['AKTIF', 'NON AKTIF', 'BARU'], cellDates: false });
+    wb = XLSX.readFile(filePath, { sheets: wanted, cellDates: false });
   } catch (err) {
     warnings.push({ level: 'error', file: fileName, message: `Gagal baca workbook: ${err.message}` });
     return;
   }
 
-  const aktifAll = readArraySheet(wb.Sheets['AKTIF']);
-  const nonAktifAll = readArraySheet(wb.Sheets['NON AKTIF']);
-  const baruAll = readArraySheet(wb.Sheets['BARU']);
+  const aktifAll = readArraySheet(sAktif ? wb.Sheets[sAktif] : null);
+  const nonAktifAll = readArraySheet(sNon ? wb.Sheets[sNon] : null);
+  const baruAll = readArraySheet(sBaru ? wb.Sheets[sBaru] : null);
 
   const aktifRows = aktifAll.slice(findHeaderRow(aktifAll, ['NAMA_LENGKAP', 'NIK']) + 1);
   const nonAktifRows = nonAktifAll.slice(findHeaderRow(nonAktifAll, ['NAMA_LENGKAP', 'KPJ', 'SEBAB']) + 1);
