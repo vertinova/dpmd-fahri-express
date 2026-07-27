@@ -22,8 +22,16 @@ prisma.$connect()
     logger.error('❌ Prisma Client initial connection failed (will retry on first query):', err);
   });
 
-// Graceful shutdown
+// Graceful shutdown.
+//
+// `beforeExit` DI-EMIT BERULANG: Node memancarkannya lagi setiap kali event loop
+// kosong kembali. Handler ini async, jadi await-nya sendiri mengisi ulang event
+// loop → beforeExit nyala lagi → ribuan baris "Prisma Client disconnected"
+// membanjiri terminal setiap skrip CLI selesai. Karena itu dijaga agar sekali jalan.
+let disconnecting = false;
 process.on('beforeExit', async () => {
+  if (disconnecting) return;
+  disconnecting = true;
   await prisma.$disconnect();
   logger.info('Prisma Client disconnected');
 });
