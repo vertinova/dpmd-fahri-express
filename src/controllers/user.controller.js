@@ -8,6 +8,7 @@ const bcrypt = require('bcryptjs');
 const path = require('path');
 const { generateToken, invalidateRoleCache } = require('../middlewares/auth');
 const { DESA_PERMISSIONS, sanitizePermissionKeys } = require('../config/desaPermissions');
+const { mustCompleteDesaProfile } = require('../config/desaProfile');
 const { invalidateDesaPermissions } = require('../middlewares/desaPermission');
 const ActivityLogger = require('../utils/activityLogger');
 
@@ -63,7 +64,10 @@ const buildAuthUserResponse = async (user, finalBidangId, bidangName) => {
     is_active: user.is_active,
     must_change_password: await isUsingDefaultPassword(user.password),
     // Hak akses fitur halaman desa; hanya terisi untuk akun operasional (role `desa`).
-    desa_permissions: await loadDesaPermissions(user.id, user.role)
+    desa_permissions: await loadDesaPermissions(user.id, user.role),
+    jabatan_desa: user.jabatan_desa || null,
+    no_hp: user.no_hp || null,
+    must_complete_profile: mustCompleteDesaProfile(user)
   };
 
   if (user.desa_id) {
@@ -180,6 +184,8 @@ class UserController {
             bidang_id: true,
             kecamatan_id: true,
             desa_id: true,
+            jabatan_desa: true,
+            no_hp: true,
             dinas_id: true,
             is_active: true,
             created_at: true,
@@ -277,6 +283,10 @@ class UserController {
         bidang_id: user.bidang_id,
         kecamatan_id: user.kecamatan_id,
         desa_id: user.desa_id,
+        // Identitas kontak akun desa — ditampilkan di kartu user superadmin.
+        jabatan_desa: user.jabatan_desa || null,
+        no_hp: user.no_hp || null,
+        profile_incomplete: mustCompleteDesaProfile(user),
         dinas_id: user.dinas_id,
         pegawai_id: user.pegawai_id,
         nip: user.pegawai?.nip || null,
@@ -471,6 +481,8 @@ class UserController {
           role: true,
           avatar: true,
           desa_id: true,
+          jabatan_desa: true,
+          no_hp: true,
           kecamatan_id: true,
           bidang_id: true,
           dinas_id: true,

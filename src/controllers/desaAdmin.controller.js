@@ -9,6 +9,7 @@ const bcrypt = require('bcryptjs');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const { DESA_PERMISSIONS, sanitizePermissionKeys } = require('../config/desaPermissions');
+const { normalizePhone } = require('../config/desaProfile');
 const { invalidateDesaPermissions } = require('../middlewares/desaPermission');
 const ActivityLogger = require('../utils/activityLogger');
 
@@ -56,6 +57,7 @@ const serializeUser = (user) => ({
   email: user.email,
   role: user.role,
   jabatan_desa: user.jabatan_desa || null,
+  no_hp: user.no_hp || null,
   desa_id: user.desa_id === null || user.desa_id === undefined ? null : String(user.desa_id),
   is_active: user.is_active,
   last_active_at: user.last_active_at || null,
@@ -70,6 +72,7 @@ const USER_SELECT = {
   email: true,
   role: true,
   jabatan_desa: true,
+  no_hp: true,
   desa_id: true,
   is_active: true,
   last_active_at: true,
@@ -213,6 +216,7 @@ class DesaAdminController {
       const email = String(req.body.email || '').trim().toLowerCase();
       const password = String(req.body.password || '');
       const jabatanDesa = String(req.body.jabatan_desa || '').trim();
+      const noHp = normalizePhone(req.body.no_hp);
       const permissions = sanitizePermissionKeys(req.body.permissions);
 
       if (!name) return badRequest(res, 'Nama wajib diisi');
@@ -238,6 +242,7 @@ class DesaAdminController {
           desa_id: desaId,
           kecamatan_id: req.user.kecamatan_id ? parseInt(req.user.kecamatan_id, 10) : null,
           jabatan_desa: jabatanDesa || null,
+          no_hp: noHp,
           is_active: req.body.is_active === undefined ? true : Boolean(req.body.is_active),
           created_at: new Date(),
           updated_at: new Date(),
@@ -253,7 +258,7 @@ class DesaAdminController {
         action: 'create',
         target: created,
         description: `${req.user.name} membuat akun desa "${name}" (${email})${jabatanDesa ? ` — bagian ${jabatanDesa}` : ''} dengan hak akses: ${permissions.join(', ') || 'tidak ada'}`,
-        newValue: { name, email, jabatan_desa: jabatanDesa || null, is_active: created.is_active, permissions },
+        newValue: { name, email, jabatan_desa: jabatanDesa || null, no_hp: noHp, is_active: created.is_active, permissions },
       });
 
       res.status(201).json({
@@ -303,6 +308,17 @@ class DesaAdminController {
         data.jabatan_desa = jabatan || null;
       }
 
+      if (req.body.no_hp !== undefined) {
+        const raw = String(req.body.no_hp).trim();
+        if (!raw) {
+          data.no_hp = null;
+        } else {
+          const phone = normalizePhone(raw);
+          if (!phone) return badRequest(res, 'Nomor HP tidak valid. Contoh: 081234567890');
+          data.no_hp = phone;
+        }
+      }
+
       if (req.body.is_active !== undefined) {
         data.is_active = Boolean(req.body.is_active);
       }
@@ -346,6 +362,7 @@ class DesaAdminController {
       if (data.name) changes.push('nama');
       if (data.email) changes.push('email');
       if (data.jabatan_desa !== undefined) changes.push('bagian');
+      if (data.no_hp !== undefined) changes.push('nomor HP');
       if (data.is_active !== undefined) changes.push('status aktif');
       if (data.password) changes.push('password');
       if (permissionsGiven) changes.push('hak akses');
@@ -359,6 +376,7 @@ class DesaAdminController {
           name: target.name,
           email: target.email,
           jabatan_desa: target.jabatan_desa,
+          no_hp: target.no_hp,
           is_active: target.is_active,
           permissions: (target.desa_user_permissions || []).map((p) => p.permission_key),
         },
@@ -366,6 +384,7 @@ class DesaAdminController {
           name: updated.name,
           email: updated.email,
           jabatan_desa: updated.jabatan_desa,
+          no_hp: updated.no_hp,
           is_active: updated.is_active,
           permissions: (updated.desa_user_permissions || []).map((p) => p.permission_key),
           password_changed: Boolean(data.password),

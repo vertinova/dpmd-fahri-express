@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const { generateToken } = require('../middlewares/auth');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
+const { validateDesaProfile, mustCompleteDesaProfile } = require('../config/desaProfile');
 
 // Password bawaan (seeder). User yang masih memakai ini WAJIB menggantinya dulu.
 const DEFAULT_PASSWORD = 'password';
@@ -77,6 +78,8 @@ const login = async (req, res) => {
         role: true,
         avatar: true,
         desa_id: true,
+        jabatan_desa: true,
+        no_hp: true,
         kecamatan_id: true,
         bidang_id: true,
         dinas_id: true,
@@ -194,7 +197,11 @@ const login = async (req, res) => {
       // Wajib ganti password bila masih memakai password default 'password'.
       must_change_password: await isUsingDefaultPassword(user.password),
       // Fitur halaman desa yang boleh dibuka akun ini (diatur Admin Desa).
-      desa_permissions: await loadDesaPermissions(user.id, user.role)
+      desa_permissions: await loadDesaPermissions(user.id, user.role),
+      jabatan_desa: user.jabatan_desa || null,
+      no_hp: user.no_hp || null,
+      // Admin Desa wajib melengkapi identitas dulu sebelum boleh beraktivitas.
+      must_complete_profile: mustCompleteDesaProfile(user)
     };
 
     // If user has desa_id, fetch related desa and kecamatan
@@ -367,6 +374,8 @@ const verifyToken = async (req, res) => {
         password: true,
         avatar: true,
         desa_id: true,
+        jabatan_desa: true,
+        no_hp: true,
         kecamatan_id: true,
         bidang_id: true,
         dinas_id: true,
@@ -430,7 +439,11 @@ const verifyToken = async (req, res) => {
       // Wajib ganti password bila masih memakai password default 'password'.
       must_change_password: await isUsingDefaultPassword(user.password),
       // Fitur halaman desa yang boleh dibuka akun ini (diatur Admin Desa).
-      desa_permissions: await loadDesaPermissions(user.id, user.role)
+      desa_permissions: await loadDesaPermissions(user.id, user.role),
+      jabatan_desa: user.jabatan_desa || null,
+      no_hp: user.no_hp || null,
+      // Admin Desa wajib melengkapi identitas dulu sebelum boleh beraktivitas.
+      must_complete_profile: mustCompleteDesaProfile(user)
     };
 
     // If user has desa_id, fetch desa data with kecamatan
@@ -533,6 +546,8 @@ const getProfile = async (req, res) => {
         password: true,
         avatar: true,
         desa_id: true,
+        jabatan_desa: true,
+        no_hp: true,
         kecamatan_id: true,
         bidang_id: true,
         dinas_id: true,
@@ -596,7 +611,11 @@ const getProfile = async (req, res) => {
       // Wajib ganti password bila masih memakai password default 'password'.
       must_change_password: await isUsingDefaultPassword(user.password),
       // Fitur halaman desa yang boleh dibuka akun ini (diatur Admin Desa).
-      desa_permissions: await loadDesaPermissions(user.id, user.role)
+      desa_permissions: await loadDesaPermissions(user.id, user.role),
+      jabatan_desa: user.jabatan_desa || null,
+      no_hp: user.no_hp || null,
+      // Admin Desa wajib melengkapi identitas dulu sebelum boleh beraktivitas.
+      must_complete_profile: mustCompleteDesaProfile(user)
     };
 
     // If user has desa_id, fetch desa data with kecamatan
@@ -946,9 +965,63 @@ const forceChangePassword = async (req, res) => {
   }
 };
 
+/**
+ * Simpan identitas Admin Desa (nama asli, jabatan, nomor HP).
+ * Dipakai oleh popup wajib-isi maupun form ubah identitas di halaman Pengaturan.
+ */
+const saveDesaProfile = async (req, res) => {
+  try {
+    const allowedRoles = ['admin_desa', 'desa'];
+    if (!allowedRoles.includes(String(req.user.role || '').trim().toLowerCase())) {
+      return res.status(403).json({
+        success: false,
+        message: 'Identitas ini hanya berlaku untuk akun desa'
+      });
+    }
+
+    const { valid, errors, value } = validateDesaProfile(req.body);
+    if (!valid) {
+      return res.status(422).json({
+        success: false,
+        message: 'Data belum lengkap atau tidak valid',
+        errors
+      });
+    }
+
+    const userId = BigInt(String(req.user.id));
+    const updated = await prisma.users.update({
+      where: { id: userId },
+      data: {
+        name: value.name,
+        jabatan_desa: value.jabatan_desa,
+        no_hp: value.no_hp,
+        updated_at: new Date()
+      },
+      select: { id: true, name: true, role: true, jabatan_desa: true, no_hp: true }
+    });
+
+    logger.info(`👤 Identitas desa disimpan: ${req.user.email} → ${value.name} (${value.jabatan_desa}, ${value.no_hp})`);
+
+    return res.json({
+      success: true,
+      message: 'Identitas berhasil disimpan',
+      data: {
+        name: updated.name,
+        jabatan_desa: updated.jabatan_desa,
+        no_hp: updated.no_hp,
+        must_complete_profile: mustCompleteDesaProfile(updated)
+      }
+    });
+  } catch (error) {
+    logger.error('saveDesaProfile error:', error);
+    return res.status(500).json({ success: false, message: 'Gagal menyimpan identitas', error: error.message });
+  }
+};
+
 module.exports = {
   login,
   verifyToken,
   getProfile,
-  forceChangePassword
+  forceChangePassword,
+  saveDesaProfile
 };
