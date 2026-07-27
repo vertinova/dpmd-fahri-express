@@ -7,8 +7,12 @@ const express = require('express');
 const router = express.Router();
 const produkHukumController = require('../controllers/produkHukum.controller');
 const { auth } = require('../middlewares/auth');
+const { requireDesaPermission } = require('../middlewares/desaPermission');
 const { uploadProdukHukum } = require('../middlewares/upload');
 const desaContextMiddleware = require('../middlewares/desaContext.middleware');
+
+// Akun desa hanya boleh masuk bila diberi hak akses "produk-hukum" oleh Admin Desa.
+router.use(auth, requireDesaPermission('produk-hukum'));
 
 /**
  * @route   GET /api/produk-hukum

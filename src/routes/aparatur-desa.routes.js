@@ -2,10 +2,14 @@ const express = require('express');
 const router = express.Router();
 const aparaturDesaController = require('../controllers/aparatur-desa.controller');
 const { auth } = require('../middlewares/auth');
+const { requireDesaPermission } = require('../middlewares/desaPermission');
 const { uploadAparaturDesa } = require('../middlewares/upload');
 
 // All routes require authentication
 router.use(auth);
+
+// Akun desa hanya boleh masuk bila diberi hak akses "aparatur-desa" oleh Admin Desa.
+router.use(requireDesaPermission('aparatur-desa'));
 
 // GET /api/desa/aparatur-desa - Get all aparatur desa for logged in user's desa
 router.get('/', aparaturDesaController.getAllAparaturDesa);

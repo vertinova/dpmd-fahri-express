@@ -16,6 +16,24 @@ const isUsingDefaultPassword = async (passwordHash) => {
 };
 
 // Validasi koordinat lokasi yang dikirim klien (lokasi WAJIB saat login).
+/**
+ * Hak akses fitur halaman desa untuk akun operasional (role `desa`).
+ * Role lain tidak memakai mekanisme ini sehingga selalu mengembalikan array kosong.
+ */
+const loadDesaPermissions = async (userId, role) => {
+  if (String(role || '').trim().toLowerCase() !== 'desa') return [];
+  try {
+    const rows = await prisma.desa_user_permissions.findMany({
+      where: { user_id: BigInt(String(userId)) },
+      select: { permission_key: true }
+    });
+    return rows.map((row) => row.permission_key);
+  } catch (error) {
+    logger.error(`Gagal memuat hak akses desa untuk user ${userId}:`, error.message);
+    return [];
+  }
+};
+
 const parseCoordinate = (value, min, max) => {
   if (value === undefined || value === null || value === '') return null;
   const num = Number(value);
@@ -174,7 +192,9 @@ const login = async (req, res) => {
       golongan: user.pegawai?.golongan || null,
       sub_bidang: user.pegawai?.sub_bidang || null,
       // Wajib ganti password bila masih memakai password default 'password'.
-      must_change_password: await isUsingDefaultPassword(user.password)
+      must_change_password: await isUsingDefaultPassword(user.password),
+      // Fitur halaman desa yang boleh dibuka akun ini (diatur Admin Desa).
+      desa_permissions: await loadDesaPermissions(user.id, user.role)
     };
 
     // If user has desa_id, fetch related desa and kecamatan
@@ -408,7 +428,9 @@ const verifyToken = async (req, res) => {
       golongan: user.pegawai?.golongan || null,
       sub_bidang: user.pegawai?.sub_bidang || null,
       // Wajib ganti password bila masih memakai password default 'password'.
-      must_change_password: await isUsingDefaultPassword(user.password)
+      must_change_password: await isUsingDefaultPassword(user.password),
+      // Fitur halaman desa yang boleh dibuka akun ini (diatur Admin Desa).
+      desa_permissions: await loadDesaPermissions(user.id, user.role)
     };
 
     // If user has desa_id, fetch desa data with kecamatan
@@ -572,7 +594,9 @@ const getProfile = async (req, res) => {
       golongan: user.pegawai?.golongan || null,
       sub_bidang: user.pegawai?.sub_bidang || null,
       // Wajib ganti password bila masih memakai password default 'password'.
-      must_change_password: await isUsingDefaultPassword(user.password)
+      must_change_password: await isUsingDefaultPassword(user.password),
+      // Fitur halaman desa yang boleh dibuka akun ini (diatur Admin Desa).
+      desa_permissions: await loadDesaPermissions(user.id, user.role)
     };
 
     // If user has desa_id, fetch desa data with kecamatan

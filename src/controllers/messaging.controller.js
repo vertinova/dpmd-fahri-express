@@ -9,7 +9,9 @@ const pushService = PushNotificationService;
 
 // Role groupings for conversation type resolution
 const DPMD_ROLES = ['superadmin', 'admin', 'kepala_dinas', 'sekretaris_dinas', 'kepala_bidang', 'ketua_tim', 'pegawai', 'sarpras', 'sekretariat'];
-const DESA_ROLES = ['desa'];
+// Admin Desa ikut dihitung sebagai pihak desa supaya jalur komunikasi
+// desa ↔ DPMD/kecamatan/dinas tetap terbuka meski dia bukan akun operasional.
+const DESA_ROLES = ['desa', 'admin_desa'];
 const KECAMATAN_ROLES = ['kecamatan'];
 const DINAS_ROLES = ['dinas_terkait', 'verifikator_dinas'];
 
@@ -760,11 +762,11 @@ class MessagingController {
 
 			// If kecamatan user, only show desa in their kecamatan
 			if (KECAMATAN_ROLES.includes(currentUser.role) && currentUser.kecamatan_id) {
-				if (role_filter === 'desa' || (!role_filter && allowedRoles.includes('desa'))) {
+				if (role_filter === 'desa' || (!role_filter && allowedRoles.some(r => DESA_ROLES.includes(r)))) {
 					// Add kecamatan filter only for desa users
 					where.OR = [
-						{ role: { in: allowedRoles.filter(r => r !== 'desa') } },
-						{ role: 'desa', kecamatan_id: currentUser.kecamatan_id },
+						{ role: { in: allowedRoles.filter(r => !DESA_ROLES.includes(r)) } },
+						{ role: { in: allowedRoles.filter(r => DESA_ROLES.includes(r)) }, kecamatan_id: currentUser.kecamatan_id },
 					];
 					delete where.role;
 				}

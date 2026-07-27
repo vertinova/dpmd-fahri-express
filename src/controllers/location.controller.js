@@ -32,14 +32,19 @@ class LocationController {
   }
 
   // GET /api/desas - Get all desas
+  // ?include_kelurahan=1 untuk ikut menyertakan kelurahan (mis. saat superadmin
+  // membuat akun Admin Desa; kelurahan juga punya Admin Desa sendiri).
+  // Default tetap hanya desa supaya pemakai lama tidak berubah perilakunya.
   async getDesas(req, res, next) {
     try {
-      logger.info('Fetching all desas (excluding kelurahan)');
+      const includeKelurahan = ['1', 'true', 'yes'].includes(
+        String(req.query.include_kelurahan || '').toLowerCase()
+      );
+
+      logger.info(`Fetching all desas (${includeKelurahan ? 'termasuk' : 'tanpa'} kelurahan)`);
 
       const desas = await prisma.desas.findMany({
-        where: {
-          status_pemerintahan: 'desa' // Exclude kelurahan
-        },
+        where: includeKelurahan ? {} : { status_pemerintahan: 'desa' },
         include: {
           kecamatans: true
         },

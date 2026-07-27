@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const { auth } = require('../middlewares/auth');
+const { requireDesaPermission } = require('../middlewares/desaPermission');
 const messagingController = require('../controllers/messaging.controller');
 
 // Ensure upload directory exists
@@ -37,6 +38,10 @@ const upload = multer({
 		}
 	}
 });
+
+// Akun desa hanya boleh berkirim pesan bila diberi hak akses "pesan" oleh Admin Desa.
+// Admin Desa sendiri tetap diizinkan agar jalur komunikasi desa ↔ DPMD tidak putus.
+router.use(auth, requireDesaPermission('pesan', { allowAdminDesa: true }));
 
 // Get all conversations
 router.get('/conversations', auth, (req, res) => messagingController.getConversations(req, res));

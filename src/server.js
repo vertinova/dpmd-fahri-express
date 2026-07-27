@@ -332,6 +332,7 @@ app.use('/api/public', publicRoutes); // Public endpoints (no auth)
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes); // User management routes
+app.use('/api/desa-admin', require('./routes/desaAdmin.routes')); // Manajemen akun oleh Admin Desa
 app.use('/api/roles', require('./routes/role.routes')); // Role management routes
 app.use('/api/pegawai', pegawaiRoutes); // Pegawai routes
 app.use('/api/absensi', require('./routes/absensi.routes')); // Absensi pegawai routes

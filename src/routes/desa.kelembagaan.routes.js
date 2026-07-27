@@ -7,6 +7,7 @@
 const express = require('express');
 const router = express.Router();
 const { auth } = require('../middlewares/auth');
+const { requireDesaPermission } = require('../middlewares/desaPermission');
 const desaContextMiddleware = require('../middlewares/desaContext.middleware');
 const { uploadPengurus } = require('../middlewares/upload');
 
@@ -35,6 +36,24 @@ router.use(desaContextMiddleware);
 
 // Dashboard summary endpoint (for Desa Dashboard Page)
 router.get('/dashboard/summary', getDesaDashboardSummary);
+
+// Modul Kelembagaan — akun desa wajib punya izin dari Admin Desa.
+// Guard sengaja dibatasi ke prefix milik kelembagaan saja: router ini di-mount di
+// '/api/desa', sehingga `router.use` tanpa path juga akan ikut jalan untuk request
+// ke mount lain seperti '/api/desa/aparatur-desa' atau '/api/desa/bankeu'.
+const KELEMBAGAAN_PATHS = [
+  '/kelembagaan',
+  '/rw',
+  '/rt',
+  '/posyandu',
+  '/karang-taruna',
+  '/lpm',
+  '/satlinmas',
+  '/pkk',
+  '/lembaga-lainnya',
+  '/pengurus',
+];
+router.use(KELEMBAGAAN_PATHS, requireDesaPermission('kelembagaan'));
 
 // Summary endpoint for logged-in desa (for Kelembagaan Page)
 router.get('/kelembagaan/summary', summaryController.getDesaSummary.bind(summaryController));

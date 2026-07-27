@@ -2,10 +2,15 @@ const express = require('express');
 const router = express.Router();
 const bumdesController = require('../controllers/bumdes.controller');
 const { auth, checkRole } = require('../middlewares/auth');
+const { requireDesaPermission } = require('../middlewares/desaPermission');
 const { uploadBumdes } = require('../middlewares/upload');
 
 // Define allowed roles for BUMDes management (SPKED = Bidang 3)
 const bumdesRoles = ['desa', 'dinas', 'superadmin', 'sarana_prasarana', 'pegawai', 'kepala_bidang', 'kepala_dinas', 'ketua_tim'];
+
+// Akun desa hanya boleh masuk bila diberi hak akses "bumdes" oleh Admin Desa.
+// Role lain diteruskan dan tetap disaring checkRole di masing-masing route.
+router.use(auth, requireDesaPermission('bumdes'));
 
 // PUBLIC/SHARED ROUTES (specific routes first before dynamic params)
 router.get('/statistics', auth, checkRole(...bumdesRoles), bumdesController.getStatistics);

@@ -7,6 +7,9 @@ const prisma = require('../config/prisma');
 const bcrypt = require('bcryptjs');
 const path = require('path');
 const { generateToken } = require('../middlewares/auth');
+const { DESA_PERMISSIONS, sanitizePermissionKeys } = require('../config/desaPermissions');
+const { invalidateDesaPermissions } = require('../middlewares/desaPermission');
+const ActivityLogger = require('../utils/activityLogger');
 
 const DEFAULT_PASSWORD = 'password';
 
@@ -20,6 +23,20 @@ const isUsingDefaultPassword = async (passwordHash) => {
     return await bcrypt.compare(DEFAULT_PASSWORD, passwordHash);
   } catch {
     return false;
+  }
+};
+
+/** Hak akses fitur halaman desa; hanya berlaku untuk akun operasional (role `desa`). */
+const loadDesaPermissions = async (userId, role) => {
+  if (String(role || '').trim().toLowerCase() !== 'desa') return [];
+  try {
+    const rows = await prisma.desa_user_permissions.findMany({
+      where: { user_id: BigInt(String(userId)) },
+      select: { permission_key: true }
+    });
+    return rows.map((row) => row.permission_key);
+  } catch {
+    return [];
   }
 };
 
@@ -44,7 +61,9 @@ const buildAuthUserResponse = async (user, finalBidangId, bidangName) => {
     golongan: user.pegawai?.golongan || null,
     sub_bidang: user.pegawai?.sub_bidang || null,
     is_active: user.is_active,
-    must_change_password: await isUsingDefaultPassword(user.password)
+    must_change_password: await isUsingDefaultPassword(user.password),
+    // Hak akses fitur halaman desa; hanya terisi untuk akun operasional (role `desa`).
+    desa_permissions: await loadDesaPermissions(user.id, user.role)
   };
 
   if (user.desa_id) {
@@ -1005,6 +1024,110 @@ class UserController {
         message: 'Failed to reset password',
         error: error.message
       });
+    }
+  }
+
+  /**
+   * Lihat hak akses fitur milik satu akun operasional desa.
+   * Untuk staf DPMD supaya bisa membantu desa tanpa harus impersonate Admin Desa.
+   */
+  async getDesaPermissions(req, res) {
+    try {
+      const user = await prisma.users.findUnique({
+        where: { id: BigInt(String(req.params.id)) },
+        select: { id: true, name: true, email: true, role: true, desa_id: true }
+      });
+
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
+      }
+
+      if (user.role !== 'desa') {
+        return res.status(400).json({
+          success: false,
+          message: 'Hak akses fitur hanya berlaku untuk akun operasional desa'
+        });
+      }
+
+      res.json({
+        success: true,
+        data: {
+          user: {
+            id: convertBigInt(user.id),
+            name: user.name,
+            email: user.email,
+            desa_id: convertBigInt(user.desa_id)
+          },
+          catalog: DESA_PERMISSIONS,
+          permissions: await loadDesaPermissions(user.id, user.role)
+        }
+      });
+    } catch (error) {
+      console.error('Error fetching desa permissions:', error);
+      res.status(500).json({ success: false, message: 'Gagal memuat hak akses', error: error.message });
+    }
+  }
+
+  /**
+   * Ubah hak akses fitur satu akun operasional desa (dari sisi staf DPMD).
+   */
+  async updateDesaPermissions(req, res) {
+    try {
+      const user = await prisma.users.findUnique({
+        where: { id: BigInt(String(req.params.id)) },
+        select: { id: true, name: true, email: true, role: true }
+      });
+
+      if (!user) {
+        return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
+      }
+
+      if (user.role !== 'desa') {
+        return res.status(400).json({
+          success: false,
+          message: 'Hak akses fitur hanya berlaku untuk akun operasional desa'
+        });
+      }
+
+      const before = await loadDesaPermissions(user.id, user.role);
+      const permissions = sanitizePermissionKeys(req.body.permissions);
+      const actorId = BigInt(String(req.user.id));
+
+      await prisma.$transaction(async (tx) => {
+        await tx.desa_user_permissions.deleteMany({ where: { user_id: user.id } });
+        if (permissions.length > 0) {
+          await tx.desa_user_permissions.createMany({
+            data: permissions.map((key) => ({
+              user_id: user.id,
+              permission_key: key,
+              created_by: actorId
+            }))
+          });
+        }
+      });
+
+      invalidateDesaPermissions(user.id);
+
+      ActivityLogger.log({
+        userId: actorId,
+        userName: req.user.name,
+        userRole: req.user.role,
+        module: 'manajemen_akun_desa',
+        action: 'update',
+        entityType: 'users',
+        entityId: user.id,
+        entityName: user.name,
+        description: `${req.user.name} (DPMD) mengubah hak akses "${user.name}" (${user.email}) dari [${before.join(', ') || 'kosong'}] menjadi [${permissions.join(', ') || 'kosong'}]`,
+        oldValue: { permissions: before },
+        newValue: { permissions },
+        ipAddress: ActivityLogger.getIpFromRequest(req),
+        userAgent: ActivityLogger.getUserAgentFromRequest(req)
+      }).catch(() => {});
+
+      res.json({ success: true, message: 'Hak akses berhasil diperbarui', data: { permissions } });
+    } catch (error) {
+      console.error('Error updating desa permissions:', error);
+      res.status(500).json({ success: false, message: 'Gagal memperbarui hak akses', error: error.message });
     }
   }
 

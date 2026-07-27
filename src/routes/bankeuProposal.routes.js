@@ -2,10 +2,14 @@ const express = require('express');
 const router = express.Router();
 const bankeuProposalController = require('../controllers/bankeuProposal.controller');
 const { auth } = require('../middlewares/auth');
+const { requireDesaPermission } = require('../middlewares/desaPermission');
 const upload = require('../middlewares/upload');
 
 // All routes require authentication (desa role will be validated in controller)
 router.use(auth);
+
+// Akun desa hanya boleh masuk bila diberi hak akses "bankeu" oleh Admin Desa.
+router.use(requireDesaPermission('bankeu'));
 
 // Get master kegiatan
 router.get('/master-kegiatan', bankeuProposalController.getMasterKegiatan);

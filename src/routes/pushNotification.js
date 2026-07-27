@@ -212,7 +212,7 @@ router.get('/users-list', auth, async (req, res) => {
 
     const where = {
       is_active: true,
-      role: { notIn: ['desa', 'kecamatan', 'dinas_terkait'] }
+      role: { notIn: ['desa', 'admin_desa', 'kecamatan', 'dinas_terkait'] }
     };
 
     if (search) {
