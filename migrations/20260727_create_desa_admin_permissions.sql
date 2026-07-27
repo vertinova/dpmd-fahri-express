@@ -35,4 +35,20 @@ CREATE TABLE IF NOT EXISTS `desa_user_permissions` (
 
 -- 3. Seluruh akun desa lama berubah fungsi menjadi Admin Desa (pengelola akun saja).
 --    Akun operasional dibuat sendiri oleh Admin Desa lewat menu Manajemen Akun.
-UPDATE `users` SET `role` = 'admin_desa' WHERE `role` = 'desa';
+--
+--    HANYA BOLEH JALAN SEKALI. Setelah cutover, akun `desa` yang ada adalah akun
+--    operator bikinan Admin Desa; kalau UPDATE ini terulang (mis. `npm run db:migrate`
+--    tanpa argumen yang menjalankan seluruh folder migrations), semua operator itu
+--    ikut berubah jadi `admin_desa` dan desa lumpuh lagi.
+--    Penanda "sudah pernah jalan" = sudah ada minimal satu akun `admin_desa`.
+SET @sudah_migrasi := (
+  SELECT COUNT(*) FROM (SELECT 1 FROM `users` WHERE `role` = 'admin_desa' LIMIT 1) AS penanda
+);
+SET @sql := IF(
+  @sudah_migrasi = 0,
+  'UPDATE `users` SET `role` = ''admin_desa'' WHERE `role` = ''desa''',
+  'DO 0'
+);
+PREPARE stmt FROM @sql;
+EXECUTE stmt;
+DEALLOCATE PREPARE stmt;
