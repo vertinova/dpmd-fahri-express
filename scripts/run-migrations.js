@@ -24,7 +24,17 @@ function getDbConfig() {
     const match = dbUrl.match(/mysql:\/\/([^:]+):([^@]*)@([^:]+):(\d+)\/(.+)/);
     if (match) {
       const [, user, password, host, port, database] = match;
-      return { host, port: parseInt(port), user, password, database };
+      return {
+        host,
+        port: parseInt(port),
+        user,
+        password: decodeURIComponent(password),
+        // Buang query string: DATABASE_URL produksi memakai
+        // "mysql://.../dpmd?connection_limit=20", dan tanpa pemotongan ini nama
+        // database ikut membawa "?connection_limit=20" sehingga koneksi gagal
+        // dengan ER_BAD_DB_ERROR "Unknown database 'dpmd?connection_limit=20'".
+        database: database.split('?')[0],
+      };
     }
   }
 
