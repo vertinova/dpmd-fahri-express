@@ -20,6 +20,33 @@ const updateLastActive = (userId) => {
   }).catch(() => {}); // fire-and-forget
 };
 
+// Sesi di aplikasi ini tidak pernah kedaluwarsa, sedangkan role ikut di dalam JWT.
+// Tanpa pengecekan ini, user yang rolenya berubah di database (mis. saat migrasi
+// desa -> admin_desa) akan terus dilayani memakai role lama sampai dia logout
+// sendiri — dan dia tidak punya alasan untuk logout karena tidak ada error.
+const ROLE_CACHE_TTL_MS = 60 * 1000;
+const roleCache = new Map(); // userId(string) -> { role, expiresAt }
+
+const getCurrentRole = async (userId) => {
+  const key = String(userId);
+  const cached = roleCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) return cached.role;
+
+  const user = await prisma.users.findUnique({
+    where: { id: BigInt(key) },
+    select: { role: true }
+  });
+  const role = user ? user.role : null;
+  roleCache.set(key, { role, expiresAt: Date.now() + ROLE_CACHE_TTL_MS });
+  return role;
+};
+
+/** Dipanggil saat role user diubah agar token lamanya langsung ditolak. */
+const invalidateRoleCache = (userId) => {
+  if (userId === undefined || userId === null) return;
+  roleCache.delete(String(userId));
+};
+
 // Express JWT Auth Middleware (Independent from Laravel)
 const auth = async (req, res, next) => {
   try {
@@ -69,8 +96,26 @@ const auth = async (req, res, next) => {
       kecamatan_id: Number.isNaN(kecamatanId) ? null : kecamatanId
     };
     
+    // Tolak token yang rolenya sudah tidak sama dengan database supaya user
+    // dipaksa login ulang dan mendapat token baru. Sengaja fail-open: bila
+    // pengecekan gagal (mis. database sedang bermasalah), request tetap diteruskan
+    // agar tidak menjatuhkan seluruh aplikasi.
+    try {
+      const currentRole = await getCurrentRole(req.user.id);
+      if (currentRole !== null && String(currentRole) !== String(req.user.role)) {
+        logger.warn(`🔄 Role berubah untuk user ${req.user.id}: token "${req.user.role}" vs database "${currentRole}" — minta login ulang`);
+        return res.status(401).json({
+          success: false,
+          code: 'ROLE_CHANGED',
+          message: 'Hak akses akun Anda telah diperbarui. Silakan login kembali.'
+        });
+      }
+    } catch (roleCheckError) {
+      logger.error('Gagal memeriksa role terkini:', roleCheckError.message);
+    }
+
     logger.info(`✅ Auth successful: User ${req.user.id} (${req.user.role}) - Bidang: ${req.user.bidang_id} - Kecamatan: ${req.user.kecamatan_id}`);
-    
+
     // Update last_active_at (throttled, fire-and-forget)
     updateLastActive(req.user.id);
 
@@ -281,4 +326,4 @@ const requireSuperadmin = (req, res, next) => {
   next();
 };
 
-module.exports = { auth, checkRole, checkAbsensiAdmin, generateToken, authorizeDinas, requireSuperadmin };
+module.exports = { auth, checkRole, checkAbsensiAdmin, generateToken, authorizeDinas, requireSuperadmin, invalidateRoleCache };

@@ -6,7 +6,7 @@
 const prisma = require('../config/prisma');
 const bcrypt = require('bcryptjs');
 const path = require('path');
-const { generateToken } = require('../middlewares/auth');
+const { generateToken, invalidateRoleCache } = require('../middlewares/auth');
 const { DESA_PERMISSIONS, sanitizePermissionKeys } = require('../config/desaPermissions');
 const { invalidateDesaPermissions } = require('../middlewares/desaPermission');
 const ActivityLogger = require('../utils/activityLogger');
@@ -716,7 +716,12 @@ class UserController {
       const updateData = {};
       if (name !== undefined) updateData.name = name;
       if (email !== undefined) updateData.email = email;
-      if (role !== undefined) updateData.role = role;
+      if (role !== undefined) {
+        updateData.role = role;
+        // Token lama user ini masih membawa role sebelumnya; buang cache supaya
+        // request berikutnya langsung ditolak dan dia dipaksa login ulang.
+        invalidateRoleCache(userId);
+      }
       if (is_active !== undefined) updateData.is_active = is_active;
       if (kecamatan_id !== undefined) updateData.kecamatan_id = kecamatan_id ? parseInt(kecamatan_id) : null;
       
