@@ -168,6 +168,11 @@ const keAparaturDesa = (baris, desaId, { id } = {}) => ({
   status: 'Aktif',
   sumber_data: 'dapur_desa',
   dapur_id: baris.dapur_id,
+  // `foto_lokal` berisi NAMA BERKAS yang sudah disalin ke storage oleh
+  // scripts/pasang-foto-dapur-desa.js, bukan path di arsip. Jadi memasang foto
+  // saat desa memilih "pakai arsip" cukup menyalin namanya — tidak perlu
+  // menyentuh berkas, dan folder arsip boleh dihapus setelah penyalinan.
+  file_pas_foto: baris.foto_lokal || null,
   keterangan:
     `Dari arsip Dapur Desa (ID ${baris.dapur_id}). ` +
     'Tempat lahir & tanggal lahir belum ada di arsip — tanggal lahir masih taksiran dari usia, mohon dikoreksi.',

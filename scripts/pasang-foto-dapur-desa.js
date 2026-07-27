@@ -12,15 +12,26 @@
  * `--dir` berisi `data/_peta_foto_lokal.tsv` (id → path foto) dan folder
  * `files/photo_by_wilayah/<Kecamatan>/<Desa>/<id>_<nama>.<ext>`.
  *
- * Aturan yang dipegang:
- *   - Foto HANYA dipasang ke record yang file_pas_foto-nya masih kosong. Foto yang
- *     diunggah sendiri oleh desa tidak pernah ditimpa.
- *   - Hanya baris arsip berstatus `otomatis`, `sama`, atau `selesai` yang dipasangi.
- *     Baris `ditolak` dilewati: desa sudah menyatakan memakai datanya sendiri.
+ * Dua langkah terpisah, sengaja:
+ *   1. SALIN berkas untuk SEMUA baris arsip yang punya foto — termasuk yang masih
+ *      berstatus `konflik`/`baru`. Nama berkasnya disimpan di
+ *      `aparatur_dapur_desa.foto_lokal`, sehingga saat desa nanti menekan "Pakai
+ *      arsip" atau "Tambahkan", controller cukup menyalin NAMA berkas itu tanpa
+ *      menyentuh berkas apa pun. Tanpa langkah ini, keputusan desa menghasilkan
+ *      record tanpa pas foto dan fotonya tidak akan pernah sampai.
+ *   2. PASANG ke `aparatur_desa.file_pas_foto` hanya untuk baris berstatus
+ *      `otomatis`, `sama`, atau `selesai`. Baris `ditolak` dilewati: desa sudah
+ *      menyatakan memakai datanya sendiri.
+ *
+ * Aturan lain:
+ *   - Record yang file_pas_foto-nya sudah terisi TIDAK pernah ditimpa; foto hasil
+ *     unggahan desa selalu menang.
  *   - Berkas PDF di arsip dilewati (248 buah). Kolom pas foto ditampilkan sebagai
  *     gambar; PDF di sana akan tampil sebagai gambar rusak.
  *
  * Aman diulang: berkas yang sudah ada di tujuan dengan ukuran sama tidak disalin ulang.
+ * Setelah skrip ini selesai, folder arsip boleh dihapus — aplikasi tidak lagi
+ * membacanya saat desa mengambil keputusan.
  */
 
 const fs = require('fs');
@@ -37,8 +48,10 @@ const DRY_RUN = process.argv.includes('--dry-run');
 
 const TUJUAN = path.join(__dirname, '..', 'storage', 'uploads', 'aparatur_desa_files');
 
-// Status arsip yang boleh dipasangi foto — lihat catatan di kepala berkas.
-const STATUS_BOLEH = ['otomatis', 'sama', 'selesai'];
+// Status yang fotonya boleh langsung dipasang ke record aparatur. Baris di luar
+// daftar ini tetap DISALIN berkasnya (supaya siap dipakai saat desa memutuskan),
+// hanya belum dipasang.
+const STATUS_PASANG = ['otomatis', 'sama', 'selesai'];
 
 // Ekstensi yang layak jadi pas foto. `jfif` sebenarnya JPEG, disimpan sebagai .jpg
 // supaya peramban dan pustaka gambar tidak salah menebak.
@@ -74,13 +87,13 @@ async function main() {
   const peta = bacaPeta(DIR);
   console.log(`   ${peta.size} entri foto di arsip.\n`);
 
+  // SEMUA baris diambil, bukan hanya yang sudah selesai — lihat catatan langkah 1.
   const barisArsip = await prisma.aparatur_dapur_desa.findMany({
-    where: { status_rekonsiliasi: { in: STATUS_BOLEH }, aparatur_desa_id: { not: null } },
-    select: { dapur_id: true, nama: true, aparatur_desa_id: true },
+    select: { dapur_id: true, nama: true, aparatur_desa_id: true, status_rekonsiliasi: true },
   });
 
   // Ambil sekali, supaya tidak query per record: mana yang pas fotonya masih kosong.
-  const idAparatur = barisArsip.map((b) => b.aparatur_desa_id);
+  const idAparatur = barisArsip.map((b) => b.aparatur_desa_id).filter(Boolean);
   const aparatur = await prisma.aparatur_desa.findMany({
     where: { id: { in: idAparatur } },
     select: { id: true, file_pas_foto: true },
@@ -88,7 +101,9 @@ async function main() {
   const fotoSaatIni = new Map(aparatur.map((a) => [a.id, a.file_pas_foto]));
 
   const ringkasan = {
+    disiapkan: 0,
     dipasang: 0,
+    menunggu_keputusan: 0,
     disalin: 0,
     sudah_ada_berkas: 0,
     sudah_punya_foto: 0,
@@ -117,11 +132,6 @@ async function main() {
         continue;
       }
 
-      if (fotoSaatIni.get(baris.aparatur_desa_id)) {
-        ringkasan.sudah_punya_foto++;
-        continue;
-      }
-
       const sumber = path.join(DIR, relatif);
       if (!fs.existsSync(sumber)) {
         ringkasan.berkas_hilang++;
@@ -131,6 +141,7 @@ async function main() {
       const namaBerkas = `dapur_${baris.dapur_id}.${extTujuan}`;
       const tujuan = path.join(TUJUAN, namaBerkas);
 
+      // LANGKAH 1 — salin berkas & catat namanya, apa pun status baris ini.
       if (!DRY_RUN) {
         const ukuranSumber = fs.statSync(sumber).size;
         const sudahAda = fs.existsSync(tujuan) && fs.statSync(tujuan).size === ukuranSumber;
@@ -141,18 +152,29 @@ async function main() {
           ringkasan.disalin++;
         }
 
-        await prisma.$transaction([
-          prisma.aparatur_desa.update({
-            where: { id: baris.aparatur_desa_id },
-            data: { file_pas_foto: namaBerkas, updated_at: new Date() },
-          }),
-          prisma.aparatur_dapur_desa.update({
-            where: { dapur_id: baris.dapur_id },
-            data: { foto_lokal: relatif, updated_at: new Date() },
-          }),
-        ]);
+        await prisma.aparatur_dapur_desa.update({
+          where: { dapur_id: baris.dapur_id },
+          data: { foto_lokal: namaBerkas, updated_at: new Date() },
+        });
+      }
+      ringkasan.disiapkan++;
+
+      // LANGKAH 2 — pasang ke record aparatur, hanya untuk baris yang sudah beres.
+      if (!STATUS_PASANG.includes(baris.status_rekonsiliasi) || !baris.aparatur_desa_id) {
+        ringkasan.menunggu_keputusan++;
+        continue;
+      }
+      if (fotoSaatIni.get(baris.aparatur_desa_id)) {
+        ringkasan.sudah_punya_foto++;
+        continue;
       }
 
+      if (!DRY_RUN) {
+        await prisma.aparatur_desa.update({
+          where: { id: baris.aparatur_desa_id },
+          data: { file_pas_foto: namaBerkas, updated_at: new Date() },
+        });
+      }
       ringkasan.dipasang++;
     } catch (err) {
       ringkasan.gagal++;
@@ -163,12 +185,14 @@ async function main() {
   console.log('────────────────────────────────────────');
   console.log(DRY_RUN ? '🔍 HASIL SIMULASI (tidak ada yang ditulis)' : '✅ PEMASANGAN FOTO SELESAI');
   console.log('────────────────────────────────────────');
-  console.log(`Record arsip diperiksa     : ${barisArsip.length}`);
-  console.log(`Foto dipasang              : ${ringkasan.dipasang}`);
+  console.log(`Baris arsip diperiksa      : ${barisArsip.length}`);
+  console.log(`Berkas foto disiapkan      : ${ringkasan.disiapkan}`);
   if (!DRY_RUN) {
     console.log(`  berkas disalin           : ${ringkasan.disalin}`);
     console.log(`  berkas sudah ada         : ${ringkasan.sudah_ada_berkas}`);
   }
+  console.log(`Foto terpasang ke aparatur : ${ringkasan.dipasang}`);
+  console.log(`Menunggu keputusan desa    : ${ringkasan.menunggu_keputusan}   (berkas siap, dipasang saat desa memilih)`);
   console.log(`Sudah punya foto sendiri   : ${ringkasan.sudah_punya_foto}   (tidak ditimpa)`);
   console.log(`Tidak ada fotonya di arsip : ${ringkasan.tanpa_foto_di_arsip}`);
   console.log(`PDF dilewati               : ${ringkasan.pdf_dilewati}   (bukan gambar)`);

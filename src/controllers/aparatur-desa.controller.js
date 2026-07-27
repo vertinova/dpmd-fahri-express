@@ -617,6 +617,15 @@ const terapkanArsipKeAparatur = async (baris, desaId, aparaturId) => {
 
 	if (aparaturId) {
 		const { id, desa_id, tempat_lahir, tanggal_lahir, ...bolehDitimpa } = data;
+
+		// Pas foto hasil unggahan desa tidak boleh tertimpa foto arsip. Foto arsip
+		// hanya mengisi kalau kolomnya memang masih kosong.
+		const sekarang = await prisma.aparatur_desa.findUnique({
+			where: { id: aparaturId },
+			select: { file_pas_foto: true },
+		});
+		if (sekarang?.file_pas_foto) delete bolehDitimpa.file_pas_foto;
+
 		return prisma.aparatur_desa.update({
 			where: { id: aparaturId },
 			data: { ...bolehDitimpa, updated_at: new Date() },
