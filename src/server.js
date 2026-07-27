@@ -111,7 +111,6 @@ const dinasVerifikatorRoutes = require('./routes/dinasVerifikator.routes');
 const verifikatorAksesDesaRoutes = require('./routes/verifikatorAksesDesa.routes');
 const beritaAcaraRoutes = require('./routes/beritaAcara.routes');
 const perjadinRoutes = require('./routes/perjadin.routes');
-const externalApiRoutes = require('./routes/externalApi.routes');
 const pemdesAparaturRoutes = require('./routes/pemdes-aparatur.routes');
 const pemdesProfilDesaRoutes = require('./routes/pemdes-profil-desa.routes');
 const chatbotRoutes = require('./routes/chatbot.routes');
@@ -432,9 +431,6 @@ app.use('/api/bhprd', bhprdRoutes); // BHPRD (Bagi Hasil Pajak dan Retribusi Dae
 app.use('/api/bhprd-t1', bhprdT1Routes); // BHPRD Tahap 1
 app.use('/api/bhprd-t2', bhprdT2Routes); // BHPRD Tahap 2
 app.use('/api/bhprd-t3', bhprdT3Routes); // BHPRD Tahap 3
-
-// External API Proxy routes (DPMD Bogorkab)
-app.use('/api/external', externalApiRoutes);
 
 // Pemdes Aparatur Desa routes (bidang-level, from local DB)
 app.use('/api/pemdes/aparatur-desa', pemdesAparaturRoutes);

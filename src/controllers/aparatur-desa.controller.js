@@ -2,35 +2,7 @@ const prisma = require('../config/prisma');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs').promises;
-const axios = require('axios');
-const externalApiService = require('../services/externalApiProxy.service');
-
-/**
- * Download photo from URL and save to aparatur_desa_files directory
- * Returns the filename if successful, null otherwise
- */
-const downloadPhoto = async (photoUrl, personName) => {
-	if (!photoUrl) return null;
-	try {
-		const response = await axios.get(photoUrl, {
-			responseType: 'arraybuffer',
-			timeout: 15000,
-		});
-		const contentType = response.headers['content-type'] || '';
-		let ext = '.jpg';
-		if (contentType.includes('png')) ext = '.png';
-		else if (contentType.includes('webp')) ext = '.webp';
-		const safeName = (personName || 'photo').replace(/[^a-zA-Z0-9]/g, '_').substring(0, 50);
-		const filename = `${Date.now()}_${safeName}${ext}`;
-		const uploadDir = path.join(__dirname, '../../storage/uploads/aparatur_desa_files');
-		await fs.mkdir(uploadDir, { recursive: true });
-		await fs.writeFile(path.join(uploadDir, filename), response.data);
-		return filename;
-	} catch (err) {
-		console.error(`[Import] Failed to download photo for ${personName}:`, err.message);
-		return null;
-	}
-};
+const { keAparaturDesa, bandingkanDenganAparatur } = require('../config/dapurDesa');
 
 /**
  * Get all aparatur desa for logged in user's desa
@@ -514,137 +486,255 @@ const deleteAparaturDesa = async (req, res) => {
 	}
 };
 
+// ============================================================
+// REKONSILIASI ARSIP DAPUR DESA
+//
+// Arsip Dapur Desa sudah dimuat ke tabel `aparatur_dapur_desa` oleh
+// scripts/import-dapur-desa.js. Desa yang saat impor belum punya data apa pun
+// sudah langsung disuntik (status `otomatis`); sisanya menunggu keputusan desa:
+//   konflik → nama yang sama sudah ada di data desa, pilih mana yang dipakai.
+//   baru    → orang ini belum ada di data desa, desa boleh menambahkannya.
+// ============================================================
+
+/** Kolom staging yang perlu dilihat desa saat membandingkan. */
+const KOLOM_STAGING = {
+	id: true,
+	dapur_id: true,
+	nama: true,
+	jabatan: true,
+	jenis_kelamin: true,
+	usia: true,
+	agama: true,
+	pendidikan: true,
+	status_pns: true,
+	status_kawin: true,
+	no_sk: true,
+	tgl_sk: true,
+	no_sk_pertama: true,
+	tgl_sk_pertama: true,
+	foto_url: true,
+	status_rekonsiliasi: true,
+	aparatur_desa_id: true,
+};
+
 /**
- * Import aparatur desa from external Dapur Desa API
- * Maps external API fields to local database columns
+ * Daftar rekonsiliasi arsip Dapur Desa untuk desa yang sedang login.
+ * GET /api/desa/aparatur-desa/dapur-desa
  */
-const importFromExternal = async (req, res) => {
+const getRekonsiliasiDapurDesa = async (req, res) => {
 	try {
-		const { desa_id } = req.user;
-		const desa = await prisma.desas.findFirst({
-			where: { id: parseInt(desa_id) },
-			select: { id: true, kode: true, nama: true },
+		const desaId = BigInt(String(req.user.desa_id));
+
+		const [konflik, baru, ringkasanMentah] = await Promise.all([
+			prisma.aparatur_dapur_desa.findMany({
+				where: { desa_id: desaId, status_rekonsiliasi: 'konflik' },
+				select: KOLOM_STAGING,
+				orderBy: { nama: 'asc' },
+			}),
+			prisma.aparatur_dapur_desa.findMany({
+				where: { desa_id: desaId, status_rekonsiliasi: 'baru' },
+				select: KOLOM_STAGING,
+				orderBy: { nama: 'asc' },
+			}),
+			prisma.aparatur_dapur_desa.groupBy({
+				by: ['status_rekonsiliasi'],
+				where: { desa_id: desaId },
+				_count: { id: true },
+			}),
+		]);
+
+		// Pasangan data desa untuk setiap konflik, supaya bisa ditampilkan berdampingan.
+		const idAparatur = konflik.map((k) => k.aparatur_desa_id).filter(Boolean);
+		const pasangan = idAparatur.length
+			? await prisma.aparatur_desa.findMany({
+					where: { id: { in: idAparatur } },
+					select: {
+						id: true,
+						nama_lengkap: true,
+						jabatan: true,
+						jenis_kelamin: true,
+						tempat_lahir: true,
+						tanggal_lahir: true,
+						pendidikan_terakhir: true,
+						agama: true,
+						pangkat_golongan: true,
+						tanggal_pengangkatan: true,
+						nomor_sk_pengangkatan: true,
+						file_pas_foto: true,
+					},
+			  })
+			: [];
+		const pasanganById = new Map(pasangan.map((p) => [p.id, p]));
+
+		const ringkasan = ringkasanMentah.reduce(
+			(acc, r) => ({ ...acc, [r.status_rekonsiliasi]: r._count.id }),
+			{ otomatis: 0, sama: 0, konflik: 0, baru: 0, selesai: 0, ditolak: 0 }
+		);
+
+		// Kolom yang benar-benar berbeda dihitung ulang di sini: dipakai UI untuk
+		// menandai baris, sekaligus jaring pengaman kalau ada baris lama yang
+		// tercatat konflik padahal isinya sama (mis. hasil impor sebelum
+		// pembanding ini ada). Yang ternyata identik tidak usah ditanyakan.
+		const konflikNyata = konflik
+			.map((k) => {
+				const dataDesa = pasanganById.get(k.aparatur_desa_id) || null;
+				return {
+					...k,
+					id: String(k.id),
+					data_desa: dataDesa,
+					kolom_beda: dataDesa ? bandingkanDenganAparatur(k, dataDesa).beda : [],
+				};
+			})
+			.filter((k) => !k.data_desa || k.kolom_beda.length > 0);
+
+		res.json({
+			success: true,
+			data: {
+				ringkasan,
+				konflik: konflikNyata,
+				baru: baru.map((b) => ({ ...b, id: String(b.id) })),
+			},
+		});
+	} catch (error) {
+		console.error('Error fetching rekonsiliasi Dapur Desa:', error);
+		res.status(500).json({
+			success: false,
+			message: 'Gagal memuat data rekonsiliasi Dapur Desa',
+			error: error.message,
+		});
+	}
+};
+
+/**
+ * Terapkan satu baris arsip ke data desa.
+ *
+ * Sengaja TIDAK menimpa kolom yang tidak dimiliki arsip (tempat/tanggal lahir,
+ * NIPD, NIAP, BPJS, berkas) — isian desa untuk kolom itu jauh lebih tepercaya
+ * daripada nilai taksiran, jadi dipertahankan apa adanya.
+ */
+const terapkanArsipKeAparatur = async (baris, desaId, aparaturId) => {
+	const data = keAparaturDesa(baris, desaId, { id: aparaturId || undefined });
+
+	if (aparaturId) {
+		const { id, desa_id, tempat_lahir, tanggal_lahir, ...bolehDitimpa } = data;
+		return prisma.aparatur_desa.update({
+			where: { id: aparaturId },
+			data: { ...bolehDitimpa, updated_at: new Date() },
+		});
+	}
+
+	return prisma.aparatur_desa.create({
+		data: { ...data, created_at: new Date(), updated_at: new Date() },
+	});
+};
+
+/**
+ * Tetapkan data mana yang dipakai untuk satu baris arsip.
+ * POST /api/desa/aparatur-desa/dapur-desa/:dapurId/putuskan  { keputusan: 'dapur' | 'desa' }
+ */
+const putuskanDapurDesa = async (req, res) => {
+	try {
+		const desaId = BigInt(String(req.user.desa_id));
+		const dapurId = parseInt(req.params.dapurId, 10);
+		const keputusan = String(req.body?.keputusan || '').toLowerCase();
+
+		if (!['dapur', 'desa'].includes(keputusan)) {
+			return res.status(400).json({ success: false, message: "Keputusan harus 'dapur' atau 'desa'" });
+		}
+
+		const baris = await prisma.aparatur_dapur_desa.findUnique({ where: { dapur_id: dapurId } });
+		if (!baris || String(baris.desa_id) !== String(desaId)) {
+			return res.status(404).json({ success: false, message: 'Data arsip tidak ditemukan untuk desa ini' });
+		}
+		if (!['konflik', 'baru'].includes(baris.status_rekonsiliasi)) {
+			return res.status(409).json({
+				success: false,
+				message: `Data ini sudah diputuskan sebelumnya (status: ${baris.status_rekonsiliasi})`,
+			});
+		}
+
+		let aparaturId = baris.aparatur_desa_id;
+		if (keputusan === 'dapur') {
+			const hasil = await terapkanArsipKeAparatur(baris, desaId, baris.aparatur_desa_id);
+			aparaturId = hasil.id;
+		}
+
+		await prisma.aparatur_dapur_desa.update({
+			where: { dapur_id: dapurId },
+			data: {
+				// 'desa' berarti arsip tidak dipakai — ditandai ditolak supaya tidak muncul lagi.
+				status_rekonsiliasi: keputusan === 'dapur' ? 'selesai' : 'ditolak',
+				keputusan,
+				aparatur_desa_id: aparaturId,
+				diputuskan_oleh: BigInt(String(req.user.id)),
+				diputuskan_pada: new Date(),
+				updated_at: new Date(),
+			},
 		});
 
-		if (!desa || !desa.kode) {
-			return res.status(400).json({
-				success: false,
-				message: 'Kode desa tidak ditemukan',
-			});
-		}
+		res.json({
+			success: true,
+			message:
+				keputusan === 'dapur'
+					? `Data ${baris.nama} diambil dari arsip Dapur Desa`
+					: `Data desa untuk ${baris.nama} dipertahankan`,
+		});
+	} catch (error) {
+		console.error('Error memutuskan data Dapur Desa:', error);
+		res.status(500).json({
+			success: false,
+			message: 'Gagal menetapkan data',
+			error: error.message,
+		});
+	}
+};
 
-		const villageCode = desa.kode.replace(/\./g, '');
+/**
+ * Tambahkan sekaligus semua orang yang ada di arsip tapi belum ada di data desa.
+ * Hanya menyentuh status `baru` — konflik tetap harus diputuskan satu per satu
+ * supaya tidak ada isian desa yang tertimpa tanpa sengaja.
+ * POST /api/desa/aparatur-desa/dapur-desa/tambah-semua-baru
+ */
+const tambahSemuaBaruDapurDesa = async (req, res) => {
+	try {
+		const desaId = BigInt(String(req.user.desa_id));
+		const daftar = await prisma.aparatur_dapur_desa.findMany({
+			where: { desa_id: desaId, status_rekonsiliasi: 'baru' },
+		});
 
-		// Fetch all external data (both Perangkat Desa and BPD)
-		const fetchAll = async (jobType) => {
-			let allData = [];
-			let page = 1;
-			let hasMore = true;
-			while (hasMore) {
-				const result = await externalApiService.fetchAparaturDesa({
-					master_village_id: villageCode,
-					job_type: jobType,
-					page,
-					limit: 100,
-				});
-				const items = result.data || [];
-				allData = allData.concat(items);
-				const totalPage = result.meta?.totalPage || 1;
-				hasMore = page < totalPage;
-				page++;
-			}
-			return allData;
-		};
-
-		const [perangkat, bpd] = await Promise.all([
-			fetchAll('Perangkat Desa'),
-			fetchAll('BPD'),
-		]);
-		const externalData = [...perangkat, ...bpd];
-
-		if (externalData.length === 0) {
-			return res.json({
-				success: true,
-				message: 'Tidak ada data dari Dapur Desa untuk diimpor',
-				imported: 0,
-			});
-		}
-
-		// Map gender: external "L"/"P" -> DB enum "Laki_laki"/"Perempuan"
-		const mapGender = (g) => {
-			if (g === 'L') return 'Laki_laki';
-			if (g === 'P') return 'Perempuan';
-			return 'Laki_laki';
-		};
-
-		// Estimate birth date from usia (age)
-		const estimateBirthDate = (usia) => {
-			if (!usia) return new Date('2000-01-01');
-			const year = new Date().getFullYear() - parseInt(usia);
-			return new Date(`${year}-01-01`);
-		};
-
-		let imported = 0;
-		let skipped = 0;
-		const errors = [];
-
-		for (const ext of externalData) {
+		let ditambah = 0;
+		const gagal = [];
+		for (const baris of daftar) {
 			try {
-				// Check duplicate by nama_lengkap + jabatan for this desa
-				const existing = await prisma.aparatur_desa.findFirst({
-					where: {
-						desa_id: parseInt(desa_id),
-						nama_lengkap: ext.name || '',
-						jabatan: ext.master_job_level_name || '-',
-					},
-				});
-
-				if (existing) {
-					skipped++;
-					continue;
-				}
-
-				// Download photo if available
-				const photoFilename = await downloadPhoto(ext.photo, ext.name);
-
-				await prisma.aparatur_desa.create({
+				const hasil = await terapkanArsipKeAparatur(baris, desaId, null);
+				await prisma.aparatur_dapur_desa.update({
+					where: { dapur_id: baris.dapur_id },
 					data: {
-						id: uuidv4(),
-						desa_id: parseInt(desa_id),
-						nama_lengkap: ext.name || '-',
-						jabatan: ext.master_job_level_name || '-',
-						tempat_lahir: '-',
-						tanggal_lahir: estimateBirthDate(ext.usia),
-						jenis_kelamin: mapGender(ext.gender),
-						pendidikan_terakhir: ext.master_degree_name || '-',
-						agama: ext.agama || '-',
-						pangkat_golongan: ext.status_pns === 'PNS' ? 'PNS' : null,
-						tanggal_pengangkatan: ext.sk_date ? new Date(ext.sk_date) : new Date(),
-						nomor_sk_pengangkatan: ext.no_sk || '-',
-						status: 'Aktif',
-						file_pas_foto: photoFilename,
-						keterangan: `Diimpor dari Dapur Desa (ID: ${ext.id || '-'})`,
+						status_rekonsiliasi: 'selesai',
+						keputusan: 'dapur',
+						aparatur_desa_id: hasil.id,
+						diputuskan_oleh: BigInt(String(req.user.id)),
+						diputuskan_pada: new Date(),
+						updated_at: new Date(),
 					},
 				});
-				imported++;
+				ditambah++;
 			} catch (err) {
-				errors.push({ name: ext.name, error: err.message });
+				gagal.push({ nama: baris.nama, pesan: err.message });
 			}
 		}
 
 		res.json({
 			success: true,
-			message: `Berhasil mengimpor ${imported} data aparatur desa${skipped > 0 ? `, ${skipped} data sudah ada (dilewati)` : ''}`,
-			imported,
-			skipped,
-			total: externalData.length,
-			errors: errors.length > 0 ? errors : undefined,
+			message: `${ditambah} data ditambahkan dari arsip Dapur Desa`,
+			ditambah,
+			gagal: gagal.length ? gagal : undefined,
 		});
 	} catch (error) {
-		console.error('Error importing from external:', error);
+		console.error('Error menambah semua data Dapur Desa:', error);
 		res.status(500).json({
 			success: false,
-			message: 'Gagal mengimpor data dari Dapur Desa',
+			message: 'Gagal menambahkan data dari arsip',
 			error: error.message,
 		});
 	}
@@ -656,5 +746,7 @@ module.exports = {
 	createAparaturDesa,
 	updateAparaturDesa,
 	deleteAparaturDesa,
-	importFromExternal,
+	getRekonsiliasiDapurDesa,
+	putuskanDapurDesa,
+	tambahSemuaBaruDapurDesa,
 };

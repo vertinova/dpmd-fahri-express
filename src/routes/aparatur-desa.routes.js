@@ -14,8 +14,11 @@ router.use(requireDesaPermission('aparatur-desa'));
 // GET /api/desa/aparatur-desa - Get all aparatur desa for logged in user's desa
 router.get('/', aparaturDesaController.getAllAparaturDesa);
 
-// POST /api/desa/aparatur-desa/import-external - Import from Dapur Desa external API
-router.post('/import-external', aparaturDesaController.importFromExternal);
+// Rekonsiliasi arsip Dapur Desa. HARUS didaftarkan sebelum '/:id' di bawah,
+// kalau tidak "dapur-desa" akan ditangkap sebagai id aparatur.
+router.get('/dapur-desa', aparaturDesaController.getRekonsiliasiDapurDesa);
+router.post('/dapur-desa/tambah-semua-baru', aparaturDesaController.tambahSemuaBaruDapurDesa);
+router.post('/dapur-desa/:dapurId/putuskan', aparaturDesaController.putuskanDapurDesa);
 
 // GET /api/desa/aparatur-desa/:id - Get single aparatur desa by ID
 router.get('/:id', aparaturDesaController.getAparaturDesaById);

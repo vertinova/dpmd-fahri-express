@@ -76,6 +76,10 @@ model aparatur_desa {
   nomor_sk_pemberhentian     String?                     @db.VarChar(255)
   keterangan                 String?                     @db.VarChar(255)
   status                     aparatur_desa_status        @default(Aktif)
+  /// 'desa' = diisi sendiri oleh desa, 'dapur_desa' = hasil suntikan arsip Dapur Desa.
+  sumber_data                String                      @default("desa") @db.VarChar(20)
+  /// id record asal di arsip Dapur Desa; jalan pulang kalau impor perlu dibatalkan.
+  dapur_id                   Int?
   produk_hukum_id            String?                     @db.Char(36)
   bpjs_kesehatan_nomor       String?                     @db.VarChar(255)
   bpjs_ketenagakerjaan_nomor String?                     @db.VarChar(255)
@@ -93,6 +97,54 @@ model aparatur_desa {
 
   @@index([desa_id], map: "aparatur_desa_desa_id_foreign")
   @@index([produk_hukum_id], map: "aparatur_desa_produk_hukum_id_foreign")
+  @@index([dapur_id], map: "aparatur_desa_dapur_id_index")
+}
+
+/// Arsip aparatur dari Dapur Desa (integrasi API-nya sudah dimatikan, lihat
+/// scripts/import-dapur-desa.js). Ditampung terpisah dan TIDAK langsung menimpa
+/// `aparatur_desa`, supaya desa bisa memilih data mana yang dipakai saat bentrok.
+model aparatur_dapur_desa {
+  id                    BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  /// id record asli di Dapur Desa; kunci idempoten saat impor diulang.
+  dapur_id              Int       @unique(map: "aparatur_dapur_desa_dapur_id_unique")
+  /// Hasil pemetaan kode desa ke tabel `desas`. NULL = kode tidak dikenali.
+  desa_id               BigInt?   @db.UnsignedBigInt
+  kode_desa             String?   @db.VarChar(20)
+  kode_kecamatan        String?   @db.VarChar(20)
+  nama_desa_sumber      String?   @db.VarChar(255)
+  nama_kecamatan_sumber String?   @db.VarChar(255)
+  nama                  String    @db.VarChar(255)
+  /// Nama tanpa gelar/tanda baca, huruf besar — dipakai untuk mencocokkan dengan isian desa.
+  nama_normal           String    @db.VarChar(255)
+  jabatan               String?   @db.VarChar(255)
+  jenis_kelamin         String?   @db.VarChar(5)
+  usia                  Int?
+  agama                 String?   @db.VarChar(50)
+  status_kawin          String?   @db.VarChar(50)
+  status_pns            String?   @db.VarChar(20)
+  pendidikan            String?   @db.VarChar(255)
+  no_sk                 String?   @db.VarChar(255)
+  tgl_sk                DateTime? @db.Date
+  no_sk_pertama         String?   @db.VarChar(255)
+  tgl_sk_pertama        DateTime? @db.Date
+  tahun_lulus           String?   @db.VarChar(10)
+  foto_url              String?   @db.Text
+  /// Path foto di arsip lokal; dipakai tahap kedua saat foto disalin ke server.
+  foto_lokal            String?   @db.VarChar(500)
+  /// baru | otomatis | sama | konflik | selesai | ditolak | tanpa_desa
+  status_rekonsiliasi   String    @default("baru") @db.VarChar(20)
+  /// Record aparatur yang dicocokkan (konflik) atau yang dihasilkan (otomatis/selesai).
+  aparatur_desa_id      String?   @db.Char(36)
+  /// dapur | desa — pilihan operator desa saat menyelesaikan konflik.
+  keputusan             String?   @db.VarChar(20)
+  diputuskan_oleh       BigInt?   @db.UnsignedBigInt
+  diputuskan_pada       DateTime? @db.Timestamp(0)
+  created_at            DateTime? @default(now()) @db.Timestamp(0)
+  updated_at            DateTime? @default(now()) @db.Timestamp(0)
+
+  @@index([desa_id], map: "aparatur_dapur_desa_desa_id_index")
+  @@index([nama_normal], map: "aparatur_dapur_desa_nama_normal_index")
+  @@index([status_rekonsiliasi], map: "aparatur_dapur_desa_status_index")
 }
 
 model app_settings {

@@ -1,5 +1,4 @@
 const prisma = require('../config/prisma');
-const externalApiService = require('../services/externalApiProxy.service');
 const sipandaService = require('../services/sipanda.service');
 const crypto = require('crypto');
 
@@ -118,7 +117,7 @@ const buildDashboardModules = (modules) => ([
   {
     key: 'aparatur_desa',
     label: 'Aparatur Desa',
-    description: 'Total aparatur gabungan lokal dan external beserta detailnya.',
+    description: 'Total aparatur desa beserta rinciannya dari basis data DPMD.',
     data_path: 'data.modules.aparatur_desa',
     data: modules.aparatur_desa
   },
@@ -999,47 +998,46 @@ const validateCoreDashboardAccess = (req, res) => {
   return true;
 };
 
-const normalizeExternalDashboard = (externalDashboard) => {
-  const emptyGroup = {
-    total: 0,
-    gender: [],
-    pendidikan: [],
-    usia: []
-  };
+/**
+ * Kelompok Kepala Desa / Perangkat Desa / BPD.
+ *
+ * Dulu tiga blok ini diambil dari API Dapur Desa. API itu sudah dimatikan dan
+ * arsipnya disuntikkan ke `aparatur_desa`, jadi sekarang dihitung dari data
+ * sendiri agar bentuk payload untuk mitra tidak berubah.
+ *
+ * Rincian `usia` sengaja tidak diterbitkan lagi: tanggal lahir pada record hasil
+ * suntikan arsip masih taksiran dari usia, jadi menyajikannya sebagai statistik
+ * resmi akan menyesatkan.
+ */
+const KELOMPOK_APARATUR = {
+  kepala_desa: (jabatan) => /\bkepala\s+desa\b/i.test(jabatan),
+  bpd: (jabatan) => /\bbpd\b/i.test(jabatan)
+};
 
-  if (!externalDashboard || typeof externalDashboard !== 'object') {
-    return {
-      available: false,
-      kepala_desa: emptyGroup,
-      perangkat_desa: emptyGroup,
-      bpd: emptyGroup
-    };
+const groupAparaturRecords = (records) => {
+  const kosong = () => ({ total: 0, gender: [], pendidikan: [] });
+  const hasil = { kepala_desa: [], bpd: [], perangkat_desa: [] };
+
+  for (const record of records) {
+    const jabatan = String(record.jabatan || '');
+    if (KELOMPOK_APARATUR.kepala_desa(jabatan)) hasil.kepala_desa.push(record);
+    else if (KELOMPOK_APARATUR.bpd(jabatan)) hasil.bpd.push(record);
+    else hasil.perangkat_desa.push(record);
   }
 
-  const sumChart = (items) => Array.isArray(items)
-    ? items.reduce((total, item) => total + toNumber(Array.isArray(item.y) ? item.y[0] : item.y), 0)
-    : 0;
+  const ringkas = (daftar) =>
+    daftar.length === 0
+      ? kosong()
+      : {
+          total: daftar.length,
+          gender: countBy(daftar, (record) => record.jenis_kelamin),
+          pendidikan: countBy(daftar, (record) => record.pendidikan_terakhir)
+        };
 
   return {
-    available: true,
-    kepala_desa: {
-      total: sumChart(externalDashboard.kepala_desa_gender),
-      gender: externalDashboard.kepala_desa_gender || [],
-      pendidikan: externalDashboard.kepala_desa_pendidikan || [],
-      usia: externalDashboard.kepala_desa_usia || []
-    },
-    perangkat_desa: {
-      total: sumChart(externalDashboard.perangkat_desa_gender),
-      gender: externalDashboard.perangkat_desa_gender || [],
-      pendidikan: externalDashboard.perangkat_desa_pendidikan || [],
-      usia: externalDashboard.perangkat_desa_usia || []
-    },
-    bpd: {
-      total: sumChart(externalDashboard.bpd_gender),
-      gender: externalDashboard.bpd_gender || [],
-      pendidikan: externalDashboard.bpd_pendidikan || [],
-      usia: externalDashboard.bpd_usia || []
-    }
+    kepala_desa: ringkas(hasil.kepala_desa),
+    perangkat_desa: ringkas(hasil.perangkat_desa),
+    bpd: ringkas(hasil.bpd)
   };
 };
 
@@ -1297,6 +1295,7 @@ const buildAparaturDesaDetail = async (baseUrl) => {
     aktif,
     tidak_aktif: records.length - aktif,
     desa_count: new Set(records.map((record) => record.desa_id).filter(Boolean)).size,
+    ...groupAparaturRecords(records),
     by_jabatan: countBy(records, (record) => record.jabatan),
     by_pendidikan: countBy(records, (record) => record.pendidikan_terakhir),
     by_gender: countBy(records, (record) => record.jenis_kelamin),
@@ -1561,20 +1560,6 @@ const safeBuildModule = async (name, builder, fallback) => {
   }
 };
 
-const fetchExternalDashboardStatsWithTimeout = (timeoutMs) => Promise.race([
-  externalApiService.fetchDashboardStats()
-    .then((data) => ({ success: true, data }))
-    .catch((error) => ({ success: false, error: error.message })),
-  new Promise((resolve) => {
-    setTimeout(() => {
-      resolve({
-        success: false,
-        error: `External dashboard timeout after ${timeoutMs}ms`
-      });
-    }, timeoutMs);
-  })
-]);
-
 const isPreviewPayloadRequest = (req) => {
   const view = String(req.query?.view || req.query?.mode || '').toLowerCase();
   const detail = String(req.query?.detail || '').toLowerCase();
@@ -1593,8 +1578,7 @@ const buildPublicDashboardPayload = async (req) => {
     bumdesFinancials,
     bankeuPerubahanTotal,
     bankeuPerubahanApprovedDpmd,
-    bankeuPerubahanFinancials,
-    externalDashboardResult
+    bankeuPerubahanFinancials
   ] = await Promise.all([
     safeCount('aparatur_desa', { where: { status: 'Aktif' } }),
     safeCount('bumdes'),
@@ -1614,23 +1598,18 @@ const buildPublicDashboardPayload = async (req) => {
       _sum: {
         anggaran_usulan: true
       }
-    }),
-    fetchExternalDashboardStatsWithTimeout(previewMode ? 1200 : 3000)
+    })
   ]);
 
-  const externalAparatur = normalizeExternalDashboard(
-    externalDashboardResult.success ? externalDashboardResult.data : null
-  );
-  const totalAparaturExternal =
-    externalAparatur.kepala_desa.total +
-    externalAparatur.perangkat_desa.total +
-    externalAparatur.bpd.total;
-  const totalAparaturGabungan = totalAparaturLokal + totalAparaturExternal;
+  const kelompokAparaturKosong = { total: 0, gender: [], pendidikan: [] };
 
   const detailFallbacks = {
     aparatur_desa: {
       total: totalAparaturLokal,
       aktif: totalAparaturLokal,
+      kepala_desa: kelompokAparaturKosong,
+      perangkat_desa: kelompokAparaturKosong,
+      bpd: kelompokAparaturKosong,
       records: []
     },
     bumdes: {
@@ -1669,9 +1648,8 @@ const buildPublicDashboardPayload = async (req) => {
 
   const summary = {
     total_bumdes: totalBumdes,
-    total_aparatur: totalAparaturGabungan,
+    total_aparatur: totalAparaturLokal,
     total_aparatur_lokal: totalAparaturLokal,
-    total_aparatur_external: totalAparaturExternal,
     total_bankeu_perubahan_proposal: bankeuPerubahanTotal,
     total_bankeu_perubahan_anggaran: toNumber(bankeuPerubahanFinancials._sum?.anggaran_usulan)
   };
@@ -1688,14 +1666,10 @@ const buildPublicDashboardPayload = async (req) => {
       ...bumdesDetail
     },
     aparatur_desa: {
-      source: externalAparatur.available ? 'gabungan_lokal_external' : 'local_database',
-      external_available: externalAparatur.available,
-      total_gabungan: totalAparaturGabungan,
+      // Sejak arsip Dapur Desa disuntikkan ke basis data sendiri, seluruh angka
+      // aparatur — termasuk rincian Kepala Desa/Perangkat/BPD — berasal dari sini.
+      source: 'local_database',
       local_total_aktif: totalAparaturLokal,
-      external_total: totalAparaturExternal,
-      kepala_desa: externalAparatur.kepala_desa,
-      perangkat_desa: externalAparatur.perangkat_desa,
-      bpd: externalAparatur.bpd,
       ...aparaturDesaDetail
     },
     bankeu_perubahan: {
@@ -1731,11 +1705,7 @@ const buildPublicDashboardPayload = async (req) => {
     },
     modules,
     sources: {
-      local_database: true,
-      external_dapur_desa: {
-        available: externalDashboardResult.success,
-        status: externalDashboardResult.success ? 'available' : 'unavailable'
-      }
+      local_database: true
     }
   };
 };
