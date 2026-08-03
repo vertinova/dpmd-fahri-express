@@ -9,6 +9,152 @@ class KepalaDinasController {
     this.getPerjadinStats = this.getPerjadinStats.bind(this);
     this.getTrendData = this.getTrendData.bind(this);
     this.getMusdesusStats = this.getMusdesusStats.bind(this);
+    this.getTrends = this.getTrends.bind(this);
+  }
+
+  // GET /api/kepala-dinas/trends?months=12
+  // Deret waktu ASLI dari tanggal kejadian di database (bukan total dibagi rata).
+  async getTrends(req, res, next) {
+    try {
+      const months = Math.min(Math.max(parseInt(req.query.months, 10) || 12, 3), 36);
+
+      // Bucket bulan: [start .. end] inklusif, end = bulan berjalan
+      const now = new Date();
+      const monthStart = (offsetFromCurrent) => {
+        const d = new Date(now.getFullYear(), now.getMonth() + offsetFromCurrent, 1);
+        return d;
+      };
+      const ymd = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-01`;
+      const ym = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+
+      const currentStart = monthStart(-(months - 1));
+      const previousStart = monthStart(-(months * 2 - 1));
+      const endExclusive = monthStart(1);
+
+      const labels = [];
+      for (let i = 0; i < months; i += 1) {
+        labels.push(ym(new Date(currentStart.getFullYear(), currentStart.getMonth() + i, 1)));
+      }
+      const previousLabels = [];
+      for (let i = 0; i < months; i += 1) {
+        previousLabels.push(ym(new Date(previousStart.getFullYear(), previousStart.getMonth() + i, 1)));
+      }
+
+      // table/column konstan (bukan input user) — aman dari injeksi.
+      const SOURCES = [
+        {
+          key: 'aparatur',
+          label: 'Pengangkatan Aparatur',
+          unit: 'orang',
+          description: 'Perangkat desa & BPD yang diangkat, dihitung dari tanggal SK pengangkatan.',
+          table: 'aparatur_desa',
+          column: 'tanggal_pengangkatan',
+        },
+        {
+          key: 'produk_hukum',
+          label: 'Produk Hukum Ditetapkan',
+          unit: 'dokumen',
+          description: 'Perdes/Perkades/SK yang ditetapkan desa, dihitung dari tanggal penetapan.',
+          table: 'produk_hukums',
+          column: 'tanggal_penetapan',
+        },
+        {
+          key: 'perjadin',
+          label: 'Perjalanan Dinas',
+          unit: 'kegiatan',
+          description: 'Kegiatan perjalanan dinas, dihitung dari tanggal mulai kegiatan.',
+          table: 'kegiatan',
+          column: 'tanggal_mulai',
+        },
+      ];
+
+      const buildSeries = async (source) => {
+        const rows = await prisma.$queryRawUnsafe(
+          `SELECT DATE_FORMAT(\`${source.column}\`, '%Y-%m') AS bucket, COUNT(*) AS total
+           FROM \`${source.table}\`
+           WHERE \`${source.column}\` >= ? AND \`${source.column}\` < ?
+           GROUP BY bucket`,
+          ymd(previousStart),
+          ymd(endExclusive)
+        );
+
+        const byMonth = new Map();
+        for (const row of rows) byMonth.set(row.bucket, Number(row.total) || 0);
+
+        const points = labels.map((month) => ({ month, value: byMonth.get(month) || 0 }));
+        const previousPoints = previousLabels.map((month) => byMonth.get(month) || 0);
+
+        const total = points.reduce((sum, point) => sum + point.value, 0);
+        const previousTotal = previousPoints.reduce((sum, value) => sum + value, 0);
+        const peak = points.reduce(
+          (best, point) => (point.value > best.value ? point : best),
+          { month: labels[0], value: 0 }
+        );
+
+        return {
+          key: source.key,
+          label: source.label,
+          unit: source.unit,
+          description: source.description,
+          points,
+          // nilai periode sebelumnya, sejajar indeks dengan `points` (untuk overlay pembanding)
+          previous_points: previousPoints,
+          total,
+          previous_total: previousTotal,
+          average: points.length ? Math.round(total / points.length) : 0,
+          peak,
+          latest: points.length ? points[points.length - 1].value : 0,
+        };
+      };
+
+      const series = [];
+      for (const source of SOURCES) {
+        try {
+          series.push(await buildSeries(source));
+        } catch (error) {
+          logger.warn(`Trend source ${source.key} gagal: ${error.message}`);
+        }
+      }
+
+      // BUMDes hanya punya tahun pendirian (bukan tanggal) — disajikan terpisah per tahun.
+      let bumdesPerTahun = [];
+      try {
+        const rows = await prisma.$queryRawUnsafe(
+          `SELECT TahunPendirian AS tahun, COUNT(*) AS total
+           FROM bumdes
+           WHERE TahunPendirian REGEXP '^[0-9]{4}$'
+             AND CAST(TahunPendirian AS UNSIGNED) BETWEEN 1990 AND YEAR(CURDATE())
+           GROUP BY TahunPendirian
+           ORDER BY TahunPendirian ASC`
+        );
+        bumdesPerTahun = rows.slice(-12).map((row) => ({
+          year: String(row.tahun),
+          value: Number(row.total) || 0,
+        }));
+      } catch (error) {
+        logger.warn(`Trend BUMDes per tahun gagal: ${error.message}`);
+      }
+
+      return res.json({
+        success: true,
+        data: {
+          range: {
+            months,
+            start: labels[0],
+            end: labels[labels.length - 1],
+            previous_start: previousLabels[0],
+            previous_end: previousLabels[previousLabels.length - 1],
+          },
+          labels,
+          series,
+          bumdes_per_tahun: bumdesPerTahun,
+          generated_at: new Date().toISOString(),
+        },
+      });
+    } catch (error) {
+      logger.error('Error getting trends:', error);
+      return next(error);
+    }
   }
 
   // GET /api/kepala-dinas/dashboard - Get comprehensive dashboard statistics
