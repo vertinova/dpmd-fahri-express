@@ -226,6 +226,14 @@ const getStats = async (req, res) => {
 			}
 		}
 
+		// Jabatan distribution (untuk chart komposisi jabatan)
+		const jabatan = jabatanGroups
+			.map(g => ({
+				name: g.jabatan || 'Tidak Diketahui',
+				value: g._count._all,
+			}))
+			.sort((a, b) => b.value - a.value);
+
 		res.json({
 			success: true,
 			data: {
@@ -239,6 +247,7 @@ const getStats = async (req, res) => {
 				total_bpd: totalBPD,
 				rentang_usia,
 				pendidikan,
+				jabatan,
 			},
 		});
 	} catch (error) {
