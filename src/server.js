@@ -405,6 +405,7 @@ app.use('/api/berita-acara', beritaAcaraRoutes); // Berita Acara routes
 app.use('/api/contoh-proposal', require('./routes/contohProposal.routes')); // Example proposal files
 app.use('/api/hero-gallery', heroGalleryRoutes);
 app.use('/api/kepala-dinas', kepalaDinasRoutes); // Kepala Dinas dashboard
+app.use('/api/prolap', require('./routes/prolap.routes')); // Prolap — rekap output kegiatan (Sekretariat)
 app.use('/api/jadwal-kegiatan', require('./routes/jadwalKegiatan.routes')); // Jadwal Kegiatan routes
 app.use('/api/status', require('./routes/status.routes')); // User status/story routes
 app.use('/api/perjadin', perjadinRoutes); // Perjadin (Perjalanan Dinas) routes
