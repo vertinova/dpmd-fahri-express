@@ -13,6 +13,7 @@ const getAllAparaturDesa = async (req, res) => {
 			jabatan,
 			jenis_kelamin,
 			status,
+			pendidikan,
 			page = 1,
 			limit = 20
 		} = req.query;
@@ -48,6 +49,22 @@ const getAllAparaturDesa = async (req, res) => {
 
 		if (status) {
 			where.status = status;
+		}
+
+		// Kolomnya VarChar bebas dan isinya berasal dari dua sumber data dengan
+		// penulisan berbeda ("S1" vs "STRATA I / DIPLOMA IV"). UI mengelompokkan
+		// ejaan-ejaan itu jadi satu pilihan lalu mengirimkannya dipisah koma,
+		// jadi di sini diterima sebagai daftar.
+		if (pendidikan) {
+			const nilai = String(pendidikan)
+				.split(',')
+				.map((v) => v.trim())
+				.filter(Boolean);
+			if (nilai.length === 1) {
+				where.pendidikan_terakhir = nilai[0];
+			} else if (nilai.length > 1) {
+				where.pendidikan_terakhir = { in: nilai };
+			}
 		}
 
 		const [data, totalItems] = await Promise.all([
