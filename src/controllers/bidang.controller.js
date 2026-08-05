@@ -343,19 +343,22 @@ class BidangController {
 
       // Format response
       const formattedData = pegawaiList.map(user => {
-        // Determine role based on user.role
-        let pegawaiRole = 'staff';
-        if (user.role === 'kepala_bidang') {
-          pegawaiRole = 'kepala_bidang';
-        } else if (user.role === 'sekretaris_bidang') {
-          pegawaiRole = 'sekretaris';
-        } else if (user.role === 'koordinator') {
-          pegawaiRole = 'koordinator';
-        } else if (user.role === 'ketua_tim') {
-          pegawaiRole = 'ketua_tim';
-        } else if (user.role === 'bendahara') {
-          pegawaiRole = 'bendahara';
-        }
+        // Pemetaan role akun -> label peran di daftar pegawai.
+        //
+        // Sebelumnya semua role di luar daftar ini jatuh ke 'staff', sehingga
+        // Kepala Dinas dan Sekretaris Dinas ikut tampil sebagai "Staff" di
+        // daftar pegawai. Pimpinan sekarang punya nilainya sendiri; hanya role
+        // pelaksana (`pegawai`) yang memang berarti staf.
+        const ROLE_MAP = {
+          kepala_dinas: 'kepala_dinas',
+          sekretaris_dinas: 'sekretaris_dinas',
+          kepala_bidang: 'kepala_bidang',
+          sekretaris_bidang: 'sekretaris',
+          koordinator: 'koordinator',
+          ketua_tim: 'ketua_tim',
+          bendahara: 'bendahara',
+        };
+        const pegawaiRole = ROLE_MAP[user.role] || 'staff';
 
         return {
           id: Number(user.id),
