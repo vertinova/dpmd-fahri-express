@@ -3113,3 +3113,88 @@ enum arsip_barang_status {
   aktif
   dihapuskan
 }
+
+// ============================================================
+// Drive per bidang
+// ============================================================
+// Berkasnya disimpan di storage/private/drive (di luar jangkauan
+// express.static) dan hanya bisa diambil lewat controller yang memeriksa izin.
+
+model drive_folder {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  bidang_id  BigInt    @db.UnsignedBigInt
+  parent_id  BigInt?   @db.UnsignedBigInt
+  nama       String    @db.VarChar(255)
+  jalur      String    @default("/") @db.VarChar(1000)
+  created_by BigInt?   @db.UnsignedBigInt
+  updated_by BigInt?   @db.UnsignedBigInt
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+  updated_at DateTime? @default(now()) @db.Timestamp(0)
+  deleted_at DateTime? @db.Timestamp(0)
+  deleted_by BigInt?   @db.UnsignedBigInt
+
+  @@index([bidang_id, parent_id, deleted_at], map: "idx_drive_folder_bidang")
+  @@index([deleted_at], map: "idx_drive_folder_sampah")
+}
+
+model drive_file {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  bidang_id  BigInt    @db.UnsignedBigInt
+  folder_id  BigInt?   @db.UnsignedBigInt
+  nama       String    @db.VarChar(255)
+  nama_asli  String    @db.VarChar(255)
+  mime       String?   @db.VarChar(150)
+  ekstensi   String?   @db.VarChar(20)
+  ukuran     BigInt    @default(0) @db.UnsignedBigInt
+  nama_disk  String    @unique(map: "uq_drive_file_disk") @db.VarChar(120)
+  jalur_disk String    @db.VarChar(500)
+  checksum   String?   @db.Char(64)
+  created_by BigInt?   @db.UnsignedBigInt
+  updated_by BigInt?   @db.UnsignedBigInt
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+  updated_at DateTime? @default(now()) @db.Timestamp(0)
+  deleted_at DateTime? @db.Timestamp(0)
+  deleted_by BigInt?   @db.UnsignedBigInt
+
+  @@index([bidang_id, folder_id, deleted_at], map: "idx_drive_file_bidang")
+  @@index([bidang_id, checksum], map: "idx_drive_file_checksum")
+  @@index([deleted_at], map: "idx_drive_file_sampah")
+}
+
+model drive_share {
+  id             BigInt                    @id @default(autoincrement()) @db.UnsignedBigInt
+  objek_tipe     drive_share_objek_tipe
+  objek_id       BigInt                    @db.UnsignedBigInt
+  bidang_pemilik BigInt                    @db.UnsignedBigInt
+  penerima_tipe  drive_share_penerima_tipe
+  penerima_id    BigInt                    @db.UnsignedBigInt
+  izin           drive_share_izin          @default(lihat)
+  created_by     BigInt?                   @db.UnsignedBigInt
+  created_at     DateTime?                 @default(now()) @db.Timestamp(0)
+
+  @@unique([objek_tipe, objek_id, penerima_tipe, penerima_id], map: "uq_drive_share")
+  @@index([penerima_tipe, penerima_id], map: "idx_drive_share_penerima")
+  @@index([objek_tipe, objek_id], map: "idx_drive_share_objek")
+}
+
+model drive_kuota {
+  bidang_id      BigInt    @id @db.UnsignedBigInt
+  batas_bytes    BigInt    @default(26843545600) @db.UnsignedBigInt
+  terpakai_bytes BigInt    @default(0) @db.UnsignedBigInt
+  updated_at     DateTime? @default(now()) @db.Timestamp(0)
+}
+
+enum drive_share_objek_tipe {
+  folder
+  file
+}
+
+enum drive_share_penerima_tipe {
+  bidang
+  user
+}
+
+enum drive_share_izin {
+  lihat
+  ubah
+}

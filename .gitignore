@@ -131,3 +131,7 @@ dbml/
 
 # Skrip inspeksi/coret-coret sementara
 cmp_tmp.js
+
+# Berkas Drive per bidang. Sengaja di luar storage/ karena storage/ disajikan
+# express.static tanpa autentikasi. Isinya tidak boleh masuk repo.
+private/

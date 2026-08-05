@@ -8,6 +8,7 @@ const pushNotificationService = require('./pushNotification.service');
 const attendanceAwardService = require('./attendanceAward.service');
 const prisma = require('../config/prisma');
 const PushNotificationServiceStatic = require('./pushNotificationService');
+const drivePurgeService = require('./drivePurge.service');
 
 // Status kepegawaian yang wajib absen
 const ABSENSI_REQUIRED_STATUS = [
@@ -91,6 +92,32 @@ class SchedulerService {
         await this.checkAbsensiReminder();
       } catch (error) {
         console.error('❌ Error checking absensi reminder:', error);
+      }
+    }, {
+      scheduled: true,
+      timezone: "Asia/Jakarta"
+    });
+
+    // Bersihkan sampah Drive tiap dini hari. Tanpa ini kuota bidang tidak
+    // pernah kembali walau isinya sudah dibuang pengguna.
+    this.jobs.drivePurge = cron.schedule('30 2 * * *', async () => {
+      try {
+        await drivePurgeService.bersihkanSampah();
+      } catch (error) {
+        console.error('❌ Error membersihkan sampah Drive:', error);
+      }
+    }, {
+      scheduled: true,
+      timezone: "Asia/Jakarta"
+    });
+
+    // Selaraskan penghitung kuota tiap Minggu dini hari — menangkap penyimpangan
+    // kalau proses pernah mati di antara penulisan berkas dan pembaruan kuota.
+    this.jobs.driveKuotaSync = cron.schedule('0 3 * * 0', async () => {
+      try {
+        await drivePurgeService.selaraskanKuota();
+      } catch (error) {
+        console.error('❌ Error menyelaraskan kuota Drive:', error);
       }
     }, {
       scheduled: true,

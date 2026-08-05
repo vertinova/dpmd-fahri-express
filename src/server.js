@@ -211,7 +211,16 @@ if (process.env.NODE_ENV === 'development') {
 app.get('/favicon.ico', (req, res) => res.status(204).end());
 
 // Serve uploaded files with CORS headers
+//
+// Perhatian: ini menyajikan SELURUH direktori storage/ tanpa autentikasi.
+// Jangan pernah menaruh berkas yang butuh kontrol akses di bawah storage/ —
+// berkas Drive misalnya disimpan di private/ (sejajar storage/) dan hanya
+// dilayani lewat controller. Penjaga di bawah menolak lintasan bernama
+// "private" seandainya suatu saat ada yang membuatnya di sini.
 app.use('/storage', (req, res, next) => {
+  if (/(^|\/)private(\/|$)/i.test(req.path)) {
+    return res.status(404).end();
+  }
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Cross-Origin-Resource-Policy', 'cross-origin');
   next();
@@ -412,6 +421,10 @@ app.use('/api/perjadin', perjadinRoutes); // Perjadin (Perjalanan Dinas) routes
 app.use('/api/berita', require('./routes/berita.routes')); // Berita routes
 app.use('/api/informasi', require('./routes/informasi.routes')); // Informasi banner routes (Sekretariat)
 app.use('/api/arsip-barang', require('./routes/arsipBarang.routes')); // Arsip Barang / inventaris (Sekretariat)
+// Drive per bidang. Berkasnya di storage/private/ — TIDAK dipetakan ke rute
+// statis mana pun; satu-satunya jalan mengambil berkas adalah lewat
+// /api/drive/file/:id/unduh yang memeriksa izin lebih dulu.
+app.use('/api/drive', require('./routes/drive.routes'));
 app.use('/api/activity-logs', require('./routes/activityLog.routes')); // Global Activity Logs (Superadmin)
 app.use('/api/kelembagaan', kelembagaanRoutes); // Kelembagaan routes (admin/global)
 app.use('/api/kelembagaan/activity-logs', require('./routes/kelembagaanActivityLogs.routes')); // Activity logs
