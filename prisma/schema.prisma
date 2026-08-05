@@ -3198,3 +3198,108 @@ enum drive_share_izin {
   lihat
   ubah
 }
+
+// ============================================================
+// Formulir (pembuat formulir mandiri per bidang)
+// ============================================================
+// Lampiran jawaban disimpan di private/formulir (di luar jangkauan
+// express.static) dan hanya bisa diambil lewat controller yang memeriksa izin.
+
+model formulir {
+  id               BigInt          @id @default(autoincrement()) @db.UnsignedBigInt
+  bidang_id        BigInt          @db.UnsignedBigInt
+  judul            String          @db.VarChar(255)
+  deskripsi        String?         @db.Text
+  token            String          @unique(map: "uq_formulir_token") @db.Char(32)
+  status           formulir_status @default(draf)
+  butuh_login      Boolean         @default(false)
+  satu_respons     Boolean         @default(false)
+  kumpulkan_email  Boolean         @default(false)
+  acak_pertanyaan  Boolean         @default(false)
+  respons_terbuka  Boolean         @default(false)
+  pesan_konfirmasi String?         @db.Text
+  tutup_pada       DateTime?       @db.DateTime(0)
+  batas_respons    Int?            @db.UnsignedInt
+  created_by       BigInt?         @db.UnsignedBigInt
+  updated_by       BigInt?         @db.UnsignedBigInt
+  created_at       DateTime?       @default(now()) @db.Timestamp(0)
+  updated_at       DateTime?       @default(now()) @db.Timestamp(0)
+  deleted_at       DateTime?       @db.Timestamp(0)
+  deleted_by       BigInt?         @db.UnsignedBigInt
+
+  @@index([bidang_id, deleted_at], map: "idx_formulir_bidang")
+  @@index([status, deleted_at], map: "idx_formulir_status")
+}
+
+model formulir_pertanyaan {
+  id          BigInt                   @id @default(autoincrement()) @db.UnsignedBigInt
+  formulir_id BigInt                   @db.UnsignedBigInt
+  tipe        formulir_pertanyaan_tipe @default(jawaban_singkat)
+  label       String                   @db.VarChar(500)
+  deskripsi   String?                  @db.Text
+  wajib       Boolean                  @default(false)
+  urutan      Int                      @default(0)
+  opsi        Json?
+  pengaturan  Json?
+  created_at  DateTime?                @default(now()) @db.Timestamp(0)
+  updated_at  DateTime?                @default(now()) @db.Timestamp(0)
+
+  @@index([formulir_id, urutan], map: "idx_formulir_pertanyaan_urut")
+}
+
+model formulir_respons {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  formulir_id    BigInt    @db.UnsignedBigInt
+  user_id        BigInt?   @db.UnsignedBigInt
+  nama_responden String?   @db.VarChar(255)
+  email          String?   @db.VarChar(255)
+  ip             String?   @db.VarChar(45)
+  dikirim_pada   DateTime? @default(now()) @db.Timestamp(0)
+
+  @@index([formulir_id, dikirim_pada], map: "idx_formulir_respons_form")
+  @@index([formulir_id, user_id], map: "idx_formulir_respons_user")
+}
+
+model formulir_jawaban {
+  id            BigInt  @id @default(autoincrement()) @db.UnsignedBigInt
+  respons_id    BigInt  @db.UnsignedBigInt
+  pertanyaan_id BigInt  @db.UnsignedBigInt
+  nilai         String? @db.Text
+  nilai_json    Json?
+
+  @@unique([respons_id, pertanyaan_id], map: "uq_formulir_jawaban")
+  @@index([pertanyaan_id], map: "idx_formulir_jawaban_pertanyaan")
+}
+
+model formulir_berkas {
+  id            BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  respons_id    BigInt    @db.UnsignedBigInt
+  pertanyaan_id BigInt    @db.UnsignedBigInt
+  nama          String    @db.VarChar(255)
+  mime          String?   @db.VarChar(150)
+  ukuran        BigInt    @default(0) @db.UnsignedBigInt
+  nama_disk     String    @unique(map: "uq_formulir_berkas_disk") @db.VarChar(120)
+  jalur_disk    String    @db.VarChar(500)
+  created_at    DateTime? @default(now()) @db.Timestamp(0)
+
+  @@index([respons_id, pertanyaan_id], map: "idx_formulir_berkas_respons")
+}
+
+enum formulir_status {
+  draf
+  terbit
+  ditutup
+}
+
+enum formulir_pertanyaan_tipe {
+  bagian
+  jawaban_singkat
+  paragraf
+  pilihan_ganda
+  kotak_centang
+  dropdown
+  skala_linier
+  tanggal
+  waktu
+  unggah_berkas
+}

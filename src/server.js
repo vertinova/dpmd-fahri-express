@@ -425,6 +425,10 @@ app.use('/api/arsip-barang', require('./routes/arsipBarang.routes')); // Arsip B
 // statis mana pun; satu-satunya jalan mengambil berkas adalah lewat
 // /api/drive/file/:id/unduh yang memeriksa izin lebih dulu.
 app.use('/api/drive', require('./routes/drive.routes'));
+// Formulir per bidang (seperti Google Forms). /api/formulir/publik/* sengaja
+// TIDAK memakai auth — itu jalur pengisian lewat tautan yang dibagikan; sisanya
+// wajib login. Lampiran jawaban ikut disimpan di private/, bukan storage/.
+app.use('/api/formulir', require('./routes/formulir.routes'));
 app.use('/api/activity-logs', require('./routes/activityLog.routes')); // Global Activity Logs (Superadmin)
 app.use('/api/kelembagaan', kelembagaanRoutes); // Kelembagaan routes (admin/global)
 app.use('/api/kelembagaan/activity-logs', require('./routes/kelembagaanActivityLogs.routes')); // Activity logs
