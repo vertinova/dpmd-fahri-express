@@ -5,6 +5,12 @@ const prisma = require('../config/prisma');
 const JWT_SECRET = process.env.JWT_SECRET;
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
+// Ambang perpanjangan token: begitu sisa umur token kurang dari ini, request
+// berikutnya dibalas dengan token baru lewat header X-Renewed-Token. Dipasang
+// lebih dari separuh JWT_EXPIRES_IN supaya user yang membuka aplikasi sesekali
+// saja tetap terperpanjang sebelum tokennya mati.
+const RENEW_IF_REMAINING_MS = 4 * 24 * 60 * 60 * 1000; // 4 hari
+
 // Throttle last_active_at updates: max once per 60s per user
 const lastActiveCache = new Map();
 const ACTIVE_THROTTLE_MS = 60 * 1000;
@@ -115,6 +121,23 @@ const auth = async (req, res, next) => {
     }
 
     logger.info(`✅ Auth successful: User ${req.user.id} (${req.user.role}) - Bidang: ${req.user.bidang_id} - Kecamatan: ${req.user.kecamatan_id}`);
+
+    // Perpanjang token yang mendekati kedaluwarsa. Sesi di klien memang tidak
+    // pernah kedaluwarsa, tapi JWT-nya berumur JWT_EXPIRES_IN (7 hari) dan tidak
+    // ada mekanisme perpanjangan — jadi setiap 7 hari sekali user terlempar
+    // keluar di tengah pemakaian, paling terasa di PWA yang tidak pernah ditutup.
+    // Selama user membuka aplikasi dalam masa berlaku, tokennya bergulir sendiri.
+    // Header ini diabaikan begitu saja oleh klien versi lama.
+    try {
+      const sisaMs = decoded.exp ? decoded.exp * 1000 - Date.now() : 0;
+      if (sisaMs > 0 && sisaMs < RENEW_IF_REMAINING_MS) {
+        res.setHeader('X-Renewed-Token', generateToken(req.user));
+        logger.info(`♻️  Token diperpanjang untuk user ${req.user.id} (sisa ${Math.round(sisaMs / 3600000)} jam)`);
+      }
+    } catch (renewError) {
+      // Gagal memperpanjang bukan alasan menolak request yang tokennya masih sah.
+      logger.error('Gagal memperpanjang token:', renewError.message);
+    }
 
     // Update last_active_at (throttled, fire-and-forget)
     updateLastActive(req.user.id);

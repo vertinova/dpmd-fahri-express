@@ -157,7 +157,10 @@ const allowedOrigins = process.env.CORS_ORIGIN
 
 app.use(cors({
   origin: allowedOrigins,
-  credentials: true
+  credentials: true,
+  // Tanpa ini header perpanjangan token tidak terbaca oleh JavaScript di
+  // browser saat frontend beda origin (dev di localhost:5173).
+  exposedHeaders: ['X-Renewed-Token']
 }));
 
 // Rate limiting - Standard API requests
