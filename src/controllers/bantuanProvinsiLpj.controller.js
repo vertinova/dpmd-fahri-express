@@ -17,12 +17,12 @@ function cleanupFiles(files) {
 class BantuanProvinsiLpjController {
   /**
    * Get LPJ Bantuan Provinsi for logged-in desa
-   * GET /api/desa/bantuan-provinsi-lpj?tahun=2026
+   * GET /api/desa/bantuan-provinsi-lpj?tahun=2025
    */
   async getMyLpj(req, res) {
     try {
       const userId = req.user.id;
-      const tahun = parseInt(req.query.tahun) || 2026;
+      const tahun = parseInt(req.query.tahun) || 2025;
 
       const user = await prisma.users.findUnique({
         where: { id: BigInt(userId) },
@@ -63,7 +63,7 @@ class BantuanProvinsiLpjController {
   async uploadLpj(req, res) {
     try {
       const userId = req.user.id;
-      const tahun = parseInt(req.body.tahun_anggaran || req.body.tahun) || 2026;
+      const tahun = parseInt(req.body.tahun_anggaran || req.body.tahun) || 2025;
       const keterangan = req.body.keterangan || null;
       const files = req.files;
 
@@ -228,11 +228,11 @@ class BantuanProvinsiLpjController {
 
   /**
    * DPMD/SPKED: Get all LPJ Bantuan Provinsi submissions grouped by kecamatan
-   * GET /api/dpmd/bantuan-provinsi-lpj?tahun=2026
+   * GET /api/dpmd/bantuan-provinsi-lpj?tahun=2025
    */
   async getAllLpj(req, res) {
     try {
-      const tahun = parseInt(req.query.tahun) || 2026;
+      const tahun = parseInt(req.query.tahun) || 2025;
 
       const [rows] = await sequelize.query(`
         SELECT
