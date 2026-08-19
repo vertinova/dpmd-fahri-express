@@ -1,8 +1,11 @@
 const bcrypt = require('bcryptjs');
-const { generateToken } = require('../middlewares/auth');
+const jwt = require('jsonwebtoken');
+const { generateToken, invalidateRoleCache } = require('../middlewares/auth');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const { validateDesaProfile, mustCompleteDesaProfile } = require('../config/desaProfile');
+
+const JWT_SECRET = process.env.JWT_SECRET;
 
 // Password bawaan (seeder). User yang masih memakai ini WAJIB menggantinya dulu.
 const DEFAULT_PASSWORD = 'password';
@@ -127,6 +130,14 @@ const login = async (req, res) => {
     }
 
     logger.info(`✅ Login successful: ${user.email} (${user.role})`);
+
+    // Role user disimpan di cache middleware selama 60 detik. Bila rolenya baru
+    // saja diubah langsung di database (migrasi/SQL manual) cache itu masih
+    // memegang role lama, sedangkan token yang dibuat di bawah memakai role baru
+    // dari baris ini — perbandingan keduanya gagal dan request pertama setelah
+    // login dibalas 401 ROLE_CHANGED. Segarkan cache-nya di sini supaya login
+    // yang baru saja berhasil tidak langsung dipentalkan.
+    invalidateRoleCache(user.id);
 
     // Record success login history (fire-and-forget) — sertakan koordinat lokasi.
     recordLoginHistory(req, user.id, 'success', { latitude, longitude });
@@ -966,6 +977,104 @@ const forceChangePassword = async (req, res) => {
 };
 
 /**
+ * Tukar token kedaluwarsa dengan token baru, tanpa memaksa user login ulang.
+ *
+ * Sesi di aplikasi ini memang dirancang permanen — user hanya keluar kalau dia
+ * sendiri menekan keluar. Tapi JWT-nya berumur JWT_EXPIRES_IN (7 hari): kalau
+ * PWA tidak dibuka selama itu, perpanjangan bergulir lewat header
+ * X-Renewed-Token tidak pernah kebagian jalan dan tokennya mati. Tanpa endpoint
+ * ini, request pertama setelah user kembali dibalas 401 dan dia terlempar keluar
+ * padahal tidak pernah menekan keluar.
+ *
+ * Sengaja TIDAK memakai middleware `auth` (tokennya memang sudah kedaluwarsa).
+ * Yang tetap diperiksa: tanda tangan token harus sah, akunnya harus masih ada
+ * dan aktif, dan rolenya harus sama dengan yang tercatat di token. Jadi
+ * pemanggilnya tetap wajib memegang token yang pernah kita terbitkan sendiri.
+ */
+const renewToken = async (req, res) => {
+  try {
+    const token = String(
+      req.body?.token || req.header('Authorization')?.replace('Bearer ', '') || ''
+    ).trim();
+
+    if (!token) {
+      return res.status(400).json({
+        success: false,
+        code: 'TOKEN_REQUIRED',
+        message: 'Token lama wajib disertakan'
+      });
+    }
+
+    let decoded;
+    try {
+      decoded = jwt.verify(token, JWT_SECRET, { ignoreExpiration: true });
+    } catch {
+      // Tanda tangan tidak cocok / token bukan terbitan kita.
+      return res.status(401).json({
+        success: false,
+        code: 'SESSION_INVALID',
+        message: 'Sesi tidak dikenali. Silakan login kembali.'
+      });
+    }
+
+    const user = await prisma.users.findUnique({
+      where: { id: BigInt(String(decoded.id)) },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        is_active: true,
+        desa_id: true,
+        kecamatan_id: true,
+        bidang_id: true,
+        dinas_id: true
+      }
+    });
+
+    if (!user) {
+      return res.status(401).json({
+        success: false,
+        code: 'SESSION_INVALID',
+        message: 'Akun tidak ditemukan. Silakan login kembali.'
+      });
+    }
+
+    if (!user.is_active) {
+      return res.status(401).json({
+        success: false,
+        code: 'ACCOUNT_INACTIVE',
+        message: 'Akun Anda dinonaktifkan. Hubungi admin.'
+      });
+    }
+
+    if (String(user.role) !== String(decoded.role)) {
+      return res.status(401).json({
+        success: false,
+        code: 'ROLE_CHANGED',
+        message: 'Hak akses akun Anda telah diperbarui. Silakan login kembali.'
+      });
+    }
+
+    invalidateRoleCache(user.id);
+    logger.info(`♻️  Sesi diperbarui tanpa login ulang: ${user.email} (${user.role})`);
+
+    return res.json({
+      success: true,
+      message: 'Sesi diperbarui',
+      data: { token: generateToken(user) }
+    });
+  } catch (error) {
+    logger.error('renewToken error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Gagal memperbarui sesi',
+      error: error.message
+    });
+  }
+};
+
+/**
  * Simpan identitas Admin Desa (nama asli, jabatan, nomor HP).
  * Dipakai oleh popup wajib-isi maupun form ubah identitas di halaman Pengaturan.
  */
@@ -1023,5 +1132,6 @@ module.exports = {
   verifyToken,
   getProfile,
   forceChangePassword,
-  saveDesaProfile
+  saveDesaProfile,
+  renewToken
 };

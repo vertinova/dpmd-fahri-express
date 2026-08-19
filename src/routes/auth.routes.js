@@ -1,11 +1,16 @@
 const express = require('express');
 const router = express.Router();
-const { login, verifyToken, getProfile, forceChangePassword, saveDesaProfile } = require('../controllers/auth.controller');
+const { login, verifyToken, getProfile, forceChangePassword, saveDesaProfile, renewToken } = require('../controllers/auth.controller');
 const { auth } = require('../middlewares/auth');
 const loginRateLimiter = require('../middlewares/loginRateLimit');
 
 // Public routes - with rate limiting (max 5 attempts per 5 minutes per IP)
 router.post('/login', loginRateLimiter, login);
+// Tukar token kedaluwarsa dengan yang baru. Tanpa middleware `auth` — tokennya
+// memang sudah lewat masa berlaku; keabsahannya diperiksa di dalam controller.
+// Tanpa rate limit login: pemanggilnya wajib sudah memegang token bertanda
+// tangan sah, dan ini jalur yang menjaga user tidak keluar sendiri.
+router.post('/renew', renewToken);
 
 // Protected routes
 router.get('/verify', auth, verifyToken);
