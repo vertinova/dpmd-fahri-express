@@ -26,6 +26,7 @@ const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
 const { PETA, KOLOM_DIPERTAHANKAN, PETA_BADAN_HUKUM, BADAN_HUKUM_KOSONG } = require('./mapping');
+const { bacaAngka } = require('../../src/config/bumdesFields');
 
 // ---------------------------------------------------------------- argumen ----
 const arg = (nama, bawaan = null) => {
@@ -86,57 +87,26 @@ const parseCSV = (text) => {
 // -------------------------------------------------------------- pembaca ----
 const KOSONG = new Set(['', '#n/a', 'n/a']);
 
-/** Batas atas kolom DECIMAL(15,2) di MySQL. */
-const BATAS_DECIMAL_15_2 = 9999999999999.99;
-
-/** Teks: '#N/A' dianggap tidak terisi. Tanda '-' DIPERTAHANKAN (artinya "tidak ada"). */
+/** Teks: "#N/A" dianggap tidak terisi. Tanda "-" DIPERTAHANKAN (artinya "tidak ada"). */
 const bacaTeks = (raw) => {
-  const v = String(raw ?? '').trim();
+  const v = String(raw ?? "").trim();
   return KOSONG.has(v.toLowerCase()) ? null : v;
 };
 
-const bacaBulat = (raw) => {
+// Pembacaan angka dipakai bersama dengan API (src/config/bumdesFields.js),
+// supaya aturan "Rp 1.500.000", "50 juta", "(50.000)", dan penolakan nilai
+// ambigu tidak bisa berbeda antara impor CSV dan penyimpanan lewat form.
+//
+// desimalDiizinkan:false — saat impor, dua kelompok angka seperti "171.35"
+// ambigu (171,35 atau 171 juta?) sehingga ditolak dan dilaporkan, bukan ditebak.
+const bacaAngkaCSV = (raw, bulat = false) => {
   const v = bacaTeks(raw);
   if (v === null) return { ok: true, nilai: null };
-  // Sama seperti kolom uang: "-" berarti tidak ada isinya, bukan angka rusak.
-  if (/^(-|nol|belum ada|tidak ada)$/i.test(v)) return { ok: true, nilai: null };
-  const n = parseInt(v.replace(/[^\d-]/g, ''), 10);
-  return Number.isFinite(n) ? { ok: true, nilai: n } : { ok: false, nilai: null };
+  return bacaAngka(v, { bulat, desimalDiizinkan: false });
 };
 
-/**
- * Uang. Ragam yang muncul di sheet ini:
- *   "Rp 286,877,726"  "Rp.299.500.000;"  "150,000,000"  "112000000"
- *   "Rp (5,156,400)"  -> negatif (format akuntansi)
- *   "Rp -"  "-"  "#N/A"  "nol"  "belum ada"  -> tidak terisi
- * Pemisah ribuan bisa koma ATAU titik, jadi keduanya dibuang hanya bila setiap
- * kelompok setelah yang pertama tepat 3 digit. Kalau tidak, nilainya ditolak
- * dan dilaporkan sebagai anomali, bukan ditebak.
- */
-const bacaUang = (raw) => {
-  const v = String(raw ?? '').trim();
-  if (KOSONG.has(v.toLowerCase())) return { ok: true, nilai: null };
-  if (/^(-|nol|belum ada|tidak ada)$/i.test(v)) return { ok: true, nilai: null };
-
-  let s = v.replace(/^rp\.?,?/i, '').trim();
-  let negatif = false;
-  if (/^\(.*\)$/.test(s)) { negatif = true; s = s.slice(1, -1).trim(); }
-  s = s.replace(/[\s;]/g, '');
-  if (s === '' || s === '-') return { ok: true, nilai: null };
-  if (!/^[\d.,]+$/.test(s)) return { ok: false, nilai: null };
-
-  const grup = s.split(/[.,]/);
-  if (grup.length > 1 && grup.slice(1).some((g) => g.length !== 3)) {
-    return { ok: false, nilai: null };
-  }
-  const n = Number(grup.join(''));
-  if (!Number.isFinite(n)) return { ok: false, nilai: null };
-  // Kolom uang bertipe DECIMAL(15,2). Nilai di luar jangkauan itu pasti salah
-  // ketik (mis. "Rp 16,270,800,000,000,000" di Balekambang), jadi ditolak dan
-  // dilaporkan — bukan dipotong diam-diam sampai jadi angka lain.
-  if (Math.abs(n) > BATAS_DECIMAL_15_2) return { ok: false, nilai: null };
-  return { ok: true, nilai: negatif ? -n : n };
-};
+const bacaBulat = (raw) => bacaAngkaCSV(raw, true);
+const bacaUang = (raw) => bacaAngkaCSV(raw, false);
 
 /** Status: pakai kolom 2025; bila kosong, jatuh ke kolom 2024. */
 const bacaStatus = (s2025, s2024) => {

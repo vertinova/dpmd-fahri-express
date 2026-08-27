@@ -162,38 +162,94 @@ const normalisasiStatus = (nilai) => {
   return null;
 };
 
+/** Sufiks singkatan yang lazim dipakai penulis data. */
+const SUFIKS = {
+  rb: 1e3, ribu: 1e3,
+  jt: 1e6, juta: 1e6,
+  miliar: 1e9, milyar: 1e9, m: 1e9,
+};
+
+/** Batas atas kolom DECIMAL(15,2) di MySQL. */
+const BATAS_DECIMAL_15_2 = 9999999999999.99;
+
 /**
- * Baca angka dari input yang mungkin berformat rupiah.
- * Menerima "1500000", "1.500.000", "1,500,000", "Rp 1.500.000", "(50.000)".
- * Pemisah ribuan dibuang hanya bila tiap kelompok setelah yang pertama tepat
- * 3 digit; kalau tidak, angkanya dianggap tidak terbaca dan DITOLAK — bukan
- * ditebak.
+ * Baca angka dari input yang mungkin berformat rupiah atau ditulis bebas.
+ *
+ * Yang DISERAGAMKAN (murni beda penulisan, maknanya tidak berubah):
+ *   "Rp 286,877,726"  "Rp.299.500.000;"  "150,000,000"  "1.000 000"
+ *   "50 juta" -> 50000000          (sufiks rb/ribu/jt/juta/miliar)
+ *   "100000000 (Tahun 2020)"       (keterangan dalam kurung di belakang dibuang)
+ *   "0. ( perawatan )" -> 0
+ *   "(50.000)" -> -50000           (kurung membungkus seluruhnya = negatif)
+ *   "Tidak ada penyertaan modal dari desa" -> kosong
+ *
+ * Yang SENGAJA DITOLAK, karena menebaknya berarti mengarang angka:
+ *   "2.000.000/bulan", "2 Jt Perbulan" -> nilai per BULAN pada kolom TAHUNAN.
+ *      Dipakai apa adanya salah 12x; dikali 12 mengarang yang tak pernah ditulis.
+ *   "10 unit kios" -> bukan nilai uang sama sekali.
+ *   "Modal awal : 170jt, dari Dana Desa ..." -> angka terselip di kalimat;
+ *      mengambilnya berarti menebak angka mana yang dimaksud.
+ *   Nilai di luar jangkauan DECIMAL(15,2), mis. salah ketik Rp 16.270 triliun.
  *
  * Mengembalikan { ok, nilai }. `ok:false` berarti pemanggil harus MELEWATI
  * field itu, supaya nilai lama tidak tertimpa null gara-gara salah ketik.
+ *
+ * `desimalDiizinkan` dibedakan: lewat form, "1500000.50" wajar sebagai desimal;
+ * saat impor CSV, dua kelompok seperti "171.35" ambigu (171,35 atau 171 juta?)
+ * sehingga lebih baik ditolak dan dilaporkan.
  */
-const bacaAngka = (mentah, bulat = false) => {
-  let s = String(mentah).replace(/^rp\.?,?/i, '').trim();
+const bacaAngka = (mentah, opsi = {}) => {
+  const { bulat = false, desimalDiizinkan = true, batas = BATAS_DECIMAL_15_2 } = opsi;
+
+  let s = String(mentah ?? '').trim();
+  if (s === '') return { ok: true, nilai: null };
+
+  // Kalimat yang artinya "tidak ada" -> kosong, bukan anomali.
+  if (/^(tidak ada|belum ada|tidak tersedia|nol|kosong)\b/i.test(s)) {
+    return { ok: true, nilai: null };
+  }
+
+  s = s.replace(/^rp\.?,?/i, '').trim();
+
+  // Kurung yang membungkus SELURUH nilai = format akuntansi untuk negatif.
   let negatif = false;
   if (/^\(.*\)$/.test(s)) { negatif = true; s = s.slice(1, -1).trim(); }
-  s = s.replace(/\s/g, '');
-  if (s === '' || s === '-') return { ok: true, nilai: null };
-  if (!/^-?[\d.,]+$/.test(s)) return { ok: false, nilai: null };
-  if (s.startsWith('-')) { negatif = true; s = s.slice(1); }
 
-  const grup = s.split(/[.,]/);
+  // Kurung di BELAKANG angka = keterangan, bukan bagian nilainya.
+  const tanpaKeterangan = s.replace(/\s*\([^)]*\)\s*$/, '').trim();
+  if (tanpaKeterangan !== '') s = tanpaKeterangan;
+
+  s = s.replace(/[;.,]+$/, '').trim();
+  if (s === '' || s === '-') return { ok: true, nilai: null };
+
+  // Sufiks singkatan. Harus menutup string; "2 Jt Perbulan" sengaja tidak cocok.
+  let pengali = 1;
+  const sufiks = s.match(/^([\d.,\s]+?)\s*(rb|ribu|jt|juta|miliar|milyar|m)$/i);
+  if (sufiks) { pengali = SUFIKS[sufiks[2].toLowerCase()]; s = sufiks[1].trim(); }
+
+  if (s.startsWith('-')) { negatif = true; s = s.slice(1).trim(); }
+  if (!/^\d([\d.,\s]*\d)?$/.test(s)) return { ok: false, nilai: null };
+
+  // Titik, koma, DAN spasi sama-sama dipakai orang sebagai pemisah ribuan.
+  const grup = s.split(/[.,\s]+/).filter(Boolean);
   let angka;
   if (grup.length === 1) {
     angka = Number(grup[0]);
   } else if (grup.slice(1).every((g) => g.length === 3)) {
-    angka = Number(grup.join('')); // pemisah ribuan
-  } else if (grup.length === 2) {
-    angka = Number(`${grup[0]}.${grup[1]}`); // titik/koma desimal
+    angka = Number(grup.join(''));
+    // Saat ada sufiks ("1,5 juta"), pecahan desimal tidak ambigu: tidak ada
+    // yang menulis "1,5 juta" untuk maksud 1.500 juta. Jadi aturan tolak-
+    // desimal saat impor CSV sengaja tidak berlaku di sini.
+  } else if ((desimalDiizinkan || pengali > 1) && grup.length === 2 && grup[1].length <= 2) {
+    angka = Number(`${grup[0]}.${grup[1]}`);
   } else {
     return { ok: false, nilai: null };
   }
+
   if (!Number.isFinite(angka)) return { ok: false, nilai: null };
+  angka *= pengali;
   if (negatif) angka = -angka;
+  if (Math.abs(angka) > batas) return { ok: false, nilai: null };
   return { ok: true, nilai: bulat ? Math.trunc(angka) : angka };
 };
 
@@ -230,7 +286,7 @@ const siapkanData = (body, kolomDiizinkan) => {
     const desimal = KOLOM_ANGKA_DESIMAL.includes(nama);
     const bulat = KOLOM_ANGKA_BULAT.includes(nama);
     if (nilai !== null && (desimal || bulat)) {
-      const hasil = bacaAngka(nilai, bulat);
+      const hasil = bacaAngka(nilai, { bulat });
       // Angka yang tidak terbaca: field dilewati sama sekali, supaya nilai lama
       // tetap utuh alih-alih terhapus karena salah ketik.
       if (!hasil.ok) continue;
@@ -244,6 +300,8 @@ const siapkanData = (body, kolomDiizinkan) => {
 };
 
 module.exports = {
+  bacaAngka,
+  BATAS_DECIMAL_15_2,
   KOLOM_DESA,
   KOLOM_DPMD,
   KOLOM_ADMIN,
