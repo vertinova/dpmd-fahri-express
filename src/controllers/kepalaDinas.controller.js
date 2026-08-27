@@ -11,6 +11,7 @@ class KepalaDinasController {
     this.getTrendData = this.getTrendData.bind(this);
     this.getMusdesusStats = this.getMusdesusStats.bind(this);
     this.getTrends = this.getTrends.bind(this);
+    this.getBumdesList = this.getBumdesList.bind(this);
   }
 
   // GET /api/kepala-dinas/trends?months=12
@@ -523,6 +524,115 @@ class KepalaDinasController {
     } catch (error) {
       logger.error('Error getting trend data:', error);
       return [];
+    }
+  }
+
+  // GET /api/kepala-dinas/bumdes
+  // Daftar BUMDes untuk halaman Statistik BUMDes di Core Dashboard.
+  //
+  // Sengaja TIDAK memakai /api/bumdes yang sudah ada: rute itu menolak
+  // `sekretaris_dinas` (padahal punya akses Core Dashboard) dan getBumdesById
+  // bahkan menolak `kepala_dinas`. Rute ini memakai `auth` saja, sama seperti
+  // /dashboard di sebelahnya.
+  //
+  // Seluruh 416 baris dikirim sekali dengan kolom seperlunya (~35 dari 149),
+  // supaya pencarian, penyaringan, dan pengurutan berjalan seketika di sisi
+  // klien tanpa bolak-balik ke server. Kolom path berkas TIDAK dikirim — hanya
+  // penanda ada/tidaknya, supaya lintasan penyimpanan tidak bocor ke browser.
+  async getBumdesList(req, res, next) {
+    try {
+      const rows = await prisma.bumdes.findMany({
+        orderBy: [{ kecamatan: 'asc' }, { desa: 'asc' }],
+        select: {
+          id: true, kode_desa: true, namabumdesa: true, desa: true, kecamatan: true,
+          status: true, keterangan_tidak_aktif: true, TahunPendirian: true,
+          AlamatBumdesa: true, TelfonBumdes: true, Alamatemail: true,
+          badanhukum: true, NIB: true, NPWP: true, LKPP: true, NomorPerdes: true,
+          Pemeringkatan2026: true, Pemeringkatan2024: true,
+          JenisUsaha: true, JenisUsahaUtama: true, TotalTenagaKerja: true,
+          NamaDirektur: true, HPDirektur: true,
+          NilaiAset: true, Omset2024: true, Laba2024: true,
+          Omset2025: true, Laba2025: true,
+          KontribusiTerhadapPADes2024: true, KontribusiTerhadapPADes2025: true,
+          PenyertaanModal2019: true, PenyertaanModal2020: true, PenyertaanModal2021: true,
+          PenyertaanModal2022: true, PenyertaanModal2023: true, PenyertaanModal2024: true,
+          DesaWisata: true, Ketapang2025: true, PeranMBG: true,
+          Perdes: true, AnggaranDasar: true, AnggaranRumahTangga: true,
+          ProgramKerja: true, SK_BUM_Desa: true, ProfilBUMDesa: true, BeritaAcara: true,
+          LaporanKeuangan2021: true, LaporanKeuangan2022: true,
+          LaporanKeuangan2023: true, LaporanKeuangan2024: true,
+        },
+      });
+
+      // Decimal Prisma datang sebagai string; diubah di sini supaya klien tidak
+      // perlu mengurai angka lagi saat mengurutkan atau menjumlahkan.
+      const angka = (v) => (v === null || v === undefined ? null : Number(v));
+      const ada = (v) => Boolean(v && String(v).trim() !== '');
+
+      const data = rows.map((r) => {
+        const modal = [
+          r.PenyertaanModal2019, r.PenyertaanModal2020, r.PenyertaanModal2021,
+          r.PenyertaanModal2022, r.PenyertaanModal2023, r.PenyertaanModal2024,
+        ].reduce((total, v) => total + (angka(v) || 0), 0);
+
+        return {
+          id: r.id,
+          kode_desa: r.kode_desa,
+          nama: r.namabumdesa,
+          desa: r.desa,
+          kecamatan: r.kecamatan,
+          status: r.status,
+          keterangan_tidak_aktif: r.keterangan_tidak_aktif,
+          tahun_pendirian: r.TahunPendirian,
+          alamat: r.AlamatBumdesa,
+          telepon: r.TelfonBumdes,
+          email: r.Alamatemail,
+          badan_hukum: r.badanhukum,
+          nib: r.NIB,
+          npwp: r.NPWP,
+          lkpp: r.LKPP,
+          nomor_perdes: r.NomorPerdes,
+          // Pemeringkatan terbaru yang tersedia, dipakai kolom tabel.
+          pemeringkatan: r.Pemeringkatan2026 || r.Pemeringkatan2024 || null,
+          pemeringkatan_2026: r.Pemeringkatan2026,
+          pemeringkatan_2024: r.Pemeringkatan2024,
+          jenis_usaha: r.JenisUsaha,
+          jenis_usaha_utama: r.JenisUsahaUtama,
+          tenaga_kerja: r.TotalTenagaKerja,
+          direktur: r.NamaDirektur,
+          hp_direktur: r.HPDirektur,
+          aset: angka(r.NilaiAset),
+          omset_2024: angka(r.Omset2024),
+          laba_2024: angka(r.Laba2024),
+          omset_2025: angka(r.Omset2025),
+          laba_2025: angka(r.Laba2025),
+          pades_2024: angka(r.KontribusiTerhadapPADes2024),
+          pades_2025: angka(r.KontribusiTerhadapPADes2025),
+          total_penyertaan_modal: modal,
+          desa_wisata: r.DesaWisata,
+          ketahanan_pangan: r.Ketapang2025,
+          peran_mbg: r.PeranMBG,
+          // Hanya penanda ada/tidak — lintasan berkas tidak dikirim ke klien.
+          dokumen: {
+            perdes: ada(r.Perdes),
+            anggaran_dasar: ada(r.AnggaranDasar),
+            anggaran_rumah_tangga: ada(r.AnggaranRumahTangga),
+            program_kerja: ada(r.ProgramKerja),
+            sk_bum_desa: ada(r.SK_BUM_Desa),
+            profil: ada(r.ProfilBUMDesa),
+            berita_acara: ada(r.BeritaAcara),
+            laporan_keuangan: [
+              r.LaporanKeuangan2021, r.LaporanKeuangan2022,
+              r.LaporanKeuangan2023, r.LaporanKeuangan2024,
+            ].filter(ada).length,
+          },
+        };
+      });
+
+      return res.json({ success: true, total: data.length, data });
+    } catch (error) {
+      logger.error('Error getting BUMDes list:', error);
+      next(error);
     }
   }
 }
