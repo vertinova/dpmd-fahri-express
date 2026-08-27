@@ -45,10 +45,10 @@ cd scripts/bumdes-import
 # 1. BACKUP (wajib, sebelum apa pun)
 bash backup-bumdes.sh
 
-# 2. Lihat kolom yang akan dibuat, lalu jalankan
-node import-bumdes.js --print-ddl
-node import-bumdes.js --print-ddl > /root/alter_bumdes.sql
-mysql -h127.0.0.1 -udpmd_user -p dpmd < /root/alter_bumdes.sql
+# 2. Kolom baru sudah dibuat otomatis oleh migrasi
+#    migrations/20260827_add_bumdes_csv_columns.sql lewat auto-migrate saat
+#    deploy. Langkah ini hanya perlu kalau menyiapkan server baru:
+#      node import-bumdes.js --print-ddl > /root/alter_bumdes.sql
 
 # 3. SIMULASI — tidak menulis apa pun
 node import-bumdes.js --csv=/root/bumdes.csv --dry-run
@@ -69,6 +69,13 @@ cd /var/www/frontend && npm run build && nginx -s reload
 ```
 
 Kredensial dibaca sendiri dari `/var/www/backend/.env`, tidak perlu diketik.
+
+`node` di server dikelola fnm dan TIDAK ada di PATH pada SSH non-interaktif.
+Kalau menjalankan lewat `ssh <host> "..."`, sertakan dulu lintasannya:
+
+```bash
+export PATH=$PATH:/root/.local/share/fnm/node-versions/v20.20.0/installation/bin
+```
 Ganti dengan `--env=/path/lain` bila perlu.
 
 ## Kalau gagal
