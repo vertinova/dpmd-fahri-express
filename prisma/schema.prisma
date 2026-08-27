@@ -799,81 +799,157 @@ model anggaran_rka_items {
 }
 
 model bumdes {
-  id                                                            Int            @id @default(autoincrement())
-  desa_id                                                       Int?
-  kode_desa                                                     String?        @db.VarChar(50)
-  kecamatan                                                     String?        @db.VarChar(255)
-  desa                                                          String?        @db.VarChar(255)
-  namabumdesa                                                   String         @db.VarChar(255)
-  status                                                        bumdes_status  @default(aktif)
-  keterangan_tidak_aktif                                        String?        @db.Text
-  NIB                                                           String?        @db.VarChar(255)
-  LKPP                                                          String?        @db.VarChar(255)
-  NPWP                                                          String?        @db.VarChar(255)
-  badanhukum                                                    String?        @db.VarChar(255)
-  NamaPenasihat                                                 String?        @db.VarChar(255)
-  JenisKelaminPenasihat                                         String?        @db.VarChar(255)
-  HPPenasihat                                                   String?        @db.VarChar(255)
-  NamaPengawas                                                  String?        @db.VarChar(255)
-  JenisKelaminPengawas                                          String?        @db.VarChar(255)
-  HPPengawas                                                    String?        @db.VarChar(255)
-  NamaDirektur                                                  String?        @db.VarChar(255)
-  JenisKelaminDirektur                                          String?        @db.VarChar(255)
-  HPDirektur                                                    String?        @db.VarChar(255)
-  NamaSekretaris                                                String?        @db.VarChar(255)
-  JenisKelaminSekretaris                                        String?        @db.VarChar(255)
-  HPSekretaris                                                  String?        @db.VarChar(255)
-  NamaBendahara                                                 String?        @db.VarChar(255)
-  JenisKelaminBendahara                                         String?        @db.VarChar(255)
-  HPBendahara                                                   String?        @db.VarChar(255)
-  TahunPendirian                                                String?        @db.VarChar(255)
-  AlamatBumdesa                                                 String?        @db.Text
-  Alamatemail                                                   String?        @db.VarChar(255)
-  TotalTenagaKerja                                              Int?
-  TelfonBumdes                                                  String?        @db.VarChar(255)
-  JenisUsaha                                                    String?        @db.Text
-  JenisUsahaUtama                                               String?        @db.VarChar(255)
-  JenisUsahaLainnya                                             String?        @db.Text
-  Omset2023                                                     Decimal?       @db.Decimal(15, 2)
-  Laba2023                                                      Decimal?       @db.Decimal(15, 2)
-  Omset2024                                                     Decimal?       @db.Decimal(15, 2)
-  Laba2024                                                      Decimal?       @db.Decimal(15, 2)
-  PenyertaanModal2019                                           Decimal?       @db.Decimal(15, 2)
-  PenyertaanModal2020                                           Decimal?       @db.Decimal(15, 2)
-  PenyertaanModal2021                                           Decimal?       @db.Decimal(15, 2)
-  PenyertaanModal2022                                           Decimal?       @db.Decimal(15, 2)
-  PenyertaanModal2023                                           Decimal?       @db.Decimal(15, 2)
-  PenyertaanModal2024                                           Decimal?       @db.Decimal(15, 2)
-  SumberLain                                                    Decimal?       @db.Decimal(15, 2)
-  JenisAset                                                     String?        @db.VarChar(255)
-  NilaiAset                                                     Decimal?       @db.Decimal(15, 2)
-  KerjasamaPihakKetiga                                          String?        @db.Text
-  TahunMulai_TahunBerakhir                                      String?        @map("TahunMulai-TahunBerakhir") @db.VarChar(255)
-  KontribusiTerhadapPADes2021                                   Decimal?       @db.Decimal(15, 2)
-  KontribusiTerhadapPADes2022                                   Decimal?       @db.Decimal(15, 2)
-  KontribusiTerhadapPADes2023                                   Decimal?       @db.Decimal(15, 2)
-  KontribusiTerhadapPADes2024                                   Decimal?       @db.Decimal(15, 2)
-  Ketapang2024                                                  String?        @db.VarChar(255)
-  Ketapang2025                                                  String?        @db.VarChar(255)
-  BantuanKementrian                                             String?        @db.Text
-  BantuanLaptopShopee                                           String?        @db.Text
-  NomorPerdes                                                   String?        @db.VarChar(255)
-  DesaWisata                                                    String?        @db.VarChar(255)
-  LaporanKeuangan2021                                           String?        @db.VarChar(255)
-  LaporanKeuangan2022                                           String?        @db.VarChar(255)
-  LaporanKeuangan2023                                           String?        @db.VarChar(255)
-  LaporanKeuangan2024                                           String?        @db.VarChar(255)
-  Perdes                                                        String?        @db.VarChar(255)
-  produk_hukum_perdes_id                                        String?        @db.Char(36)
-  ProfilBUMDesa                                                 String?        @db.VarChar(255)
-  BeritaAcara                                                   String?        @db.VarChar(255)
-  AnggaranDasar                                                 String?        @db.VarChar(255)
-  AnggaranRumahTangga                                           String?        @db.VarChar(255)
-  ProgramKerja                                                  String?        @db.VarChar(255)
-  SK_BUM_Desa                                                   String?        @db.VarChar(255)
-  produk_hukum_sk_bumdes_id                                     String?        @db.Char(36)
-  created_at                                                    DateTime?      @db.Timestamp(0)
-  updated_at                                                    DateTime?      @db.Timestamp(0)
+  id                          Int           @id @default(autoincrement())
+  desa_id                     Int?
+  kode_desa                   String?       @db.VarChar(50)
+  kecamatan                   String?       @db.VarChar(255)
+  desa                        String?       @db.VarChar(255)
+  namabumdesa                 String        @db.VarChar(255)
+  status                      bumdes_status @default(aktif)
+  keterangan_tidak_aktif      String?       @db.Text
+  NIB                         String?       @db.VarChar(255)
+  LKPP                        String?       @db.VarChar(255)
+  NPWP                        String?       @db.VarChar(255)
+  badanhukum                  String?       @db.VarChar(255)
+  NamaPenasihat               String?       @db.VarChar(255)
+  JenisKelaminPenasihat       String?       @db.VarChar(255)
+  HPPenasihat                 String?       @db.VarChar(255)
+  NamaPengawas                String?       @db.VarChar(255)
+  JenisKelaminPengawas        String?       @db.VarChar(255)
+  HPPengawas                  String?       @db.VarChar(255)
+  NamaDirektur                String?       @db.VarChar(255)
+  JenisKelaminDirektur        String?       @db.VarChar(255)
+  HPDirektur                  String?       @db.VarChar(255)
+  NamaSekretaris              String?       @db.VarChar(255)
+  JenisKelaminSekretaris      String?       @db.VarChar(255)
+  HPSekretaris                String?       @db.VarChar(255)
+  NamaBendahara               String?       @db.VarChar(255)
+  JenisKelaminBendahara       String?       @db.VarChar(255)
+  HPBendahara                 String?       @db.VarChar(255)
+  TahunPendirian              String?       @db.VarChar(255)
+  AlamatBumdesa               String?       @db.Text
+  Alamatemail                 String?       @db.VarChar(255)
+  TotalTenagaKerja            Int?
+  TelfonBumdes                String?       @db.VarChar(255)
+  JenisUsaha                  String?       @db.Text
+  JenisUsahaUtama             String?       @db.VarChar(255)
+  JenisUsahaLainnya           String?       @db.Text
+  Omset2023                   Decimal?      @db.Decimal(15, 2)
+  Laba2023                    Decimal?      @db.Decimal(15, 2)
+  Omset2024                   Decimal?      @db.Decimal(15, 2)
+  Laba2024                    Decimal?      @db.Decimal(15, 2)
+  PenyertaanModal2019         Decimal?      @db.Decimal(15, 2)
+  PenyertaanModal2020         Decimal?      @db.Decimal(15, 2)
+  PenyertaanModal2021         Decimal?      @db.Decimal(15, 2)
+  PenyertaanModal2022         Decimal?      @db.Decimal(15, 2)
+  PenyertaanModal2023         Decimal?      @db.Decimal(15, 2)
+  PenyertaanModal2024         Decimal?      @db.Decimal(15, 2)
+  SumberLain                  Decimal?      @db.Decimal(15, 2)
+  JenisAset                   String?       @db.VarChar(255)
+  NilaiAset                   Decimal?      @db.Decimal(15, 2)
+  KerjasamaPihakKetiga        String?       @db.Text
+  TahunMulai_TahunBerakhir    String?       @map("TahunMulai-TahunBerakhir") @db.VarChar(255)
+  KontribusiTerhadapPADes2021 Decimal?      @db.Decimal(15, 2)
+  KontribusiTerhadapPADes2022 Decimal?      @db.Decimal(15, 2)
+  KontribusiTerhadapPADes2023 Decimal?      @db.Decimal(15, 2)
+  KontribusiTerhadapPADes2024 Decimal?      @db.Decimal(15, 2)
+  Ketapang2024                String?       @db.VarChar(255)
+  Ketapang2025                String?       @db.VarChar(255)
+  BantuanKementrian           String?       @db.Text
+  BantuanLaptopShopee         String?       @db.Text
+  NomorPerdes                 String?       @db.VarChar(255)
+  DesaWisata                  String?       @db.VarChar(255)
+  LaporanKeuangan2021         String?       @db.VarChar(255)
+  LaporanKeuangan2022         String?       @db.VarChar(255)
+  LaporanKeuangan2023         String?       @db.VarChar(255)
+  LaporanKeuangan2024         String?       @db.VarChar(255)
+  Perdes                      String?       @db.VarChar(255)
+  produk_hukum_perdes_id      String?       @db.Char(36)
+  ProfilBUMDesa               String?       @db.VarChar(255)
+  BeritaAcara                 String?       @db.VarChar(255)
+  AnggaranDasar               String?       @db.VarChar(255)
+  AnggaranRumahTangga         String?       @db.VarChar(255)
+  ProgramKerja                String?       @db.VarChar(255)
+  SK_BUM_Desa                 String?       @db.VarChar(255)
+  produk_hukum_sk_bumdes_id   String?       @db.Char(36)
+  created_at                  DateTime?     @db.Timestamp(0)
+  updated_at                  DateTime?     @db.Timestamp(0)
+
+  // --- Kolom hasil impor CSV "Rekap data Keseluruhan BUM Desa" (2026-08) ---
+  Status2024                                                    String?        @db.VarChar(20)
+  KeteranganTidakAktif2024                                      String?        @db.VarChar(20)
+  Pemeringkatan2022                                             String?        @db.VarChar(30)
+  NilaiPemeringkatan2022                                        String?        @db.VarChar(10)
+  Pemeringkatan2023                                             String?        @db.VarChar(30)
+  NilaiPemeringkatan2023                                        String?        @db.VarChar(10)
+  Pemeringkatan2024                                             String?        @db.VarChar(30)
+  KetPemeringkatan2024                                          String?        @db.VarChar(10)
+  Pemeringkatan2024Sem1                                         String?        @db.VarChar(30)
+  PemeringkatanApp2023                                          String?        @db.VarChar(30)
+  EvaluasiRPJMN2024                                             String?        @db.VarChar(30)
+  PemeringkatanApp2024                                          String?        @db.VarChar(30)
+  Pemeringkatan2026                                             String?        @db.VarChar(30)
+  StatusBadanHukum2026                                          String?        @db.VarChar(60)
+  StatusBadanHukum2026Feb                                       String?        @db.VarChar(60)
+  StatusBadanHukum2025Pembinaan                                 String?        @db.VarChar(60)
+  StatusBadanHukum2025                                          String?        @db.VarChar(60)
+  StatusBadanHukum2024                                          String?        @db.VarChar(60)
+  StatusBadanHukum2023                                          String?        @db.VarChar(60)
+  StatusBadanHukum2022                                          String?        @db.VarChar(60)
+  NamaStafLainnya                                               String?        @db.VarChar(255)
+  JenisKelaminStafLainnya                                       String?        @db.VarChar(20)
+  HPStafLainnya                                                 String?        @db.VarChar(50)
+  JenisUsaha2021                                                String?        @db.Text
+  JenisUsahaKetahananPangan                                     String?        @db.Text
+  KeteranganUsahaKetahananPangan                                String?        @db.Text
+  VolumeKetahananPangan                                         String?        @db.Text
+  AnggaranModalKetahananPangan                                  Decimal?       @db.Decimal(15, 2)
+  Omset2024Sem1                                                 Decimal?       @db.Decimal(15, 2)
+  Laba2024Sem1                                                  Decimal?       @db.Decimal(15, 2)
+  Omset2025                                                     Decimal?       @db.Decimal(15, 2)
+  Laba2025                                                      Decimal?       @db.Decimal(15, 2)
+  PenganggaranPenyertaanModal2025                               Decimal?       @db.Decimal(15, 2)
+  PenyertaanModalTPKK                                           Decimal?       @db.Decimal(15, 2)
+  TotalRealisasiPenyertaanModal20192025                         Decimal?       @db.Decimal(15, 2)
+  JumlahModalAwal                                               Decimal?       @db.Decimal(15, 2)
+  KontribusiTerhadapPADes2025                                   Decimal?       @db.Decimal(15, 2)
+  KontribusiKemitraanPADes2024                                  Decimal?       @db.Decimal(15, 2)
+  KontribusiKemitraanPADes2025                                  Decimal?       @db.Decimal(15, 2)
+  DesaWisataStatus                                              String?        @db.VarChar(20)
+  PeranMBG                                                      String?        @db.Text
+  MekanismeKerjaSamaMBG                                         String?        @db.Text
+  JumlahSPPG                                                    Int?
+  TahunKerjaSamaMBG                                             String?        @db.VarChar(20)
+  BantuanLainnya                                                String?        @db.Text
+  Pelatihan2022                                                 String?        @db.Text
+  Pelatihan2023                                                 String?        @db.Text
+  PelatihanBUMDesa2024                                          String?        @db.Text
+  PelatihanPenasehatPengawas2024                                String?        @db.Text
+  Pelatihan2025Pertama                                          String?        @db.Text
+  PelatihanBusinessPlanUI2023                                   String?        @db.Text
+  SABISA                                                        String?        @db.Text
+  FGDUI2024                                                     String?        @db.Text
+  FGDBRIN2024                                                   String?        @db.Text
+  ToTSTAN                                                       String?        @db.Text
+  SosialisasiELearningUI                                        String?        @db.Text
+  PesertaPelatihanBalaiBesarKemendesa                           String?        @db.Text
+  Pembinaan2022                                                 String?        @db.Text
+  Pembinaan2023                                                 String?        @db.Text
+  Pembinaan2024                                                 String?        @db.Text
+  ProgressHasilPembinaan2024                                    String?        @db.Text
+  DeskPendataan2025                                             String?        @db.VarChar(20)
+  KehadiranDesk2026                                             String?        @db.VarChar(20)
+  PermintaanDataKPK                                             String?        @db.Text
+  MasalahPendirianPenyertaanModal                               String?        @db.Text
+  TahunPenyertaanModalBermasalah                                String?        @db.Text
+  SuratKonfirmasi                                               String?        @db.Text
+  BerkasSurat                                                   String?        @db.Text
+  PermasalahanLainnya                                           String?        @db.Text
+  ECommerce                                                     String?        @db.Text
+  LinkSK                                                        String?        @db.Text
+  LinkLapKeuangan2021                                           String?        @db.Text
+  LinkSKKepengurusan2021                                        String?        @db.Text
+  CatatanTambahan                                               String?        @db.Text
   produk_hukums_bumdes_produk_hukum_perdes_idToproduk_hukums    produk_hukums? @relation("bumdes_produk_hukum_perdes_idToproduk_hukums", fields: [produk_hukum_perdes_id], references: [id], onUpdate: NoAction, map: "bumdes_produk_hukum_perdes_id_foreign")
   produk_hukums_bumdes_produk_hukum_sk_bumdes_idToproduk_hukums produk_hukums? @relation("bumdes_produk_hukum_sk_bumdes_idToproduk_hukums", fields: [produk_hukum_sk_bumdes_id], references: [id], onUpdate: NoAction, map: "bumdes_produk_hukum_sk_bumdes_id_foreign")
 

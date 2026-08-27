@@ -1,0 +1,4 @@
+# Skrip shell dan berkas SQL harus selalu berakhiran LF.
+# Dengan CRLF, bash di server gagal dengan "bad interpreter: bash^M".
+*.sh text eol=lf
+*.sql text eol=lf

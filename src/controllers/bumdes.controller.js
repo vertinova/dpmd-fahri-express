@@ -3,6 +3,7 @@ const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const fs = require('fs').promises;
 const path = require('path');
+const { KOLOM_DESA, KOLOM_ADMIN, siapkanData } = require('../config/bumdesFields');
 
 class BumdesController {
   
@@ -72,59 +73,8 @@ class BumdesController {
         });
       }
 
-      // Fix field name typos from frontend
-      if (data.AlamatBumdes) {
-        data.AlamatBumdesa = data.AlamatBumdes;
-        delete data.AlamatBumdes;
-      }
-      if (data.NoHpBumdes) {
-        data.TelfonBumdes = data.NoHpBumdes;
-        delete data.NoHpBumdes;
-      }
-      if (data.EmailBumdes) {
-        data.Alamatemail = data.EmailBumdes;
-        delete data.EmailBumdes;
-      }
-      if (data.NoPerdes) {
-        data.NomorPerdes = data.NoPerdes;
-        delete data.NoPerdes;
-      }
-
-      // Remove fields that don't exist in schema or need special handling
-      const invalidFields = [
-        'TanggalPerdes', 'NoSKKemenkumham', 'TanggalSKKemenkumham',
-        'TenagaKerjaLaki', 'TenagaKerjaPerempuan', 'KelasUsaha', 
-        'StatusUsaha', 'ModalAwal', 'ModalSekarang', 'Aset', 
-        'KekayaanBersih', 'Omzet2022', 'SHU2022', 'SHU2023', 
-        'SHU2024', 'Laba2022', 'PotensiWisata', 'OVOP', 
-        'DesaWisata', 'KontribusiPADesRP', 'KontribusiPADesPersen',
-        'PeranOVOP', 'PeranKetapang2025', 'PeranDesaWisata',
-        'upload_status', 'AlamatBumdes', 'NoHpBumdes', 'EmailBumdes', 'NoPerdes',
-        'produk_hukum_perdes_id', 'produk_hukum_sk_bumdes_id'  // Remove FK fields - not supported in create
-      ];
-      
-      invalidFields.forEach(field => {
-        if (data[field] !== undefined) {
-          delete data[field];
-        }
-      });
-
-      // Convert empty strings to null for optional fields
-      Object.keys(data).forEach(key => {
-        if (data[key] === '') {
-          data[key] = null;
-        }
-      });
-
-      logger.info('BUMDES Data After Cleanup:', {
-        namabumdesa: data.namabumdesa,
-        has_AlamatBumdes: !!data.AlamatBumdes,
-        has_AlamatBumdesa: !!data.AlamatBumdesa,
-        has_NoHpBumdes: !!data.NoHpBumdes,
-        produk_hukum_perdes_id: data.produk_hukum_perdes_id,
-        produk_hukum_sk_bumdes_id: data.produk_hukum_sk_bumdes_id,
-        total_fields: Object.keys(data).length
-      });
+      // Penyaringan payload dilakukan di bawah, setelah desa tujuan
+      // ditentukan: lihat siapkanData() di src/config/bumdesFields.js.
       
       // For role 'desa', use their desa_id
       // For role 'sarana_prasarana', 'dinas', or 'superadmin', use desa_id from form data
@@ -175,26 +125,28 @@ class BumdesController {
         });
       }
 
-      // Convert numeric string fields to proper types
-      if (data.TotalTenagaKerja) data.TotalTenagaKerja = parseInt(data.TotalTenagaKerja);
-      
-      // Convert decimal string fields to Decimal (Prisma handles this, but we should parse)
-      const decimalFields = [
-        'Omset2023', 'Laba2023', 'Omset2024', 'Laba2024',
-        'PenyertaanModal2019', 'PenyertaanModal2020', 'PenyertaanModal2021',
-        'PenyertaanModal2022', 'PenyertaanModal2023', 'PenyertaanModal2024',
-        'SumberLain', 'NilaiAset'
-      ];
-      
-      decimalFields.forEach(field => {
-        if (data[field] !== undefined && data[field] !== null && data[field] !== '') {
-          // Convert string to number, Prisma will handle Decimal conversion
-          data[field] = parseFloat(data[field]);
-        } else if (data[field] === '') {
-          // Convert empty strings to null
-          data[field] = null;
-        }
+      // Saring payload: hanya kolom yang boleh ditulis peran ini yang lolos,
+      // alias ejaan lama diterjemahkan, angka berformat rupiah dibaca, dan
+      // status diseragamkan ke nilai enum Prisma.
+      const kolomBoleh = userRole === 'desa' ? KOLOM_DESA : KOLOM_ADMIN;
+      const dataTersaring = siapkanData(data, kolomBoleh);
+
+      // Identitas desa selalu ditetapkan sistem dari tabel desas, tidak pernah
+      // dari input — inilah yang dulu membuat desa_id kosong di seluruh baris.
+      const desaRef = await prisma.desas.findUnique({
+        where: { id: BigInt(targetDesaId) },
+        select: { id: true, kode: true, nama: true, kecamatans: { select: { nama: true } } }
       });
+      if (!desaRef) {
+        return res.status(404).json({
+          success: false,
+          message: 'Desa tidak ditemukan'
+        });
+      }
+      dataTersaring.desa_id = Number(desaRef.id);
+      dataTersaring.kode_desa = desaRef.kode;
+      dataTersaring.desa = desaRef.nama;
+      dataTersaring.kecamatan = desaRef.kecamatans?.nama || null;
 
       // Check if BUMDES already exists for this desa_id
       const existing = await prisma.bumdes.findFirst({
@@ -208,13 +160,13 @@ class BumdesController {
         // Update existing
         bumdes = await prisma.bumdes.update({
           where: { id: existing.id },
-          data
+          data: dataTersaring
         });
         logger.info(`BUMDES updated for desa_id: ${targetDesaId} by user ${userId} (${userRole})`);
       } else {
         // Create new
         bumdes = await prisma.bumdes.create({
-          data
+          data: dataTersaring
         });
         logger.info(`BUMDES created for desa_id: ${targetDesaId}, id: ${bumdes.id} by user ${userId} (${userRole})`);
       }
@@ -468,37 +420,10 @@ class BumdesController {
         });
       }
 
-      // Filter only valid fields for Prisma update
-      const validFields = [
-        'desa_id', 'kode_desa', 'kecamatan', 'desa', 'namabumdesa', 'status', 'keterangan_tidak_aktif',
-        'NIB', 'LKPP', 'NPWP', 'badanhukum',
-        'NamaPenasihat', 'JenisKelaminPenasihat', 'HPPenasihat',
-        'NamaPengawas', 'JenisKelaminPengawas', 'HPPengawas',
-        'NamaDirektur', 'JenisKelaminDirektur', 'HPDirektur',
-        'NamaSekretaris', 'JenisKelaminSekretaris', 'HPSekretaris',
-        'NamaBendahara', 'JenisKelaminBendahara', 'HPBendahara',
-        'TahunPendirian', 'AlamatBumdesa', 'Alamatemail', 'TotalTenagaKerja', 'TelfonBumdes',
-        'JenisUsaha', 'JenisUsahaUtama', 'JenisUsahaLainnya',
-        'Omset2023', 'Laba2023', 'Omset2024', 'Laba2024',
-        'PenyertaanModal2019', 'PenyertaanModal2020', 'PenyertaanModal2021',
-        'PenyertaanModal2022', 'PenyertaanModal2023', 'PenyertaanModal2024',
-        'SumberLain', 'JenisAset', 'NilaiAset',
-        'KerjasamaPihakKetiga', 'TahunMulai-TahunBerakhir',
-        'KontribusiTerhadapPADes2021', 'KontribusiTerhadapPADes2022',
-        'KontribusiTerhadapPADes2023', 'KontribusiTerhadapPADes2024',
-        'Ketapang2024', 'Ketapang2025', 'BantuanKementrian', 'BantuanLaptopShopee',
-        'NomorPerdes', 'DesaWisata',
-        'LaporanKeuangan2021', 'LaporanKeuangan2022', 'LaporanKeuangan2023', 'LaporanKeuangan2024',
-        'Perdes', 'produk_hukum_perdes_id', 'ProfilBUMDesa', 'BeritaAcara',
-        'AnggaranDasar', 'AnggaranRumahTangga', 'ProgramKerja', 'SK_BUM_Desa', 'produk_hukum_sk_bumdes_id'
-      ];
-
-      const dataToUpdate = {};
-      for (const field of validFields) {
-        if (req.body[field] !== undefined) {
-          dataToUpdate[field] = req.body[field];
-        }
-      }
+      // Saring payload dengan daftar-izin yang sama seperti saat menyimpan,
+      // supaya aturan kolom tidak bisa berbeda antara create dan update.
+      const kolomBoleh = userRole === 'desa' ? KOLOM_DESA : KOLOM_ADMIN;
+      const dataToUpdate = siapkanData(req.body, kolomBoleh);
 
       const bumdes = await prisma.bumdes.update({
         where: { id: parseInt(id) },
