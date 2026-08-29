@@ -561,6 +561,15 @@ class KepalaDinasController {
           ProgramKerja: true, SK_BUM_Desa: true, ProfilBUMDesa: true, BeritaAcara: true,
           LaporanKeuangan2021: true, LaporanKeuangan2022: true,
           LaporanKeuangan2023: true, LaporanKeuangan2024: true,
+          // Perdes/SK yang dipilih desa dari modul Produk Hukum. Berkasnya ada
+          // di folder lain, jadi harus ikut supaya tombol dokumen di Core
+          // Dashboard tidak kosong untuk desa yang menempuh jalur itu.
+          produk_hukums_bumdes_produk_hukum_perdes_idToproduk_hukums: {
+            select: { id: true, judul: true, nomor: true, tahun: true, file: true },
+          },
+          produk_hukums_bumdes_produk_hukum_sk_bumdes_idToproduk_hukums: {
+            select: { id: true, judul: true, nomor: true, tahun: true, file: true },
+          },
         },
       });
 
@@ -568,6 +577,30 @@ class KepalaDinasController {
       // perlu mengurai angka lagi saat mengurutkan atau menjumlahkan.
       const angka = (v) => (v === null || v === undefined ? null : Number(v));
       const ada = (v) => Boolean(v && String(v).trim() !== '');
+
+      // Kolom berkas menyimpan bentuk campur: kadang "dokumen_badanhukum/x.pdf",
+      // kadang nama berkasnya saja. Yang dipakai selalu nama dasarnya, lalu
+      // dirakit ulang di atas folder penyajian yang sebenarnya.
+      //
+      // Yang dikirim FOLDER + NAMA, bukan URL utuh. BASE_URL di .env menunjuk
+      // origin frontend (port 5173), sedangkan /uploads dilayani backend dan
+      // tidak diteruskan oleh dev server — URL utuh dari sini akan 404. Klien
+      // sudah tahu alamat penyimpanannya sendiri lewat API_CONFIG.STORAGE_URL.
+      const berkas = (nilai, folder, jenis, label, tambahan = {}) => {
+        if (!ada(nilai)) return null;
+        const nama = String(nilai).split('/').pop();
+        return { jenis, label, nama, folder, sumber: 'unggahan', ...tambahan };
+      };
+
+      const DOKUMEN_BADAN_HUKUM = [
+        ['Perdes', 'Perdes Pendirian'],
+        ['ProfilBUMDesa', 'Profil BUM Desa'],
+        ['BeritaAcara', 'Berita Acara'],
+        ['AnggaranDasar', 'Anggaran Dasar'],
+        ['AnggaranRumahTangga', 'Anggaran Rumah Tangga'],
+        ['ProgramKerja', 'Program Kerja'],
+        ['SK_BUM_Desa', 'SK BUM Desa'],
+      ];
 
       const data = rows.map((r) => {
         const modal = [
@@ -612,7 +645,24 @@ class KepalaDinasController {
           desa_wisata: r.DesaWisata,
           ketahanan_pangan: r.Ketapang2025,
           peran_mbg: r.PeranMBG,
-          // Hanya penanda ada/tidak — lintasan berkas tidak dikirim ke klien.
+          // Berkas yang benar-benar bisa dibuka, dari dua jalur sekaligus:
+          // diunggah lewat halaman BUMDes, atau dipilih desa dari Produk Hukum.
+          berkas: [
+            ...DOKUMEN_BADAN_HUKUM
+              .map(([kolom, label]) => berkas(r[kolom], 'bumdes_dokumen_badanhukum', kolom, label)),
+            ...['2021', '2022', '2023', '2024'].map((th) =>
+              berkas(r[`LaporanKeuangan${th}`], 'bumdes_laporan_keuangan', `LaporanKeuangan${th}`, `Laporan Keuangan ${th}`)),
+            ...[
+              [r.produk_hukums_bumdes_produk_hukum_perdes_idToproduk_hukums, 'ProdukHukumPerdes', 'Perdes (dari Produk Hukum)'],
+              [r.produk_hukums_bumdes_produk_hukum_sk_bumdes_idToproduk_hukums, 'ProdukHukumSK', 'SK BUM Desa (dari Produk Hukum)'],
+            ].map(([ph, jenis, label]) => (ph && ada(ph.file)
+              ? berkas(ph.file, 'produk-hukum', jenis, label, {
+                sumber: 'produk_hukum',
+                keterangan: [ph.nomor, ph.tahun].filter(Boolean).join(' · ') || ph.judul || null,
+              })
+              : null)),
+          ].filter(Boolean),
+          // Penanda ada/tidak, dipakai penyaring kelengkapan dokumen.
           dokumen: {
             perdes: ada(r.Perdes),
             anggaran_dasar: ada(r.AnggaranDasar),
