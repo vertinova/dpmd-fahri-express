@@ -646,7 +646,14 @@ class BumdesController {
           AnggaranRumahTangga: true,
           ProgramKerja: true,
           Perdes: true,
-          SK_BUM_Desa: true
+          SK_BUM_Desa: true,
+          // Dokumen yang dipilih desa dari modul Produk Hukum, bukan diunggah di sini.
+          produk_hukums_bumdes_produk_hukum_perdes_idToproduk_hukums: {
+            select: { id: true, judul: true, nomor: true, tahun: true, file: true }
+          },
+          produk_hukums_bumdes_produk_hukum_sk_bumdes_idToproduk_hukums: {
+            select: { id: true, judul: true, nomor: true, tahun: true, file: true }
+          }
         }
       });
 
@@ -661,6 +668,22 @@ class BumdesController {
         { field: 'ProgramKerja', label: 'Program Kerja' },
         { field: 'Perdes', label: 'Peraturan Desa' },
         { field: 'SK_BUM_Desa', label: 'SK BUM Desa' }
+      ];
+
+      // Perdes dan SK BUM Desa punya dua jalur: diunggah langsung di halaman ini,
+      // atau dipilih desa dari modul Produk Hukum. Keduanya harus terlihat di sini,
+      // kalau tidak dokumen yang sudah ada di halaman desa seolah-olah hilang.
+      const tautanProdukHukum = [
+        {
+          relasi: 'produk_hukums_bumdes_produk_hukum_perdes_idToproduk_hukums',
+          field: 'produk_hukum_perdes_id',
+          label: 'Peraturan Desa'
+        },
+        {
+          relasi: 'produk_hukums_bumdes_produk_hukum_sk_bumdes_idToproduk_hukums',
+          field: 'produk_hukum_sk_bumdes_id',
+          label: 'SK BUM Desa'
+        }
       ];
 
       for (const bumdes of allBumdes) {
@@ -682,6 +705,7 @@ class BumdesController {
                 download_url: `${baseUrl}/uploads/bumdes_dokumen_badanhukum/${filename}`,
                 file_exists: true, // File ada di database
                 status: 'available',
+                sumber: 'unggahan',
                 bumdes_name: bumdes.namabumdesa || 'Tidak Diketahui',
                 desa: bumdes.desa || '',
                 kecamatan: bumdes.kecamatan || '',
@@ -690,6 +714,39 @@ class BumdesController {
               });
             }
           }
+        }
+
+        for (const { relasi, field, label } of tautanProdukHukum) {
+          const ph = bumdes[relasi];
+          if (!ph || !ph.file) continue;
+
+          const filename = ph.file.split('/').pop();
+          const uniqueKey = `${bumdes.id}_${filename}_${field}`;
+          if (seenFiles.has(uniqueKey)) continue;
+          seenFiles.add(uniqueKey);
+
+          documents.push({
+            filename,
+            document_type: label,
+            original_path: `uploads/produk-hukum/${filename}`,
+            url: `${baseUrl}/uploads/produk-hukum/${filename}`,
+            download_url: `${baseUrl}/uploads/produk-hukum/${filename}`,
+            file_exists: true,
+            status: 'available',
+            // Berkasnya milik arsip Produk Hukum desa; jangan dihapus dari sini.
+            sumber: 'produk_hukum',
+            produk_hukum: {
+              id: ph.id,
+              judul: ph.judul,
+              nomor: ph.nomor,
+              tahun: ph.tahun
+            },
+            bumdes_name: bumdes.namabumdesa || 'Tidak Diketahui',
+            desa: bumdes.desa || '',
+            kecamatan: bumdes.kecamatan || '',
+            bumdes_id: bumdes.id,
+            field: field
+          });
         }
       }
 
@@ -814,8 +871,15 @@ class BumdesController {
       const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
 
       // Get all BUMDES with produk hukum documents
-      const allBumdes = await Bumdes.findAll({
-        attributes: ['id', 'namabumdesa', 'desa', 'kecamatan', 'Perdes', 'SK_BUM_Desa']
+      const allBumdes = await prisma.bumdes.findMany({
+        select: {
+          id: true,
+          namabumdesa: true,
+          desa: true,
+          kecamatan: true,
+          Perdes: true,
+          SK_BUM_Desa: true
+        }
       });
       
       const documents = [];
@@ -1157,6 +1221,29 @@ class BumdesController {
         });
       }
 
+      // Berkas yang berasal dari modul Produk Hukum desa tidak boleh dihapus dari
+      // halaman BUMDes: pemiliknya arsip hukum desa, dan menghapusnya di sini akan
+      // memutus dokumen yang masih dipakai di halaman desa.
+      const dariProdukHukum = await prisma.produk_hukums.findFirst({
+        where: {
+          file: { contains: filename },
+          OR: [
+            { bumdes_bumdes_produk_hukum_perdes_idToproduk_hukums: { some: {} } },
+            { bumdes_bumdes_produk_hukum_sk_bumdes_idToproduk_hukums: { some: {} } }
+          ]
+        },
+        select: { id: true, judul: true }
+      });
+
+      if (dariProdukHukum) {
+        return res.status(409).json({
+          success: false,
+          message: 'Berkas ini berasal dari Produk Hukum desa, bukan unggahan BUMDes. '
+            + 'Hapus atau ganti lewat menu Produk Hukum di halaman desa.',
+          produk_hukum: dariProdukHukum
+        });
+      }
+
       // Find BUMDes that has this file
       const documentFields = document_type === 'dokumen_badan_hukum' 
         ? ['Perdes', 'ProfilBUMDesa', 'BeritaAcara', 'AnggaranDasar', 'AnggaranRumahTangga', 'ProgramKerja', 'SK_BUM_Desa']
@@ -1208,57 +1295,6 @@ class BumdesController {
     }
   }
 
-}
-
-// Helper functions (outside class)
-async function findMatchingBumdes(filename) {
-  const matches = [];
-  
-  const documentFields = [
-    'Perdes', 'ProfilBUMDesa', 'BeritaAcara', 'AnggaranDasar', 
-    'AnggaranRumahTangga', 'ProgramKerja', 'SK_BUM_Desa',
-    'LaporanKeuangan2021', 'LaporanKeuangan2022', 'LaporanKeuangan2023', 'LaporanKeuangan2024'
-  ];
-
-  for (const field of documentFields) {
-    const bumdesList = await Bumdes.findAll({
-      where: {
-        [field]: {
-          [require('sequelize').Op.like]: `%${filename}%`
-        }
-      }
-    });
-
-    for (const bumdes of bumdesList) {
-      const dbValue = bumdes[field];
-      if (!dbValue) continue;
-
-      let extractedFilename = null;
-      
-      if (dbValue.includes('bumdes_dokumen_badanhukum/')) {
-        extractedFilename = dbValue.split('bumdes_dokumen_badanhukum/')[1];
-      } else if (dbValue.includes('bumdes_laporan_keuangan/')) {
-        extractedFilename = dbValue.split('bumdes_laporan_keuangan/')[1];
-      } else if (dbValue.includes('/')) {
-        extractedFilename = path.basename(dbValue);
-      } else {
-        extractedFilename = dbValue;
-      }
-
-      if (extractedFilename === filename) {
-        matches.push({
-          id: bumdes.id,
-          namabumdesa: bumdes.namabumdesa,
-          desa: bumdes.desa,
-          kecamatan: bumdes.kecamatan,
-          match_field: field
-        });
-        break;
-      }
-    }
-  }
-
-  return matches;
 }
 
 function formatBytes(bytes, decimals = 2) {
