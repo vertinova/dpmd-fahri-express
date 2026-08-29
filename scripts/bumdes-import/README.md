@@ -93,13 +93,15 @@ Importer menulis `bumdes_anomali_<stempel>.csv` berisi nilai yang tidak bisa
 dibaca sebagai angka. Kolomnya diisi `NULL`, **tidak ditebak**. Perbaiki di
 sheet lalu jalankan ulang — mode `gabung` aman diulang.
 
-Dari CSV sekarang ada **16 anomali**, antara lain:
+Dari CSV versi 2026-08-27 tersisa **11 anomali** (sebelumnya 16; sebagian sudah
+dibetulkan di sheet):
 
 - Balekambang: `Laba2024`, `Omset2025`, `Laba2025` tertulis ±Rp 16.270 **triliun**
   (melebihi kapasitas `DECIMAL(15,2)`, hampir pasti salah ketik)
-- Cariu, Cihowe, Curug: kontribusi PADes ditulis "2.000.000/bulan", "2 Jt Perbulan"
-- Pamijahan, Karehkel, Ciasmara: modal awal ditulis sebagai kalimat
-- Semplak Barat: `NilaiAset` = "10 unit kios"
+- Cariu, Cihowe: kontribusi PADes ditulis "2.000.000/bulan", "2 Jt Perbulan"
+- Pamijahan, Karehkel: modal awal ditulis sebagai kalimat
+- Pamijahan, Semplak Barat: `NilaiAset` ditulis kalimat / "10 unit kios"
+- Mekarsari: `AnggaranModalKetahananPangan` = "171.35" (ambigu ribuan vs desimal)
 
 ## Catatan lanjutan
 
@@ -112,3 +114,30 @@ Dari CSV sekarang ada **16 anomali**, antara lain:
 
 2. **Ukuran baris tabel** setelah ALTER kira-kira 49.700 dari batas 65.535 byte
    (149 kolom). Penambahan kolom berikutnya sebaiknya bertipe `TEXT`.
+
+## Menjalankan di laptop (Laragon)
+
+Sama persis, hanya kredensial dan lintasan yang berbeda — `--env` menunjuk `.env`
+lokal, dan `mysql`/`mysqldump` Laragon perlu ditambahkan ke PATH.
+
+```bash
+export PATH=$PATH:/c/laragon/bin/mysql/mysql-8.0.30-winx64/bin
+cd /d/dpmd/dpmd-fahri-express
+
+# 1. Backup
+ENV_FILE="$PWD/.env" DEST_ROOT=/c/Users/ACER/backup-bumdes bash scripts/bumdes-import/backup-bumdes.sh
+
+# 2. Kolom baru (sekali saja; di lokal tidak ada auto-migrate)
+mysql -h127.0.0.1 -uroot dpmd < migrations/20260827_add_bumdes_csv_columns.sql
+
+# 3. Simulasi, lalu impor
+node scripts/bumdes-import/import-bumdes.js --csv="D:/dpmd/Rekap data Keseluruhan BUM Desa - Data Base BUM Desa.csv" --env="$PWD/.env" --dry-run
+node scripts/bumdes-import/import-bumdes.js --csv="D:/dpmd/Rekap data Keseluruhan BUM Desa - Data Base BUM Desa.csv" --env="$PWD/.env" --mode=gabung
+
+# 4. Verifikasi + segarkan Prisma
+mysql -h127.0.0.1 -uroot dpmd < scripts/bumdes-import/verifikasi.sql
+npx prisma generate
+```
+
+Dijalankan 2026-08-29 di Laragon: 187 diperbarui, 229 ditambah, 416 total,
+`desa_id` kosong 0, 200 dokumen lama utuh, 11 anomali.
