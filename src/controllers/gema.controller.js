@@ -37,6 +37,7 @@ const CONTOH = [
 	'berapa RW di desa Cijayanti',
 	'berapa ADD di kecamatan Jonggol',
 	'penyaluran dana desa',
+	'kepala desa Cibeuteung Muara',
 ];
 
 /** POST /api/gema/tanya  { teks } */

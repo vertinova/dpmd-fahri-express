@@ -29,6 +29,9 @@ const prisma = require('../config/prisma');
 const { muatKamus } = require('./gemaKamus.service');
 const { jawabKeuangan, sumberDanaDisebut } = require('./gemaKeuangan.service');
 const { bicarakan, belumBisa } = require('./gemaGaya.service');
+const {
+	detailAparatur, detailBumdes, detailProdukHukum,
+} = require('./gemaDetail.service');
 
 const nf = new Intl.NumberFormat('id-ID');
 
@@ -334,13 +337,18 @@ const daftarBumdes = async (a) => {
 		prisma.bumdes.findMany({
 			where,
 			select: {
-				namabumdesa: true, desa: true, kecamatan: true, status: true,
+				id: true, namabumdesa: true, desa: true, kecamatan: true, status: true,
 				badanhukum: true, NilaiAset: true, Omset2025: true,
 			},
 			orderBy: [{ kecamatan: 'asc' }, { desa: 'asc' }],
 			take: BATAS_BARIS,
 		}),
 	]);
+
+	if (jumlah === 1 && baris[0]) {
+		const detail = await detailBumdes(baris[0].id);
+		if (detail) return detail;
+	}
 
 	const sifat = [
 		a.mintaAktif ? 'berstatus aktif' : null,
@@ -383,13 +391,21 @@ const daftarAparatur = async (a) => {
 		prisma.aparatur_desa.findMany({
 			where,
 			select: {
-				nama_lengkap: true, jabatan: true, status: true,
+				id: true, nama_lengkap: true, jabatan: true, status: true,
 				desas: { select: { nama: true, kecamatans: { select: { nama: true } } } },
 			},
 			orderBy: { nama_lengkap: 'asc' },
 			take: BATAS_BARIS,
 		}),
 	]);
+
+	// Pertanyaan yang mengerucut ke SATU orang tidak sedang meminta daftar
+	// berisi satu baris — ia meminta orangnya. "Kepala desa Cibeuteung Muara"
+	// harus menjawab dengan profil, bukan tabel.
+	if (jumlah === 1 && baris[0]) {
+		const detail = await detailAparatur(baris[0].id);
+		if (detail) return detail;
+	}
 
 	const sifat = [
 		a.jabatan ? `berjabatan ${a.jabatan.nama}` : null,
@@ -441,13 +457,19 @@ const daftarProdukHukum = async (a) => {
 		prisma.produk_hukums.findMany({
 			where,
 			select: {
-				judul: true, nomor: true, tahun: true, singkatan_jenis: true, status_peraturan: true,
+				id: true, judul: true, nomor: true, tahun: true,
+				singkatan_jenis: true, status_peraturan: true,
 				desas: { select: { nama: true, kecamatans: { select: { nama: true } } } },
 			},
 			orderBy: [{ tahun: 'desc' }],
 			take: BATAS_BARIS,
 		}),
 	]);
+
+	if (jumlah === 1 && baris[0]) {
+		const detail = await detailProdukHukum(baris[0].id);
+		if (detail) return detail;
+	}
 
 	const sifat = [
 		a.desa ? `Desa ${a.desa.nama}` : null,
@@ -623,25 +645,25 @@ const pencarianMenyeluruh = async (kataAsli) => {
 	const [desa, bumdes, aparatur, produkHukum] = await Promise.all([
 		prisma.desas.findMany({
 			where: { nama: { contains: kata } },
-			select: { nama: true, kecamatans: { select: { nama: true } } },
+			select: { id: true, nama: true, kecamatans: { select: { nama: true } } },
 			take: 25,
 		}),
 		prisma.bumdes.findMany({
 			where: { namabumdesa: { contains: kata } },
-			select: { namabumdesa: true, desa: true, kecamatan: true },
+			select: { id: true, namabumdesa: true, desa: true, kecamatan: true },
 			take: 25,
 		}),
 		prisma.aparatur_desa.findMany({
 			where: { nama_lengkap: { contains: kata } },
 			select: {
-				nama_lengkap: true, jabatan: true,
+				id: true, nama_lengkap: true, jabatan: true,
 				desas: { select: { nama: true, kecamatans: { select: { nama: true } } } },
 			},
 			take: 25,
 		}),
 		prisma.produk_hukums.findMany({
 			where: { OR: [{ judul: { contains: kata } }, { nomor: { contains: kata } }] },
-			select: { judul: true, nomor: true, tahun: true, desas: { select: { nama: true } } },
+			select: { id: true, judul: true, nomor: true, tahun: true, desas: { select: { nama: true } } },
 			take: 25,
 		}),
 	]);
@@ -664,6 +686,29 @@ const pencarianMenyeluruh = async (kataAsli) => {
 			keterangan: `Nomor ${p.nomor} tahun ${p.tahun} · ${p.desas?.nama || '—'}`,
 		})),
 	];
+
+	// Satu hasil tunggal di seluruh sistem = pertanyaannya memang tentang benda
+	// itu. Menampilkan tabel satu baris untuk pencarian nama orang terasa seperti
+	// alat yang tidak mau menjawab.
+	if (baris.length === 1) {
+		if (aparatur.length === 1) {
+			const d = await detailAparatur(aparatur[0].id);
+			if (d) return d;
+		}
+		if (bumdes.length === 1) {
+			const d = await detailBumdes(bumdes[0].id);
+			if (d) return d;
+		}
+		if (produkHukum.length === 1) {
+			const d = await detailProdukHukum(produkHukum[0].id);
+			if (d) return d;
+		}
+		if (desa.length === 1) {
+			const kamus = await muatKamus();
+			const cocok = kamus.desa.find((x) => x.id === desa[0].id);
+			if (cocok) return raporDesa(cocok);
+		}
+	}
 
 	const ringkas = [
 		desa.length ? `${desa.length} desa` : null,

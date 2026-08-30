@@ -98,7 +98,8 @@ const buatAlat = (tangkap) => {
 			name: 'cari_bumdes',
 			description:
 				'Cari BUM Desa. Bisa disaring status aktif, sudah terbit badan hukum, '
-				+ 'kecamatan, atau desa tertentu.',
+				+ 'kecamatan, atau desa tertentu. Kalau hasilnya tinggal SATU, yang kembali '
+				+ 'adalah profil lengkapnya: direktur, NIB, NPWP, aset, omset, dan PADes.',
 			inputSchema: {
 				type: 'object',
 				properties: {
@@ -125,7 +126,9 @@ const buatAlat = (tangkap) => {
 			name: 'cari_aparatur',
 			description:
 				'Cari aparatur desa. Bisa disaring jabatan (mis. KEPALA DESA, SEKRETARIS '
-				+ 'DESA, Anggota BPD, KAUR KEUANGAN), kecamatan, atau desa.',
+				+ 'DESA, Anggota BPD, KAUR KEUANGAN), kecamatan, atau desa. Kalau hasilnya '
+				+ 'tinggal SATU orang, yang kembali adalah profil lengkapnya: NIPD, tempat '
+				+ 'dan tanggal lahir, pendidikan, SK pengangkatan, BPJS, dan berkasnya.',
 			inputSchema: {
 				type: 'object',
 				properties: {
@@ -305,6 +308,9 @@ const susunSistem = (kamus) => [
 	'- sebutkan CONTOH isi datanya, bukan cuma jumlahnya. "Ada 66 desa" kurang',
 	'  berguna; "ada 66, di antaranya Cijayanti dan Ragajaya" jauh lebih hidup',
 	'- satu sampai dua kalimat saja, bahasa Indonesia yang wajar diucapkan',
+	'- kalau alat mengembalikan profil satu orang atau satu objek, sebutkan',
+	'  hal yang paling penting saja (nama, jabatan, desa) — rinciannya sudah',
+	'  tampil lengkap di layar',
 	'- sebut angka pentingnya, jangan membacakan daftar panjang',
 	'  (tabelnya sudah tampil sendiri di layar pengguna)',
 	'- tanpa markdown, tanpa poin-poin, tanpa emoji',
