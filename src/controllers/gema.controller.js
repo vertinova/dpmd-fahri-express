@@ -32,6 +32,9 @@ const CONTOH = [
 	'kecamatan Pamijahan',
 	'produk hukum desa Cibatok',
 	'desa bertipologi persawahan',
+	'bantuan keuangan di kecamatan Jonggol',
+	'posyandu di kecamatan Cibungbulang',
+	'berapa RW di desa Cijayanti',
 ];
 
 /** POST /api/gema/tanya  { teks } */

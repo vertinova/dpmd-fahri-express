@@ -185,6 +185,60 @@ const buatAlat = (tangkap) => {
 		}),
 
 		betaTool({
+			name: 'cari_bantuan_keuangan',
+			description:
+				'Cari usulan Bantuan Keuangan (Bankeu) desa: judul kegiatan, anggaran yang '
+				+ 'diusulkan, dan tahap verifikasinya. Bisa disaring desa, kecamatan, dan '
+				+ 'tahun anggaran.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					desa: { type: 'string' },
+					kecamatan: { type: 'string' },
+					tahun: { type: 'integer', description: 'tahun anggaran, mis. 2025' },
+				},
+				additionalProperties: false,
+			},
+			run: async (input) => {
+				const bagian = [
+					'bantuan keuangan',
+					input.desa ? `desa ${input.desa}` : '',
+					input.kecamatan ? `kecamatan ${input.kecamatan}` : '',
+					input.tahun ? String(input.tahun) : '',
+				].filter(Boolean).join(' ');
+				return catat(await mesin.jawab(bagian));
+			},
+		}),
+
+		betaTool({
+			name: 'cari_kelembagaan',
+			description:
+				'Cari lembaga kemasyarakatan desa. Sebutkan salah satu: posyandu, rt, rw, '
+				+ 'lpm, pkk, karang taruna, satlinmas. Bisa disaring desa atau kecamatan.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					lembaga: {
+						type: 'string',
+						enum: ['posyandu', 'rt', 'rw', 'lpm', 'pkk', 'karang taruna', 'satlinmas'],
+					},
+					desa: { type: 'string' },
+					kecamatan: { type: 'string' },
+				},
+				required: ['lembaga'],
+				additionalProperties: false,
+			},
+			run: async (input) => {
+				const bagian = [
+					input.lembaga,
+					input.desa ? `di desa ${input.desa}` : '',
+					input.kecamatan ? `di kecamatan ${input.kecamatan}` : '',
+				].filter(Boolean).join(' ');
+				return catat(await mesin.jawab(bagian));
+			},
+		}),
+
+		betaTool({
 			name: 'cari_apa_saja',
 			description:
 				'Cari satu kata ke seluruh nama di sistem sekaligus: nama desa, nama BUM '

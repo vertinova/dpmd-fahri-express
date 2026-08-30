@@ -46,6 +46,22 @@ const bersihkan = (teks) =>
 
 const punya = (t, kata) => kata.some((k) => t.includes(k));
 
+/**
+ * Cocokkan sebagai KATA UTUH, tanpa regex.
+ *
+ * "rt" harus cocok di "rt di desa Cijayanti" tapi TIDAK di "karang taruna"
+ * atau "berturut". Versi pertama memakai new RegExp dengan batas kata yang
+ * ditulis di dalam template literal — dan di sana urutan itu berarti
+ * karakter backspace, bukan batas kata. Polanya tidak pernah cocok, sehingga
+ * setiap pertanyaan kelembagaan jatuh ke nilai bawaan dan semuanya dijawab
+ * "Posyandu". Memecah teks jadi potongan kata menghindari jebakan pelolosan
+ * itu sama sekali.
+ */
+const kataUtuh = (teks, kata) => {
+	if (kata.includes(' ')) return teks.includes(kata);
+	return teks.split(/[^a-z0-9]+/).includes(kata);
+};
+
 const rupiah = (n) => (n === null || n === undefined ? '—' : `Rp ${nf.format(Math.round(Number(n)))}`);
 
 /** Cocokkan kamus ke dalam kalimat; yang namanya paling panjang menang. */
@@ -64,7 +80,25 @@ const TOPIK = [
 	{ id: 'bumdes', kata: ['bumdes', 'bum desa', 'badan usaha'] },
 	{ id: 'aparatur', kata: ['aparatur', 'perangkat desa', 'kepala desa', 'sekretaris desa', 'bpd', 'kaur', 'kasi', 'kadus'] },
 	{ id: 'produk-hukum', kata: ['produk hukum', 'perdes', 'peraturan desa', 'perkades', 'sk kades'] },
+	{ id: 'bankeu', kata: ['bankeu', 'bantuan keuangan', 'proposal', 'usulan', 'lpj'] },
+	{ id: 'kelembagaan', kata: ['kelembagaan', 'posyandu', 'rt', 'rw', 'lpm', 'pkk', 'karang taruna', 'satlinmas', 'lembaga'] },
 	{ id: 'desa', kata: ['desa', 'kelurahan', 'kecamatan'] },
+];
+
+/**
+ * Lembaga desa yang bisa ditanyakan, beserta tabel dan sebutannya.
+ * Ditulis sebagai data, bukan cabang if, supaya menambah lembaga baru cukup
+ * menambah satu baris di sini.
+ */
+const LEMBAGA = [
+	{ kata: ['posyandu'], tabel: 'posyandus', label: 'Posyandu', punyaNama: true },
+	{ kata: ['karang taruna'], tabel: 'karang_tarunas', label: 'Karang Taruna', punyaNama: true },
+	{ kata: ['lpm'], tabel: 'lpms', label: 'LPM', punyaNama: true },
+	{ kata: ['pkk'], tabel: 'pkks', label: 'PKK', punyaNama: true },
+	{ kata: ['satlinmas'], tabel: 'satlinmas', label: 'Satlinmas', punyaNama: true },
+	// RT dan RW dinomori, bukan dinamai.
+	{ kata: ['rw'], tabel: 'rws', label: 'RW', punyaNama: false },
+	{ kata: ['rt'], tabel: 'rts', label: 'RT', punyaNama: false },
 ];
 
 const analisis = async (teksAsli) => {
@@ -81,10 +115,13 @@ const analisis = async (teksAsli) => {
 	const nilai = cocokkan(teks, kamus.nilai);
 	const jabatan = cocokkan(teks, kamus.jabatan);
 
+	const lembaga = LEMBAGA.find((l) => l.kata.some((k) => kataUtuh(teks, k)));
+
 	let topik = null;
 	for (const t of TOPIK) {
 		if (punya(teks, t.kata)) { topik = t.id; break; }
 	}
+	if (!topik && lembaga) topik = 'kelembagaan';
 	if (!topik && jabatan) topik = 'aparatur';
 	if (!topik && nilai) topik = 'desa';
 
@@ -94,6 +131,7 @@ const analisis = async (teksAsli) => {
 		desa,
 		nilai,
 		jabatan,
+		lembaga,
 		topik,
 		agregasi: punya(teks, ['berapa', 'jumlah', 'total', 'hitung', 'banyaknya']),
 		mintaAktif: punya(teks, ['aktif']) && !punya(teks, ['tidak aktif', 'non aktif', 'nonaktif']),
@@ -395,6 +433,136 @@ const daftarProdukHukum = async (a) => {
 	};
 };
 
+/** Bantuan Keuangan: usulan desa beserta tahap verifikasinya. */
+const daftarBankeu = async (a) => {
+	const where = {};
+	if (a.desa) where.desa_id = a.desa.id;
+	else if (a.kecamatan) where.desas = { kecamatan_id: a.kecamatan.id };
+
+	// Tahun anggaran ditangkap dari kalimatnya kalau disebut.
+	const tahun = a.teks.match(/(20\d{2})/);
+	if (tahun) where.tahun_anggaran = parseInt(tahun[1], 10);
+
+	const [jumlah, baris, perStatus, jumlahAnggaran] = await Promise.all([
+		prisma.bankeu_proposals.count({ where }),
+		prisma.bankeu_proposals.findMany({
+			where,
+			select: {
+				judul_proposal: true, nama_kegiatan_spesifik: true, anggaran_usulan: true,
+				status: true, dpmd_status: true, tahun_anggaran: true,
+				desas: { select: { nama: true, kecamatans: { select: { nama: true } } } },
+			},
+			orderBy: [{ created_at: 'desc' }],
+			take: BATAS_BARIS,
+		}),
+		prisma.bankeu_proposals.groupBy({ by: ['status'], where, _count: { id: true } }),
+		prisma.bankeu_proposals.aggregate({ where, _sum: { anggaran_usulan: true } }),
+	]);
+
+	const dimana = [
+		a.desa ? `Desa ${a.desa.nama}` : null,
+		!a.desa && a.kecamatan ? `Kecamatan ${a.kecamatan.nama}` : null,
+		tahun ? `tahun anggaran ${tahun[1]}` : null,
+	].filter(Boolean).join(' ');
+
+	const total = jumlahAnggaran._sum.anggaran_usulan;
+
+	return {
+		maksud: 'daftar-bankeu',
+		kalimat: jumlah
+			? `Ada ${nf.format(jumlah)} usulan Bantuan Keuangan${dimana ? ' di ' + dimana : ''}`
+				+ (total ? `, total ${rupiah(total)}.` : '.')
+				+ (jumlah > baris.length ? ` Ditampilkan ${nf.format(baris.length)} terbaru.` : '')
+			: `Tidak ada usulan Bantuan Keuangan${dimana ? ' di ' + dimana : ''}.`,
+		kolom: [
+			{ kunci: 'judul', label: 'Usulan' },
+			{ kunci: 'desa', label: 'Desa' },
+			{ kunci: 'kecamatan', label: 'Kecamatan' },
+			{ kunci: 'tahun', label: 'Tahun' },
+			{ kunci: 'anggaran', label: 'Anggaran' },
+			{ kunci: 'status', label: 'Status' },
+		],
+		baris: baris.map((b) => ({
+			judul: b.judul_proposal || b.nama_kegiatan_spesifik || '—',
+			desa: b.desas?.nama || '—',
+			kecamatan: b.desas?.kecamatans?.nama || '—',
+			tahun: b.tahun_anggaran || '—',
+			anggaran: b.anggaran_usulan ? rupiah(b.anggaran_usulan) : '—',
+			status: b.dpmd_status || b.status || '—',
+		})),
+		total: jumlah,
+		// Sebaran status ikut dikirim: pertanyaan tentang usulan hampir selalu
+		// berlanjut ke "yang sudah diverifikasi berapa".
+		rincian: perStatus.map((r) => ({
+			label: `Status ${r.status}`, nilai: `${nf.format(r._count.id)} usulan`,
+		})),
+	};
+};
+
+/** Kelembagaan desa: posyandu, RT, RW, LPM, PKK, karang taruna, satlinmas. */
+const daftarKelembagaan = async (a) => {
+	// Tanpa lembaga yang jelas, JANGAN menebak. Menjawab "Posyandu" untuk
+	// pertanyaan "kelembagaan apa saja" adalah jawaban yang salah, bukan
+	// jawaban yang kurang lengkap.
+	if (!a.lembaga) {
+		return {
+			maksud: 'kelembagaan-pilih',
+			kalimat: 'Lembaga desa yang bisa saya carikan: Posyandu, RT, RW, LPM, PKK, Karang Taruna, dan Satlinmas. Sebutkan salah satu.',
+			kolom: [], baris: [], total: 0,
+		};
+	}
+
+	const l = a.lembaga;
+	const model = prisma[l.tabel];
+
+	const where = {};
+	if (a.desa) where.desa_id = a.desa.id;
+	else if (a.kecamatan) where.desas = { kecamatan_id: a.kecamatan.id };
+
+	const pilih = {
+		desas: { select: { nama: true, kecamatans: { select: { nama: true } } } },
+		status_kelembagaan: true,
+		status_verifikasi: true,
+		...(l.punyaNama ? { nama: true } : { nomor: true }),
+	};
+
+	const [jumlah, baris, perVerifikasi] = await Promise.all([
+		model.count({ where }),
+		model.findMany({ where, select: pilih, take: BATAS_BARIS }),
+		model.groupBy({ by: ['status_verifikasi'], where, _count: { id: true } }),
+	]);
+
+	const dimana = [
+		a.desa ? `Desa ${a.desa.nama}` : null,
+		!a.desa && a.kecamatan ? `Kecamatan ${a.kecamatan.nama}` : null,
+	].filter(Boolean).join(' ');
+
+	return {
+		maksud: 'daftar-kelembagaan',
+		kalimat: jumlah
+			? `Ada ${nf.format(jumlah)} ${l.label}${dimana ? ' di ' + dimana : ' se-Kabupaten Bogor'}.`
+				+ (jumlah > baris.length ? ` Ditampilkan ${nf.format(baris.length)} teratas.` : '')
+			: `Tidak ada ${l.label}${dimana ? ' di ' + dimana : ''} di data yang tercatat.`,
+		kolom: [
+			{ kunci: 'nama', label: l.punyaNama ? 'Nama' : 'Nomor' },
+			{ kunci: 'desa', label: 'Desa' },
+			{ kunci: 'kecamatan', label: 'Kecamatan' },
+			{ kunci: 'verifikasi', label: 'Verifikasi' },
+		],
+		baris: baris.map((b) => ({
+			nama: l.punyaNama ? (b.nama || '—') : `${l.label} ${b.nomor ?? '—'}`,
+			desa: b.desas?.nama || '—',
+			kecamatan: b.desas?.kecamatans?.nama || '—',
+			verifikasi: b.status_verifikasi || '—',
+		})),
+		total: jumlah,
+		rincian: perVerifikasi.map((r) => ({
+			label: `Status ${r.status_verifikasi || 'belum diisi'}`,
+			nilai: `${nf.format(r._count.id)} ${l.label}`,
+		})),
+	};
+};
+
 /* ------------------------------------------ lapis 3: pencarian menyeluruh -- */
 
 /**
@@ -496,6 +664,8 @@ const jawab = async (teksAsli) => {
 	if (a.topik === 'bumdes') return daftarBumdes(a);
 	if (a.topik === 'aparatur') return daftarAparatur(a);
 	if (a.topik === 'produk-hukum') return daftarProdukHukum(a);
+	if (a.topik === 'bankeu') return daftarBankeu(a);
+	if (a.topik === 'kelembagaan') return daftarKelembagaan(a);
 	if (a.topik === 'desa' || a.nilai) return daftarDesa(a);
 
 	// LAPIS 3 — tidak ada yang dikenali; cari katanya ke mana-mana.
