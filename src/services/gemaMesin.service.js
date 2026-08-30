@@ -27,6 +27,8 @@
 
 const prisma = require('../config/prisma');
 const { muatKamus } = require('./gemaKamus.service');
+const { jawabKeuangan, sumberDanaDisebut } = require('./gemaKeuangan.service');
+const { bicarakan, belumBisa } = require('./gemaGaya.service');
 
 const nf = new Intl.NumberFormat('id-ID');
 
@@ -44,6 +46,38 @@ const bersihkan = (teks) =>
 		.replace(/\s+/g, ' ')
 		.trim();
 
+const siapkan = (teks) => betulkanEjaan(bersihkan(teks));
+
+/**
+ * Betulkan salah dengar yang paling sering terjadi.
+ *
+ * Pengenalan suara jarang tepat pada istilah lokal: "bumdes" terdengar
+ * "bum des" atau "bumdesa", "posyandu" jadi "pos yandu", "BHPRD" hampir
+ * selalu berantakan. Menuntut ucapan yang tepat berarti alat ini hanya
+ * berguna bagi orang yang sudah tahu kata kuncinya — padahal yang penting
+ * maksudnya tertangkap.
+ */
+const EJAAN = [
+	[/\bbum\s+des(a|sa)?\b/g, 'bumdes'],
+	[/\bbumdesa\b/g, 'bumdes'],
+	[/\bbun\s?des\w*\b/g, 'bumdes'],
+	[/\bpos\s+yandu\b/g, 'posyandu'],
+	[/\bposyandhu\b/g, 'posyandu'],
+	[/\bbe\s?ha\s?pe\s?er\s?de\b/g, 'bhprd'],
+	[/\bbh\s?prd\b/g, 'bhprd'],
+	[/\ba\s?de\s?de\b/g, 'add'],
+	[/\bde\s?de\b/g, 'dd'],
+	[/\bban\s?keu\b/g, 'bankeu'],
+	[/\bbang\s?ke\s?u\b/g, 'bankeu'],
+	[/\bkarangtaruna\b/g, 'karang taruna'],
+	[/\bel\s?pe\s?em\b/g, 'lpm'],
+	[/\bpe\s?ka\s?ka\b/g, 'pkk'],
+	[/\bes\s?ka\b/g, 'sk'],
+	[/\bperdes\w*\b/g, 'perdes'],
+	[/\bmandiri\w+\b/g, 'mandiri'],
+];
+
+const betulkanEjaan = (t) => EJAAN.reduce((teks, [pola, ganti]) => teks.replace(pola, ganti), t);
 const punya = (t, kata) => kata.some((k) => t.includes(k));
 
 /**
@@ -80,6 +114,9 @@ const TOPIK = [
 	{ id: 'bumdes', kata: ['bumdes', 'bum desa', 'badan usaha'] },
 	{ id: 'aparatur', kata: ['aparatur', 'perangkat desa', 'kepala desa', 'sekretaris desa', 'bpd', 'kaur', 'kasi', 'kadus'] },
 	{ id: 'produk-hukum', kata: ['produk hukum', 'perdes', 'peraturan desa', 'perkades', 'sk kades'] },
+	// Keuangan didahulukan dari bankeu: "bankeu" juga nama sumber dana di
+	// SIPANDA, dan pertanyaan penyaluran lebih sering ditanyakan daripada usulan.
+	{ id: 'keuangan', kata: ['add', 'dana desa', 'bhprd', 'penyaluran', 'pencairan', 'sudah cair', 'alokasi dana'] },
 	{ id: 'bankeu', kata: ['bankeu', 'bantuan keuangan', 'proposal', 'usulan', 'lpj'] },
 	{ id: 'kelembagaan', kata: ['kelembagaan', 'posyandu', 'rt', 'rw', 'lpm', 'pkk', 'karang taruna', 'satlinmas', 'lembaga'] },
 	{ id: 'desa', kata: ['desa', 'kelurahan', 'kecamatan'] },
@@ -102,7 +139,7 @@ const LEMBAGA = [
 ];
 
 const analisis = async (teksAsli) => {
-	const teks = bersihkan(teksAsli);
+	const teks = siapkan(teksAsli);
 	const kamus = await muatKamus();
 
 	const kecamatan = cocokkan(teks, kamus.kecamatan);
@@ -116,11 +153,13 @@ const analisis = async (teksAsli) => {
 	const jabatan = cocokkan(teks, kamus.jabatan);
 
 	const lembaga = LEMBAGA.find((l) => l.kata.some((k) => kataUtuh(teks, k)));
+	const sumberDana = sumberDanaDisebut(kataUtuh, teks);
 
 	let topik = null;
 	for (const t of TOPIK) {
 		if (punya(teks, t.kata)) { topik = t.id; break; }
 	}
+	if (!topik && sumberDana) topik = 'keuangan';
 	if (!topik && lembaga) topik = 'kelembagaan';
 	if (!topik && jabatan) topik = 'aparatur';
 	if (!topik && nilai) topik = 'desa';
@@ -132,6 +171,7 @@ const analisis = async (teksAsli) => {
 		nilai,
 		jabatan,
 		lembaga,
+		sumberDana,
 		topik,
 		agregasi: punya(teks, ['berapa', 'jumlah', 'total', 'hitung', 'banyaknya']),
 		mintaAktif: punya(teks, ['aktif']) && !punya(teks, ['tidak aktif', 'non aktif', 'nonaktif']),
@@ -649,9 +689,45 @@ const pencarianMenyeluruh = async (kataAsli) => {
 
 /* ------------------------------------------------------------------ utama -- */
 
-const jawab = async (teksAsli) => {
-	const a = await analisis(teksAsli);
+/**
+ * Kolom mana yang paling pantas disebut sebagai "contoh isi" di ucapan.
+ * Untuk daftar desa yang menarik namanya desa; untuk aparatur namanya orang.
+ */
+const KUNCI_CONTOH = {
+	'daftar-desa': 'desa',
+	'daftar-bumdes': 'nama',
+	'daftar-aparatur': 'nama',
+	'daftar-produk-hukum': 'judul',
+	'daftar-bankeu': 'judul',
+	'daftar-kelembagaan': 'nama',
+	'pencarian-menyeluruh': 'nama',
+	'keuangan-desa': 'nama',
+};
 
+/**
+ * Ubah jawaban faktual jadi ucapan yang terdengar manusiawi.
+ *
+ * Yang diubah HANYA kalimatnya. Angka, kolom, dan baris tidak disentuh sama
+ * sekali — gaya bicara tidak boleh sampai mengubah fakta.
+ */
+const manusiakan = (hasil) => {
+	if (!hasil) return hasil;
+
+	// Jawaban "belum bisa" punya kalimatnya sendiri yang sudah ramah.
+	if (hasil.maksud === 'belum-bisa') return hasil;
+
+	const kosong = !hasil.total && !(hasil.rincian && hasil.rincian.length);
+	return {
+		...hasil,
+		kalimat: bicarakan(hasil.kalimat, {
+			baris: hasil.baris,
+			kunciNama: KUNCI_CONTOH[hasil.maksud] || 'nama',
+			kosong,
+		}),
+	};
+};
+/** Pilih penangan yang tepat. Mengembalikan jawaban MENTAH, belum digayakan. */
+const cariJawaban = async (a) => {
 	// LAPIS 1 — satu entitas disebut, tanpa topik lain dan tanpa penyaring.
 	// "Cijayanti" atau "profil desa Cijayanti" cukup jadi pertanyaan utuh.
 	const tanpaPenyaring = !a.nilai && !a.jabatan && !a.mintaAktif && !a.mintaBadanHukum;
@@ -661,6 +737,7 @@ const jawab = async (teksAsli) => {
 	}
 
 	// LAPIS 2 — topik yang dikenali, disaring entitas dan nilai yang disebut.
+	if (a.topik === 'keuangan') return jawabKeuangan(a);
 	if (a.topik === 'bumdes') return daftarBumdes(a);
 	if (a.topik === 'aparatur') return daftarAparatur(a);
 	if (a.topik === 'produk-hukum') return daftarProdukHukum(a);
@@ -672,4 +749,22 @@ const jawab = async (teksAsli) => {
 	return pencarianMenyeluruh(a.teks);
 };
 
-module.exports = { jawab, analisis, bersihkan, pencarianMenyeluruh };
+const jawab = async (teksAsli) => {
+	const a = await analisis(teksAsli);
+	const hasil = await cariJawaban(a);
+
+	// Jalan buntu: bukan sekadar "tidak ada data", tapi Gema memang belum
+	// mampu. Mengaku begitu jauh lebih berguna daripada melempar kalimat
+	// kosong, dan menyebut siapa yang sedang mengerjakannya memberi harapan
+	// yang jujur — fiturnya memang sedang dibangun.
+	if (hasil.maksud === 'pencarian-menyeluruh' && !hasil.total) {
+		return {
+			maksud: 'belum-bisa',
+			kalimat: belumBisa(),
+			kolom: [], baris: [], total: 0,
+		};
+	}
+
+	return manusiakan(hasil);
+};
+module.exports = { jawab, cariJawaban, analisis, bersihkan, siapkan, pencarianMenyeluruh };

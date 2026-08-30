@@ -239,6 +239,40 @@ const buatAlat = (tangkap) => {
 		}),
 
 		betaTool({
+			name: 'cari_penyaluran_dana',
+			description:
+				'Penyaluran dana desa dari SIPANDA: ADD, Dana Desa (DD), BHPRD, Bankeu '
+				+ 'Akselerasi, dan Bantuan Provinsi (BP). Menjawab berapa totalnya, berapa '
+				+ 'yang sudah cair, dan sebarannya. Bisa disaring desa atau kecamatan.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					sumber_dana: {
+						type: 'string',
+						enum: ['ADD', 'DD', 'BHPRD', 'BANKEU', 'BP'],
+						description: 'kosongkan untuk melihat semua sumber sekaligus',
+					},
+					desa: { type: 'string' },
+					kecamatan: { type: 'string' },
+				},
+				additionalProperties: false,
+			},
+			run: async (input) => {
+				const sebutan = {
+					ADD: 'add', DD: 'dana desa', BHPRD: 'bhprd',
+					BANKEU: 'bankeu', BP: 'bantuan provinsi',
+				};
+				const bagian = [
+					'penyaluran',
+					sebutan[input.sumber_dana] || '',
+					input.desa ? `desa ${input.desa}` : '',
+					input.kecamatan ? `kecamatan ${input.kecamatan}` : '',
+				].filter(Boolean).join(' ');
+				return catat(await mesin.jawab(bagian));
+			},
+		}),
+
+		betaTool({
 			name: 'cari_apa_saja',
 			description:
 				'Cari satu kata ke seluruh nama di sistem sekaligus: nama desa, nama BUM '
@@ -266,13 +300,18 @@ const susunSistem = (kamus) => [
 	'menemukan apa-apa, katakan tidak ada — itu jawaban yang benar.',
 	'',
 	'Jawabanmu akan DIUCAPKAN dengan suara, jadi:',
+	'- bicara santai seperti rekan kerja, bukan seperti mesin. Boleh mengawali',
+	'  dengan "Oke", "Nah", atau "Siap", dan sesekali menawarkan bantuan lanjutan',
+	'- sebutkan CONTOH isi datanya, bukan cuma jumlahnya. "Ada 66 desa" kurang',
+	'  berguna; "ada 66, di antaranya Cijayanti dan Ragajaya" jauh lebih hidup',
 	'- satu sampai dua kalimat saja, bahasa Indonesia yang wajar diucapkan',
 	'- sebut angka pentingnya, jangan membacakan daftar panjang',
 	'  (tabelnya sudah tampil sendiri di layar pengguna)',
 	'- tanpa markdown, tanpa poin-poin, tanpa emoji',
 	'',
-	'Kalau pertanyaannya di luar data DPMD (cuaca, berita, hal umum), katakan',
-	'terus terang bahwa kamu hanya bisa menjawab soal data desa di sistem ini.',
+	'Kalau pertanyaannya di luar data DPMD (cuaca, berita, hal umum), jawab',
+	'dengan ringan bahwa kamu belum bisa dan masih dikembangkan tim IT DPMD —',
+	'jangan kaku, jangan minta maaf berlebihan.',
 	'',
 	`Kabupaten Bogor punya ${kamus.kecamatan.length} kecamatan dan ${kamus.desa.length} desa/kelurahan terdata.`,
 ].join('\n');

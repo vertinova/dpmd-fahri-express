@@ -35,6 +35,8 @@ const CONTOH = [
 	'bantuan keuangan di kecamatan Jonggol',
 	'posyandu di kecamatan Cibungbulang',
 	'berapa RW di desa Cijayanti',
+	'berapa ADD di kecamatan Jonggol',
+	'penyaluran dana desa',
 ];
 
 /** POST /api/gema/tanya  { teks } */
