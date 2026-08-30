@@ -12,11 +12,15 @@
  *
  * `kalimat` yang diucapkan Gema. `rincian` untuk jawaban tentang SATU hal
  * (rapor desa, rapor kecamatan); `kolom` + `baris` untuk jawaban berupa daftar.
- * Halaman depan menggambar apa pun yang datang tanpa perlu tahu pertanyaannya
- * tentang apa.
+ * `ditenagai` menyebut siapa yang menjawab: 'model', 'mesin', atau
+ * 'mesin-cadangan' saat model gagal dipanggil. Halaman depan menggambar apa pun
+ * yang datang tanpa perlu tahu pertanyaannya tentang apa.
  */
 
-const { jawab } = require('../services/gemaMesin.service');
+// Lapis model bahasa memutuskan sendiri apakah ia aktif: tanpa ANTHROPIC_API_KEY
+// ia langsung meneruskan ke mesin deterministik, dan tidak ada satu byte pun yang
+// meninggalkan server.
+const { jawab, tersedia } = require('../services/gemaLLM.service');
 const logger = require('../utils/logger');
 
 /** Contoh yang ditawarkan di halaman depan. */
@@ -60,6 +64,12 @@ const tanya = async (req, res) => {
 
 /** GET /api/gema/kemampuan */
 const kemampuan = (req, res) =>
-	res.json({ success: true, data: CONTOH.map((contoh) => ({ id: contoh, contoh })) });
+	res.json({
+		success: true,
+		data: CONTOH.map((contoh) => ({ id: contoh, contoh })),
+		// Halaman depan memakai ini untuk memberi tahu pengguna seberapa bebas
+		// ia boleh bertanya — kalimat bebas hanya dimengerti bila model aktif.
+		model_aktif: tersedia(),
+	});
 
 module.exports = { tanya, kemampuan, CONTOH };
