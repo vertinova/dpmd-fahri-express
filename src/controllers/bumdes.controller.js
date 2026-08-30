@@ -1,4 +1,7 @@
 const prisma = require('../config/prisma');
+const {
+  sinkronkanKeProdukHukum, KOLOM_TERSINKRON,
+} = require('../services/sinkronProdukHukumBumdes.service');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const fs = require('fs').promises;
@@ -352,13 +355,34 @@ class BumdesController {
         user_role: userRole
       });
 
+      // Perdes dan SK BUM Desa sekalian didaftarkan ke modul Produk Hukum
+      // Desa, supaya dokumen yang diunggah SPKED juga terlihat oleh desanya.
+      // Kegagalan di sini TIDAK menggagalkan unggahan: berkasnya sudah tersimpan
+      // dan tercatat di kolom BUM Desa, jadi membalas error hanya akan membuat
+      // petugas mengunggah ulang berkas yang sebenarnya sudah masuk.
+      let sinkronProdukHukum = null;
+      if (KOLOM_TERSINKRON.includes(field_name)) {
+        try {
+          sinkronProdukHukum = await sinkronkanKeProdukHukum(
+            { ...bumdes, [field_name]: newFilePath },
+            field_name,
+            req.file.filename
+          );
+        } catch (errSinkron) {
+          logger.error('Gagal menyinkronkan dokumen BUM Desa ke Produk Hukum:', errSinkron);
+        }
+      }
+
       return res.json({
         success: true,
-        message: 'File berhasil diupload',
+        message: sinkronProdukHukum
+          ? 'File berhasil diupload dan terdaftar di Produk Hukum Desa'
+          : 'File berhasil diupload',
         data: {
           field_name,
           file_path: newFilePath,
-          bumdes_id: parseInt(bumdes_id)
+          bumdes_id: parseInt(bumdes_id),
+          produk_hukum: sinkronProdukHukum,
         }
       });
 
@@ -563,6 +587,7 @@ class BumdesController {
       const { id } = req.params;
       const userRole = req.user.role;
       const desaId = req.user.desa_id;
+      const bidangId = req.user.bidang_id;
 
       logger.info(`Getting BUMDES by ID: ${id}`, {
         user_role: userRole,
@@ -581,6 +606,26 @@ class BumdesController {
         });
       } else if (userRole === 'dinas' || userRole === 'superadmin' || userRole === 'sarana_prasarana') {
         // Dinas, superadmin, and sarana_prasarana can get any BUMDes
+        bumdes = await prisma.bumdes.findFirst({
+          where: { 
+            id: parseInt(id)
+          }
+        });
+      } else if (['pegawai', 'kepala_bidang', 'kepala_dinas', 'ketua_tim'].includes(userRole)) {
+        // Pegawai SPKED (bidang 3) boleh membaca BUMDes mana pun.
+        //
+        // Cabang ini dulu tidak ada di sini, padahal updateDesaBumdes dan
+        // deleteDesaBumdes sudah punya — jadi SPKED boleh MENGUBAH dan
+        // MENGHAPUS tapi tidak boleh MEMBACA satu baris. Tidak pernah ketahuan
+        // karena halaman lama menyunting dari baris yang sudah ada di daftar
+        // dan tidak pernah memanggil endpoint ini. Begitu formulir ubah dibuka
+        // dari halaman Statistik, barisnya harus diambil ulang lewat sini.
+        if (bidangId !== 3) {
+          return res.status(403).json({
+            success: false,
+            message: 'Role Anda tidak memiliki akses ke data BUMDes (hanya SPKED/Bidang 3)'
+          });
+        }
         bumdes = await prisma.bumdes.findFirst({
           where: { 
             id: parseInt(id)

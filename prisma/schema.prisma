@@ -664,6 +664,7 @@ model bidangs {
   kegiatan_bidang          kegiatan_bidang[]
   pegawai                  pegawai[]
   pencairan                pencairan[]
+  produk_hukum_bidang      produk_hukum_bidang[]
 }
 
 model anggaran_bidang_units {
@@ -1761,6 +1762,65 @@ model produk_hukums {
   satlinmas                                              satlinmas[]
 
   @@index([desa_id], map: "produk_hukums_desa_id_foreign")
+}
+
+/// Produk hukum tingkat kabupaten, dipegang per bidang DPMD.
+/// Terpisah dari `produk_hukums` yang khusus desa — lihat
+/// migrations/20260830_create_produk_hukum_bidang.sql untuk alasannya.
+model produk_hukum_bidang {
+  id                BigInt                               @id @default(autoincrement()) @db.UnsignedBigInt
+  bidang_id         BigInt                               @db.UnsignedBigInt
+  jenis             String                               @db.VarChar(100)
+  singkatan_jenis   String                               @db.VarChar(30)
+  judul             String                               @db.VarChar(500)
+  nomor             String                               @db.VarChar(100)
+  tahun             Int                                  @db.UnsignedSmallInt
+  tentang           String?                              @db.VarChar(500)
+  tempat_penetapan  String?                              @db.VarChar(255)
+  tanggal_penetapan DateTime?                            @db.Date
+  sumber            String?                              @db.VarChar(255)
+  status_peraturan  produk_hukum_bidang_status_peraturan @default(berlaku)
+  keterangan_status String?                              @db.VarChar(500)
+  bidang_hukum      String                               @default("Tata Negara") @db.VarChar(100)
+  file              String?                              @db.VarChar(255)
+  url_sumber        String?                              @db.VarChar(1000)
+  created_by        BigInt?                              @db.UnsignedBigInt
+  updated_by        BigInt?                              @db.UnsignedBigInt
+  created_at        DateTime?                            @default(now()) @db.Timestamp(0)
+  updated_at        DateTime?                            @default(now()) @db.Timestamp(0)
+  bidangs           bidangs                              @relation(fields: [bidang_id], references: [id], onDelete: Cascade, map: "fk_produk_hukum_bidang_bidang")
+
+  @@unique([bidang_id, singkatan_jenis, nomor, tahun], map: "uniq_produk_hukum_bidang")
+  @@index([bidang_id, tahun], map: "idx_phb_bidang")
+  @@index([singkatan_jenis], map: "idx_phb_jenis")
+  @@index([status_peraturan], map: "idx_phb_status")
+}
+
+/// Rujukan peraturan luar (UU, PP, Permendagri, Perda) yang mengikat desa.
+/// Metadata + tautan JDIH saja, tanpa berkas di server.
+model produk_hukum_referensi {
+  id                BigInt                                  @id @default(autoincrement()) @db.UnsignedBigInt
+  tingkat           produk_hukum_referensi_tingkat          @default(nasional)
+  jenis             String                                  @db.VarChar(100)
+  singkatan_jenis   String                                  @db.VarChar(30)
+  nomor             String                                  @db.VarChar(50)
+  tahun             Int                                     @db.UnsignedSmallInt
+  judul             String                                  @db.VarChar(500)
+  tentang           String                                  @db.VarChar(500)
+  topik             String?                                 @db.VarChar(100)
+  url               String?                                 @db.VarChar(1000)
+  sumber_situs      String?                                 @db.VarChar(255)
+  status_peraturan  produk_hukum_referensi_status_peraturan @default(berlaku)
+  keterangan_status String?                                 @db.VarChar(500)
+  urutan            Int                                     @default(0)
+  aktif             Boolean                                 @default(true)
+  created_at        DateTime?                               @default(now()) @db.Timestamp(0)
+  updated_at        DateTime?                               @default(now()) @db.Timestamp(0)
+
+  @@unique([singkatan_jenis, nomor, tahun], map: "uniq_produk_hukum_referensi")
+  @@index([tingkat, urutan], map: "idx_phr_tingkat")
+  @@index([topik], map: "idx_phr_topik")
+  @@index([aktif], map: "idx_phr_aktif")
 }
 
 model profil_desas {
@@ -3378,4 +3438,22 @@ enum formulir_pertanyaan_tipe {
   tanggal
   waktu
   unggah_berkas
+}
+
+enum produk_hukum_bidang_status_peraturan {
+  berlaku
+  diubah
+  dicabut
+}
+
+enum produk_hukum_referensi_tingkat {
+  nasional
+  provinsi
+  kabupaten
+}
+
+enum produk_hukum_referensi_status_peraturan {
+  berlaku
+  diubah
+  dicabut
 }

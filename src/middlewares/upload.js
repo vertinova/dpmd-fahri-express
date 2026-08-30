@@ -241,6 +241,31 @@ const uploadProdukHukum = multer({
   }
 });
 
+// Storage configuration for PRODUK HUKUM BIDANG (tingkat kabupaten, PDF only).
+// Folder terpisah dari produk hukum desa supaya pemiliknya kelihatan dari
+// jalur berkasnya saja, dan menghapus satu kelompok tidak menyentuh kelompok
+// yang lain.
+const storageProdukHukumBidang = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'storage/produk_hukum_bidang');
+  },
+  filename: function (req, file, cb) {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    const nameWithoutExt = path.basename(file.originalname, ext);
+    const sanitizedName = nameWithoutExt.replace(/[^a-zA-Z0-9]/g, '_');
+    cb(null, `${sanitizedName}_${timestamp}${ext}`);
+  }
+});
+
+const uploadProdukHukumBidang = multer({
+  storage: storageProdukHukumBidang,
+  fileFilter: pdfFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB for PDF
+  }
+});
+
 // Storage configuration for SURAT MASUK (PDF, JPG, PNG)
 const storageSuratMasuk = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -683,6 +708,7 @@ module.exports = {
   uploadHeroGallery,
   uploadBerita,
   uploadProdukHukum,
+  uploadProdukHukumBidang,
   uploadSuratMasuk,
   uploadAparaturDesa,
   uploadPengurus,

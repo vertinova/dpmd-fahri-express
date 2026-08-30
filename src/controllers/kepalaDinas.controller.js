@@ -652,15 +652,29 @@ class KepalaDinasController {
               .map(([kolom, label]) => berkas(r[kolom], 'bumdes_dokumen_badanhukum', kolom, label)),
             ...['2021', '2022', '2023', '2024'].map((th) =>
               berkas(r[`LaporanKeuangan${th}`], 'bumdes_laporan_keuangan', `LaporanKeuangan${th}`, `Laporan Keuangan ${th}`)),
+            // Dokumen dari modul Produk Hukum. Dua catatan:
+            //
+            //  1. Berkasnya TIDAK berada di bawah /uploads melainkan di
+            //     storage/produk_hukum/, jadi dikirimkan `jalur` utuh. Tanpa itu
+            //     klien merangkai /uploads/produk-hukum/... yang tidak pernah
+            //     ada isinya, dan tautannya mati.
+            //  2. Sejak unggahan SPKED ikut didaftarkan sebagai produk hukum,
+            //     satu dokumen bisa muncul dari dua jalur sekaligus. Bila nama
+            //     berkasnya sama dengan yang sudah diunggah di kolom BUM Desa,
+            //     entri ini dilewati supaya tidak tampil kembar.
             ...[
-              [r.produk_hukums_bumdes_produk_hukum_perdes_idToproduk_hukums, 'ProdukHukumPerdes', 'Perdes (dari Produk Hukum)'],
-              [r.produk_hukums_bumdes_produk_hukum_sk_bumdes_idToproduk_hukums, 'ProdukHukumSK', 'SK BUM Desa (dari Produk Hukum)'],
-            ].map(([ph, jenis, label]) => (ph && ada(ph.file)
-              ? berkas(ph.file, 'produk-hukum', jenis, label, {
+              [r.produk_hukums_bumdes_produk_hukum_perdes_idToproduk_hukums, 'ProdukHukumPerdes', 'Perdes (dari Produk Hukum)', r.Perdes],
+              [r.produk_hukums_bumdes_produk_hukum_sk_bumdes_idToproduk_hukums, 'ProdukHukumSK', 'SK BUM Desa (dari Produk Hukum)', r.SK_BUM_Desa],
+            ].map(([ph, jenis, label, kolomUnggahan]) => {
+              if (!ph || !ada(ph.file)) return null;
+              const namaPh = String(ph.file).split('/').pop();
+              if (ada(kolomUnggahan) && String(kolomUnggahan).split('/').pop() === namaPh) return null;
+              return berkas(ph.file, 'produk-hukum', jenis, label, {
                 sumber: 'produk_hukum',
+                jalur: `/storage/produk_hukum/${encodeURIComponent(namaPh)}`,
                 keterangan: [ph.nomor, ph.tahun].filter(Boolean).join(' · ') || ph.judul || null,
-              })
-              : null)),
+              });
+            }),
           ].filter(Boolean),
           // Penanda ada/tidak, dipakai penyaring kelengkapan dokumen.
           dokumen: {
