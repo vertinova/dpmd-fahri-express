@@ -1,7 +1,11 @@
 /**
  * Lapis model bahasa untuk Gema.
  *
- * ATURAN YANG TIDAK BOLEH DILANGGAR: model TIDAK PERNAH menghasilkan data.
+ * ATURAN YANG TIDAK BOLEH DILANGGAR: model TIDAK PERNAH menghasilkan data, dan
+ * TIDAK PERNAH mengubahnya. Satu-satunya alat yang menyentuh perubahan —
+ * siapkan_setel_ulang_sandi — hanya MENYIAPKAN konfirmasi; yang benar-benar
+ * mengganti sandi adalah endpoint konfirmasi terpisah yang memeriksa izinnya
+ * sendiri, setelah pengguna menekan tombol di layar.
  *
  * Model hanya mengerjakan dua hal — memilih alat mana yang dipanggil dengan
  * penyaring apa, dan merangkai satu kalimat yang enak diucapkan. Seluruh angka
@@ -28,6 +32,7 @@ const { betaTool } = require('@anthropic-ai/sdk/helpers/beta/json-schema');
 const logger = require('../utils/logger');
 const mesin = require('./gemaMesin.service');
 const { muatKamus } = require('./gemaKamus.service');
+const akun = require('./gemaAkunPegawai.service');
 
 const MODEL = 'claude-opus-5';
 
@@ -51,7 +56,7 @@ const ambilKlien = () => {
  * Hasil alat terakhir ditangkap di sini, lalu dipakai membangun jawaban akhir.
  * Tabel yang dilihat pengguna berasal dari SINI, bukan dari karangan model.
  */
-const buatAlat = (tangkap) => {
+const buatAlat = (tangkap, pelaku) => {
 	const catat = (hasil) => {
 		tangkap.push(hasil);
 		// Yang dikirim balik ke model diringkas: ia butuh tahu ADA APA dan
@@ -63,6 +68,8 @@ const buatAlat = (tangkap) => {
 			jumlah_baris_tersedia: hasil.baris?.length || 0,
 			contoh_baris: (hasil.baris || []).slice(0, 5),
 			rincian: hasil.rincian || undefined,
+			// Penanda bahwa yang terjadi barulah PENYIAPAN, belum ada yang berubah.
+			menunggu_konfirmasi: hasil.konfirmasi ? true : undefined,
 		});
 	};
 
@@ -276,6 +283,47 @@ const buatAlat = (tangkap) => {
 		}),
 
 		betaTool({
+			name: 'cari_akun_pegawai',
+			description:
+				'Cari profil AKUN PEGAWAI DPMD (bukan aparatur desa) menurut nama, email, '
+				+ 'atau NIP. Kalau ketemu satu, yang kembali profil lengkapnya: peran, '
+				+ 'bidang, jabatan, NIP, status akun, dan apakah sandinya masih sandi '
+				+ 'default. Pakai untuk pertanyaan tentang akun aplikasi milik pegawai.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					kata: { type: 'string', description: 'nama, email, atau NIP pegawai' },
+				},
+				required: ['kata'],
+				additionalProperties: false,
+			},
+			run: async (input) => catat(await akun.cariAkun(String(input.kata || ''))),
+		}),
+
+		betaTool({
+			name: 'siapkan_setel_ulang_sandi',
+			description:
+				'SIAPKAN penyetelan ulang sandi akun pegawai ke sandi default. Alat ini '
+				+ 'TIDAK mengubah apa pun — ia hanya mencari akunnya dan menyiapkan '
+				+ 'konfirmasi yang harus ditekan pengguna di layar. Kalau yang cocok lebih '
+				+ 'dari satu, yang kembali daftarnya supaya penanya mempersempit. Setelah '
+				+ 'memanggil alat ini, katakan bahwa konfirmasinya menunggu ditekan; JANGAN '
+				+ 'pernah mengatakan sandinya sudah diganti.',
+			inputSchema: {
+				type: 'object',
+				properties: {
+					kata: { type: 'string', description: 'nama atau email pegawai yang sandinya disetel ulang' },
+				},
+				required: ['kata'],
+				additionalProperties: false,
+			},
+			run: async (input) => catat(await akun.siapkanSetelUlangSandi({
+				kata: String(input.kata || ''),
+				pelaku,
+			})),
+		}),
+
+		betaTool({
 			name: 'cari_apa_saja',
 			description:
 				'Cari satu kata ke seluruh nama di sistem sekaligus: nama desa, nama BUM '
@@ -315,6 +363,13 @@ const susunSistem = (kamus) => [
 	'  (tabelnya sudah tampil sendiri di layar pengguna)',
 	'- tanpa markdown, tanpa poin-poin, tanpa emoji',
 	'',
+	'Soal AKUN PEGAWAI: kamu bisa mencari profil akunnya, dan bisa MENYIAPKAN',
+	'penyetelan ulang sandi ke sandi default. Menyiapkan bukan berarti sudah',
+	'terjadi — sandinya baru berubah setelah pengguna menekan tombol konfirmasi',
+	'di layar. Jadi jangan pernah bilang sandinya sudah diganti; bilang',
+	'konfirmasinya menunggu ditekan. Kalau yang cocok lebih dari satu orang,',
+	'minta penanya menyebut nama lengkap atau emailnya, jangan menebak.',
+	'',
 	'Kalau pertanyaannya di luar data DPMD (cuaca, berita, hal umum), jawab',
 	'dengan ringan bahwa kamu belum bisa dan masih dikembangkan tim IT DPMD —',
 	'jangan kaku, jangan minta maaf berlebihan.',
@@ -327,7 +382,7 @@ const susunSistem = (kamus) => [
  * untuk jatuh ke mesin deterministik, supaya kegagalan tidak pernah berarti
  * pengguna tidak dapat jawaban sama sekali.
  */
-const jawabDenganModel = async (teks) => {
+const jawabDenganModel = async (teks, pelaku = null) => {
 	const c = ambilKlien();
 	if (!c) throw new Error('ANTHROPIC_API_KEY belum diisi');
 
@@ -344,7 +399,7 @@ const jawabDenganModel = async (teks) => {
 		betas: ['server-side-fallback-2026-07-01'],
 		fallbacks: 'default',
 		system: susunSistem(kamus),
-		tools: buatAlat(tangkap),
+		tools: buatAlat(tangkap, pelaku),
 		messages: [{ role: 'user', content: teks }],
 	});
 
@@ -371,21 +426,24 @@ const jawabDenganModel = async (teks) => {
 		kolom: terakhir?.kolom || [],
 		baris: terakhir?.baris || [],
 		total: terakhir?.total || 0,
+		// Tiket konfirmasi (mis. setel ulang sandi) harus sampai ke layar —
+		// tanpa ini tombolnya tidak pernah muncul dan aksinya tidak bisa selesai.
+		konfirmasi: terakhir?.konfirmasi,
 		ditenagai: 'model',
 	};
 };
 
 /** Jawab lewat model bila tersedia; kalau gagal, kembali ke mesin deterministik. */
-const jawab = async (teks) => {
-	if (!tersedia()) return { ...(await mesin.jawab(teks)), ditenagai: 'mesin' };
+const jawab = async (teks, pelaku = null) => {
+	if (!tersedia()) return { ...(await mesin.jawab(teks, pelaku)), ditenagai: 'mesin' };
 
 	try {
-		return await jawabDenganModel(teks);
+		return await jawabDenganModel(teks, pelaku);
 	} catch (error) {
 		// Gagal memanggil model TIDAK BOLEH berarti Gema bisu. Mesin
 		// deterministik tetap menjawab, hanya dengan pemahaman yang lebih kaku.
 		logger.error('Gema: model bahasa gagal, jatuh ke mesin deterministik:', error.message);
-		return { ...(await mesin.jawab(teks)), ditenagai: 'mesin-cadangan' };
+		return { ...(await mesin.jawab(teks, pelaku)), ditenagai: 'mesin-cadangan' };
 	}
 };
 

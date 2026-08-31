@@ -41,15 +41,9 @@ const uploadAvatar = multer({
  * Admin Desa mengelola akun desanya lewat /api/desa-admin.
  */
 
-const USER_ADMIN_ROLES = [
-  'superadmin',
-  'kepala_dinas',
-  'sekretaris_dinas',
-  'kepala_bidang',
-  'ketua_tim',
-  'pegawai',
-  'bendahara',
-];
+// Daftarnya dipegang bersama dengan Gema (fitur setel ulang sandi lewat suara)
+// supaya izin akses tidak bisa menyimpang antara dua pintu yang sama.
+const { PERAN_ADMIN_AKUN: USER_ADMIN_ROLES } = require('../config/akunStaf');
 
 // Field yang boleh diubah sendiri oleh pemilik akun lewat halaman Profil.
 const SELF_EDITABLE_FIELDS = ['name', 'email', 'tempat_lahir', 'tanggal_lahir'];

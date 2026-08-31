@@ -32,6 +32,9 @@ const { bicarakan, belumBisa } = require('./gemaGaya.service');
 const {
 	detailAparatur, detailBumdes, detailProdukHukum,
 } = require('./gemaDetail.service');
+const {
+	cariAkun, siapkanSetelUlangSandi, ambilKataCari,
+} = require('./gemaAkunPegawai.service');
 
 const nf = new Intl.NumberFormat('id-ID');
 
@@ -76,6 +79,9 @@ const EJAAN = [
 	[/\bel\s?pe\s?em\b/g, 'lpm'],
 	[/\bpe\s?ka\s?ka\b/g, 'pkk'],
 	[/\bes\s?ka\b/g, 'sk'],
+	[/\bpas\s?word\b/g, 'password'],
+	[/\bre\s?set\b/g, 'reset'],
+	[/\bakun\s+pegawe\w*\b/g, 'akun pegawai'],
 	[/\bperdes\w*\b/g, 'perdes'],
 	[/\bmandiri\w+\b/g, 'mandiri'],
 ];
@@ -114,6 +120,17 @@ const cocokkan = (teks, daftar) => {
 /* --------------------------------------------------------------- analisis -- */
 
 const TOPIK = [
+	// Didahulukan dari semuanya: "akun pegawai di bidang SPKED" berbicara soal
+	// akun, bukan soal desa, dan kata 'reset password' tidak boleh tertelan
+	// topik lain.
+	{
+		id: 'akun-pegawai',
+		kata: [
+			'akun pegawai', 'akun staf', 'akun dpmd', 'profil akun',
+			'reset password', 'reset sandi', 'setel ulang sandi', 'setel ulang password',
+			'password default', 'sandi default', 'ganti password', 'ubah password',
+		],
+	},
 	{ id: 'bumdes', kata: ['bumdes', 'bum desa', 'badan usaha'] },
 	{ id: 'aparatur', kata: ['aparatur', 'perangkat desa', 'kepala desa', 'sekretaris desa', 'bpd', 'kaur', 'kasi', 'kadus'] },
 	{ id: 'produk-hukum', kata: ['produk hukum', 'perdes', 'peraturan desa', 'perkades', 'sk kades'] },
@@ -177,6 +194,10 @@ const analisis = async (teksAsli) => {
 		sumberDana,
 		topik,
 		agregasi: punya(teks, ['berapa', 'jumlah', 'total', 'hitung', 'banyaknya']),
+		mintaSetelUlang: punya(teks, [
+			'reset password', 'reset sandi', 'setel ulang sandi', 'setel ulang password',
+			'password default', 'sandi default', 'ganti password', 'ubah password',
+		]),
 		mintaAktif: punya(teks, ['aktif']) && !punya(teks, ['tidak aktif', 'non aktif', 'nonaktif']),
 		mintaBadanHukum: punya(teks, ['badan hukum', 'berbadan hukum', 'sertifikat']),
 	};
@@ -761,6 +782,10 @@ const manusiakan = (hasil) => {
 	// Jawaban "belum bisa" punya kalimatnya sendiri yang sudah ramah.
 	if (hasil.maksud === 'belum-bisa') return hasil;
 
+	// Kalimat konfirmasi dan penolakan akun tidak boleh dipoles: isinya
+	// menjelaskan tindakan yang akan mengubah data, jadi harus apa adanya.
+	if (hasil.konfirmasi || String(hasil.maksud || '').startsWith('akun-pegawai')) return hasil;
+
 	const kosong = !hasil.total && !(hasil.rincian && hasil.rincian.length);
 	return {
 		...hasil,
@@ -772,7 +797,7 @@ const manusiakan = (hasil) => {
 	};
 };
 /** Pilih penangan yang tepat. Mengembalikan jawaban MENTAH, belum digayakan. */
-const cariJawaban = async (a) => {
+const cariJawaban = async (a, pelaku = null) => {
 	// LAPIS 1 — satu entitas disebut, tanpa topik lain dan tanpa penyaring.
 	// "Cijayanti" atau "profil desa Cijayanti" cukup jadi pertanyaan utuh.
 	const tanpaPenyaring = !a.nilai && !a.jabatan && !a.mintaAktif && !a.mintaBadanHukum;
@@ -782,6 +807,14 @@ const cariJawaban = async (a) => {
 	}
 
 	// LAPIS 2 — topik yang dikenali, disaring entitas dan nilai yang disebut.
+	// Akun pegawai didahulukan karena satu-satunya cabang yang boleh MENULIS
+	// ada di sini, dan izinnya diperiksa layanannya sendiri.
+	if (a.topik === 'akun-pegawai') {
+		const kata = ambilKataCari(a.teks);
+		return a.mintaSetelUlang
+			? siapkanSetelUlangSandi({ kata, pelaku })
+			: cariAkun(kata);
+	}
 	if (a.topik === 'keuangan') return jawabKeuangan(a);
 	if (a.topik === 'bumdes') return daftarBumdes(a);
 	if (a.topik === 'aparatur') return daftarAparatur(a);
@@ -794,9 +827,9 @@ const cariJawaban = async (a) => {
 	return pencarianMenyeluruh(a.teks);
 };
 
-const jawab = async (teksAsli) => {
+const jawab = async (teksAsli, pelaku = null) => {
 	const a = await analisis(teksAsli);
-	const hasil = await cariJawaban(a);
+	const hasil = await cariJawaban(a, pelaku);
 
 	// Jalan buntu: bukan sekadar "tidak ada data", tapi Gema memang belum
 	// mampu. Mengaku begitu jauh lebih berguna daripada melempar kalimat

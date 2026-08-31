@@ -1,6 +1,13 @@
 /**
  * Gema — asisten suara Core Dashboard.
- * Hanya baca: Gema menjawab dari data yang sudah ada, tidak pernah mengubahnya.
+ *
+ * Nyaris seluruhnya baca: Gema menjawab dari data yang sudah ada. SATU
+ * pengecualian yang disengaja adalah menyetel ulang sandi akun pegawai ke sandi
+ * default, dan itu pun tidak pernah terjadi dari kalimat yang diucapkan —
+ * perintahnya hanya menyiapkan, lalu pengguna menekan tombol dan front-end
+ * memanggil /konfirmasi. Izinnya sama persis dengan halaman Manajemen Pengguna
+ * (lihat src/config/akunStaf.js), jadi Gema hanya pintu lain menuju kewenangan
+ * yang sudah dipegang, bukan kewenangan baru.
  */
 
 const express = require('express');
@@ -16,5 +23,8 @@ router.use(checkRole([
 
 router.get('/kemampuan', controller.kemampuan);
 router.post('/tanya', controller.tanya);
+
+// Langkah kedua tindakan yang mengubah data; memeriksa izinnya sendiri.
+router.post('/konfirmasi', controller.konfirmasi);
 
 module.exports = router;

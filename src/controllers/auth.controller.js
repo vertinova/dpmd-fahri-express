@@ -4,11 +4,14 @@ const { generateToken, invalidateRoleCache } = require('../middlewares/auth');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const { validateDesaProfile, mustCompleteDesaProfile } = require('../config/desaProfile');
+const { SANDI_DEFAULT } = require('../config/sandiDefault');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
 // Password bawaan (seeder). User yang masih memakai ini WAJIB menggantinya dulu.
-const DEFAULT_PASSWORD = 'password';
+// Nilainya dipegang bersama dengan Gema, yang bisa menyetel ulang sandi akun
+// pegawai ke sandi ini — kalau keduanya berbeda, layar ganti sandi tidak muncul.
+const DEFAULT_PASSWORD = SANDI_DEFAULT;
 
 // Apakah hash password ini masih sama dengan password default?
 const isUsingDefaultPassword = async (passwordHash) => {
