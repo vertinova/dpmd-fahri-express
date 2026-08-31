@@ -225,6 +225,13 @@ async function buildReferenceLabel(refType, refId) {
 			});
 			if (proposal) return `Proposal Bankeu ${proposal.tahun_anggaran} - ${proposal.desas?.nama || ''}`;
 		}
+		if (refType === 'bankeu_proposal_2025') {
+			const proposal = await prisma.bankeu_proposal_2025.findUnique({
+				where: { id: refId },
+				select: { tahun_anggaran: true, desas: { select: { nama: true } } },
+			});
+			if (proposal) return `Proposal Bankeu ${proposal.tahun_anggaran} - ${proposal.desas?.nama || ''}`;
+		}
 		if (refType === 'bantuan_provinsi_lpj') {
 			const [rows] = await sequelize.query(`
 				SELECT lpj.tahun_anggaran, d.nama AS desa_nama
@@ -1087,7 +1094,7 @@ class MessagingController {
 				return res.status(400).json({ success: false, message: 'target_user_id, reference_type, dan reference_id diperlukan' });
 			}
 
-			const validRefTypes = ['bankeu_lpj', 'bankeu_proposal', 'bantuan_provinsi_lpj'];
+			const validRefTypes = ['bankeu_lpj', 'bankeu_proposal', 'bankeu_proposal_2025', 'bantuan_provinsi_lpj'];
 			if (!validRefTypes.includes(reference_type)) {
 				return res.status(400).json({ success: false, message: 'reference_type tidak valid' });
 			}
@@ -1672,7 +1679,7 @@ class MessagingController {
  * @param {BigInt} desaUserId - The desa user who submitted
  * @param {string} reviewerRole - Role of the reviewer
  * @param {string} desaRole - Role of the desa user (usually 'desa')
- * @param {string} referenceType - 'bankeu_lpj' | 'bankeu_proposal' | 'bantuan_provinsi_lpj'
+ * @param {string} referenceType - 'bankeu_lpj' | 'bankeu_proposal' | 'bankeu_proposal_2025' | 'bantuan_provinsi_lpj'
  * @param {BigInt} referenceId - ID of the entity
  * @param {string} systemMessage - System message content (e.g. revision notes)
  */

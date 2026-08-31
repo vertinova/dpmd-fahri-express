@@ -45,6 +45,7 @@ const requiredDirs = [
   path.join(__dirname, '../storage/uploads/bankeu-perubahan/surat-pengantar'),
   path.join(__dirname, '../storage/uploads/bankeu-perubahan/annotated'),
   path.join(__dirname, '../storage/uploads/bantuan_provinsi_lpj/temp'),
+  path.join(__dirname, '../storage/uploads/bankeu_proposal_2025/temp'),
   path.join(__dirname, '../public/backups')
 ];
 
@@ -106,6 +107,8 @@ const dinasVerificationRoutes = require('./routes/dinasVerification.routes');
 const dpmdVerificationRoutes = require('./routes/dpmdVerification.routes');
 const bankeuLpjRoutes = require('./routes/bankeuLpj.routes');
 const dpmdBankeuLpjRoutes = require('./routes/dpmdBankeuLpj.routes');
+const bankeuProposal2025Routes = require('./routes/bankeuProposal2025.routes');
+const dpmdBankeuProposal2025Routes = require('./routes/dpmdBankeuProposal2025.routes');
 const bantuanProvinsiLpjRoutes = require('./routes/bantuanProvinsiLpj.routes');
 const dpmdBantuanProvinsiLpjRoutes = require('./routes/dpmdBantuanProvinsiLpj.routes');
 const dinasVerifikatorRoutes = require('./routes/dinasVerifikator.routes');
@@ -403,6 +406,9 @@ app.use('/api/bankeu-perubahan/berita-acara', bankeuPerubahanBeritaAcaraRoutes);
 app.use('/api/bankeu-perubahan/questionnaire', bankeuPerubahanQuestionnaireRoutes);
 app.use('/api/desa/bankeu-lpj', bankeuLpjRoutes); // Bankeu LPJ upload routes for desa
 app.use('/api/dpmd/bankeu-lpj', dpmdBankeuLpjRoutes); // Bankeu LPJ monitoring routes for DPMD/SPKED
+
+app.use('/api/desa/bankeu-proposal-2025', bankeuProposal2025Routes); // Unggah proposal Bankeu TA 2025 oleh desa
+app.use('/api/dpmd/bankeu-proposal-2025', dpmdBankeuProposal2025Routes); // Rekap proposal Bankeu TA 2025 untuk DPMD/SPKED
 app.use('/api/desa/bantuan-provinsi-lpj', bantuanProvinsiLpjRoutes); // Bantuan Provinsi LPJ upload routes for desa
 app.use('/api/dpmd/bantuan-provinsi-lpj', dpmdBantuanProvinsiLpjRoutes); // Bantuan Provinsi LPJ monitoring routes for DPMD/SPKED
 app.use('/api/bankeu/master-kegiatan', bankeuMasterKegiatanRoutes); // Master kegiatan CRUD

@@ -176,6 +176,26 @@ model bankeu_master_kegiatan {
   @@index([jenis_kegiatan], map: "idx_jenis")
 }
 
+model bankeu_proposal_2025 {
+  id             BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  desa_id        BigInt   @db.UnsignedBigInt
+  tahun_anggaran Int      @default(2025) @db.Year
+  nama_file      String   @db.VarChar(255)
+  file_path      String   @db.VarChar(500)
+  file_size      Int?     @db.UnsignedInt
+  keterangan     String?  @db.Text
+  uploaded_by    BigInt   @db.UnsignedBigInt
+  created_at     DateTime @default(now()) @db.Timestamp(0)
+  updated_at     DateTime @default(now()) @db.Timestamp(0)
+  desas          desas    @relation(fields: [desa_id], references: [id], onDelete: Cascade, map: "fk_bankeu_proposal_2025_desa")
+  users          users    @relation(fields: [uploaded_by], references: [id], onDelete: Cascade, map: "fk_bankeu_proposal_2025_user")
+
+  @@index([desa_id], map: "idx_bankeu_proposal_2025_desa_id")
+  @@index([tahun_anggaran], map: "idx_bankeu_proposal_2025_tahun")
+  @@index([desa_id, tahun_anggaran], map: "idx_bankeu_proposal_2025_desa_tahun")
+  @@index([uploaded_by], map: "idx_bankeu_proposal_2025_uploaded_by")
+}
+
 model bankeu_proposal_kegiatan {
   id                     BigInt                 @id @default(autoincrement()) @db.UnsignedBigInt
   proposal_id            BigInt                 @db.UnsignedBigInt
@@ -999,6 +1019,7 @@ model desas {
   updated_at                 DateTime?                    @db.Timestamp(0)
   aparatur_desa              aparatur_desa[]
   bankeu_lpj                 bankeu_lpj[]
+  bankeu_proposal_2025       bankeu_proposal_2025[]
   bankeu_perubahan_lpj       bankeu_perubahan_lpj[]
   bankeu_perubahan_proposals bankeu_perubahan_proposals[]
   bankeu_proposals           bankeu_proposals[]
@@ -2034,6 +2055,7 @@ model users {
   arsip_barang_mutasi                                            arsip_barang_mutasi[]
   arsip_barang_scan_log                                          arsip_barang_scan_log[]
   bankeu_lpj                                                     bankeu_lpj[]
+  bankeu_proposal_2025                                           bankeu_proposal_2025[]
   bankeu_perubahan_lpj_dpmd_verified_byTousers                   bankeu_perubahan_lpj[]               @relation("bp_perubahan_lpj_dpmd_verified_by")
   bankeu_perubahan_lpj_uploaded_byTousers                        bankeu_perubahan_lpj[]               @relation("bp_perubahan_lpj_uploaded_by")
   bankeu_perubahan_proposal_versions                             bankeu_perubahan_proposal_versions[] @relation("bp_perubahan_version_uploaded_by")

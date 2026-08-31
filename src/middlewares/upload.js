@@ -442,6 +442,33 @@ const uploadBankeuLpj = multer({
   }
 });
 
+// Storage configuration for PROPOSAL BANKEU 2025 (PDF only) - uploads to temp, moved to kecamatan/desa folder in controller
+const storageBankeuProposal2025 = multer.diskStorage({
+  destination: function (req, file, cb) {
+    const dir = 'storage/uploads/bankeu_proposal_2025/temp';
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+    cb(null, dir);
+  },
+  filename: function (req, file, cb) {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    const nameWithoutExt = path.basename(file.originalname, ext)
+      .replace(/[^a-zA-Z0-9]/g, '_')
+      .substring(0, 50);
+    cb(null, `proposal_${timestamp}_${nameWithoutExt}${ext}`);
+  }
+});
+
+const uploadBankeuProposal2025 = multer({
+  storage: storageBankeuProposal2025,
+  fileFilter: pdfFilter,
+  limits: {
+    fileSize: 100 * 1024 * 1024 // 100MB, samakan dengan LPJ
+  }
+});
+
 // Storage configuration for BANTUAN PROVINSI LPJ (PDF only)
 const storageBantuanProvinsiLpj = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -722,6 +749,7 @@ module.exports = {
   bankeuPerubahanConfigFile: uploadBankeuPerubahanConfig.single('file'),
   bankeuPerubahanSignature: uploadBankeuPerubahanSignature.single('file'),
   bankeuLpj: uploadBankeuLpj.array('files', 10),
+  bankeuProposal2025: uploadBankeuProposal2025.array('files', 10),
   bantuanProvinsiLpj: uploadBantuanProvinsiLpj.array('files', 10),
   contohProposalUpload: uploadContohProposal.single('file')
 };
