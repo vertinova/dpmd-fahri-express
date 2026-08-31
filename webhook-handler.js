@@ -52,6 +52,10 @@ const REPOS = {
       `${NODE_BIN}/npm install --production`,
       `${NODE_BIN}/npx prisma generate`,
       `${NODE_BIN}/node /var/www/backend/database-express/auto-migrate.js`,
+      // Akun bawaan yang tidak bisa dibuat lewat SQL (sandinya perlu di-hash):
+      // dinas pelihat BPKAD & Inspektorat. Skripnya idempoten — kalau akunnya
+      // sudah ada, ia hanya memastikan tautan dinasnya benar lalu keluar.
+      `${NODE_BIN}/node /var/www/backend/scripts/seed-dinas-pelihat.js`,
       // Auto-import RT/RW Excel data if files exist, then remove them from repo
       `/bin/bash -c 'if ls /var/www/backend/data/datartrw/*.xlsx 1>/dev/null 2>&1; then ${NODE_BIN}/node /var/www/backend/scripts/import-rtrw-from-excel.js && rm -f /var/www/backend/data/datartrw/*.xlsx && echo "RT/RW import done, Excel files removed"; else echo "No RT/RW Excel files to import"; fi'`,
       '/bin/cp -f /var/www/backend/nginx-dpmdbogorkab.conf /etc/nginx/sites-available/dpmdbogorkab.id',

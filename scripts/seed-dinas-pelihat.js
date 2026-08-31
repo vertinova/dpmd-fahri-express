@@ -6,21 +6,23 @@
  * Skrip ini idempoten: baris master_dinas dan akunnya dibuat kalau belum ada,
  * dan kalau sudah ada hanya dipastikan tertaut ke dinas yang benar.
  *
- * Kata sandinya diambil dari env BPKAD_PASSWORD / INSPEKTORAT_PASSWORD; kalau
- * tidak diisi, skrip membuat sandi acak dan mencetaknya sekali di akhir — jadi
- * tidak ada kredensial yang tersimpan di dalam kode.
+ * Kata sandinya diambil dari env BPKAD_PASSWORD / INSPEKTORAT_PASSWORD. Kalau
+ * tidak diisi, dipakai SANDI DEFAULT aplikasi — yang berarti akunnya langsung
+ * bisa dipakai masuk dan pemiliknya WAJIB mengganti sandi di login pertama.
+ * Sandi acak sempat dipakai di sini, tapi keliru untuk jalur otomatis: hasilnya
+ * hanya tercetak di log deploy, yang tidak dibaca siapa pun.
  *
- * Jalankan: node scripts/seed-dinas-pelihat.js
+ * Skrip ini dipanggil webhook auto-deploy setiap kali backend di-deploy. Karena
+ * idempoten, memanggilnya berulang tidak berefek apa-apa selain satu query.
+ *
+ * Jalankan manual: node scripts/seed-dinas-pelihat.js
  */
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '..', '.env') });
 
-const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const prisma = require('../src/config/prisma');
-
-// Sandi acak yang masih mudah dibacakan lewat telepon.
-const sandiAcak = () => crypto.randomBytes(9).toString('base64').replace(/[^A-Za-z0-9]/g, '') + '!';
+const { SANDI_DEFAULT } = require('../src/config/sandiDefault');
 
 const DAFTAR = [
   {
@@ -28,14 +30,14 @@ const DAFTAR = [
     nama_dinas: 'Badan Pengelolaan Keuangan dan Aset Daerah',
     singkatan: 'BPKAD',
     email: process.env.BPKAD_EMAIL || 'bpkad@bogorkab.go.id',
-    password: process.env.BPKAD_PASSWORD || sandiAcak(),
+    password: process.env.BPKAD_PASSWORD || SANDI_DEFAULT,
   },
   {
     kode_dinas: 'INSPEKTORAT',
     nama_dinas: 'Inspektorat Daerah',
     singkatan: 'INSPEKTORAT',
     email: process.env.INSPEKTORAT_EMAIL || 'inspektorat@bogorkab.go.id',
-    password: process.env.INSPEKTORAT_PASSWORD || sandiAcak(),
+    password: process.env.INSPEKTORAT_PASSWORD || SANDI_DEFAULT,
   },
 ];
 
@@ -95,7 +97,8 @@ async function pastikanAkun(item, dinas) {
 
       const hasil = await pastikanAkun(item, dinas);
       if (hasil.baru) {
-        console.log(`  akun dibuat  : ${hasil.akun.email} / ${hasil.password}`);
+        const catatan = hasil.password === SANDI_DEFAULT ? ' (sandi default — wajib diganti saat login pertama)' : '';
+        console.log(`  akun dibuat  : ${hasil.akun.email} / ${hasil.password}${catatan}`);
       } else if (hasil.ditautkan) {
         console.log(`  akun ditautkan ke dinas ini: ${hasil.akun.email}`);
       } else {
