@@ -38,6 +38,27 @@ const loadDesaPermissions = async (userId, role) => {
   }
 };
 
+/**
+ * Lampirkan identitas dinas (BPKAD, DLH, dst.) ke payload user.
+ *
+ * Front-end membedakan akun dinas "pelihat" (BPKAD/Inspektorat) dari verifikator
+ * teknis lewat `user.dinas.kode_dinas`, jadi data ini harus ikut di login,
+ * verifyToken, maupun /auth/profile — sesi aplikasi ini tidak pernah
+ * kedaluwarsa, sehingga akun lama hanya menerima info baru lewat profil.
+ */
+const attachDinasInfo = async (responseData, dinasId) => {
+  if (!dinasId) return;
+  try {
+    const dinas = await prisma.master_dinas.findUnique({
+      where: { id: Number(dinasId) },
+      select: { id: true, kode_dinas: true, nama_dinas: true, singkatan: true }
+    });
+    if (dinas) responseData.dinas = dinas;
+  } catch (error) {
+    logger.warn(`Gagal memuat data dinas ${dinasId}:`, error.message);
+  }
+};
+
 const parseCoordinate = (value, min, max) => {
   if (value === undefined || value === null || value === '') return null;
   const num = Number(value);
@@ -287,6 +308,8 @@ const login = async (req, res) => {
       }
     }
 
+    await attachDinasInfo(responseData, user.dinas_id);
+
     return res.status(200).json({
       success: true,
       message: 'Login successful',
@@ -524,6 +547,8 @@ const verifyToken = async (req, res) => {
       }
     }
 
+    await attachDinasInfo(responseData, user.dinas_id);
+
     return res.status(200).json({
       success: true,
       data: {
@@ -699,6 +724,8 @@ const getProfile = async (req, res) => {
         logger.warn(`Failed to fetch kecamatan for user ID ${userId}:`, error);
       }
     }
+
+    await attachDinasInfo(responseData, user.dinas_id);
 
     return res.status(200).json({
       success: true,

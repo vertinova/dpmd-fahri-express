@@ -303,7 +303,7 @@ const generateToken = (user) => {
 };
 
 // Middleware to check if user has dinas_terkait or verifikator_dinas role and dinas_id
-const authorizeDinas = (req, res, next) => {
+const authorizeDinas = async (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({
       success: false,
@@ -328,8 +328,98 @@ const authorizeDinas = (req, res, next) => {
     });
   }
 
+  // Dinas pelihat (BPKAD/Inspektorat) hanya PELIHAT: seluruh jalur
+  // verifikasi/pengelolaan dinas (Bankeu reguler, verifikator, akses desa)
+  // tertutup untuknya. Satu-satunya pintu mereka adalah /api/dinas-pelihat/*
+  // yang read-only.
+  if (await isDinasPelihatAccount(req.user)) {
+    logger.warn(`❌ Dinas access denied - Akun pelihat ${req.user.email} hanya punya akses lihat`);
+    return res.status(403).json({
+      success: false,
+      message: 'Akun ini hanya memiliki akses lihat (Bantuan Keuangan Perubahan)'
+    });
+  }
+
   logger.info(`✅ Dinas authorization passed - User ${req.user.email} (dinas_id: ${req.user.dinas_id}, role: ${req.user.role})`);
   next();
+};
+
+/**
+ * Tolak akun dinas pelihat pada rute yang dijaga checkRole (bukan
+ * authorizeDinas), mis. pengelolaan verifikator dinas. Dipakai berdampingan
+ * dengan checkRole.
+ */
+const denyDinasPelihat = async (req, res, next) => {
+  try {
+    if (await isDinasPelihatAccount(req.user)) {
+      logger.warn(`❌ Akses ditolak - Akun pelihat ${req.user?.email} mencoba rute pengelolaan dinas`);
+      return res.status(403).json({
+        success: false,
+        message: 'Akun ini hanya memiliki akses lihat (Bantuan Keuangan Perubahan)'
+      });
+    }
+    next();
+  } catch (error) {
+    logger.error('denyDinasPelihat error:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+// Kode dinas (di master_dinas) yang berperan PELIHAT: hanya boleh membaca &
+// mengunduh arsip Bankeu Perubahan, tidak pernah memverifikasi atau mengubah
+// apa pun. Menambah OPD pelihat baru cukup dengan menambah kodenya di sini
+// (dan barisnya di master_dinas).
+const KODE_DINAS_PELIHAT = ['BPKAD', 'INSPEKTORAT'];
+
+// Cache kecil id dinas -> kode_dinas supaya tidak query master_dinas tiap request.
+const dinasKodeCache = new Map();
+const getKodeDinas = async (dinasId) => {
+  const key = Number(dinasId);
+  if (dinasKodeCache.has(key)) return dinasKodeCache.get(key);
+  const dinas = await prisma.master_dinas.findUnique({
+    where: { id: key },
+    select: { kode_dinas: true }
+  });
+  const kode = dinas?.kode_dinas || null;
+  dinasKodeCache.set(key, kode);
+  return kode;
+};
+
+// Apakah user ini akun dinas pelihat (BPKAD/Inspektorat)? Dipakai untuk
+// membuka akses lihat sekaligus menutup akses tulis di rute dinas lainnya.
+const isDinasPelihatAccount = async (user) => {
+  if (!user || !user.dinas_id) return false;
+  return KODE_DINAS_PELIHAT.includes(await getKodeDinas(user.dinas_id));
+};
+
+/**
+ * Require dinas pelihat (read-only)
+ * Hanya akun dinas yang kode dinasnya terdaftar di KODE_DINAS_PELIHAT yang
+ * lolos. Dipakai untuk endpoint arsip Bankeu Perubahan versi lihat-saja; tidak
+ * ada satupun endpoint tulis yang memakai middleware ini.
+ */
+const authorizeDinasPelihat = async (req, res, next) => {
+  try {
+    if (!req.user) {
+      return res.status(401).json({ success: false, message: 'Unauthorized - No user found' });
+    }
+
+    const allowedRoles = ['dinas_terkait', 'verifikator_dinas'];
+    if (!allowedRoles.includes(req.user.role) || !req.user.dinas_id) {
+      logger.warn(`❌ Akses pelihat ditolak - User ${req.user.email} (role: ${req.user.role}, dinas_id: ${req.user.dinas_id})`);
+      return res.status(403).json({ success: false, message: 'Access forbidden - Requires viewer dinas account' });
+    }
+
+    if (!(await isDinasPelihatAccount(req.user))) {
+      logger.warn(`❌ Akses pelihat ditolak - User ${req.user.email} bukan akun dinas pelihat`);
+      return res.status(403).json({ success: false, message: 'Access forbidden - Requires viewer dinas account' });
+    }
+
+    next();
+  } catch (error) {
+    logger.error('authorizeDinasPelihat error:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
 };
 
 /**
@@ -349,4 +439,4 @@ const requireSuperadmin = (req, res, next) => {
   next();
 };
 
-module.exports = { auth, checkRole, checkAbsensiAdmin, generateToken, authorizeDinas, requireSuperadmin, invalidateRoleCache };
+module.exports = { auth, checkRole, checkAbsensiAdmin, generateToken, authorizeDinas, authorizeDinasPelihat, denyDinasPelihat, requireSuperadmin, invalidateRoleCache };
