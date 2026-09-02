@@ -12,6 +12,9 @@ router.get('/', controller.getAllProdukHukum);
 // GET /api/pemdes/produk-hukum/stats - Get produk hukum statistics
 router.get('/stats', controller.getStats);
 
+// GET /api/pemdes/produk-hukum/grouped - Rekap jumlah per desa & kecamatan
+router.get('/grouped', controller.getGrouped);
+
 // GET /api/pemdes/produk-hukum/:id/related - Get related kelembagaan & pengurus
 router.get('/:id/related', controller.getRelated);
 

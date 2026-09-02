@@ -1,6 +1,116 @@
 const prisma = require('../config/prisma');
 
 /**
+ * Penyaring daftar produk hukum — dipakai bersama mode daftar dan mode per
+ * wilayah supaya keduanya menghitung populasi yang sama.
+ */
+const bangunWhere = ({ search, kecamatan_id, desa_id, jenis, singkatan_jenis, tahun, status_peraturan }) => {
+	const where = {};
+
+	if (search) {
+		where.OR = [
+			{ judul: { contains: search } },
+			{ nomor: { contains: search } },
+			{ subjek: { contains: search } },
+		];
+	}
+
+	if (desa_id) {
+		where.desa_id = BigInt(desa_id);
+	} else if (kecamatan_id) {
+		where.desas = { kecamatan_id: BigInt(kecamatan_id) };
+	}
+
+	if (jenis) where.jenis = jenis;
+	if (singkatan_jenis) where.singkatan_jenis = singkatan_jenis;
+	if (tahun) where.tahun = parseInt(tahun);
+	if (status_peraturan) where.status_peraturan = status_peraturan;
+
+	return where;
+};
+
+/**
+ * Rekap jumlah produk hukum per desa, dikelompokkan per kecamatan.
+ *
+ * Desa yang belum punya satu pun tetap ditampilkan dengan angka nol — justru
+ * desa itulah yang perlu ditagih, dan menyembunyikannya membuat rekap ini
+ * cuma memuji yang sudah rajin.
+ */
+const getGrouped = async (req, res) => {
+	try {
+		const { kecamatan_id, desa_id } = req.query;
+		const where = bangunWhere(req.query);
+
+		const hitungan = await prisma.produk_hukums.groupBy({
+			by: ['desa_id'],
+			where,
+			_count: { _all: true },
+		});
+		const petaHitungan = new Map(hitungan.map((baris) => [String(baris.desa_id), baris._count._all]));
+
+		// Kelurahan tidak menerbitkan produk hukum desa, jadi tidak ikut didaftar
+		// — kecuali ternyata punya data, yang justru perlu terlihat.
+		const whereDesa = {
+			OR: [
+				{ status_pemerintahan: 'desa' },
+				{ id: { in: hitungan.map((baris) => baris.desa_id).filter(Boolean) } },
+			],
+		};
+		if (desa_id) whereDesa.id = BigInt(desa_id);
+		else if (kecamatan_id) whereDesa.kecamatan_id = BigInt(kecamatan_id);
+
+		const desas = await prisma.desas.findMany({
+			where: whereDesa,
+			select: { id: true, nama: true, kecamatans: { select: { id: true, nama: true } } },
+		});
+
+		const kecamatans = new Map();
+		for (const desa of desas) {
+			const kec = desa.kecamatans;
+			if (!kec) continue;
+
+			const idKec = String(kec.id);
+			let kecamatan = kecamatans.get(idKec);
+			if (!kecamatan) {
+				kecamatan = { id: idKec, nama: kec.nama, total: 0, desa: [] };
+				kecamatans.set(idKec, kecamatan);
+			}
+
+			const total = petaHitungan.get(String(desa.id)) || 0;
+			kecamatan.desa.push({ id: String(desa.id), nama: desa.nama, total });
+			kecamatan.total += total;
+		}
+
+		const perNama = (a, b) => a.nama.localeCompare(b.nama, 'id');
+		const data = [...kecamatans.values()]
+			.map((kecamatan) => ({ ...kecamatan, desa: kecamatan.desa.sort(perNama) }))
+			.sort(perNama);
+
+		res.json({
+			success: true,
+			message: 'Rekap produk hukum per wilayah',
+			data,
+			meta: {
+				totalItems: data.reduce((jumlah, kecamatan) => jumlah + kecamatan.total, 0),
+				totalKecamatan: data.length,
+				totalDesa: data.reduce((jumlah, kecamatan) => jumlah + kecamatan.desa.length, 0),
+				desaKosong: data.reduce(
+					(jumlah, kecamatan) => jumlah + kecamatan.desa.filter((desa) => desa.total === 0).length,
+					0
+				),
+			},
+		});
+	} catch (error) {
+		console.error('Error fetching rekap produk hukum per wilayah:', error);
+		res.status(500).json({
+			success: false,
+			message: 'Gagal mengambil rekap produk hukum per wilayah',
+			error: error.message,
+		});
+	}
+};
+
+/**
  * Get all produk hukum across all desas (for bidang/pemdes users)
  * Supports search, filtering, and pagination
  */
@@ -394,4 +504,4 @@ const getRelated = async (req, res) => {
 	}
 };
 
-module.exports = { getAllProdukHukum, getStats, getById, getRelated };
+module.exports = { getAllProdukHukum, getGrouped, getStats, getById, getRelated };

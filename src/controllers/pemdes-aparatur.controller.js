@@ -173,6 +173,21 @@ const angkaRomawi = (teks) => {
 	return total;
 };
 
+// Satu jabatan yang sama ditulis dua gaya di data ("KAUR KEUANGAN" dan
+// "Kepala Urusan Keuangan"), plus beda huruf besar-kecil. Tanpa disamakan,
+// rekap per jabatan akan memecah satu posisi jadi dua baris.
+const bakuJabatan = (jabatan = '') => {
+	let teks = String(jabatan).toUpperCase().replace(/\s+/g, ' ').trim();
+	teks = teks
+		.replace(/^KAUR\b/, 'KEPALA URUSAN')
+		.replace(/^KASI\b/, 'KEPALA SEKSI')
+		.replace(/^KADUS\b/, 'KEPALA DUSUN');
+	// Dua penamaan untuk urusan yang sama.
+	teks = teks.replace(/^KEPALA URUSAN (UMUM DAN TU|TATA USAHA DAN UMUM)$/, 'KEPALA URUSAN TATA USAHA & UMUM');
+	teks = teks.replace(/^KEPALA SEKSI KESEJAHTERAAN( RAKYAT)?$/, 'KEPALA SEKSI KESEJAHTERAAN');
+	return teks || 'TIDAK DIISI';
+};
+
 const peringkatJabatan = (jabatan = '') => {
 	const cocok = URUTAN_JABATAN.find((item) => item.pola.test(jabatan));
 	const romawi = jabatan.match(/\b([IVX]+)\s*$/i);
@@ -750,6 +765,7 @@ const getStats = async (req, res) => {
 		// Jabatan categorization: Pemdes vs BPD
 		let totalPemdes = 0;
 		let totalBPD = 0;
+		const perJabatan = new Map();
 		for (const g of jabatanGroups) {
 			const jab = (g.jabatan || '').toLowerCase();
 			if (jab.includes('bpd') || jab.includes('badan permusyawaratan')) {
@@ -757,7 +773,17 @@ const getStats = async (req, res) => {
 			} else {
 				totalPemdes += g._count._all;
 			}
+
+			const label = bakuJabatan(g.jabatan);
+			perJabatan.set(label, (perJabatan.get(label) || 0) + g._count._all);
 		}
+
+		// Diurut sesuai susunan jabatan, bukan besar-kecil angkanya: yang dicari
+		// pembaca adalah "berapa kepala desa, berapa sekdes", bukan peringkat.
+		const jabatan = [...perJabatan.entries()]
+			.map(([name, value]) => ({ name, value, ...peringkatJabatan(name) }))
+			.sort((a, b) => a.urutan - b.urutan || a.nomor - b.nomor || a.name.localeCompare(b.name, 'id'))
+			.map(({ name, value }) => ({ name, value }));
 
 		res.json({
 			success: true,
@@ -772,6 +798,7 @@ const getStats = async (req, res) => {
 				total_bpd: totalBPD,
 				rentang_usia,
 				pendidikan,
+				jabatan,
 			},
 		});
 	} catch (error) {
