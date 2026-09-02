@@ -9,7 +9,10 @@ async function runMigration() {
 	try {
 		// Parse DATABASE_URL
 		const dbUrl = process.env.DATABASE_URL;
-		const match = dbUrl.match(/mysql:\/\/([^:]+):([^@]+)@([^:]+):(\d+)\/(.+)/);
+		// Sandi boleh kosong — MySQL bawaan Laragon memang begitu, dan pola lama
+		// yang menuntut minimal satu karakter membuat runner ini tidak pernah
+		// jalan di lingkungan pengembangan.
+		const match = dbUrl.match(/mysql:\/\/([^:]+):([^@]*)@([^:]+):(\d+)\/(.+)/);
 
 		if (!match) {
 			throw new Error("Invalid DATABASE_URL format");
