@@ -11,7 +11,8 @@
 -- Aman dijalankan berulang: penambahan kolom dijaga pemeriksaan
 -- information_schema karena MySQL 8 tidak punya ADD COLUMN IF NOT EXISTS.
 --
--- Cara jalan:  node database-express/run-migration.js database-express/migrations/20260902_add_verifikasi_dan_riwayat_aparatur.sql
+-- Dijalankan otomatis saat deploy oleh database-express/auto-migrate.js
+-- (dipanggil webhook-handler.js), dan dicatat di tabel `_migration_history`.
 
 -- ---------------------------------------------------------------------------
 -- 1. Kolom verifikasi pada aparatur_desa
