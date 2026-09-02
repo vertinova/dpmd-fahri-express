@@ -1,9 +1,16 @@
 const prisma = require('../config/prisma');
+const { AKSI, catatLogAparatur, ambilLogAparatur } = require('../utils/aparaturLog');
 
 // Tabel aparatur_desa tidak punya kolom pembeda perangkat desa vs BPD —
 // satu-satunya penanda ada di teks jabatan. Aturannya ditulis sekali di sini
 // supaya daftar dan statistik tidak pernah memakai definisi yang berbeda.
 const KATA_BPD = ['bpd', 'badan permusyawaratan'];
+
+/** Jenis satu baris, dari aturan yang sama dengan penyaring di bawah. */
+const jenisAparatur = (jabatan = '') => {
+	const teks = String(jabatan).toLowerCase();
+	return KATA_BPD.some((kata) => teks.includes(kata)) ? 'bpd' : 'perangkat';
+};
 
 /** `jenis`: 'bpd' | 'perangkat'. Nilai lain (atau kosong) = tanpa penyaringan. */
 const filterJenis = (jenis) => {
@@ -189,10 +196,11 @@ const getGrouped = async (req, res) => {
 				id: true,
 				nama_lengkap: true,
 				jabatan: true,
+				nipd: true,
 				status: true,
 				jenis_kelamin: true,
 				file_pas_foto: true,
-				dpmd_verified_at: true,
+				status_verifikasi: true,
 				desas: {
 					select: {
 						id: true,
@@ -229,10 +237,11 @@ const getGrouped = async (req, res) => {
 				id: row.id,
 				nama_lengkap: row.nama_lengkap,
 				jabatan: row.jabatan,
+				nipd: row.nipd,
 				status: row.status,
 				jenis_kelamin: row.jenis_kelamin,
 				file_pas_foto: row.file_pas_foto,
-				dpmd_verified_at: row.dpmd_verified_at,
+				status_verifikasi: row.status_verifikasi,
 				urutan,
 				nomor,
 			});
@@ -247,8 +256,13 @@ const getGrouped = async (req, res) => {
 				desa: [...kecamatan.desa.values()]
 					.map((desa) => ({
 						...desa,
+						// Yang aktif dulu — seluruh susunan jabatan dari kepala desa ke
+						// bawah — baru yang nonaktif dengan susunan yang sama di
+						// bawahnya. Bukan sekadar mengurut jabatan lalu menyelipkan
+						// yang nonaktif di tengah-tengah jajarannya.
 						aparatur: desa.aparatur.sort(
 							(a, b) =>
+								(a.status === 'Aktif' ? 0 : 1) - (b.status === 'Aktif' ? 0 : 1) ||
 								a.urutan - b.urutan ||
 								a.nomor - b.nomor ||
 								a.nama_lengkap.localeCompare(b.nama_lengkap, 'id')
@@ -273,6 +287,164 @@ const getGrouped = async (req, res) => {
 		res.status(500).json({
 			success: false,
 			message: 'Gagal mengambil data aparatur desa per wilayah',
+			error: error.message,
+		});
+	}
+};
+
+/**
+ * Dua hal yang perlu ditindaklanjuti bidang, untuk kolom notifikasi:
+ * aparatur yang sudah lewat 60 tahun dan yang belum diputus verifikasinya.
+ *
+ * Keduanya sengaja dibatasi yang berstatus Aktif — yang sudah nonaktif tidak
+ * menuntut tindakan apa pun, dan ikut menghitungnya hanya menggelembungkan
+ * angka sampai notifikasinya diabaikan orang.
+ */
+const USIA_LANJUT = 60;
+
+const getNotifikasi = async (req, res) => {
+	try {
+		const jenis = ['bpd', 'perangkat'].includes(req.query.jenis) ? req.query.jenis : null;
+		const dasar = { ...bangunWhere({ jenis }), status: 'Aktif' };
+
+		const batasLahir = new Date();
+		batasLahir.setFullYear(batasLahir.getFullYear() - USIA_LANJUT);
+
+		const pilih = {
+			id: true,
+			nama_lengkap: true,
+			jabatan: true,
+			tanggal_lahir: true,
+			desas: { select: { nama: true } },
+		};
+		const urut = { desas: { nama: 'asc' } };
+
+		const whereUsia = { ...dasar, tanggal_lahir: { lt: batasLahir } };
+		const whereVerifikasi = { ...dasar, status_verifikasi: null };
+
+		const [totalUsia, contohUsia, totalVerifikasi, contohVerifikasi] = await Promise.all([
+			prisma.aparatur_desa.count({ where: whereUsia }),
+			prisma.aparatur_desa.findMany({ where: whereUsia, select: pilih, orderBy: { tanggal_lahir: 'asc' }, take: 5 }),
+			prisma.aparatur_desa.count({ where: whereVerifikasi }),
+			prisma.aparatur_desa.findMany({ where: whereVerifikasi, select: pilih, orderBy: urut, take: 5 }),
+		]);
+
+		const ringkas = (rows) =>
+			rows.map((row) => ({
+				id: row.id,
+				nama_lengkap: row.nama_lengkap,
+				jabatan: row.jabatan,
+				desa: row.desas?.nama || null,
+				tanggal_lahir: row.tanggal_lahir,
+			}));
+
+		res.json({
+			success: true,
+			data: {
+				batas_usia: USIA_LANJUT,
+				usia_lanjut: { total: totalUsia, contoh: ringkas(contohUsia) },
+				menunggu_verifikasi: { total: totalVerifikasi, contoh: ringkas(contohVerifikasi) },
+			},
+		});
+	} catch (error) {
+		console.error('Error fetching notifikasi aparatur:', error);
+		res.status(500).json({
+			success: false,
+			message: 'Gagal mengambil notifikasi aparatur',
+			error: error.message,
+		});
+	}
+};
+
+/**
+ * Riwayat terbaru lintas desa — untuk kolom aktivitas di halaman bidang.
+ *
+ * Log disimpan tanpa relasi Prisma ke `aparatur_desa` (id-nya UUID), jadi
+ * identitas orangnya diambil lewat satu query menyusul, bukan join.
+ */
+const getRiwayatTerbaru = async (req, res) => {
+	try {
+		const batas = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
+		const jenis = ['bpd', 'perangkat'].includes(req.query.jenis) ? req.query.jenis : null;
+
+		// Halaman berikutnya ditunjuk id log terakhir yang sudah dikirim, bukan
+		// offset: dengan begitu server tidak perlu melompati baris yang sudah
+		// lewat, dan catatan baru yang masuk di tengah penelusuran tidak membuat
+		// baris tergeser atau terlewat.
+		const cursor = req.query.cursor ? BigInt(String(req.query.cursor)) : null;
+
+		// Jenis tidak tersimpan di tabel log — hanya bisa dibaca dari jabatan
+		// orangnya. Jadi log diambil berlebih lalu disaring, memakai aturan yang
+		// sama dengan filterJenis.
+		// ponytail: pengambilan berlebih 5x; kalau satu jenis nyaris tak pernah
+		// disentuh dan halamannya sering terisi kurang, ganti ke query gabungan.
+		const ambil = jenis ? Math.min(batas * 5, 250) : batas;
+		const logs = await prisma.aparatur_desa_logs.findMany({
+			where: cursor ? { id: { lt: cursor } } : {},
+			orderBy: { id: 'desc' },
+			take: ambil,
+		});
+
+		const idAparatur = [...new Set(logs.map((log) => log.aparatur_id))];
+		const orang = idAparatur.length
+			? await prisma.aparatur_desa.findMany({
+					where: { id: { in: idAparatur } },
+					select: {
+						id: true,
+						nama_lengkap: true,
+						jabatan: true,
+						desas: { select: { nama: true, kecamatans: { select: { nama: true } } } },
+					},
+			  })
+			: [];
+		const petaOrang = new Map(orang.map((row) => [row.id, row]));
+
+		const tersaring = logs
+			.filter((log) => {
+				if (!jenis) return true;
+				const aparatur = petaOrang.get(log.aparatur_id);
+				// Baris yang sudah terhapus tidak bisa ditentukan jenisnya, jadi
+				// tidak ikut di panel yang memang khusus satu jenis.
+				return aparatur ? jenisAparatur(aparatur.jabatan) === jenis : false;
+			});
+
+		const data = tersaring
+			.slice(0, batas)
+			.map((log) => {
+			const aparatur = petaOrang.get(log.aparatur_id);
+			return {
+				id: String(log.id),
+				aksi: log.aksi,
+				keterangan: log.keterangan,
+				oleh_nama: log.oleh_nama,
+				oleh_peran: log.oleh_peran,
+				created_at: log.created_at,
+				aparatur_id: log.aparatur_id,
+				// Baris yang sudah dihapus tetap ditampilkan apa adanya, tidak
+				// disembunyikan — penghapusan justru kejadian yang perlu terlihat.
+				nama_lengkap: aparatur?.nama_lengkap || null,
+				jabatan: aparatur?.jabatan || null,
+				desa: aparatur?.desas?.nama || null,
+				kecamatan: aparatur?.desas?.kecamatans?.nama || null,
+			};
+			});
+
+		// Penunjuk halaman berikutnya diambil dari baris terakhir yang dikirim.
+		// Kalau satu halaman habis tersaring, penunjuknya jatuh ke baris mentah
+		// terakhir yang sempat diperiksa supaya penelusuran tetap maju.
+		const terakhir = data.length ? data[data.length - 1].id : logs.length ? String(logs[logs.length - 1].id) : null;
+		const adaLagi = tersaring.length > batas || logs.length === ambil;
+
+		res.json({
+			success: true,
+			data,
+			meta: { nextCursor: adaLagi ? terakhir : null, hasMore: adaLagi },
+		});
+	} catch (error) {
+		console.error('Error fetching riwayat aparatur terbaru:', error);
+		res.status(500).json({
+			success: false,
+			message: 'Gagal mengambil riwayat aparatur',
 			error: error.message,
 		});
 	}
@@ -330,9 +502,11 @@ const getAparaturDesaById = async (req, res) => {
 			dpmd_verified_nama = pemverifikasi?.name || null;
 		}
 
+		const riwayat = await ambilLogAparatur(id);
+
 		res.json({
 			success: true,
-			data: { ...aparatur, dpmd_verified_nama },
+			data: { ...aparatur, dpmd_verified_nama, riwayat },
 		});
 	} catch (error) {
 		console.error('Error fetching aparatur desa detail:', error);
@@ -412,6 +586,22 @@ const updateAparaturDesa = async (req, res) => {
 		data.updated_at = new Date();
 		const aparatur = await prisma.aparatur_desa.update({ where: { id }, data });
 
+		// Perubahan status punya kalimatnya sendiri: itu kejadian yang dicari
+		// orang saat membaca riwayat, bukan sekadar "kolom status ikut berubah".
+		const kolomBerubah = Object.keys(data).filter((kolom) => kolom !== 'updated_at');
+		const keteranganLog =
+			'status' in data
+				? `Status diubah menjadi ${data.status === 'Tidak_Aktif' ? 'Tidak Aktif' : 'Aktif'}` +
+				  (data.keterangan ? ` — ${data.keterangan}` : '')
+				: `Data diperbarui oleh Bidang Pemdes (${kolomBerubah.join(', ')})`;
+
+		await catatLogAparatur({
+			aparaturId: id,
+			aksi: AKSI.diubah,
+			keterangan: keteranganLog,
+			user: req.user,
+		});
+
 		res.json({ success: true, message: 'Data aparatur desa diperbarui', data: aparatur });
 	} catch (error) {
 		console.error('Error updating aparatur desa (pemdes):', error);
@@ -424,8 +614,12 @@ const updateAparaturDesa = async (req, res) => {
 };
 
 /**
- * Tandai / batalkan verifikasi satu aparatur oleh Bidang Pemerintahan Desa.
+ * Keputusan verifikasi oleh Bidang Pemerintahan Desa: setujui, tolak, atau
+ * batalkan keputusan sebelumnya. Keterangan wajib saat menolak — itulah yang
+ * dibaca desa untuk tahu apa yang harus dibetulkan.
  */
+const STATUS_VERIFIKASI = ['terverifikasi', 'ditolak', 'batal'];
+
 const verifikasiAparaturDesa = async (req, res) => {
 	try {
 		const { id } = req.params;
@@ -434,25 +628,48 @@ const verifikasiAparaturDesa = async (req, res) => {
 			return res.status(404).json({ success: false, message: 'Data aparatur desa tidak ditemukan' });
 		}
 
-		// Default true supaya tombol "Verifikasi" cukup mengirim body kosong.
-		const terverifikasi = req.body?.terverifikasi !== false;
-		const catatan = req.body?.catatan ? String(req.body.catatan).trim() : null;
+		const status = String(req.body?.status || '').trim();
+		if (!STATUS_VERIFIKASI.includes(status)) {
+			return res.status(400).json({
+				success: false,
+				message: `Status verifikasi harus salah satu dari: ${STATUS_VERIFIKASI.join(', ')}`,
+			});
+		}
 
+		const catatan = req.body?.catatan ? String(req.body.catatan).trim() : null;
+		if (status === 'ditolak' && !catatan) {
+			return res.status(400).json({
+				success: false,
+				message: 'Keterangan wajib diisi saat menolak verifikasi',
+			});
+		}
+
+		const dibatalkan = status === 'batal';
 		const aparatur = await prisma.aparatur_desa.update({
 			where: { id },
 			data: {
-				dpmd_verified_at: terverifikasi ? new Date() : null,
-				dpmd_verified_by: terverifikasi ? BigInt(req.user.id) : null,
-				catatan_verifikasi: catatan,
+				status_verifikasi: dibatalkan ? null : status,
+				dpmd_verified_at: dibatalkan ? null : new Date(),
+				dpmd_verified_by: dibatalkan ? null : BigInt(req.user.id),
+				catatan_verifikasi: dibatalkan ? null : catatan,
 				updated_at: new Date(),
 			},
 		});
 
-		res.json({
-			success: true,
-			message: terverifikasi ? 'Data aparatur desa terverifikasi' : 'Verifikasi dibatalkan',
-			data: aparatur,
+		const pesan = {
+			terverifikasi: 'Data aparatur desa terverifikasi',
+			ditolak: 'Verifikasi ditolak',
+			batal: 'Keputusan verifikasi dibatalkan',
+		};
+
+		await catatLogAparatur({
+			aparaturId: id,
+			aksi: dibatalkan ? AKSI.verifikasi_dibatalkan : status,
+			keterangan: catatan,
+			user: req.user,
 		});
+
+		res.json({ success: true, message: pesan[status], data: aparatur });
 	} catch (error) {
 		console.error('Error verifying aparatur desa:', error);
 		res.status(500).json({
@@ -572,6 +789,8 @@ module.exports = {
 	getAparaturDesaById,
 	getStats,
 	getGrouped,
+	getRiwayatTerbaru,
+	getNotifikasi,
 	updateAparaturDesa,
 	verifikasiAparaturDesa,
 	filterJenis,

@@ -15,6 +15,12 @@ router.get('/stats', controller.getStats);
 // GET /api/pemdes/aparatur-desa/grouped - Kecamatan → Desa, urut jabatan
 router.get('/grouped', controller.getGrouped);
 
+// GET /api/pemdes/aparatur-desa/riwayat-terbaru - Aktivitas lintas desa
+router.get('/riwayat-terbaru', controller.getRiwayatTerbaru);
+
+// GET /api/pemdes/aparatur-desa/notifikasi - Usia lanjut & menunggu verifikasi
+router.get('/notifikasi', controller.getNotifikasi);
+
 // GET /api/pemdes/aparatur-desa/:id - Get single aparatur desa detail
 router.get('/:id', controller.getAparaturDesaById);
 

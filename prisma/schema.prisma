@@ -9,6 +9,23 @@ datasource db {
 }
 
 /// This model or at least one of its fields has comments in the database, and requires an additional setup for migrations: Read more: https://pris.ly/d/database-comments
+/// Riwayat satu baris aparatur: dibuat, diubah, dan keputusan verifikasinya.
+/// Tidak memakai `activity_logs` karena entity_id di sana BigInt sedangkan id
+/// aparatur berupa UUID. Nama & peran pelaku disalin supaya riwayat tetap
+/// terbaca kalau akunnya kelak dihapus.
+model aparatur_desa_logs {
+  id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  aparatur_id String    @db.Char(36)
+  aksi        String    @db.VarChar(30)
+  keterangan  String?   @db.Text
+  oleh_id     BigInt?   @db.UnsignedBigInt
+  oleh_nama   String?   @db.VarChar(255)
+  oleh_peran  String?   @db.VarChar(50)
+  created_at  DateTime? @default(now()) @db.Timestamp(0)
+
+  @@index([aparatur_id, created_at], map: "aparatur_desa_logs_aparatur_id_index")
+}
+
 model activity_logs {
   id          BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
   user_id     BigInt    @db.UnsignedBigInt
@@ -90,9 +107,13 @@ model aparatur_desa {
   file_kk                    String?                     @db.VarChar(255)
   file_akta_kelahiran        String?                     @db.VarChar(255)
   file_ijazah_terakhir       String?                     @db.VarChar(255)
-  /// Verifikasi oleh Bidang Pemerintahan Desa. `dpmd_verified_by` sengaja tidak
-  /// direlasikan ke `users`: yang dipakai UI cuma "sudah/belum", dan nama
-  /// pemverifikasi diambil sekali saat detail dibuka.
+  /// Keputusan verifikasi oleh Bidang Pemerintahan Desa: 'terverifikasi' atau
+  /// 'ditolak' (NULL = belum diperiksa). `dpmd_verified_at` adalah waktu
+  /// keputusan, berlaku untuk kedua hasil, dan `catatan_verifikasi` adalah
+  /// keterangan yang dibaca desa — wajib saat menolak.
+  /// `dpmd_verified_by` sengaja tidak direlasikan ke `users`: nama pemutus
+  /// diambil sekali saat detail dibuka.
+  status_verifikasi          String?                     @db.VarChar(20)
   dpmd_verified_at           DateTime?                   @db.Timestamp(0)
   dpmd_verified_by           BigInt?                     @db.UnsignedBigInt
   catatan_verifikasi         String?                     @db.Text

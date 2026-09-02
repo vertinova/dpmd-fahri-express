@@ -3,6 +3,17 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs').promises;
 const { keAparaturDesa, bandingkanDenganAparatur } = require('../config/dapurDesa');
+const { AKSI, catatLogAparatur } = require('../utils/aparaturLog');
+
+// Data berubah = keputusan verifikasi Bidang Pemdes gugur. Kalau tidak,
+// baris yang sudah dibetulkan desa akan tetap berstatus "ditolak" —
+// dan yang sudah disetujui tetap "terverifikasi" padahal isinya lain.
+const RESET_VERIFIKASI = {
+	status_verifikasi: null,
+	dpmd_verified_at: null,
+	dpmd_verified_by: null,
+	catatan_verifikasi: null,
+};
 
 /**
  * Get all aparatur desa for logged in user's desa
@@ -244,6 +255,13 @@ const createAparaturDesa = async (req, res) => {
 			},
 		});
 
+		await catatLogAparatur({
+			aparaturId: aparatur.id,
+			aksi: AKSI.dibuat,
+			keterangan: 'Data ditambahkan oleh desa',
+			user: req.user,
+		});
+
 		res.status(201).json({
 			success: true,
 			message: 'Aparatur desa berhasil ditambahkan',
@@ -384,6 +402,7 @@ const updateAparaturDesa = async (req, res) => {
 				file_kk: data.file_kk || existing.file_kk,
 				file_akta_kelahiran: data.file_akta_kelahiran || existing.file_akta_kelahiran,
 				file_ijazah_terakhir: data.file_ijazah_terakhir || existing.file_ijazah_terakhir,
+				...RESET_VERIFIKASI,
 			},
 			include: {
 				desas: {
@@ -402,6 +421,13 @@ const updateAparaturDesa = async (req, res) => {
 					},
 				},
 			},
+		});
+
+		await catatLogAparatur({
+			aparaturId: id,
+			aksi: AKSI.diubah,
+			keterangan: 'Data diperbarui oleh desa',
+			user: req.user,
 		});
 
 		res.json({
@@ -612,7 +638,7 @@ const getRekonsiliasiDapurDesa = async (req, res) => {
  * NIPD, NIAP, BPJS, berkas) — isian desa untuk kolom itu jauh lebih tepercaya
  * daripada nilai taksiran, jadi dipertahankan apa adanya.
  */
-const terapkanArsipKeAparatur = async (baris, desaId, aparaturId) => {
+const terapkanArsipKeAparatur = async (baris, desaId, aparaturId, user = null) => {
 	const data = keAparaturDesa(baris, desaId, { id: aparaturId || undefined });
 
 	if (aparaturId) {
@@ -626,15 +652,29 @@ const terapkanArsipKeAparatur = async (baris, desaId, aparaturId) => {
 		});
 		if (sekarang?.file_pas_foto) delete bolehDitimpa.file_pas_foto;
 
-		return prisma.aparatur_desa.update({
+		const diperbarui = await prisma.aparatur_desa.update({
 			where: { id: aparaturId },
-			data: { ...bolehDitimpa, updated_at: new Date() },
+			data: { ...bolehDitimpa, ...RESET_VERIFIKASI, updated_at: new Date() },
 		});
+		await catatLogAparatur({
+			aparaturId,
+			aksi: AKSI.diubah,
+			keterangan: 'Data ditimpa dari arsip Dapur Desa',
+			user,
+		});
+		return diperbarui;
 	}
 
-	return prisma.aparatur_desa.create({
+	const dibuat = await prisma.aparatur_desa.create({
 		data: { ...data, created_at: new Date(), updated_at: new Date() },
 	});
+	await catatLogAparatur({
+		aparaturId: dibuat.id,
+		aksi: AKSI.dibuat,
+		keterangan: 'Data diambil dari arsip Dapur Desa',
+		user,
+	});
+	return dibuat;
 };
 
 /**
@@ -664,7 +704,7 @@ const putuskanDapurDesa = async (req, res) => {
 
 		let aparaturId = baris.aparatur_desa_id;
 		if (keputusan === 'dapur') {
-			const hasil = await terapkanArsipKeAparatur(baris, desaId, baris.aparatur_desa_id);
+			const hasil = await terapkanArsipKeAparatur(baris, desaId, baris.aparatur_desa_id, req.user);
 			aparaturId = hasil.id;
 		}
 
@@ -715,7 +755,7 @@ const tambahSemuaBaruDapurDesa = async (req, res) => {
 		const gagal = [];
 		for (const baris of daftar) {
 			try {
-				const hasil = await terapkanArsipKeAparatur(baris, desaId, null);
+				const hasil = await terapkanArsipKeAparatur(baris, desaId, null, req.user);
 				await prisma.aparatur_dapur_desa.update({
 					where: { dapur_id: baris.dapur_id },
 					data: {
