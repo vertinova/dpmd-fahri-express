@@ -1,6 +1,7 @@
 const prisma = require('../config/prisma');
 const fs = require('fs');
 const path = require('path');
+const { filterJenis } = require('./pemdes-aparatur.controller');
 
 class BidangController {
   /**
@@ -175,6 +176,8 @@ class BidangController {
           return {
             total_desa: await prisma.desas.count({ where: { status_pemerintahan: 'desa' } }),
             total_aparatur: await prisma.aparatur_desa.count(),
+            total_perangkat: await prisma.aparatur_desa.count({ where: filterJenis('perangkat') }),
+            total_bpd: await prisma.aparatur_desa.count({ where: filterJenis('bpd') }),
             total_produk_hukum: await prisma.produk_hukums.count(),
             produk_hukum_berlaku: await prisma.produk_hukums.count({
               where: { status_peraturan: 'berlaku' }
