@@ -14,12 +14,10 @@ const express = require('express');
 const router = express.Router();
 const controller = require('../controllers/gema.controller');
 const { auth, checkRole } = require('../middlewares/auth');
+const { PERAN_INTERNAL_DPMD } = require('../config/peranDpmd');
 
 router.use(auth);
-router.use(checkRole([
-	'pegawai', 'kepala_bidang', 'ketua_tim',
-	'sekretaris_dinas', 'kepala_dinas', 'bendahara', 'superadmin',
-]));
+router.use(checkRole(PERAN_INTERNAL_DPMD));
 
 router.get('/kemampuan', controller.kemampuan);
 router.post('/tanya', controller.tanya);

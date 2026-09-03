@@ -2,9 +2,10 @@ const express = require('express');
 const router = express.Router();
 const controller = require('../controllers/pemdes-produk-hukum.controller');
 const { auth, checkRole } = require('../middlewares/auth');
+const { PERAN_INTERNAL_DPMD } = require('../config/peranDpmd');
 
 router.use(auth);
-router.use(checkRole(['pegawai', 'kepala_bidang', 'ketua_tim', 'kepala_dinas', 'bendahara', 'superadmin']));
+router.use(checkRole(PERAN_INTERNAL_DPMD));
 
 // GET /api/pemdes/produk-hukum - List all produk hukum from all desas
 router.get('/', controller.getAllProdukHukum);

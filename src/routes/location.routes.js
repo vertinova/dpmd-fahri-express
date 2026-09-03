@@ -2,9 +2,15 @@ const express = require('express');
 const router = express.Router();
 const locationController = require('../controllers/location.controller');
 const { auth, checkRole } = require('../middlewares/auth');
+const { PERAN_INTERNAL_DPMD } = require('../config/peranDpmd');
 
-// Define roles yang bisa akses location data (hampir semua role authenticated)
-const locationRoles = ['desa', 'kecamatan', 'dinas', 'superadmin', 'sarana_prasarana', 'pegawai', 'kepala_bidang', 'ketua_tim', 'kepala_dinas', 'kekayaan_keuangan', 'pemberdayaan_masyarakat', 'pemerintahan_desa'];
+// Define roles yang bisa akses location data (hampir semua role authenticated):
+// seluruh pegawai DPMD, akun wilayah/dinas, dan pseudo-role bidang.
+const locationRoles = [
+	...PERAN_INTERNAL_DPMD,
+	'desa', 'kecamatan', 'dinas',
+	'sarana_prasarana', 'kekayaan_keuangan', 'pemberdayaan_masyarakat', 'pemerintahan_desa',
+];
 
 // Get all kecamatans
 router.get('/kecamatans', auth, checkRole(...locationRoles), locationController.getKecamatans);
