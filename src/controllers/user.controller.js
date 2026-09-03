@@ -219,7 +219,14 @@ class UserController {
               }
             }
           },
-          orderBy: { created_at: 'desc' }
+          // Tie-breaker `id` wajib: puluhan akun lama warisan migrasi punya
+          // created_at NULL, dan tanpa kunci kedua urutannya tidak pasti antar
+          // permintaan — saat halaman mengambil data per halaman, baris bisa
+          // terlewat atau muncul dua kali.
+          orderBy: [
+            { created_at: 'desc' },
+            { id: 'desc' }
+          ]
         }),
         prisma.users.count({ where })
       ]);
