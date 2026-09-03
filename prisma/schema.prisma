@@ -3283,6 +3283,7 @@ enum arsip_barang_scan_log_source {
 
 enum arsip_barang_kondisi {
   baik
+  kurang_baik
   rusak_ringan
   rusak_berat
 }

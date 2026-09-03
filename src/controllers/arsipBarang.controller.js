@@ -15,6 +15,7 @@ const KODE_PREFIX = 'DPMD-SEK';
 
 const KONDISI_LABEL = {
   baik: 'Baik',
+  kurang_baik: 'Kurang Baik',
   rusak_ringan: 'Rusak Ringan',
   rusak_berat: 'Rusak Berat'
 };
@@ -194,11 +195,12 @@ class ArsipBarangController {
   // GET /api/arsip-barang/stats
   async getStats(req, res, next) {
     try {
-      const [total, aktif, dihapuskan, baik, rusakRingan, rusakBerat, totalScan] = await Promise.all([
+      const [total, aktif, dihapuskan, baik, kurangBaik, rusakRingan, rusakBerat, totalScan] = await Promise.all([
         prisma.arsip_barang.count(),
         prisma.arsip_barang.count({ where: { status: 'aktif' } }),
         prisma.arsip_barang.count({ where: { status: 'dihapuskan' } }),
         prisma.arsip_barang.count({ where: { status: 'aktif', kondisi: 'baik' } }),
+        prisma.arsip_barang.count({ where: { status: 'aktif', kondisi: 'kurang_baik' } }),
         prisma.arsip_barang.count({ where: { status: 'aktif', kondisi: 'rusak_ringan' } }),
         prisma.arsip_barang.count({ where: { status: 'aktif', kondisi: 'rusak_berat' } }),
         prisma.arsip_barang_scan_log.count()
@@ -215,7 +217,7 @@ class ArsipBarangController {
           total,
           aktif,
           dihapuskan,
-          kondisi: { baik, rusak_ringan: rusakRingan, rusak_berat: rusakBerat },
+          kondisi: { baik, kurang_baik: kurangBaik, rusak_ringan: rusakRingan, rusak_berat: rusakBerat },
           total_scan: totalScan,
           total_nilai_perolehan: nilai._sum.nilai_perolehan ? Number(nilai._sum.nilai_perolehan) : 0
         }
