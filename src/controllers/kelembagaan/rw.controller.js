@@ -14,6 +14,7 @@ const {
   createAjukanUlangHandler,
   validateKecamatanScope,
   buildToggleStatusData,
+  nonaktifkanPengurusLembaga,
 } = require('./base.controller');
 
 class RWController {
@@ -395,9 +396,19 @@ class RWController {
         return res.status(400).json({ success: false, message: validationError });
       }
 
-      const updated = await prisma.rws.update({
-        where: { id: String(req.params.id) },
-        data: updateData
+      // Menonaktifkan lembaga ikut menonaktifkan pengurus di bawahnya; satu
+      // transaksi supaya tidak pernah ada keadaan lembaga mati tapi
+      // pengurusnya masih terhitung aktif.
+      let pengurusDinonaktifkan = 0;
+      const updated = await prisma.$transaction(async (tx) => {
+        const lembaga = await tx.rws.update({
+          where: { id: String(req.params.id) },
+          data: updateData
+        });
+        if (updateData.status_kelembagaan === 'nonaktif') {
+          pengurusDinonaktifkan = await nonaktifkanPengurusLembaga('rws', lembaga.id, tx);
+        }
+        return lembaga;
       });
 
       // Log activity - ensure this completes before sending response
@@ -429,7 +440,12 @@ class RWController {
         // Continue even if logging fails
       }
 
-      res.json({ success: true, data: updated });
+      res.json({
+        success: true,
+        data: updated,
+        // Berapa pengurus yang ikut dinonaktifkan, supaya UI bisa memberitahu.
+        pengurus_dinonaktifkan: pengurusDinonaktifkan,
+      });
     } catch (error) {
       console.error('Error in toggleStatus:', error);
       res.status(500).json({ success: false, message: 'Gagal mengubah status RW', error: error.message });

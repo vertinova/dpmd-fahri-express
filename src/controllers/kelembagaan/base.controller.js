@@ -371,6 +371,44 @@ function createAjukanUlangHandler(tableName, kelembagaanType, entityLabel, getEn
   };
 }
 
+/**
+ * Nonaktifkan seluruh pengurus yang bernaung di bawah satu lembaga.
+ *
+ * Pengurus terhubung ke lembaga secara polimorfik (pengurusable_type +
+ * pengurusable_id) dan jumlahnya bisa puluhan — satu lembaga tercatat punya
+ * 121 pengurus. Sebelum ini menonaktifkan lembaga tidak menyentuh mereka sama
+ * sekali, sehingga pengurus tetap terhitung aktif di bawah lembaga yang sudah
+ * mati.
+ *
+ * Hanya pengurus yang masih 'aktif' yang disentuh: yang sudah 'selesai' atau
+ * 'nonaktif' dibiarkan, supaya riwayatnya tidak tertimpa.
+ *
+ * Kaskadenya sengaja SATU ARAH. Mengaktifkan kembali lembaga tidak ikut
+ * mengaktifkan pengurusnya, karena tidak ada cara membedakan mana yang
+ * nonaktif akibat kaskade ini dan mana yang memang dinonaktifkan satu per satu
+ * — menghidupkan semuanya berisiko memunculkan lagi pengurus yang sengaja
+ * diberhentikan. Pengaktifan pengurus dilakukan terpisah.
+ *
+ * @param {string|string[]} pengurusableType Nilai kolom pengurusable_type, mis.
+ *   'rts'. Boleh berupa larik karena lembaga lainnya tercatat dengan dua
+ *   varian ('lembaga-lainnya' dan 'lembaga_lainnyas').
+ * @param {string} lembagaId UUID lembaga.
+ * @param {object} [client]  Prisma client/transaksi; default prisma.
+ * @returns {Promise<number>} Jumlah pengurus yang berubah jadi nonaktif.
+ */
+async function nonaktifkanPengurusLembaga(pengurusableType, lembagaId, client = prisma) {
+  const tipe = Array.isArray(pengurusableType) ? pengurusableType : [pengurusableType];
+  const { count } = await client.pengurus.updateMany({
+    where: {
+      pengurusable_type: { in: tipe },
+      pengurusable_id: String(lembagaId),
+      status_jabatan: 'aktif',
+    },
+    data: { status_jabatan: 'nonaktif' },
+  });
+  return count;
+}
+
 module.exports = {
   prisma,
   ACTIVITY_TYPES,
@@ -383,4 +421,5 @@ module.exports = {
   validateKecamatanScope,
   ALASAN_NONAKTIF_LEMBAGA,
   buildToggleStatusData,
+  nonaktifkanPengurusLembaga,
 };

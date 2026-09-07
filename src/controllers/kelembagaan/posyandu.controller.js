@@ -14,6 +14,7 @@ const {
   createAjukanUlangHandler,
   validateKecamatanScope,
   buildToggleStatusData,
+  nonaktifkanPengurusLembaga,
 } = require('./base.controller');
 
 class PosyanduController {
@@ -307,9 +308,19 @@ class PosyanduController {
         return res.status(400).json({ success: false, message: validationError });
       }
 
-      const updated = await prisma.posyandus.update({
-        where: { id: String(req.params.id) },
-        data: updateData
+      // Menonaktifkan lembaga ikut menonaktifkan pengurus di bawahnya; satu
+      // transaksi supaya tidak pernah ada keadaan lembaga mati tapi
+      // pengurusnya masih terhitung aktif.
+      let pengurusDinonaktifkan = 0;
+      const updated = await prisma.$transaction(async (tx) => {
+        const lembaga = await tx.posyandus.update({
+          where: { id: String(req.params.id) },
+          data: updateData
+        });
+        if (updateData.status_kelembagaan === 'nonaktif') {
+          pengurusDinonaktifkan = await nonaktifkanPengurusLembaga('posyandus', lembaga.id, tx);
+        }
+        return lembaga;
       });
 
       // Log activity
@@ -336,7 +347,12 @@ class PosyanduController {
         userAgent: req.get('user-agent')
       });
 
-      res.json({ success: true, data: updated });
+      res.json({
+        success: true,
+        data: updated,
+        // Berapa pengurus yang ikut dinonaktifkan, supaya UI bisa memberitahu.
+        pengurus_dinonaktifkan: pengurusDinonaktifkan,
+      });
     } catch (error) {
       console.error('Error in toggleStatus:', error);
       res.status(500).json({ success: false, message: 'Gagal mengubah status Posyandu', error: error.message });

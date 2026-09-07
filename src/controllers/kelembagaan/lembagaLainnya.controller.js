@@ -16,6 +16,7 @@ const {
   createAjukanUlangHandler,
   validateKecamatanScope,
   buildToggleStatusData,
+  nonaktifkanPengurusLembaga,
 } = require('./base.controller');
 
 const TYPE = 'lembaga-lainnya';
@@ -250,9 +251,20 @@ class LembagaLainnyaController {
         return res.status(400).json({ success: false, message: validationError });
       }
 
-      const updated = await prisma[TABLE].update({
-        where: { id: String(req.params.id) },
-        data: updateData
+      // Menonaktifkan lembaga ikut menonaktifkan pengurus di bawahnya; satu
+      // transaksi supaya tidak pernah ada keadaan lembaga mati tapi
+      // pengurusnya masih terhitung aktif. Kedua varian pengurusable_type
+      // dicakup, sejalan dengan kueri pengurus di bawah.
+      let pengurusDinonaktifkan = 0;
+      const updated = await prisma.$transaction(async (tx) => {
+        const lembaga = await tx[TABLE].update({
+          where: { id: String(req.params.id) },
+          data: updateData
+        });
+        if (updateData.status_kelembagaan === 'nonaktif') {
+          pengurusDinonaktifkan = await nonaktifkanPengurusLembaga([TYPE, TABLE], lembaga.id, tx);
+        }
+        return lembaga;
       });
 
       await logKelembagaanActivity({
@@ -278,7 +290,12 @@ class LembagaLainnyaController {
         userAgent: req.get('user-agent')
       });
 
-      res.json({ success: true, data: updated });
+      res.json({
+        success: true,
+        data: updated,
+        // Berapa pengurus yang ikut dinonaktifkan, supaya UI bisa memberitahu.
+        pengurus_dinonaktifkan: pengurusDinonaktifkan,
+      });
     } catch (error) {
       console.error('Error in toggleStatus LembagaLainnya:', error);
       res.status(500).json({ success: false, message: 'Gagal toggle status', error: error.message });

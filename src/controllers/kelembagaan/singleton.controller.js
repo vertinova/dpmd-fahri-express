@@ -15,6 +15,7 @@ const {
   createAjukanUlangHandler,
   validateKecamatanScope,
   buildToggleStatusData,
+  nonaktifkanPengurusLembaga,
 } = require('./base.controller');
 
 /**
@@ -252,9 +253,23 @@ function createSingletonController(type, tableName, displayName) {
           return res.status(400).json({ success: false, message: validationError });
         }
 
-        const updated = await prisma[tableName].update({
-          where: { id: String(req.params.id) },
-          data: updateData
+        // Menonaktifkan lembaga ikut menonaktifkan pengurus di bawahnya; satu
+        // transaksi supaya tidak pernah ada keadaan lembaga mati tapi
+        // pengurusnya masih terhitung aktif.
+        //
+        // Untuk lembaga singleton nama tabel Prisma kebetulan sama persis
+        // dengan nilai pengurusable_type ('lpms', 'pkks', 'karang_tarunas',
+        // 'satlinmas'), jadi tableName bisa dipakai langsung.
+        let pengurusDinonaktifkan = 0;
+        const updated = await prisma.$transaction(async (tx) => {
+          const lembaga = await tx[tableName].update({
+            where: { id: String(req.params.id) },
+            data: updateData
+          });
+          if (updateData.status_kelembagaan === 'nonaktif') {
+            pengurusDinonaktifkan = await nonaktifkanPengurusLembaga(tableName, lembaga.id, tx);
+          }
+          return lembaga;
         });
 
         // Log activity
@@ -281,7 +296,12 @@ function createSingletonController(type, tableName, displayName) {
           userAgent: req.get('user-agent')
         });
 
-        res.json({ success: true, data: updated });
+        res.json({
+          success: true,
+          data: updated,
+          // Berapa pengurus yang ikut dinonaktifkan, supaya UI bisa memberitahu.
+          pengurus_dinonaktifkan: pengurusDinonaktifkan,
+        });
       } catch (error) {
         console.error(`Error in toggleStatus ${displayName}:`, error);
         res.status(500).json({ success: false, message: 'Gagal toggle status', error: error.message });
