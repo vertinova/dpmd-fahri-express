@@ -259,13 +259,26 @@ class UserController {
           userData.kecamatan = kecamatan;
         }
         
-        // Get desa if desa_id exists
+        // Get desa if desa_id exists. Kecamatan induk ikut disertakan supaya
+        // daftar akun desa bisa difilter per kecamatan di sisi frontend.
         if (user.desa_id) {
           const desa = await prisma.desas.findUnique({
             where: { id: user.desa_id },
-            select: { id: true, nama: true }
+            select: {
+              id: true,
+              nama: true,
+              kecamatan_id: true,
+              kecamatans: { select: { id: true, nama: true } }
+            }
           });
-          userData.desa = desa;
+          userData.desa = desa
+            ? {
+                id: desa.id,
+                nama: desa.nama,
+                kecamatan_id: desa.kecamatan_id,
+                kecamatan: desa.kecamatans || null
+              }
+            : null;
         }
         
         // Get dinas if dinas_id exists
