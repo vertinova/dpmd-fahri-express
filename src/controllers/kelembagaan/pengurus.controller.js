@@ -212,19 +212,9 @@ class PengurusController {
         });
       }
 
-      // Validate nomor_buku_nikah for Ketua RT/RW who are married
-      const jabatanUpper = jabatan?.toUpperCase();
-      const statusPerkawinanUpper = status_perkawinan?.toUpperCase();
-      if (
-        (jabatanUpper === 'KETUA RT' || jabatanUpper === 'KETUA RW') &&
-        statusPerkawinanUpper === 'MENIKAH' &&
-        !nomor_buku_nikah?.trim()
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: 'Nomor buku nikah wajib diisi untuk Ketua RT/RW yang berstatus menikah'
-        });
-      }
+      // Nomor buku nikah bersifat opsional, termasuk untuk Ketua RT/RW yang
+      // berstatus menikah: dokumennya kerap belum di tangan saat pengurus
+      // didaftarkan, dan itu tidak boleh menghalangi pendataan.
 
       // Handle avatar upload if exists
       const avatarPath = req.file ? `uploads/pengurus_files/${req.file.filename}` : null;
@@ -336,21 +326,8 @@ class PengurusController {
         nama_rekening
       } = req.body;
 
-      // Validate nomor_buku_nikah for Ketua RT/RW who are married
-      // Use incoming values or fall back to existing record
-      const effectiveJabatan = (jabatan || existing.jabatan || '').toUpperCase();
-      const effectiveStatus = (status_perkawinan || existing.status_perkawinan || '').toUpperCase();
-      const effectiveNomorBukuNikah = nomor_buku_nikah !== undefined ? nomor_buku_nikah : existing.nomor_buku_nikah;
-      if (
-        (effectiveJabatan === 'KETUA RT' || effectiveJabatan === 'KETUA RW') &&
-        effectiveStatus === 'MENIKAH' &&
-        !effectiveNomorBukuNikah?.trim()
-      ) {
-        return res.status(400).json({
-          success: false,
-          message: 'Nomor buku nikah wajib diisi untuk Ketua RT/RW yang berstatus menikah'
-        });
-      }
+      // Nomor buku nikah opsional — lihat catatan di createPengurus. Pengurus
+      // lama yang kolomnya kosong karena itu tetap bisa disunting.
 
       // Handle avatar upload if exists
       const avatarPath = req.file ? `uploads/pengurus_files/${req.file.filename}` : undefined;
