@@ -571,24 +571,36 @@ class SummaryController {
       const desaId = validateDesaAccess(req, res);
       if (!desaId) return;
 
+      // Lembaga nonaktif tidak ikut dihitung — angka di halaman kelembagaan desa
+      // harus mencerminkan lembaga yang benar-benar berjalan.
+      const aktifDiDesa = { desa_id: desaId, status_kelembagaan: 'aktif' };
+      const kolomSingleton = { id: true, status_verifikasi: true, status_kelembagaan: true, alamat: true, produk_hukum_id: true };
+
       const [desa, totalRW, totalRT, totalPosyandu, karangTaruna, lpm, satlinmas, pkk, totalLembagaLainnya] = await Promise.all([
         prisma.desas.findUnique({ 
           where: { id: desaId }, 
           select: { id: true, nama: true, status_pemerintahan: true } 
         }),
-        prisma.rws.count({ where: { desa_id: desaId } }),
-        prisma.rts.count({ where: { desa_id: desaId } }),
-        prisma.posyandus.count({ where: { desa_id: desaId } }),
-        prisma.karang_tarunas.findFirst({ where: { desa_id: desaId }, select: { id: true, status_verifikasi: true, alamat: true, produk_hukum_id: true } }),
-        prisma.lpms.findFirst({ where: { desa_id: desaId }, select: { id: true, status_verifikasi: true, alamat: true, produk_hukum_id: true } }),
-        prisma.satlinmas.findFirst({ where: { desa_id: desaId }, select: { id: true, status_verifikasi: true, alamat: true, produk_hukum_id: true } }),
-        prisma.pkks.findFirst({ where: { desa_id: desaId }, select: { id: true, status_verifikasi: true, alamat: true, produk_hukum_id: true } }),
-        prisma.lembaga_lainnyas.count({ where: { desa_id: desaId } })
+        prisma.rws.count({ where: aktifDiDesa }),
+        prisma.rts.count({ where: aktifDiDesa }),
+        prisma.posyandus.count({ where: aktifDiDesa }),
+        // Singleton dicari tanpa filter status: keberadaannya menentukan kartu
+        // "sudah dibentuk", dan create menolak duplikat — kalau lembaga nonaktif
+        // dianggap belum ada, desa akan mentok error saat mencoba membentuk lagi.
+        prisma.karang_tarunas.findFirst({ where: { desa_id: desaId }, select: kolomSingleton }),
+        prisma.lpms.findFirst({ where: { desa_id: desaId }, select: kolomSingleton }),
+        prisma.satlinmas.findFirst({ where: { desa_id: desaId }, select: kolomSingleton }),
+        prisma.pkks.findFirst({ where: { desa_id: desaId }, select: kolomSingleton }),
+        prisma.lembaga_lainnyas.count({ where: aktifDiDesa })
       ]);
+
+      const isAktif = (record) => !!record && record.status_kelembagaan === 'aktif';
 
       // Build verification detail for singleton lembaga
       const buildVerifDetail = async (record, type) => {
-        if (!record) return null;
+        // Lembaga nonaktif bukan pekerjaan verifikasi yang tertunda, jadi
+        // dikeluarkan dari progress agar tidak menahan angkanya.
+        if (!isAktif(record)) return null;
         const pengurusCount = await prisma.pengurus.count({
           where: { pengurusable_id: record.id, pengurusable_type: type }
         });
@@ -603,7 +615,7 @@ class SummaryController {
       // Build verification detail for multi-type (RW, RT, Posyandu)
       const buildMultiVerifDetail = async (model, type) => {
         const records = await prisma[model].findMany({
-          where: { desa_id: desaId },
+          where: aktifDiDesa,
           select: { id: true, status_verifikasi: true, alamat: true, produk_hukum_id: true,
             ...(model === 'rts' ? { jumlah_jiwa: true, jumlah_kk: true } : {})
           }
@@ -658,15 +670,21 @@ class SummaryController {
           rw: totalRW,
           rt: totalRT,
           posyandu: totalPosyandu,
-          karang_taruna: karangTaruna ? 1 : 0,
-          lpm: lpm ? 1 : 0,
-          satlinmas: satlinmas ? 1 : 0,
-          pkk: pkk ? 1 : 0,
+          karang_taruna: isAktif(karangTaruna) ? 1 : 0,
+          lpm: isAktif(lpm) ? 1 : 0,
+          satlinmas: isAktif(satlinmas) ? 1 : 0,
+          pkk: isAktif(pkk) ? 1 : 0,
           lembaga_lainnya: totalLembagaLainnya,
           has_karang_taruna: !!karangTaruna,
           has_lpm: !!lpm,
           has_satlinmas: !!satlinmas,
           has_pkk: !!pkk,
+          // Status dikirim terpisah supaya kartu singleton yang sudah dibentuk
+          // tapi nonaktif bisa diberi label, bukan sekadar hilang angkanya.
+          karang_taruna_status: karangTaruna?.status_kelembagaan || null,
+          lpm_status: lpm?.status_kelembagaan || null,
+          satlinmas_status: satlinmas?.status_kelembagaan || null,
+          pkk_status: pkk?.status_kelembagaan || null,
           verifikasi: {
             rw: rwVerif,
             rt: rtVerif,

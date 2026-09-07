@@ -1263,6 +1263,8 @@ model karang_tarunas {
   catatan_verifikasi           String?                            @db.Text
   nonaktif_at                  DateTime?                          @db.Timestamp(0)
   produk_hukum_penonaktifan_id String?                            @db.Char(36)
+  alasan_nonaktif              String?                            @db.VarChar(100)
+  keterangan_nonaktif          String?                            @db.Text
   verified_at                  DateTime?                          @db.Timestamp(0)
   verifikator_nama             String?                            @db.VarChar(255)
   desas                        desas                              @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "karang_tarunas_desa_id_foreign")
@@ -1286,6 +1288,9 @@ model lembaga_lainnyas {
   verified_at                  DateTime?                            @db.Timestamp(0)
   produk_hukum_id              String?                              @db.Char(36)
   produk_hukum_penonaktifan_id String?                              @db.Char(36)
+  nonaktif_at                  DateTime?                            @db.Timestamp(0)
+  alasan_nonaktif              String?                              @db.VarChar(100)
+  keterangan_nonaktif          String?                              @db.Text
   created_at                   DateTime?                            @default(now()) @db.Timestamp(0)
   updated_at                   DateTime?                            @default(now()) @db.Timestamp(0)
   desas                        desas                                @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "lembaga_lainnyas_desa_id_foreign")
@@ -1451,6 +1456,8 @@ model lpms {
   catatan_verifikasi           String?                  @db.Text
   nonaktif_at                  DateTime?                @db.Timestamp(0)
   produk_hukum_penonaktifan_id String?                  @db.Char(36)
+  alasan_nonaktif              String?                  @db.VarChar(100)
+  keterangan_nonaktif          String?                  @db.Text
   verified_at                  DateTime?                @db.Timestamp(0)
   verifikator_nama             String?                  @db.VarChar(255)
   desas                        desas                    @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "lpms_desa_id_foreign")
@@ -1733,6 +1740,8 @@ model pkks {
   catatan_verifikasi           String?                  @db.Text
   nonaktif_at                  DateTime?                @db.Timestamp(0)
   produk_hukum_penonaktifan_id String?                  @db.Char(36)
+  alasan_nonaktif              String?                  @db.VarChar(100)
+  keterangan_nonaktif          String?                  @db.Text
   verified_at                  DateTime?                @db.Timestamp(0)
   verifikator_nama             String?                  @db.VarChar(255)
   desas                        desas                    @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "pkks_desa_id_foreign")
@@ -1757,6 +1766,8 @@ model posyandus {
   catatan_verifikasi           String?                       @db.Text
   nonaktif_at                  DateTime?                     @db.Timestamp(0)
   produk_hukum_penonaktifan_id String?                       @db.Char(36)
+  alasan_nonaktif              String?                       @db.VarChar(100)
+  keterangan_nonaktif          String?                       @db.Text
   verified_at                  DateTime?                     @db.Timestamp(0)
   verifikator_nama             String?                       @db.VarChar(255)
   desas                        desas                         @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "posyandus_desa_id_foreign")
@@ -1925,6 +1936,8 @@ model rts {
   jumlah_kk                    Int?
   nonaktif_at                  DateTime?               @db.Timestamp(0)
   produk_hukum_penonaktifan_id String?                 @db.Char(36)
+  alasan_nonaktif              String?                 @db.VarChar(100)
+  keterangan_nonaktif          String?                 @db.Text
   verified_at                  DateTime?               @db.Timestamp(0)
   verifikator_nama             String?                 @db.VarChar(255)
   desas                        desas                   @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "rts_desa_id_foreign")
@@ -1951,6 +1964,8 @@ model rws {
   catatan_verifikasi           String?                @db.Text
   nonaktif_at                  DateTime?              @db.Timestamp(0)
   produk_hukum_penonaktifan_id String?                @db.Char(36)
+  alasan_nonaktif              String?                @db.VarChar(100)
+  keterangan_nonaktif          String?                @db.Text
   verified_at                  DateTime?              @db.Timestamp(0)
   verifikator_nama             String?                @db.VarChar(255)
   rts                          rts[]
@@ -1975,6 +1990,9 @@ model satlinmas {
   produk_hukum_id              String?                      @db.Char(36)
   catatan_verifikasi           String?                      @db.Text
   produk_hukum_penonaktifan_id String?                      @db.Char(36)
+  nonaktif_at                  DateTime?                    @db.Timestamp(0)
+  alasan_nonaktif              String?                      @db.VarChar(100)
+  keterangan_nonaktif          String?                      @db.Text
   verified_at                  DateTime?                    @db.Timestamp(0)
   verifikator_nama             String?                      @db.VarChar(255)
   desas                        desas                        @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "satlinmas_desa_id_foreign")

@@ -61,9 +61,19 @@ async function logKelembagaanActivity({
       case ACTIVITY_TYPES.UPDATE:
         actionDescription = `${userName} mengubah data ${entityType === ENTITY_TYPES.LEMBAGA ? 'kelembagaan' : 'pengurus'} ${entityName}`;
         break;
-      case ACTIVITY_TYPES.TOGGLE_STATUS:
-        actionDescription = `${userName} mengubah status ${entityType === ENTITY_TYPES.LEMBAGA ? 'kelembagaan' : 'pengurus'} ${entityName} menjadi ${newValue?.status_kelembagaan || newValue?.status_pengurus || 'aktif'}`;
+      case ACTIVITY_TYPES.TOGGLE_STATUS: {
+        const statusBaru = newValue?.status_kelembagaan || newValue?.status_pengurus || 'aktif';
+        actionDescription = `${userName} mengubah status ${entityType === ENTITY_TYPES.LEMBAGA ? 'kelembagaan' : 'pengurus'} ${entityName} menjadi ${statusBaru}`;
+        // Alasan penonaktifan ikut masuk deskripsi supaya riwayatnya terbaca
+        // tanpa harus membuka detail lembaganya.
+        if (statusBaru === 'nonaktif' && newValue?.alasan_nonaktif) {
+          actionDescription += ` — ${newValue.alasan_nonaktif}`;
+          if (newValue?.keterangan_nonaktif) {
+            actionDescription += `: ${newValue.keterangan_nonaktif}`;
+          }
+        }
         break;
+      }
       case ACTIVITY_TYPES.VERIFY: {
         const verificationAction = newValue?.status_verifikasi === 'verified'
           ? 'memverifikasi'
@@ -192,6 +202,75 @@ function toUpper(val) {
 }
 
 /**
+ * Alasan penonaktifan lembaga yang lazim dipakai. Dibuat sebagai daftar tertutup
+ * supaya isiannya seragam dan bisa dihitung per kategori, dengan jalan keluar
+ * "Lainnya" untuk kasus yang tidak masuk daftar.
+ */
+const ALASAN_NONAKTIF_LEMBAGA = [
+  'Penggabungan Wilayah',
+  'Pemekaran Wilayah',
+  'Tidak Aktif / Vakum',
+  'Habis Masa Bakti',
+  'Duplikat Data',
+  'Lainnya',
+];
+
+/**
+ * Susun payload update untuk toggle status lembaga.
+ *
+ * Menonaktifkan lembaga wajib disertai alasan (kategori) dan keterangan
+ * (penjelasan) — tanpa itu keputusannya tidak bisa dipertanggungjawabkan.
+ * Produk hukum tidak lagi dikaitkan; kolom lamanya dibiarkan apa adanya
+ * untuk data historis.
+ *
+ * @returns {{ error: string }} bila input tidak valid,
+ *          {{ data: object }} bila valid.
+ */
+function buildToggleStatusData(body) {
+  const { status_kelembagaan, alasan_nonaktif, keterangan_nonaktif } = body || {};
+
+  if (!status_kelembagaan) {
+    return { error: 'Status kelembagaan harus diisi' };
+  }
+  if (status_kelembagaan !== 'aktif' && status_kelembagaan !== 'nonaktif') {
+    return { error: 'Status kelembagaan tidak valid' };
+  }
+
+  if (status_kelembagaan === 'aktif') {
+    return {
+      data: {
+        status_kelembagaan,
+        nonaktif_at: null,
+        alasan_nonaktif: null,
+        keterangan_nonaktif: null,
+      },
+    };
+  }
+
+  const alasan = typeof alasan_nonaktif === 'string' ? alasan_nonaktif.trim() : '';
+  const keterangan = typeof keterangan_nonaktif === 'string' ? keterangan_nonaktif.trim() : '';
+
+  if (!alasan) {
+    return { error: 'Alasan penonaktifan harus dipilih' };
+  }
+  if (!ALASAN_NONAKTIF_LEMBAGA.includes(alasan)) {
+    return { error: 'Alasan penonaktifan tidak dikenali' };
+  }
+  if (!keterangan) {
+    return { error: 'Keterangan penonaktifan harus diisi' };
+  }
+
+  return {
+    data: {
+      status_kelembagaan,
+      nonaktif_at: new Date(),
+      alasan_nonaktif: alasan,
+      keterangan_nonaktif: keterangan,
+    },
+  };
+}
+
+/**
  * Validate that a kecamatan user may access/verify a specific desa.
  * Returns true if allowed, responds with 403 and returns false if not.
  * Non-kecamatan roles are always allowed through (no restriction).
@@ -302,4 +381,6 @@ module.exports = {
   toUpper,
   createAjukanUlangHandler,
   validateKecamatanScope,
+  ALASAN_NONAKTIF_LEMBAGA,
+  buildToggleStatusData,
 };

@@ -14,6 +14,7 @@ const {
   toUpper,
   createAjukanUlangHandler,
   validateKecamatanScope,
+  buildToggleStatusData,
 } = require('./base.controller');
 
 /**
@@ -244,20 +245,11 @@ function createSingletonController(type, tableName, displayName) {
           return res.status(403).json({ success: false, message: 'User tidak memiliki akses desa' });
         }
 
-        const { status_kelembagaan, produk_hukum_penonaktifan_id } = req.body;
-        if (!status_kelembagaan) {
-          return res.status(400).json({ success: false, message: 'Status kelembagaan harus diisi' });
-        }
-
-        const updateData = { status_kelembagaan };
-        if (status_kelembagaan === 'nonaktif') {
-          updateData.nonaktif_at = new Date();
-          if (produk_hukum_penonaktifan_id) {
-            updateData.produk_hukum_penonaktifan_id = produk_hukum_penonaktifan_id;
-          }
-        } else if (status_kelembagaan === 'aktif') {
-          updateData.produk_hukum_penonaktifan_id = null;
-          updateData.nonaktif_at = null;
+        // Menonaktifkan wajib disertai alasan + keterangan; validasinya
+        // dipusatkan di base.controller agar seragam untuk semua lembaga.
+        const { data: updateData, error: validationError } = buildToggleStatusData(req.body);
+        if (validationError) {
+          return res.status(400).json({ success: false, message: validationError });
         }
 
         const updated = await prisma[tableName].update({
@@ -276,7 +268,11 @@ function createSingletonController(type, tableName, displayName) {
           entityId: updated.id,
           entityName: updated.nama,
           oldValue: { status_kelembagaan: item.status_kelembagaan },
-          newValue: { status_kelembagaan: updated.status_kelembagaan },
+          newValue: {
+            status_kelembagaan: updated.status_kelembagaan,
+            alasan_nonaktif: updated.alasan_nonaktif,
+            keterangan_nonaktif: updated.keterangan_nonaktif,
+          },
           userId: user.id,
           userName: user.name,
           userRole: user.role,
