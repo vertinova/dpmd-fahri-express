@@ -32,6 +32,7 @@ const {
   bacaKoneksiDatabase,
   jalurMysqldump,
   opsiMysqldumpDidukung,
+  periksaMysqldump,
   namaBerkasBackup,
 } = require('../config/backup');
 
@@ -160,12 +161,25 @@ class BackupController {
       const ukuranFoto = jumlahkan(foto);
       const ukuranBerkas = jumlahkan(berkas);
 
-      let database = { tersedia: true, catatan: null };
+      // Kesiapan cadangan basis data butuh DUA syarat, dan keduanya diperiksa
+      // di sini — bukan saat tombol ditekan. Unduhan berjalan lewat navigasi
+      // peramban, sehingga badan respons galat tidak pernah terbaca JavaScript
+      // halaman; tanpa pemeriksaan awal, kegagalan hanya tampak sebagai unduhan
+      // yang tidak pernah datang.
+      let database;
       try {
         const koneksi = bacaKoneksiDatabase();
-        database = { tersedia: true, nama: koneksi.database, host: koneksi.host, catatan: null };
+        const alat = await periksaMysqldump();
+        database = {
+          tersedia: alat.tersedia,
+          nama: koneksi.database,
+          host: koneksi.host,
+          mysqldump: alat.versi,
+          catatan: alat.catatan,
+        };
       } catch (error) {
-        database = { tersedia: false, catatan: error.message };
+        // DATABASE_URL sendiri bermasalah — mysqldump tidak relevan lagi.
+        database = { tersedia: false, mysqldump: null, catatan: error.message };
       }
 
       res.json({

@@ -138,6 +138,38 @@ const opsiMysqldumpDidukung = async () => {
 };
 
 /**
+ * Periksa apakah mysqldump benar-benar bisa dijalankan, DAN kembalikan versinya.
+ *
+ * Dipanggil saat halaman backup dibuka, bukan saat tombol ditekan. Alasannya:
+ * unduhan berjalan lewat navigasi peramban, sehingga badan respons galat tidak
+ * pernah sampai ke JavaScript halaman — kalau mysqldump tidak ada, yang terjadi
+ * hanyalah unduhan gagal tanpa keterangan. Memeriksanya di awal membuat
+ * penyebabnya terbaca sebelum siapa pun menunggu sia-sia.
+ */
+const periksaMysqldump = () =>
+  new Promise((resolve) => {
+    const { execFile } = require('child_process');
+    execFile(
+      jalurMysqldump(),
+      ['--version'],
+      { timeout: 10000, windowsHide: true },
+      (err, stdout, stderr) => {
+        if (!err) {
+          return resolve({ tersedia: true, versi: String(stdout || stderr).trim(), catatan: null });
+        }
+        const takAda = err.code === 'ENOENT';
+        resolve({
+          tersedia: false,
+          versi: null,
+          catatan: takAda
+            ? `mysqldump tidak ditemukan di "${jalurMysqldump()}". Pasang klien MySQL/MariaDB di server, lalu isi MYSQLDUMP_PATH di .env dengan jalur lengkapnya.`
+            : `mysqldump tidak dapat dijalankan: ${err.message}`,
+        });
+      },
+    );
+  });
+
+/**
  * Nama berkas unduhan: jenis + stempel waktu.
  *
  * Waktunya waktu LOKAL server, bukan UTC. Nama berkas dibaca manusia yang baru
@@ -163,5 +195,6 @@ module.exports = {
   bacaKoneksiDatabase,
   jalurMysqldump,
   opsiMysqldumpDidukung,
+  periksaMysqldump,
   namaBerkasBackup,
 };
