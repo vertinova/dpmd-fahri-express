@@ -98,7 +98,26 @@ const OPSI_OPSIONAL = [
   '--no-tablespaces',
   '--set-gtid-purged=OFF',
   '--default-character-set=utf8mb4',
+  // Penyeimbang --no-defaults: nilai ini biasanya diatur lewat my.cnf, dan
+  // tanpa itu satu baris berisi lampiran besar bisa melampaui batas bawaan.
+  '--max-allowed-packet=512M',
 ];
+
+/**
+ * WAJIB menjadi argumen PERTAMA — klien MySQL menolaknya di posisi lain.
+ *
+ * mysqldump membaca my.cnf/.my.cnf dan memuat grup [client] serta [mysqldump].
+ * Grup [client] dipakai bersama klien `mysql`, yang mengenal opsi seperti
+ * `database=...`; mysqldump TIDAK mengenalnya dan berhenti dengan
+ * "unknown variable 'database=...'" — bahkan untuk sekadar --version.
+ * Itu persis yang terjadi di server produksi.
+ *
+ * Aman diabaikan karena seluruh yang dibutuhkan sudah dikirim eksplisit:
+ * host, port, dan user lewat argumen, sandi lewat MYSQL_PWD. Yang hilang
+ * hanyalah setelan tuning dari my.cnf, dan yang benar-benar penting di
+ * antaranya (--max-allowed-packet) dipasang sendiri di atas.
+ */
+const OPSI_ABAIKAN_KONFIG = '--no-defaults';
 
 // Hasil probe dicache: `mysqldump --help` dipanggil sekali per proses, bukan
 // setiap kali seseorang menekan tombol unduh.
@@ -118,7 +137,7 @@ const opsiMysqldumpDidukung = async () => {
   const bantuan = await new Promise((resolve) => {
     execFile(
       jalurMysqldump(),
-      ['--help'],
+      [OPSI_ABAIKAN_KONFIG, '--help'],
       { maxBuffer: 4 * 1024 * 1024, windowsHide: true },
       (err, stdout, stderr) => resolve(err && !stdout ? '' : `${stdout || ''}${stderr || ''}`),
     );
@@ -151,7 +170,7 @@ const periksaMysqldump = () =>
     const { execFile } = require('child_process');
     execFile(
       jalurMysqldump(),
-      ['--version'],
+      [OPSI_ABAIKAN_KONFIG, '--version'],
       { timeout: 10000, windowsHide: true },
       (err, stdout, stderr) => {
         if (!err) {
@@ -194,6 +213,7 @@ module.exports = {
   adalahFoto,
   bacaKoneksiDatabase,
   jalurMysqldump,
+  OPSI_ABAIKAN_KONFIG,
   opsiMysqldumpDidukung,
   periksaMysqldump,
   namaBerkasBackup,

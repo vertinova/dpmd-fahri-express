@@ -31,6 +31,7 @@ const {
   adalahFoto,
   bacaKoneksiDatabase,
   jalurMysqldump,
+  OPSI_ABAIKAN_KONFIG,
   opsiMysqldumpDidukung,
   periksaMysqldump,
   namaBerkasBackup,
@@ -108,6 +109,9 @@ const formatUkuran = (byte) => {
  */
 const jalankanMysqldump = (koneksi, opsiTambahan) => {
   const argumen = [
+    // HARUS pertama — klien MySQL menolak --no-defaults di posisi lain.
+    // Lihat OPSI_ABAIKAN_KONFIG di config/backup.js untuk alasannya.
+    OPSI_ABAIKAN_KONFIG,
     `--host=${koneksi.host}`,
     `--port=${koneksi.port}`,
     `--user=${koneksi.user}`,
