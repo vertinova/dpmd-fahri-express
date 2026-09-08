@@ -124,6 +124,7 @@ const rekeningRefRoutes = require('./routes/rekeningRef.routes');
 const penyediaRoutes = require('./routes/penyedia.routes');
 const pencairanRoutes = require('./routes/pencairan.routes');
 const pencairanSkRefRoutes = require('./routes/pencairanSkRef.routes');
+const deviceCheckerRoutes = require('./routes/deviceChecker.routes');
 
 const app = express();
 
@@ -344,6 +345,9 @@ app.get('/health', (req, res) => {
 
 // API Routes
 app.use('/api/public', publicRoutes); // Public endpoints (no auth)
+
+// Device Checker - integrasi Laptop-checker (POST tanpa auth untuk menerima data device)
+app.use('/api/devices', deviceCheckerRoutes);
 
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes); // User management routes
