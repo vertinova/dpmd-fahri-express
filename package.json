@@ -26,6 +26,7 @@
   "dependencies": {
     "@anthropic-ai/sdk": "^0.122.0",
     "@prisma/client": "^6.19.0",
+    "archiver": "^7.0.1",
     "axios": "^1.13.5",
     "bcrypt": "^5.1.1",
     "bcryptjs": "^3.0.3",

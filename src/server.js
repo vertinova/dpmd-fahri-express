@@ -348,9 +348,13 @@ app.use('/api/public', publicRoutes); // Public endpoints (no auth)
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes); // User management routes
 app.use('/api/desa-admin', require('./routes/desaAdmin.routes')); // Manajemen akun oleh Admin Desa
+app.use('/api/superadmin/backup', require('./routes/backup.routes')); // Unduh cadangan database & berkas
 app.use('/api/roles', require('./routes/role.routes')); // Role management routes
 app.use('/api/pegawai', pegawaiRoutes); // Pegawai routes
 app.use('/api/absensi', require('./routes/absensi.routes')); // Absensi pegawai routes
+// WAJIB sebelum '/api/bidang': bidangRoutes punya GET '/:id', yang akan
+// menelan path satu segmen di bawahnya kalau urutannya terbalik.
+app.use('/api/bidang/akun-desa', require('./routes/bidangAkunDesa.routes')); // Staf bidang membuat akun operator desa
 app.use('/api/bidang', bidangRoutes); // Bidang routes
 app.use('/api', locationRoutes); // Kecamatan & Desa routes
 
