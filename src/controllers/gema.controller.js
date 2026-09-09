@@ -30,6 +30,7 @@
 const { jawab, tersedia } = require('../services/gemaLLM.service');
 const { jalankanSetelUlangSandi } = require('../services/gemaAkunPegawai.service');
 const { bolehSetelSandiSuara } = require('../config/akunStaf');
+const percakapan = require('../services/gemaPercakapan.service');
 const logger = require('../utils/logger');
 
 /** Contoh yang ditawarkan di halaman depan. */
@@ -60,15 +61,26 @@ const pelakuDari = (req) => ({
 	role: req.user?.role,
 });
 
-/** POST /api/gema/tanya  { teks } */
+/**
+ * POST /api/gema/tanya  { teks, sesi? }
+ *
+ * `sesi` adalah id percakapan yang dibuat peramban sekali per kunjungan. Dengan
+ * itu Gema mengingat giliran sebelumnya, sehingga "kalau yang maju berapa?"
+ * bisa dijawab tanpa mengulang seluruh pertanyaan. Tanpa `sesi`, jalurnya tetap
+ * bekerja — hanya saja tiap pertanyaan berdiri sendiri seperti sebelumnya.
+ */
 const tanya = async (req, res) => {
 	const teks = String(req.body?.teks || '').trim();
+	// Dibatasi panjangnya: id sesi datang dari peramban, dan apa pun yang datang
+	// dari luar tidak boleh dipakai sebagai kunci tanpa batas.
+	const sesi = String(req.body?.sesi || '').trim().slice(0, 64) || null;
+
 	if (!teks) {
 		return res.status(400).json({ success: false, message: 'Tidak ada yang ditanyakan' });
 	}
 
 	try {
-		const hasil = await jawab(teks, pelakuDari(req));
+		const hasil = await jawab(teks, pelakuDari(req), sesi);
 
 		// Tidak menemukan apa pun bukan kegagalan — itu jawaban yang sah, dan
 		// jauh lebih berguna daripada mengarang. Contoh perintah disertakan
@@ -127,6 +139,24 @@ const konfirmasi = async (req, res) => {
 	}
 };
 
+/**
+ * POST /api/gema/lupakan  { sesi }
+ *
+ * Mulai percakapan baru. Perlu ada tombolnya karena ingatan itu pedang bermata
+ * dua: setelah lama membahas Kecamatan Jonggol, pertanyaan pertama tentang
+ * topik yang sama sekali lain bisa ikut tertarik ke konteks lama. Melupakan
+ * dengan sengaja lebih jelas daripada menunggu tiga puluh menit.
+ */
+const lupakan = (req, res) => {
+	const sesi = String(req.body?.sesi || '').trim().slice(0, 64);
+	if (!sesi) {
+		return res.status(400).json({ success: false, message: 'Sesi tidak disebutkan' });
+	}
+
+	percakapan.lupakan(req.user?.id, sesi);
+	return res.json({ success: true, data: { giliran: 0 } });
+};
+
 /** GET /api/gema/kemampuan */
 const kemampuan = (req, res) => {
 	const boleh = bolehSetelSandiSuara(req.user?.role);
@@ -143,4 +173,4 @@ const kemampuan = (req, res) => {
 	});
 };
 
-module.exports = { tanya, konfirmasi, kemampuan, CONTOH };
+module.exports = { tanya, konfirmasi, kemampuan, lupakan, CONTOH };
