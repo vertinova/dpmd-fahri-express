@@ -269,7 +269,9 @@ Bila tidak ada file, nilainya `null`.
 
 Berisi realisasi penyaluran dana desa **live dari SIPANDA** tahun berjalan, dipecah per `sumber_dana`: `add`, `dd_reguler`, `bhprd`, `bankeu_infras_desa`, `bp`. Setiap sumber punya total, rekap **per kecamatan** (`by_kecamatan`), dan (mode full) `records[]` per desa. Pakai `?view=preview` untuk tanpa `records`.
 
-> Catatan: `bankeu_infras_desa` & `bp` bisa `Rp 0` bila belum ada pencairan di SIPANDA untuk tahun berjalan. Bila SIPANDA tidak dapat dijangkau, endpoint membalas `502` (tidak ada fallback statis — ini memang endpoint live SIPANDA).
+> Catatan: sebuah sumber bisa `Rp 0` bila memang belum ada alokasi/pencairan di SIPANDA untuk tahun berjalan — per 2026 itu keadaan `bp` (832 baris ada, tapi seluruh `anggaran`-nya `0` dan statusnya "Belum Mengajukan"). Bila SIPANDA tidak dapat dijangkau, endpoint membalas `502` (tidak ada fallback statis — ini memang endpoint live SIPANDA).
+>
+> **Nama pos SIPANDA berganti antar tahun.** Bantuan keuangan pernah tertulis `BANKEU INFRAS DESA` dan pada 2026 menjadi `BANKEU AKSELERASI PEDESAAN`; karena itu pos ini dicocokkan lewat awalan `BANKEU`, bukan nama persis. Kunci responsnya tetap `bankeu_infras_desa` supaya konsumen yang sudah ada tidak perlu diubah. Tiap sumber kini membawa `sumber_dana_asli[]` — nama pos yang benar-benar dipakai tahun itu — sehingga `Rp 0` karena "belum ada pencairan" bisa dibedakan dari `Rp 0` karena namanya tidak lagi cocok.
 
 ```jsonc
 {
@@ -284,6 +286,7 @@ Berisi realisasi penyaluran dana desa **live dari SIPANDA** tahun berjalan, dipe
         "sumber_dana": "ADD",
         "total_realisasi": 406865146624,
         "total_desa": 416,
+        "sumber_dana_asli": ["ADD"],
         "by_kecamatan": [ { "kecamatan": "GUNUNG PUTRI", "total_realisasi": 0, "total_desa": 0 } ],
         "records": [ { "nomor": 1, "kecamatan": "JASINGA", "desa": "CURUG", "realisasi": 0, "realisasi_label": "Rp 0" } ]
       },

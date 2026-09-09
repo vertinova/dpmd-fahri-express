@@ -16,13 +16,16 @@ const toNumber = (value) => {
 // total, rekap per kecamatan, dan (opsional) record per desa.
 // PENTING: `anggaran` SIPANDA berformat "220190608.00" (ada desimal) — gunakan
 // toNumber, JANGAN toCurrencyNumber yang membuang titik desimal (nilai jadi 100x).
-const aggregateSipandaSumber = (rows, sumberDana, includeRecords = true) => {
+const aggregateSipandaSumber = (rows, sumberDana, includeRecords = true, cocok = null) => {
   const perDesa = new Map();      // desaKey -> { kecamatan, desa, realisasi }
   const perKecamatan = new Map(); // kecamatan -> { total_realisasi, desaSet }
+  const namaAsli = new Set();     // nama pos SIPANDA yang benar-benar terpakai
   let totalRealisasi = 0;
 
   rows.forEach((row) => {
-    if (row.sumber_dana !== sumberDana) return;
+    const nama = row.sumber_dana || '';
+    if (cocok ? !cocok(nama) : nama !== sumberDana) return;
+    namaAsli.add(nama);
     const anggaran = toNumber(row.anggaran);
     const kecamatan = row.kecamatan || 'Lainnya';
     const desaKey = row.id_desa || `${kecamatan}|${row.desa || ''}`;
@@ -50,6 +53,11 @@ const aggregateSipandaSumber = (rows, sumberDana, includeRecords = true) => {
   const result = {
     total_realisasi: totalRealisasi,
     total_desa: perDesa.size,
+    // Nama pos SIPANDA yang benar-benar dipakai tahun ini. Untuk sumber dana
+    // yang namanya berganti antar tahun, inilah cara konsumen tahu angka ini
+    // berasal dari pos yang mana — dan cara membedakan "memang belum ada
+    // pencairan" dari "namanya tidak lagi cocok".
+    sumber_dana_asli: Array.from(namaAsli),
     by_kecamatan
   };
 
@@ -70,11 +78,24 @@ const aggregateSipandaSumber = (rows, sumberDana, includeRecords = true) => {
 };
 
 // Sumber dana yang tersedia di SIPANDA (untuk endpoint /api/public/sipanda).
+//
+// `cocok` opsional, dipakai untuk pos yang BERGANTI NAMA antar tahun anggaran.
+// Bantuan keuangan pernah tertulis "BANKEU INFRAS DESA" dan pada 2026 menjadi
+// "BANKEU AKSELERASI PEDESAAN"; pencocokan persis membuat endpoint ini membalas
+// Rp 0 dengan tenang, dan angka nol itu terbaca sebagai "belum ada pencairan"
+// padahal datanya ada 832 baris. `key` sengaja TIDAK diubah — ia bagian dari
+// kontrak yang sudah dipakai konsumen; nama pos sebenarnya dilaporkan lewat
+// `sumber_dana_asli`.
 const SIPANDA_SUMBER = [
   { key: 'add', sumber: 'ADD', label: 'Alokasi Dana Desa (ADD)' },
   { key: 'dd_reguler', sumber: 'DD REGULER', label: 'Dana Desa (DD Reguler)' },
   { key: 'bhprd', sumber: 'BHPRD', label: 'Bagi Hasil Pajak & Retribusi Daerah' },
-  { key: 'bankeu_infras_desa', sumber: 'BANKEU INFRAS DESA', label: 'Bankeu Infrastruktur Desa' },
+  {
+    key: 'bankeu_infras_desa',
+    sumber: 'BANKEU',
+    label: 'Bantuan Keuangan Desa',
+    cocok: (s) => s.toUpperCase().startsWith('BANKEU')
+  },
   { key: 'bp', sumber: 'BP', label: 'Bantuan Provinsi' }
 ];
 
@@ -1759,8 +1780,8 @@ const buildSipandaPayload = async (req) => {
 
   const sumber_dana = {};
   let totalRealisasi = 0;
-  SIPANDA_SUMBER.forEach(({ key, sumber, label }) => {
-    const agg = aggregateSipandaSumber(rows, sumber, !previewMode);
+  SIPANDA_SUMBER.forEach(({ key, sumber, label, cocok }) => {
+    const agg = aggregateSipandaSumber(rows, sumber, !previewMode, cocok);
     totalRealisasi += agg.total_realisasi;
     sumber_dana[key] = { label, sumber_dana: sumber, ...agg };
   });
