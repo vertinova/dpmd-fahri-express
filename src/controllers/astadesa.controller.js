@@ -58,6 +58,35 @@ const samarkanNomor = (v) => {
   return s ? `${s.slice(0, 6)}**********` : null;
 };
 
+/**
+ * URL foto rumah pertama sebuah baris sensus, atau null.
+ *
+ * MENGAPA DIAMBIL DI SINI, BUKAN DARI ENDPOINT DETAIL. Foto disimpan Spatie
+ * Media Library, bukan di kolom `foto_rumah` (kolom JSON itu ada tetapi bukan
+ * tempat berkasnya). Endpoint `/admin/sensuses/{id}` membalas `$sensus->toArray()`
+ * tanpa memuat relasi media dan tanpa menambahkan `foto_rumah_urls`, sehingga
+ * URL fotonya TIDAK PERNAH ada di sana — panel info yang menunggu foto dari
+ * situ akan selamanya kosong meski fotonya ada di ASTA DESA.
+ *
+ * `/v1/sensuses` — yang memang sudah disusuri endpoint ini — menambahkan
+ * `foto_rumah_urls` dan memuat relasi `media`. Jadi fotonya diambil di sini dan
+ * ikut bersama titiknya: satu string per baris, tanpa permintaan tambahan, dan
+ * langsung tampil begitu titiknya diklik.
+ */
+const fotoRumahPertama = (row) => {
+  const daftar = row?.foto_rumah_urls;
+  if (Array.isArray(daftar)) {
+    const url = daftar.find((v) => typeof v === 'string' && /^https?:\/\//.test(v));
+    if (url) return url;
+  }
+
+  // Cadangan: baca langsung dari relasi media bila bentuk _urls berubah.
+  const media = Array.isArray(row?.media) ? row.media : [];
+  const berkas = media.find((m) => m?.collection_name === 'foto_rumah');
+  const url = berkas?.original_url || berkas?.url;
+  return typeof url === 'string' && /^https?:\/\//.test(url) ? url : null;
+};
+
 const KUNCI_KECAMATAN = ['kecamatan', 'nama_kecamatan', 'kecamatan_nama', 'kec'];
 const KUNCI_DESA = ['desa', 'nama_desa', 'desa_nama', 'kelurahan'];
 const KUNCI_STATUS = ['status', 'status_verifikasi', 'status_sensus'];
@@ -793,7 +822,8 @@ exports.getSebaranPeta = jalankan(async (req, res) => {
       // ulang di sini agar tetap aman bila suatu saat penyamaran di sana dicabut.
       nik: samarkanNomor(row.kk_nik),
       petugas: namaPetugas(row) || rapikan(row.user?.name),
-      tanggal: keHari(row.tanggal_pendataan)
+      tanggal: keHari(row.tanggal_pendataan),
+      foto: fotoRumahPertama(row)
     });
   });
 

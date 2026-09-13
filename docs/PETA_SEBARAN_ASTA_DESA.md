@@ -119,6 +119,27 @@ bekerja dengan token **super_admin**, yang di panel pun tidak mendapat filter ap
 pun — jadi tidak ada yang perlu ditiru. Bila suatu saat DPMD ingin membatasi
 tampilan per kecamatan, filternya harus ditambahkan sendiri di `buatLayer`.
 
+### 3.2b Foto rumah ikut bersama titik, bukan dari endpoint detail
+
+Foto disimpan Spatie Media Library, bukan di kolom. Kolom JSON `foto_rumah`
+memang ada di tabel, tetapi bukan tempat berkasnya — isinya bisa nama berkas,
+bukan URL.
+
+`GET /api/v1/admin/sensuses/{id}` membalas `$sensus->toArray()` **tanpa** memuat
+relasi `media` dan **tanpa** menambahkan `foto_rumah_urls`. Jadi URL foto tidak
+pernah ada di endpoint detail, dan panel info yang menunggu foto dari situ akan
+selamanya kosong meski fotonya ada di ASTA DESA. Ini pernah terjadi dan
+diperbaiki: fotonya kini diambil di `/sebaran-peta` (`fotoRumahPertama`) dari
+`foto_rumah_urls` milik `/v1/sensuses`, lalu ikut bersama titiknya.
+
+Akibat sampingannya justru bagus: fotonya tampil **seketika** saat titik diklik,
+tidak menunggu permintaan detail. Fungsi `fotoRumah()` di `konfigPeta.js` tetap
+ada sebagai cadangan, dan `foto: fotoRumah(sensus) || f.foto` menjaga agar detail
+yang tidak berfoto tidak menghapus foto yang sudah tampil.
+
+Berkasnya dilayani statis dan publik dari `https://astadesa.rmlabs.id/storage/…`,
+jadi `<img>` lintas-origin bekerja tanpa header CORS.
+
 ### 3.3 Atribut titik diambil saat diklik
 
 Panel me-render seluruh atribut di server, sehingga semuanya langsung ada. Di
