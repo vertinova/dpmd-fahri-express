@@ -24,6 +24,17 @@ router.get('/demografi', controller.getDemografi);
 router.get('/pengguna', controller.getPengguna);
 router.get('/layer', controller.getLayer);
 router.get('/pesan', controller.getPesan);
+
+// Penunjang halaman Peta Sebaran (WebGIS). Meneruskan endpoint PUBLIK ASTA DESA,
+// tetapi tetap berada di balik auth + peran internal DPMD seperti rute lain di
+// berkas ini — tidak ada alasan membuka pintu baru hanya karena di ujung sana
+// endpointnya publik.
+router.get('/sebaran-peta', controller.getSebaranPeta);
+router.get('/wilayah/kecamatan', controller.getWilayahKecamatan);
+router.get('/wilayah/desa', controller.getWilayahDesa);
+router.get('/wilayah/geojson', controller.getWilayahGeojson);
+router.get('/cuaca', controller.getCuaca);
+
 router.post('/segarkan', controller.segarkan);
 
 // Ditaruh setelah rute statis. '/sensus/:id' dan '/status' tidak bertabrakan,

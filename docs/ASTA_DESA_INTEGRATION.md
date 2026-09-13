@@ -109,7 +109,34 @@ Core Dashboard lain. Lihat [`src/routes/astadesa.routes.js`](../src/routes/astad
 | GET | `/api/asta-desa/demografi` | Agregat anggota keluarga: jenis kelamin, piramida usia, pendidikan, hubungan, disabilitas |
 | GET | `/api/asta-desa/layer` | Layer peta ASTA DESA |
 | GET | `/api/asta-desa/pesan` | Riwayat pesan (berpaginasi) |
+| GET | `/api/asta-desa/sebaran-peta` | Titik sebaran berkoordinat **rumah** — sumber peta penuh |
+| GET | `/api/asta-desa/wilayah/kecamatan` | Daftar nama kecamatan (array string) — penyaring peta |
+| GET | `/api/asta-desa/wilayah/desa?kecamatan=` | Daftar nama desa satu kecamatan (array string) |
+| GET | `/api/asta-desa/wilayah/geojson?kecamatan=&desa=` | Geometri batas wilayah untuk disorot di peta |
+| GET | `/api/asta-desa/cuaca?lat=&lon=` | Prakiraan BMKG pada satu koordinat |
 | POST | `/api/asta-desa/segarkan` | Buang cache; dipakai tombol **Muat ulang** di halaman |
+
+`/sebaran-peta` adalah satu-satunya endpoint di sini yang menyusuri **`/api/v1/sensuses`**
+(jalur pengguna biasa, bukan grup `/admin`). Alasannya: resource admin tidak
+pernah mengirim `rumah_lat`/`rumah_lon`, dan itulah koordinat yang digambar panel
+super admin ASTA DESA. Barisnya jauh lebih berat di sana — jangan pakai jalur itu
+untuk keperluan yang sudah cukup dilayani `/admin/sensuses`. Lihat
+`requestPengguna` di service dan [`PETA_SEBARAN_ASTA_DESA.md`](PETA_SEBARAN_ASTA_DESA.md)
+§3.1.
+
+Empat endpoint wilayah & cuaca meneruskan endpoint **publik** ASTA DESA
+(`/api/v1/public/...`), bukan grup `/admin` — lihat `ambilPublik` di service.
+Tokennya sengaja tidak dikirim: endpoint wilayah di sana membaca pengguna lewat
+guard `web` (session), bukan `sanctum`, sehingga token Bearer tidak berpengaruh —
+dan tanpa pengguna terbaca, jawabannya justru mencakup seluruh kecamatan, yang
+memang yang dibutuhkan DPMD. Rutenya tetap di balik JWT + peran internal DPMD
+seperti rute lain; tidak ada alasan membuka pintu baru hanya karena di ujung sana
+endpointnya publik.
+
+Batas wilayah di-cache 24 jam (`adm_kecamatan`/`adm_desa` praktis tidak berubah),
+cuaca 1 jam (sama dengan cache di sisi ASTA DESA). Koordinat cuaca dibulatkan ke
+3 desimal sebelum diteruskan — tanpa itu tiap klik di peta menjadi kunci cache
+baru yang tidak pernah terpakai ulang.
 
 Tambahkan `?force=1` pada GET mana pun untuk melewati cache sekali jalan.
 
@@ -232,6 +259,19 @@ Tombol **Muat ulang** membuang keduanya lalu menarik ulang dengan `force=1`.
 | `useAstaDesa.js` | Pengambil data + cache tingkat modul |
 | `warna.js` | Palet data (sudah lolos uji keterbacaan buta warna) + pemformat angka |
 | `ui.jsx` | Panel, kartu angka, daftar batang, keadaan memuat/kosong/galat |
+
+**Frontend — Peta Sebaran penuh** — `src/pages/core-dashboard/asta-desa/peta/`
+
+Halaman terpisah di `/core-dashboard/asta-desa/peta-sebaran`, replika panel
+"Peta Sebaran" super admin ASTA DESA. Rinciannya di
+[`PETA_SEBARAN_ASTA_DESA.md`](PETA_SEBARAN_ASTA_DESA.md).
+
+| Berkas | Isi |
+| --- | --- |
+| `PetaSebaranPage.jsx` | Peta OpenLayers, cluster, identifikasi fitur, kontrol, cetak A3 |
+| `PanelPeta.jsx` | Panel mengapung 384 px: tab Layer / Info / Filter + koordinat kursor |
+| `konfigPeta.js` | Seluruh tetapan & gaya yang disalin persis dari panel asalnya |
+| `usePetaSebaran.js` | Pengambil data peta (tiga tetap lewat `useAstaDesa`, empat sesuai-permintaan) |
 
 ---
 

@@ -46,6 +46,18 @@ const keAngka = (v) => {
 
 const rapikan = (v) => (v === null || v === undefined ? null : String(v).trim() || null);
 
+/**
+ * NIK/no. KK yang disamarkan: 6 digit pertama, sisanya bintang.
+ *
+ * Bentuknya mengikuti penyamaran di ASTA DESA (`substr(0,6) . '**********'`)
+ * supaya pencarian di halaman peta mengenai persis apa yang dikenai panel
+ * mereka — bukan lebih banyak, bukan lebih sedikit.
+ */
+const samarkanNomor = (v) => {
+  const s = rapikan(v);
+  return s ? `${s.slice(0, 6)}**********` : null;
+};
+
 const KUNCI_KECAMATAN = ['kecamatan', 'nama_kecamatan', 'kecamatan_nama', 'kec'];
 const KUNCI_DESA = ['desa', 'nama_desa', 'desa_nama', 'kelurahan'];
 const KUNCI_STATUS = ['status', 'status_verifikasi', 'status_sensus'];
@@ -425,7 +437,13 @@ exports.getSebaran = jalankan(async (req, res) => {
       status: r.status,
       kk_nama: r.kk_nama,
       petugas: r.petugas,
-      tanggal: r.tanggal
+      tanggal: r.tanggal,
+      // NIK TERSAMAR, bukan NIK utuh. Halaman peta penuh mencari berdasarkan
+      // NIK persis seperti panel super admin — dan panel itu pun menyamarkannya
+      // lebih dulu, sehingga pencariannya hanya pernah mengenai 6 digit pertama.
+      // Mengirim NIK lengkap ke browser untuk hasil pencarian yang sama adalah
+      // risiko tanpa imbalan.
+      nik: samarkanNomor(r.kk_nik)
     }));
 
   // Rekap per kecamatan dengan titik tengah dari rata-rata koordinat anggotanya.
@@ -699,6 +717,192 @@ exports.getPesan = jalankan(async (req, res) => {
     data: Array.isArray(body?.data) ? body.data : [],
     meta: metaDari(body)
   });
+});
+
+// ── Peta sebaran penuh (WebGIS) ──────────────────────────────────────────────
+//
+// Endpoint di bawah melayani halaman Peta Sebaran yang meniru panel super admin
+// ASTA DESA. Yang wilayah & cuaca meneruskan endpoint PUBLIK di sana — bukan grup
+// admin — lewat `asta.ambilPublik`.
+
+/**
+ * GET /api/asta-desa/sebaran-peta
+ * Titik sebaran dengan koordinat RUMAH — sumber peta penuh.
+ *
+ * BEDANYA DENGAN `/sebaran`. Yang itu menyusuri `/admin/sensuses`, yang resource-
+ * nya hanya membawa `lokasi: {lat, lon}`; cukup untuk gelembung agregat per
+ * kecamatan. Peta Sebaran super admin ASTA DESA menggambar `rumah_lat`/
+ * `rumah_lon`, dan kolom itu tidak pernah ikut di resource admin. Jadi endpoint
+ * ini menyusuri `/sensuses` (jalur pengguna, `opts.pengguna`) yang membalas model
+ * apa adanya — satu-satunya jalan mencapai posisi titik yang sama tanpa meminta
+ * perubahan di sisi ASTA DESA. Lihat `requestPengguna` di service.
+ *
+ * `/sebaran` dibiarkan utuh: tab ringkas sudah memakainya, barisnya lebih murah,
+ * dan tidak ada gunanya membuat tab itu membayar muatan 104 kolom.
+ *
+ * Keduanya melaporkan `sumber_koordinat` supaya selisih jumlah titik antara
+ * halaman ini dan panel bisa dijelaskan, bukan ditebak.
+ */
+exports.getSebaranPeta = jalankan(async (req, res) => {
+  const force = paksa(req);
+  const semua = await asta.ambilSemua('/sensuses', {}, { force, pengguna: true });
+
+  let pakaiRumah = 0;
+  let pakaiLokasi = 0;
+  let tanpaKoordinat = 0;
+  let diLuarWilayah = 0;
+
+  const titik = [];
+
+  semua.rows.forEach((row) => {
+    // Koordinat rumah lebih dulu — itulah yang digambar panel. `lokasi_*` hanya
+    // cadangan, supaya baris yang koordinat rumahnya belum diisi tetap terpeta
+    // alih-alih hilang diam-diam.
+    let lat = keAngka(row.rumah_lat);
+    let lng = keAngka(row.rumah_lon);
+    let sumber = 'rumah';
+
+    if (lat === null || lng === null) {
+      lat = keAngka(row.lokasi_lat);
+      lng = keAngka(row.lokasi_lon);
+      sumber = 'lokasi';
+    }
+
+    if (lat === null || lng === null) {
+      tanpaKoordinat += 1;
+      return;
+    }
+    if (!diKabupatenBogor(lat, lng)) {
+      diLuarWilayah += 1;
+      return;
+    }
+
+    if (sumber === 'rumah') pakaiRumah += 1;
+    else pakaiLokasi += 1;
+
+    titik.push({
+      id: row.id ?? null,
+      lat,
+      lng,
+      sumber_koordinat: sumber,
+      kecamatan: rapikan(row.kecamatan) || 'Tidak diketahui',
+      desa: rapikan(row.desa) || 'Tidak diketahui',
+      status: rapikan(row.status) || 'tidak diketahui',
+      kk_nama: rapikan(row.kk_nama),
+      // NIK di endpoint ini SUDAH disamarkan ASTA DESA (maskPrivacy). Disamarkan
+      // ulang di sini agar tetap aman bila suatu saat penyamaran di sana dicabut.
+      nik: samarkanNomor(row.kk_nik),
+      petugas: namaPetugas(row) || rapikan(row.user?.name),
+      tanggal: keHari(row.tanggal_pendataan)
+    });
+  });
+
+  res.json({
+    success: true,
+    data: {
+      titik,
+      total_baris: semua.rows.length,
+      tanpa_koordinat: tanpaKoordinat,
+      di_luar_wilayah: diLuarWilayah,
+      // Dilaporkan supaya halaman bisa menyebutkan berapa titik yang TIDAK
+      // memakai koordinat rumah — satu-satunya sisa selisih dengan panel.
+      pakai_koordinat_rumah: pakaiRumah,
+      pakai_koordinat_lokasi: pakaiLokasi,
+      sebagian: semua.truncated
+    }
+  });
+});
+
+/**
+ * GET /api/asta-desa/wilayah/kecamatan
+ * Daftar nama kecamatan untuk penyaring. Balasan aslinya array string polos.
+ *
+ * Batas wilayah disimpan jauh lebih lama daripada TTL bawaan: tabel
+ * `adm_kecamatan` di sana praktis tidak pernah berubah, sementara setiap
+ * pembukaan halaman peta memanggil endpoint ini.
+ */
+const TTL_WILAYAH = 24 * 60 * 60 * 1000;
+
+exports.getWilayahKecamatan = jalankan(async (req, res) => {
+  const body = await asta.ambilPublik('/public/wilayah/kecamatans', {}, {
+    force: paksa(req),
+    ttlMs: TTL_WILAYAH
+  });
+  res.json({ success: true, data: Array.isArray(body) ? body : [] });
+});
+
+/** GET /api/asta-desa/wilayah/desa?kecamatan= — daftar desa satu kecamatan. */
+exports.getWilayahDesa = jalankan(async (req, res) => {
+  const kecamatan = rapikan(req.query.kecamatan);
+  if (!kecamatan) {
+    return res.status(400).json({ success: false, message: 'Parameter kecamatan wajib diisi.' });
+  }
+  // Jalurnya `desas` (jamak) di sisi ASTA DESA, sedangkan rute kita `desa`.
+  const body = await asta.ambilPublik('/public/wilayah/desas', { kecamatan }, {
+    force: paksa(req),
+    ttlMs: TTL_WILAYAH
+  });
+  res.json({ success: true, data: Array.isArray(body) ? body : [] });
+});
+
+/**
+ * GET /api/asta-desa/wilayah/geojson?kecamatan=&desa=
+ * Geometri batas wilayah untuk disorot di peta.
+ *
+ * ASTA DESA membalas GEOMETRI polos (hasil ST_AsGeoJSON), bukan Feature — mis.
+ * `{"type":"MultiPolygon","coordinates":[…]}`. Dibungkus di sini ke dalam
+ * `data` agar seragam dengan endpoint lain halaman ini; frontend yang
+ * membacanya kembali ke `ol.format.GeoJSON`.
+ */
+exports.getWilayahGeojson = jalankan(async (req, res) => {
+  const kecamatan = rapikan(req.query.kecamatan);
+  const desa = rapikan(req.query.desa);
+  if (!kecamatan) {
+    return res.status(400).json({ success: false, message: 'Parameter kecamatan wajib diisi.' });
+  }
+
+  const params = desa ? { kecamatan, desa } : { kecamatan };
+  const body = await asta.ambilPublik('/public/wilayah/geojson', params, {
+    force: paksa(req),
+    ttlMs: TTL_WILAYAH
+  });
+
+  // Balasan bisa berupa `{error: "..."}` dengan status 200 pada kasus tertentu.
+  if (!body || body.error) {
+    return res.status(404).json({ success: false, message: 'Geometri wilayah tidak ditemukan.' });
+  }
+
+  res.json({ success: true, data: body });
+});
+
+/**
+ * GET /api/asta-desa/cuaca?lat=&lon=
+ * Prakiraan BMKG pada satu koordinat, seperti kartu cuaca di panel super admin.
+ *
+ * TTL-nya satu jam, sama dengan cache di sisi ASTA DESA: menyimpannya lebih lama
+ * berarti menampilkan cuaca yang sudah lewat, lebih pendek tidak menambah
+ * kesegaran apa pun karena server mereka tetap membalas dari cache-nya sendiri.
+ *
+ * Koordinatnya dibulatkan ke 3 desimal (±110 m) sebelum diteruskan. Tanpa itu
+ * tiap klik di peta menjadi kunci cache yang berbeda, dan cache cuaca tumbuh
+ * tanpa batas sambil tidak pernah sekali pun terpakai ulang.
+ */
+exports.getCuaca = jalankan(async (req, res) => {
+  const lat = keAngka(req.query.lat);
+  const lon = keAngka(req.query.lon);
+  if (lat === null || lon === null) {
+    return res.status(400).json({ success: false, message: 'Parameter lat dan lon wajib berupa angka.' });
+  }
+
+  const body = await asta.ambilPublik(
+    '/public/weather',
+    { lat: lat.toFixed(3), lon: lon.toFixed(3) },
+    { force: paksa(req), ttlMs: 60 * 60 * 1000 }
+  );
+
+  // Kartu cuaca hanya digambar bila ada isinya; galat dari BMKG bukan alasan
+  // menjatuhkan seluruh panel info yang dibuka pengguna.
+  res.json({ success: true, data: body && !body.error ? body : null });
 });
 
 /**

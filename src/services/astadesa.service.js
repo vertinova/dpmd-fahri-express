@@ -110,10 +110,10 @@ const ambilToken = async () => tokenCache || login();
  * token Sanctum bisa dicabut atau kedaluwarsa kapan saja, dan tanpa percobaan
  * ulang ini halaman akan gagal sampai proses backend di-restart.
  */
-const requestMentah = async (path, params = {}, sudahUlang = false) => {
+const requestBertoken = async (jalurPenuh, params = {}, sudahUlang = false) => {
   const token = await ambilToken();
   try {
-    const res = await axios.get(`${BASE_URL}/admin${path}`, {
+    const res = await axios.get(`${BASE_URL}${jalurPenuh}`, {
       params,
       timeout: TIMEOUT_MS,
       headers: { Accept: 'application/json', Authorization: `Bearer ${token}` }
@@ -124,7 +124,7 @@ const requestMentah = async (path, params = {}, sudahUlang = false) => {
 
     if (status === 401 && !sudahUlang && !STATIC_TOKEN) {
       tokenCache = null;
-      return requestMentah(path, params, true);
+      return requestBertoken(jalurPenuh, params, true);
     }
     if (status === 401) {
       throw new AstaDesaError('Token ASTA DESA tidak diterima (401). Kredensial di .env perlu diperbarui.', 502);
@@ -133,12 +133,78 @@ const requestMentah = async (path, params = {}, sudahUlang = false) => {
       throw new AstaDesaError('Akun ASTA DESA yang dipakai bukan super_admin, sehingga endpoint admin ditolak.', 502);
     }
     if (status === 404) {
-      throw new AstaDesaError(`Endpoint ASTA DESA tidak ditemukan: ${path}`, 404);
+      throw new AstaDesaError(`Endpoint ASTA DESA tidak ditemukan: ${jalurPenuh}`, 404);
     }
     if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
       throw new AstaDesaError('Server ASTA DESA tidak merespons dalam batas waktu.', 504);
     }
     throw new AstaDesaError(`Permintaan ASTA DESA gagal: ${err.message}`, 502, err.response?.data || null);
+  }
+};
+
+/** Endpoint grup admin — `/api/v1/admin/<path>`. Bentuk pemanggilan lama. */
+const requestMentah = (path, params = {}) => requestBertoken(`/admin${path}`, params);
+
+/**
+ * Endpoint bertoken DI LUAR grup admin — `/api/v1/<path>`.
+ *
+ * MENGAPA INI ADA. `/admin/sensuses` memakai AdminSensusResource yang sengaja
+ * ringkas: ~12 kolom identitas, dan koordinatnya HANYA `lokasi: {lat, lon}`.
+ * Peta Sebaran super admin ASTA DESA menggambar `rumah_lat`/`rumah_lon` —
+ * kolom yang tidak pernah ikut di resource itu. Sementara `/sensuses` (endpoint
+ * pengguna biasa) membalas model Sensus apa adanya: `$guarded = ['id']`,
+ * sehingga SELURUH ~104 kolom ikut, termasuk `rumah_*`, dan NIK/no. KK sudah
+ * disamarkan di sana oleh `maskPrivacy`.
+ *
+ * Akun super_admin tidak ber-role surveyor/verifikator, jadi penyaringan per
+ * peran di endpoint itu tidak mengenainya: yang terbaca seluruh kabupaten, sama
+ * dengan yang dilihat panel. Itulah satu-satunya jalan mencapai paritas
+ * koordinat tanpa meminta perubahan apa pun di sisi ASTA DESA.
+ *
+ * Harganya: baris di sini jauh lebih berat daripada versi admin. Jangan pakai
+ * untuk tabel atau rekap yang sudah cukup dilayani `/admin/sensuses`.
+ */
+const requestPengguna = (path, params = {}) => requestBertoken(path, params);
+
+/**
+ * GET ke endpoint PUBLIK ASTA DESA — tanpa prefiks `/admin` dan tanpa token.
+ *
+ * Dipakai oleh batas wilayah (`/public/wilayah/*`) dan cuaca BMKG
+ * (`/public/weather`), yang dibutuhkan peta sebaran tetapi TIDAK berada di bawah
+ * grup admin. Memaksanya lewat `requestMentah` akan menghasilkan 404 karena
+ * jalurnya jadi `/admin/public/...`.
+ *
+ * Token sengaja tidak dikirim. Endpoint wilayah di sana membaca pengguna lewat
+ * guard `web` (session), bukan `sanctum`, sehingga token Bearer tidak
+ * berpengaruh apa pun — dan tanpa pengguna terbaca, jawabannya justru mencakup
+ * SELURUH kecamatan, yang memang yang dibutuhkan DPMD.
+ *
+ * Tetap diproksikan lewat backend, bukan dipanggil langsung dari browser, agar
+ * halaman ini hanya pernah bicara dengan satu origin — tidak ada urusan CORS,
+ * dan alamat server ASTA DESA tidak perlu ikut ke bundel frontend.
+ */
+const requestPublik = async (path, params = {}) => {
+  try {
+    const res = await axios.get(`${BASE_URL}${path}`, {
+      params,
+      timeout: TIMEOUT_MS,
+      headers: { Accept: 'application/json' }
+    });
+    return res.data;
+  } catch (err) {
+    const status = err.response?.status;
+    // 404 diteruskan apa adanya: untuk /wilayah/geojson itu jawaban yang sah —
+    // "geometri wilayah itu tidak ada" — bukan kerusakan sambungan.
+    if (status === 404) {
+      throw new AstaDesaError('Geometri wilayah tidak ditemukan di ASTA DESA.', 404);
+    }
+    if (status === 422) {
+      throw new AstaDesaError('Parameter wilayah tidak diterima ASTA DESA.', 422, err.response?.data || null);
+    }
+    if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
+      throw new AstaDesaError('Server ASTA DESA tidak merespons dalam batas waktu.', 504);
+    }
+    throw new AstaDesaError(`Permintaan publik ASTA DESA gagal: ${err.message}`, 502, err.response?.data || null);
   }
 };
 
@@ -185,6 +251,39 @@ const ambil = async (path, params = {}, opts = {}) => {
 };
 
 /**
+ * Versi publik dari `ambil` — jalur tanpa `/admin`, tanpa token.
+ *
+ * Kuncinya diberi awalan `PUB ` supaya tidak pernah bertabrakan dengan kunci
+ * endpoint admin: `/layers` (admin) dan `/public/weather` tidak akan pernah
+ * menempati slot yang sama hanya karena jalurnya kebetulan serupa.
+ *
+ * TTL-nya sengaja bisa dilewati pemanggil. Batas wilayah praktis tidak pernah
+ * berubah sehingga boleh disimpan lama; cuaca berubah tiap jam.
+ */
+const ambilPublik = async (path, params = {}, opts = {}) => {
+  const kunci = `PUB ${buatKunci(path, params)}`;
+  const ttl = opts.ttlMs ?? TTL_MS;
+
+  const tersimpan = cache.get(kunci);
+  if (!opts.force && tersimpan && Date.now() - tersimpan.at < ttl) return tersimpan.value;
+  if (!opts.force && inflight.has(kunci)) return inflight.get(kunci);
+
+  const promise = requestPublik(path, params)
+    .then((value) => {
+      cache.set(kunci, { value, at: Date.now() });
+      inflight.delete(kunci);
+      return value;
+    })
+    .catch((err) => {
+      inflight.delete(kunci);
+      throw err;
+    });
+
+  inflight.set(kunci, promise);
+  return promise;
+};
+
+/**
  * Susuri seluruh halaman satu endpoint berpaginasi dan kembalikan barisnya.
  *
  * Dipakai untuk agregasi (peta sebaran, rekap per kecamatan, demografi) yang
@@ -192,7 +291,11 @@ const ambil = async (path, params = {}, opts = {}) => {
  * mahal: sekali susuri, banyak kartu di halaman memakainya.
  */
 const ambilSemua = async (path, params = {}, opts = {}) => {
-  const kunci = `ALL ${buatKunci(path, params)}`;
+  // Kunci cache dibedakan per jalur: `/sensuses` versi admin dan versi pengguna
+  // punya jalur yang sama tetapi isi baris yang sama sekali berbeda, dan
+  // menumpuknya di satu slot akan menyajikan bentuk yang salah ke salah satu
+  // pemakainya.
+  const kunci = `ALL${opts.pengguna ? ':PENGGUNA' : ''} ${buatKunci(path, params)}`;
   const ttl = opts.ttlMs ?? TTL_MS;
 
   const tersimpan = cache.get(kunci);
@@ -207,19 +310,28 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
     let halamanTerakhir = 1;
     let terpotong = false;
 
+    const minta = opts.pengguna ? requestPengguna : requestMentah;
+
     // eslint-disable-next-line no-constant-condition
     while (true) {
-      const body = await requestMentah(path, { ...params, page: halaman, per_page: MAX_PER_PAGE });
-      const data = Array.isArray(body?.data) ? body.data : [];
+      const body = await minta(path, { ...params, page: halaman, per_page: MAX_PER_PAGE });
+
+      // TIGA BENTUK PAGINATOR, semuanya nyata di ASTA DESA:
+      //   a. `{data:[…], meta:{last_page}}`   — endpoint admin (/sensuses, /users)
+      //   b. `{data:[…], last_page}`          — /messages, paginator rata
+      //   c. `{data:{data:[…], last_page}}`   — /v1/sensuses, paginator Laravel
+      //                                         utuh yang dibungkus lagi
+      // Bentuk (c) adalah yang paling mudah meleset: `body.data` di situ OBJEK,
+      // bukan array, sehingga pembacaan gaya (a) menghasilkan nol baris dan
+      // penyusuran berhenti di halaman pertama tanpa satu pun galat.
+      const amplop = body?.data && !Array.isArray(body.data) ? body.data : body;
+      const data = Array.isArray(amplop?.data) ? amplop.data : Array.isArray(body?.data) ? body.data : [];
       baris.push(...data);
 
-      // Sebagian endpoint ASTA DESA membalas paginator bersarang (`meta.*`) dan
-      // sebagian lagi rata (`last_page` di akar) — /messages contohnya. Keduanya
-      // dibaca di sini; kalau hanya `meta` yang dibaca, penyusuran endpoint
-      // bergaya rata berhenti di halaman 1 dan diam-diam melaporkan seluruh
-      // datanya hanya sebanyak satu halaman.
-      halamanTerakhir = Number(body?.meta?.last_page ?? body?.last_page ?? halaman);
-      const total = Number(body?.meta?.total ?? body?.total ?? baris.length);
+      halamanTerakhir = Number(
+        amplop?.last_page ?? amplop?.meta?.last_page ?? body?.meta?.last_page ?? body?.last_page ?? halaman
+      );
+      const total = Number(amplop?.total ?? body?.meta?.total ?? body?.total ?? baris.length);
 
       if (baris.length >= batasBaris && halaman < halamanTerakhir) {
         terpotong = true;
@@ -255,6 +367,7 @@ const bersihkanCache = () => {
 module.exports = {
   AstaDesaError,
   ambil,
+  ambilPublik,
   ambilSemua,
   bersihkanCache,
   terkonfigurasi,
