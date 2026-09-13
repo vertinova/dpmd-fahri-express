@@ -475,6 +475,7 @@ app.use('/api/pemdes/produk-hukum', require('./routes/pemdes-produk-hukum.routes
 app.use('/api/produk-hukum-bidang', require('./routes/produkHukumBidang.routes')); // Produk hukum tingkat kabupaten per bidang
 app.use('/api/produk-hukum-gabungan', require('./routes/produkHukumGabungan.routes')); // Ringkasan desa + bidang + referensi
 app.use('/api/gema', require('./routes/gema.routes')); // Asisten suara Core Dashboard
+app.use('/api/asta-desa', require('./routes/astadesa.routes')); // Proxy baca API super admin ASTA DESA
 
 // Video Meeting routes (SFU mediasoup) — aktif kembali setelah port RTC dibuka
 app.use('/api/video-meetings', require('./routes/videoMeeting.routes'));
