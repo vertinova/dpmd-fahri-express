@@ -12,17 +12,26 @@ kredensial, cache, dan daftar endpoint.
 
 ---
 
-## 1. Dua peta, dua pertanyaan
+## 1. Satu peta, satu pintu
 
-| | Tab **Peta Sebaran** (`PetaTab.jsx`) | Halaman **Peta Sebaran** (`peta/`) |
-| --- | --- | --- |
-| Pertanyaan | Wilayah mana yang tertinggal | Apa isi titik ini, layer apa di atasnya |
-| Bentuk | Gelembung agregat per kecamatan/desa + tabel peringkat | WebGIS layar penuh |
-| Mesin | Leaflet (`react-leaflet`) | **OpenLayers 8.2.0 + ol-ext** |
-| Letak | Tab di halaman Asta Desa | Halaman sendiri |
+Halaman ini **satu-satunya** peta sebaran di aplikasi. Entri "Peta Sebaran" di
+deretan tab halaman Asta Desa bukan tab, melainkan tautan langsung ke sini.
 
-Keduanya disimpan. Tab ringkas tetap jadi pintu masuk dan punya tombol
-**Buka peta penuh**; halaman penuh punya tombol kembali ke tab.
+Sebelumnya ada tab peta ringkas (`PetaTab.jsx`, Leaflet) berisi gelembung agregat
+per kecamatan/desa plus tabel peringkat. Tab itu **dihapus**: dua peta untuk satu
+pertanyaan hanya memaksa pembaca menebak mana yang berwenang, dan yang ringkas
+selalu kalah begitu ada yang membuka yang penuh.
+
+Yang ikut hilang bersamanya, dan perlu diketahui:
+
+- **Tabel rincian per desa** — belum ada penggantinya. Rekap per kecamatan masih
+  tersedia sebagai angka di tab Ringkasan.
+- **Dua spanduk kelengkapan data** (baris tanpa koordinat, baris di luar
+  Kabupaten Bogor) — sudah dipindahkan ke kartu di sudut kiri bawah peta ini,
+  ditambah satu baris baru soal titik yang memakai koordinat lokasi pendataan.
+
+Leaflet tetap terpasang dan dipakai halaman lain (mis. `MapSection.jsx` di
+landing page); yang dihapus hanya tab petanya.
 
 **Mengapa OpenLayers padahal proyek ini sudah punya Leaflet.** Tugasnya bukan
 "menggambar peta" melainkan "menggambar peta yang sama". Cluster beranimasi dan
@@ -72,7 +81,7 @@ Panel super admin menggambar `rumah_lat`/`rumah_lon`. Halaman ini **juga**,
 sehingga posisi titiknya sama — tetapi jalan menuju ke sana perlu dicatat karena
 tidak lurus.
 
-`GET /api/v1/admin/sensuses` (yang dipakai tab ringkas dan seluruh tab lain)
+`GET /api/v1/admin/sensuses` (yang dipakai seluruh tab lain di halaman Asta Desa)
 **tidak mengirim kolom itu sama sekali**: `AdminSensusResource` di sana hanya
 menyertakan `lokasi: { lat, lon }`. Karena itu peta penuh memakai endpoint yang
 lain, `GET /api/v1/sensuses` — jalur pengguna biasa, bukan grup admin — yang
@@ -87,8 +96,11 @@ satu pun perubahan di sisi ASTA DESA yang dibutuhkan untuk ini.**
 
 Harganya: baris dari endpoint itu jauh lebih berat (~104 kolom, plus anggota
 keluarga dan URL media), jadi penyusuran pertamanya lebih lama daripada
-`/sebaran`. Hasilnya di-cache seperti yang lain, dan `/sebaran` dibiarkan utuh
-untuk tab ringkas — tidak ada gunanya membuat tab itu membayar muatan sebesar itu.
+`/sebaran`. Hasilnya di-cache seperti yang lain.
+
+Endpoint `/sebaran` yang lama dibiarkan hidup meski tab yang memakainya sudah
+dihapus: bentuknya ringan, sudah terdokumentasi, dan mencabut permukaan API lebih
+berisiko daripada membiarkannya. Kini tidak ada pemakainya di frontend.
 
 **Sisa selisih yang masih mungkin.** Baris yang `rumah_*`-nya kosong digambar
 memakai `lokasi_*` sebagai cadangan, supaya tidak hilang diam-diam dari peta.

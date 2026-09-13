@@ -249,9 +249,8 @@ Tombol **Muat ulang** membuang keduanya lalu menarik ulang dengan `force=1`.
 
 | Berkas | Isi |
 | --- | --- |
-| `AstaDesaPage.jsx` | Kerangka halaman, enam tab, penundaan pengambilan per tab |
+| `AstaDesaPage.jsx` | Kerangka halaman, lima tab + satu tautan keluar ke Peta Sebaran, penundaan pengambilan per tab |
 | `RingkasanTab.jsx` | Kartu angka, laju pendataan, tahap verifikasi, peringkat kecamatan, petugas |
-| `PetaTab.jsx` | Peta Leaflet tiga tingkat: gelembung kecamatan, gelembung desa, titik keluarga |
 | `SensusTab.jsx` | Tabel sensus + panel detail satu keluarga |
 | `DemografiTab.jsx` | Piramida usia, jenis kelamin, pendidikan, hubungan keluarga, disabilitas |
 | `PenggunaTab.jsx` | Komposisi peran, produktivitas petugas, daftar akun |
@@ -277,16 +276,20 @@ Halaman terpisah di `/core-dashboard/asta-desa/peta-sebaran`, replika panel
 
 ## 7. Keputusan yang sengaja diambil
 
-**Peta tidak memakai choropleth.** Proyek ini tidak punya berkas GeoJSON batas
-kecamatan Kabupaten Bogor, jadi sebaran tingkat wilayah digambar sebagai
-gelembung berukuran jumlah dengan titik tengah rata-rata koordinat anggotanya.
-Kalau suatu saat GeoJSON batas kecamatan masuk ke repo, `PetaTab.jsx` adalah satu
-tempat yang perlu diubah.
+**Hanya ada satu peta sebaran, dan itu halaman penuh.** Sempat ada tab peta
+ringkas berisi gelembung agregat per kecamatan/desa (`PetaTab.jsx`, Leaflet);
+tab itu dihapus dan entrinya di deretan tab kini menautkan langsung ke
+`/core-dashboard/asta-desa/peta-sebaran`. Dua peta untuk satu pertanyaan hanya
+memaksa pembaca menebak mana yang berwenang — dan yang ringkas selalu kalah
+begitu ada yang mengklik "buka peta penuh". Rekap per kecamatan tetap tersedia
+sebagai angka di tab Ringkasan; **rincian per desa hilang bersama tab itu** dan
+belum ada penggantinya dalam bentuk tabel.
 
-**Peta digambar di atas kanvas** (`preferCanvas`). Dengan beberapa ribu penanda,
-SVG membuat satu elemen DOM per titik dan panning-nya tersendat sampai peta
-terasa rusak. Mode titik juga dibatasi 6.000 penanda sekaligus — di atas itu
-halaman mengatakan apa yang ia potong dan menyarankan penyaring kecamatan.
+Batas wilayah kini tersedia lewat `/wilayah/geojson`, yang meneruskan
+`ST_AsGeoJSON` dari tabel `adm_kecamatan`/`adm_desa` ASTA DESA. Peta penuh
+memakainya untuk menyorot wilayah terpilih dan menyaring titik secara spasial —
+jadi catatan lama "proyek ini tidak punya berkas GeoJSON batas kecamatan" sudah
+tidak berlaku.
 
 **NIK dan nomor KK disamarkan di tabel** (`3271 •••• •••• 0001`), utuh hanya di
 panel detail. Saat memindai daftar yang dibutuhkan cuma "apakah ini orang yang
