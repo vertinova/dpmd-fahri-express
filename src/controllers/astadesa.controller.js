@@ -490,6 +490,10 @@ exports.getRingkasan = jalankan(async (req, res) => {
       // baris, angka di atas adalah angka sebagian — dan halaman harus bisa
       // mengatakannya, bukan menyajikannya sebagai total resmi.
       sebagian: semua.truncated,
+      // Sebab `sebagian`, supaya halaman tidak menuduh pagar batas baris saat
+      // yang terjadi sebenarnya lain.
+      kena_pagar: semua.kena_pagar || false,
+      kurang_terbaca: semua.kurang || 0,
       diambil_pada: new Date().toISOString()
     }
   });

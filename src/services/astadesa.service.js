@@ -326,6 +326,7 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
     let halaman = 1;
     let halamanTerakhir = 1;
     let terpotong = false;
+    let kenaPagar = false;
     let totalMeta = null;
 
     const minta = opts.pengguna ? requestPengguna : requestMentah;
@@ -370,16 +371,33 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
 
       if (baris.length >= batasBaris && halaman < halamanTerakhir) {
         terpotong = true;
+        kenaPagar = true;
         break;
       }
-      if (halaman >= halamanTerakhir || data.length === 0) {
-        // `total` dipakai apa adanya dari meta agar konsumen tahu ada berapa
-        // baris sebenarnya, bukan hanya berapa yang berhasil terbaca.
-        if (baris.length < total) terpotong = true;
-        break;
-      }
+      if (halaman >= halamanTerakhir || data.length === 0) break;
       halaman += 1;
     }
+
+    // Berapa baris yang tidak sempat terbaca.
+    //
+    // SENGAJA TIDAK LANGSUNG DIANGGAP "data sebagian". Selama pendataan
+    // berjalan, penyusuran 18 detik hampir selalu ketinggalan satu-dua baris:
+    // paginasi di sana berbasis OFFSET dengan urutan menurun, jadi baris yang
+    // masuk saat penyusuran berlangsung menggeser jendela dan mendorong
+    // segelintir baris keluar. Itu keadaan normal, bukan kerusakan.
+    //
+    // Dulu ini tidak pernah terlihat karena baris kembar (dari pergeseran yang
+    // sama) menambal jumlahnya sampai pas. Setelah kembarnya dibuang, angkanya
+    // jujur — dan menandai setiap kekurangan satu baris sebagai "data sebagian"
+    // berarti memasang peringatan yang menyala terus-menerus, yang justru
+    // membuat peringatan itu berhenti dibaca saat benar-benar penting.
+    const kurang = totalMeta === null ? 0 : Math.max(0, totalMeta - baris.length);
+
+    // Ambangnya longgar tetapi tidak tak terbatas: 1% dari total, minimal 25
+    // baris. Di bawah itu penyebabnya pergeseran biasa; di atas itu ada yang
+    // salah dan halaman memang harus mengatakannya.
+    const toleransi = Math.max(25, Math.round((totalMeta || 0) * 0.01));
+    if (!kenaPagar && kurang > toleransi) terpotong = true;
 
     const hasil = {
       rows: baris,
@@ -389,7 +407,12 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
       // Jumlah resmi menurut server, bukan panjang array. Keduanya bisa
       // berbeda: array kehilangan baris yang tergeser keluar saat penyusuran.
       total: totalMeta,
-      kembar
+      kembar,
+      kurang,
+      // Dibedakan dari `truncated` supaya halaman bisa menjelaskan sebabnya
+      // dengan benar: pagar batas baris itu soal setelan, sedangkan kekurangan
+      // besar tanpa kena pagar itu soal sambungan atau paginasi di sana.
+      kena_pagar: kenaPagar
     };
     cache.set(kunci, { value: hasil, at: Date.now() });
     inflight.delete(kunci);
