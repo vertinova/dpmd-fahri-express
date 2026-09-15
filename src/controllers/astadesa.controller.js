@@ -17,6 +17,21 @@
 
 const asta = require('../services/astadesa.service');
 
+/**
+ * Umur cache untuk angka pokok — jumlah keluarga terdata se-kabupaten.
+ *
+ * Satu menit, bukan sepuluh seperti sisanya. Saat pendataan sedang ramai, laju
+ * masuknya baris terukur ±3 per menit; dengan TTL sepuluh menit angka "Keluarga
+ * Terdata" bisa tertinggal ±30 baris di belakang panel ASTA DESA, dan selisih
+ * itulah yang selama ini terbaca sebagai "datanya tidak sinkron".
+ *
+ * Boleh sependek ini karena yang diambil cuma `meta.total` dari SATU baris
+ * (`per_page=1`) — terukur ±80 ms. Yang mahal adalah penyusuran 21 halaman, dan
+ * itu tetap memakai TTL panjang: rekap kecamatan, tren harian, dan produktivitas
+ * petugas tidak berubah berarti dalam sepuluh menit.
+ */
+const TTL_ANGKA_POKOK = 60 * 1000;
+
 // ── Pembantu ─────────────────────────────────────────────────────────────────
 
 /** Nilai pertama yang benar-benar ada dari sederet kemungkinan nama kolom. */
@@ -346,12 +361,39 @@ exports.getStatus = jalankan(async (req, res) => {
 exports.getRingkasan = jalankan(async (req, res) => {
   const force = paksa(req);
 
-  // /summary boleh gagal tanpa menjatuhkan halaman: rekap di bawah dihitung
-  // dari baris sensus dan tetap berguna sendiri.
-  const [ringkasanApi, semua] = await Promise.all([
+  // Tiga pengambilan sekaligus, masing-masing dengan alasannya sendiri.
+  //
+  // `/summary` boleh gagal tanpa menjatuhkan halaman — dan per September 2026
+  // memang selalu gagal: endpoint itu membalas 500 di sisi ASTA DESA. Tetap
+  // dipanggil supaya angka resmi mereka muncul sendiri begitu pulih.
+  //
+  // `hitunganLangsung` itulah penggantinya, dan ini yang memperbaiki selisih.
+  // Satu permintaan `per_page=1` tidak membawa baris yang berguna, tetapi
+  // `meta.total`-nya adalah `Sensus::count()` apa adanya — hitungan yang sama
+  // persis dengan yang dipakai panel ASTA DESA tiap kali halamannya dibuka.
+  // Murah, hidup, dan tidak bergantung pada endpoint yang sedang rusak.
+  const [ringkasanApi, hitunganLangsung, semua] = await Promise.all([
     asta.ambil('/summary', {}, { force }).catch(() => null),
+    asta.ambil('/sensuses', { per_page: 1 }, { force, ttlMs: TTL_ANGKA_POKOK }).catch(() => null),
     asta.ambilSemua('/sensuses', {}, { force })
   ]);
+
+  // Angka pokok, urut dari yang paling bisa dipercaya:
+  //   1. meta.total dari permintaan ringan di atas — hitungan server, hidup.
+  //   2. total.sensuses dari /summary — juga hitungan server, kalau pulih.
+  //   3. meta.total yang terbaca saat penyusuran — seumur penyusuran itu.
+  //   4. panjang array — pilihan terakhir, dan yang paling rawan: baris bisa
+  //      tergeser keluar dari paginasi saat data baru masuk (lihat catatan
+  //      dedup di astadesa.service.js), sehingga angkanya cenderung KURANG.
+  //
+  // Inilah inti selisih yang selama ini terlihat di halaman: DPMD menyajikan
+  // (4) sebagai total resmi, sementara panel ASTA DESA menyajikan (1).
+  const metaLangsung = metaDari(hitunganLangsung);
+  const totalResmi =
+    keAngka(metaLangsung?.total) ??
+    keAngka(ringkasanApi?.data?.total?.sensuses) ??
+    keAngka(semua.total) ??
+    semua.rows.length;
 
   const baris = semua.rows.map(normalSensus);
 
@@ -405,7 +447,18 @@ exports.getRingkasan = jalankan(async (req, res) => {
       // bukan tersembunyi di balik satu angka pilihan.
       summary: ringkasanApi?.data ?? ringkasanApi ?? null,
 
-      total_sensus: baris.length,
+      // Hitungan server yang hidup, bukan panjang array. Lihat catatan di
+      // tempat `totalResmi` disusun.
+      total_sensus: totalResmi,
+
+      // Berapa baris yang benar-benar terbaca dan ikut menyusun rekap di bawah.
+      // Dipisahkan dari `total_sensus` supaya selisih keduanya bisa dilihat,
+      // bukan disamarkan — dan supaya persentase yang dihitung dari hasil
+      // pembacaan (berapa persen berkoordinat) dibagi dengan populasi yang
+      // memang diukur, bukan dengan angka se-kabupaten.
+      total_terbaca: baris.length,
+      kembar_terbuang: semua.kembar || 0,
+
       total_kecamatan: perKecamatan.size,
       total_desa: perDesa.size,
       total_petugas: perPetugas.size,

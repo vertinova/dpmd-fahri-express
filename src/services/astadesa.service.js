@@ -306,9 +306,27 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
 
   const promise = (async () => {
     const baris = [];
+    // Id yang sudah masuk, untuk menolak baris kembar.
+    //
+    // MENGAPA PERLU. `/admin/sensuses` mengurut `orderByDesc('id')` lalu
+    // memotongnya dengan OFFSET. Selama penyusuran berlangsung — terukur 17,8
+    // detik untuk 21 halaman — pendataan di lapangan terus memasukkan baris
+    // baru ber-id lebih besar, dan setiap sisipan menggeser SELURUH jendela satu
+    // langkah ke belakang. Akibatnya baris di perbatasan halaman terbaca DUA
+    // KALI, sementara baris terbaru yang mendorongnya tidak pernah terbaca sama
+    // sekali. Diukur langsung ke produksi: 4.056 baris terkumpul, 4.055 id unik,
+    // id 538 dobel, satu baris hilang.
+    //
+    // Yang dobel dibuang di sini. Yang hilang tidak bisa ditambal dari sisi ini
+    // — untuk itulah `total` di bawah dibawa apa adanya dari meta, supaya
+    // pemanggil memakai angka resmi server, bukan hasil hitungan array yang
+    // kebetulan.
+    const idTerlihat = new Set();
+    let kembar = 0;
     let halaman = 1;
     let halamanTerakhir = 1;
     let terpotong = false;
+    let totalMeta = null;
 
     const minta = opts.pengguna ? requestPengguna : requestMentah;
 
@@ -326,12 +344,29 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
       // penyusuran berhenti di halaman pertama tanpa satu pun galat.
       const amplop = body?.data && !Array.isArray(body.data) ? body.data : body;
       const data = Array.isArray(amplop?.data) ? amplop.data : Array.isArray(body?.data) ? body.data : [];
-      baris.push(...data);
+
+      data.forEach((r) => {
+        // Baris tanpa id tetap diambil: tidak ada yang bisa dipakai untuk
+        // membedakannya, dan membuangnya akan lebih merugikan daripada
+        // meloloskan kembar yang mungkin tidak pernah ada.
+        const id = r?.id ?? r?.sensus_id;
+        if (id === undefined || id === null) {
+          baris.push(r);
+          return;
+        }
+        if (idTerlihat.has(id)) {
+          kembar += 1;
+          return;
+        }
+        idTerlihat.add(id);
+        baris.push(r);
+      });
 
       halamanTerakhir = Number(
         amplop?.last_page ?? amplop?.meta?.last_page ?? body?.meta?.last_page ?? body?.last_page ?? halaman
       );
       const total = Number(amplop?.total ?? body?.meta?.total ?? body?.total ?? baris.length);
+      if (Number.isFinite(total)) totalMeta = total;
 
       if (baris.length >= batasBaris && halaman < halamanTerakhir) {
         terpotong = true;
@@ -346,7 +381,16 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
       halaman += 1;
     }
 
-    const hasil = { rows: baris, truncated: terpotong, pages: halaman, last_page: halamanTerakhir };
+    const hasil = {
+      rows: baris,
+      truncated: terpotong,
+      pages: halaman,
+      last_page: halamanTerakhir,
+      // Jumlah resmi menurut server, bukan panjang array. Keduanya bisa
+      // berbeda: array kehilangan baris yang tergeser keluar saat penyusuran.
+      total: totalMeta,
+      kembar
+    };
     cache.set(kunci, { value: hasil, at: Date.now() });
     inflight.delete(kunci);
     return hasil;

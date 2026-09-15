@@ -101,7 +101,7 @@ Core Dashboard lain. Lihat [`src/routes/astadesa.routes.js`](../src/routes/astad
 | Metode | Path | Isi |
 | --- | --- | --- |
 | GET | `/api/asta-desa/status` | Apakah integrasinya sudah disetel (dipanggil halaman lebih dulu) |
-| GET | `/api/asta-desa/ringkasan` | `/summary` ASTA DESA + rekap per kecamatan/desa/status/petugas + tren harian |
+| GET | `/api/asta-desa/ringkasan` | Jumlah keluarga terdata (hitungan hidup dari server) + rekap per kecamatan/desa/status/petugas + tren harian |
 | GET | `/api/asta-desa/sebaran` | Titik koordinat untuk peta + rekap per kecamatan |
 | GET | `/api/asta-desa/sensus` | Tabel sensus (filter & paginasi diteruskan ke ASTA DESA) |
 | GET | `/api/asta-desa/sensus/:id` | Detail satu sensus — `{ sensus, anggotas, petugas }` |
@@ -208,7 +208,9 @@ jadi periksa daftar ini lebih dulu saat ada angka yang tampak mustahil.
 | Bentuk `/sensuses/{id}` | amplop `{ sensus: {…104 kolom…}, anggotas: [...], petugas: {...} }` — **berbeda** dari baris `/sensuses` yang rata. Diratakan di `getSensusDetail` |
 | Paginasi `/messages` | paginator **rata**: `current_page`/`last_page`/`total` di akar, **tanpa** `meta`. `/sensuses` dan `/users` memakai `meta` bersarang. Diseragamkan oleh `metaDari` |
 | Isi `/messages` | hanya `sender_id`, `receiver_id`, `text` — tidak ada nama pengirim |
-| `/admin/summary` | **membalas HTTP 500 di sisi mereka** per September 2026. `/ringkasan` sengaja menoleransinya (`summary: null`) dan tetap menyajikan rekap yang dihitung dari baris sensus. Kalau suatu hari endpoint itu pulih, angkanya muncul sendiri |
+| `/admin/summary` | **membalas HTTP 500 di sisi mereka** per September 2026. Sebabnya sudah dilacak: `config/auth.php` di sana hanya mendefinisikan guard `web`, sedangkan guard `sanctum` didaftarkan Sanctum saat runtime dengan `provider => null`; middleware `auth:sanctum` menggeser `auth.defaults.guard`, lalu `Role::withCount('users')` memanggil `getModelForGuard('sanctum')` yang balas null. Perbaikannya ada di repo mereka, bukan di sini. `/ringkasan` sengaja menoleransinya (`summary: null`) dan tidak lagi bergantung padanya |
+| Urutan `/admin/sensuses` | `orderByDesc('id')` dengan OFFSET. Saat pendataan berjalan, sisipan baris baru menggeser seluruh jendela: baris di perbatasan halaman terbaca dua kali, dan baris terbaru yang mendorongnya tidak terbaca sama sekali. Terukur ke produksi: 4.056 baris terkumpul, 4.055 id unik, 1 dobel, 1 hilang. Yang dobel dibuang `ambilSemua`; yang hilang tidak bisa ditambal dari sisi kita — karena itu angka pokok TIDAK boleh diambil dari panjang array |
+| `meta.total` pada `/admin/sensuses` | `Sensus::count()` apa adanya, hidup, dan **sama persis dengan yang ditampilkan panel ASTA DESA**. Diverifikasi langsung: `meta.total` 4.143 = `DB::table('sensuses')->count()` 4.143, dalam 161 ms dengan `per_page=1`. Inilah sumber `total_sensus` sekarang |
 
 Filter yang diteruskan ke sana **sudah diuji benar-benar diterapkan**:
 `kecamatan`, `desa`, `status`, `user_id`, `dari`/`sampai`, `role`, dan `search`.
@@ -224,8 +226,17 @@ Dua lapis, keduanya di memori dan hilang saat proses di-restart:
 
 | Lapis | Umur | Di mana |
 | --- | --- | --- |
+| Angka pokok (`/sensuses?per_page=1`, hanya `meta.total`) | 1 menit | `TTL_ANGKA_POKOK` di `src/controllers/astadesa.controller.js` |
 | Respons per-endpoint di server | `ASTADESA_TTL_MS` (10 menit) | `src/services/astadesa.service.js` |
 | Respons di browser | 10 menit | `frontend/src/pages/core-dashboard/asta-desa/useAstaDesa.js` |
+
+Angka pokok sengaja dipisahkan dari sisanya. Saat pendataan ramai, laju masuknya
+baris terukur ±3 per menit; dengan TTL sepuluh menit, "Keluarga Terdata" bisa
+tertinggal ±30 baris di belakang panel ASTA DESA — dan selisih itulah yang
+selama ini terbaca sebagai "datanya tidak sinkron". Menyegarkannya murah karena
+yang diambil cuma satu angka dari satu baris; yang mahal adalah penyusuran 21
+halaman, dan rincian di dalamnya (rekap kecamatan, tren harian, produktivitas
+petugas) tidak berubah berarti dalam sepuluh menit.
 
 Permintaan bersamaan digabung (inflight), sehingga lima pengunjung yang membuka
 halaman pada detik yang sama tidak menjadi lima panggilan ke ASTA DESA.
@@ -317,7 +328,9 @@ yang buruk".
 | "Server ASTA DESA tidak merespons dalam batas waktu" | Naikkan `ASTADESA_TIMEOUT_MS`, atau memang sisi sana sedang lambat |
 | Banner "angka ini sebagian" | Naikkan `ASTADESA_MAX_ROWS` |
 | Peta kosong padahal angka ada | Kolom koordinat di sumber tidak dikenali — tambahkan namanya ke `KUNCI_LAT`/`KUNCI_LNG` |
-| Kartu ringkasan resmi ASTA DESA kosong | `/admin/summary` di sisi mereka sedang membalas 500 — halaman tetap jalan dengan hitungan sendiri; tidak ada yang perlu diperbaiki di sini |
+| Kartu ringkasan resmi ASTA DESA kosong | `/admin/summary` di sisi mereka sedang membalas 500 (lihat barisnya di tabel kejutan di atas untuk sebab persisnya) — halaman tetap jalan dengan hitungan sendiri; tidak ada yang perlu diperbaiki di sini |
+| "Keluarga Terdata" beda dengan panel ASTA DESA | Selisih sampai ±30 baris itu normal selama kurang dari semenit: panel mereka menghitung ulang tiap kali dibuka, DPMD menyegarkan angkanya tiap 1 menit (`TTL_ANGKA_POKOK`) dan cache browser tiap 10 menit. Tombol **Muat ulang** melewati keduanya. Kalau selisihnya menetap jauh lebih besar dari itu, yang dicurigai `meta.total`-nya, bukan cache |
+| `total_sensus` jauh lebih besar dari `total_terbaca` | Penyusuran berhenti di pagar `ASTADESA_MAX_ROWS`, atau banyak baris tergeser keluar paginasi. `sebagian: true` akan ikut menyala dan halaman memasang peringatannya sendiri |
 | Kolom Peran di tabel pengguna kosong semua | Mereka mengganti bentuk `roles`; sesuaikan `daftarPeran` di `PenggunaTab.jsx` dan `namaRole` di controller |
 | Panel detail keluarga serba "—" | Amplop `{sensus, anggotas, petugas}` berubah bentuk; sesuaikan `getSensusDetail` |
 
