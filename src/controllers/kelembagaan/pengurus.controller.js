@@ -8,6 +8,58 @@ const { prisma, ACTIVITY_TYPES, ENTITY_TYPES, logKelembagaanActivity, validateDe
 const { v4: uuidv4 } = require('uuid');
 
 /**
+ * Batas tahun yang masuk akal untuk tanggal lahir maupun masa jabatan.
+ *
+ * Bukan batas gaya-gayaan: `<input type="date">` di Chrome menerima tahun
+ * sampai enam digit, jadi satu ketukan tombol berlebih mengubah 2024 menjadi
+ * 20240 tanpa terlihat oleh pengisinya. Tahun seperti itu lolos `new Date()`
+ * — yang dengan senang hati membuat tanggal tahun 20230 — lalu baru meledak
+ * di Prisma sebagai "Could not convert argument value ... to ArgumentValue",
+ * yang sampai ke pengguna cuma sebagai "Gagal membuat pengurus".
+ *
+ * Kolom DATETIME MySQL sendiri berhenti di tahun 9999. Rentang di bawah ini
+ * jauh lebih sempit dari itu karena memang tidak ada pengurus yang lahir
+ * sebelum 1900 atau menjabat sampai setelah 2100.
+ */
+const TAHUN_MIN = 1900;
+const TAHUN_MAKS = 2100;
+
+/** Dilempar parseTanggal, ditangkap pemanggilnya jadi HTTP 400. */
+class TanggalTidakValidError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'TanggalTidakValidError';
+  }
+}
+
+/**
+ * Ubah masukan tanggal jadi Date, atau tolak dengan alasan yang bisa dibaca.
+ *
+ * Mengembalikan null untuk nilai kosong — kolomnya memang boleh kosong.
+ * Untuk nilai yang tidak masuk akal ia MELEMPAR, bukan mengembalikan null:
+ * mendiamkannya berarti menyimpan pengurus dengan tanggal hilang diam-diam,
+ * dan itu lebih buruk daripada gagal menyimpan dengan pesan yang jelas.
+ */
+function parseTanggal(nilai, label) {
+  if (nilai === null || nilai === undefined || nilai === '') return null;
+
+  const tanggal = nilai instanceof Date ? nilai : new Date(nilai);
+  if (Number.isNaN(tanggal.getTime())) {
+    throw new TanggalTidakValidError(`${label} tidak dapat dibaca sebagai tanggal.`);
+  }
+
+  const tahun = tanggal.getUTCFullYear();
+  if (tahun < TAHUN_MIN || tahun > TAHUN_MAKS) {
+    throw new TanggalTidakValidError(
+      `${label} bertahun ${tahun}, di luar rentang ${TAHUN_MIN}–${TAHUN_MAKS}. ` +
+        'Periksa kolom tahunnya — biasanya ada satu angka berlebih.'
+    );
+  }
+
+  return tanggal;
+}
+
+/**
  * Helper function to get kelembagaan display name
  * Menyesuaikan dengan format yang digunakan di kelembagaan controllers
  */
@@ -59,8 +111,13 @@ async function getKelembagaanDisplayName(type, id) {
         });
         return record ? record.nama : null;
         
+      // Model di schema.prisma bernama `satlinmas` (tunggal), bukan jamak
+      // seperti rts/rws/posyandus. Sepuluh pemanggilan lain di kode ini sudah
+      // benar; yang di sini sempat tertulis `satlinmases` dan selalu melempar
+      // "Cannot read properties of undefined", sehingga setiap pencatatan
+      // aktivitas Satlinmas kehilangan nama kelembagaannya.
       case 'satlinmas':
-        record = await prisma.satlinmases.findUnique({
+        record = await prisma.satlinmas.findUnique({
           where: { id: String(id) },
           select: { nama: true }
         });
@@ -216,6 +273,23 @@ class PengurusController {
       // berstatus menikah: dokumennya kerap belum di tangan saat pengurus
       // didaftarkan, dan itu tidak boleh menghalangi pendataan.
 
+      // Tanggal divalidasi SEBELUM menyentuh Prisma. Kalau tidak, tahun
+      // berlebih baru tertangkap sebagai galat internal 500 yang tidak
+      // memberi tahu pengisinya kolom mana yang salah.
+      let tglLahir;
+      let tglMulai;
+      let tglAkhir;
+      try {
+        tglLahir = parseTanggal(tanggal_lahir, 'Tanggal lahir');
+        tglMulai = parseTanggal(tanggal_mulai_jabatan, 'Tanggal mulai jabatan');
+        tglAkhir = parseTanggal(tanggal_akhir_jabatan, 'Tanggal akhir jabatan');
+      } catch (e) {
+        if (e instanceof TanggalTidakValidError) {
+          return res.status(400).json({ success: false, message: e.message });
+        }
+        throw e;
+      }
+
       // Handle avatar upload if exists
       const avatarPath = req.file ? `uploads/pengurus_files/${req.file.filename}` : null;
 
@@ -232,15 +306,15 @@ class PengurusController {
           alamat: toUpper(alamat) || null,
           nik: nik || null,
           tempat_lahir: toUpper(tempat_lahir) || null,
-          tanggal_lahir: tanggal_lahir ? new Date(tanggal_lahir) : null,
+          tanggal_lahir: tglLahir,
           jenis_kelamin: jenisKelaminEnum,
           status_perkawinan: toUpper(status_perkawinan) || null,
           pendidikan: toUpper(pendidikan) || null,
           agama: toUpper(agama) || null,
           golongan_darah: toUpper(golongan_darah) || null,
           nomor_buku_nikah: toUpper(nomor_buku_nikah) || null,
-          tanggal_mulai_jabatan: tanggal_mulai_jabatan ? new Date(tanggal_mulai_jabatan) : null,
-          tanggal_akhir_jabatan: tanggal_akhir_jabatan ? new Date(tanggal_akhir_jabatan) : null,
+          tanggal_mulai_jabatan: tglMulai,
+          tanggal_akhir_jabatan: tglAkhir,
           status_jabatan: status_jabatan || 'aktif',
           status_verifikasi: 'unverified',
           produk_hukum_id: produk_hukum_id || null,
@@ -337,6 +411,23 @@ class PengurusController {
         jenisKelaminEnum = mapJenisKelaminToEnum(jenis_kelamin);
       }
 
+      // Tanggal divalidasi lebih dulu, sama seperti di createPengurus — jalur
+      // ubah menerima masukan dari form yang sama, jadi rentan tahun berlebih
+      // yang sama pula.
+      let tglLahirUbah;
+      let tglMulaiUbah;
+      let tglAkhirUbah;
+      try {
+        tglLahirUbah = parseTanggal(tanggal_lahir, 'Tanggal lahir');
+        tglMulaiUbah = parseTanggal(tanggal_mulai_jabatan, 'Tanggal mulai jabatan');
+        tglAkhirUbah = parseTanggal(tanggal_akhir_jabatan, 'Tanggal akhir jabatan');
+      } catch (e) {
+        if (e instanceof TanggalTidakValidError) {
+          return res.status(400).json({ success: false, message: e.message });
+        }
+        throw e;
+      }
+
       // Build update data object - only include fields that are provided
       const updateData = {};
       if (nama_lengkap !== undefined) updateData.nama_lengkap = toUpper(nama_lengkap);
@@ -345,15 +436,15 @@ class PengurusController {
       if (alamat !== undefined) updateData.alamat = toUpper(alamat) || null;
       if (nik !== undefined) updateData.nik = nik || null;
       if (tempat_lahir !== undefined) updateData.tempat_lahir = toUpper(tempat_lahir) || null;
-      if (tanggal_lahir !== undefined) updateData.tanggal_lahir = tanggal_lahir ? new Date(tanggal_lahir) : null;
+      if (tanggal_lahir !== undefined) updateData.tanggal_lahir = tglLahirUbah;
       if (jenisKelaminEnum !== undefined) updateData.jenis_kelamin = jenisKelaminEnum;
       if (status_perkawinan !== undefined) updateData.status_perkawinan = toUpper(status_perkawinan) || null;
       if (pendidikan !== undefined) updateData.pendidikan = toUpper(pendidikan) || null;
       if (agama !== undefined) updateData.agama = toUpper(agama) || null;
       if (golongan_darah !== undefined) updateData.golongan_darah = toUpper(golongan_darah) || null;
       if (nomor_buku_nikah !== undefined) updateData.nomor_buku_nikah = toUpper(nomor_buku_nikah) || null;
-      if (tanggal_mulai_jabatan !== undefined) updateData.tanggal_mulai_jabatan = tanggal_mulai_jabatan ? new Date(tanggal_mulai_jabatan) : null;
-      if (tanggal_akhir_jabatan !== undefined) updateData.tanggal_akhir_jabatan = tanggal_akhir_jabatan ? new Date(tanggal_akhir_jabatan) : null;
+      if (tanggal_mulai_jabatan !== undefined) updateData.tanggal_mulai_jabatan = tglMulaiUbah;
+      if (tanggal_akhir_jabatan !== undefined) updateData.tanggal_akhir_jabatan = tglAkhirUbah;
       if (status_jabatan !== undefined) updateData.status_jabatan = status_jabatan;
       if (produk_hukum_id !== undefined) updateData.produk_hukum_id = produk_hukum_id || null;
       if (nama_bank !== undefined) updateData.nama_bank = nama_bank || null;
@@ -455,7 +546,14 @@ class PengurusController {
 
       const updateData = { status_jabatan };
       if (tanggal_akhir_jabatan) {
-        updateData.tanggal_akhir_jabatan = new Date(tanggal_akhir_jabatan);
+        try {
+          updateData.tanggal_akhir_jabatan = parseTanggal(tanggal_akhir_jabatan, 'Tanggal akhir jabatan');
+        } catch (e) {
+          if (e instanceof TanggalTidakValidError) {
+            return res.status(400).json({ success: false, message: e.message });
+          }
+          throw e;
+        }
       }
 
       const updated = await prisma.pengurus.update({
