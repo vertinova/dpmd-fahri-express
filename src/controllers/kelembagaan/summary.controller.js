@@ -726,13 +726,13 @@ class SummaryController {
       }
 
       const [totalRW, totalRT, totalPosyandu, karangTaruna, lpm, satlinmas, pkk] = await Promise.all([
-        prisma.rws.count({ where: { desa_id: desaId } }),
-        prisma.rts.count({ where: { desa_id: desaId } }),
-        prisma.posyandus.count({ where: { desa_id: desaId } }),
-        prisma.karang_tarunas.findFirst({ where: { desa_id: desaId } }),
-        prisma.lpms.findFirst({ where: { desa_id: desaId } }),
-        prisma.satlinmas.findFirst({ where: { desa_id: desaId } }),
-        prisma.pkks.findFirst({ where: { desa_id: desaId } })
+        prisma.rws.count({ where: { desa_id: desaId, status_kelembagaan: 'aktif' } }),
+        prisma.rts.count({ where: { desa_id: desaId, status_kelembagaan: 'aktif' } }),
+        prisma.posyandus.count({ where: { desa_id: desaId, status_kelembagaan: 'aktif' } }),
+        prisma.karang_tarunas.findFirst({ where: { desa_id: desaId, status_kelembagaan: 'aktif' } }),
+        prisma.lpms.findFirst({ where: { desa_id: desaId, status_kelembagaan: 'aktif' } }),
+        prisma.satlinmas.findFirst({ where: { desa_id: desaId, status_kelembagaan: 'aktif' } }),
+        prisma.pkks.findFirst({ where: { desa_id: desaId, status_kelembagaan: 'aktif' } })
       ]);
 
       res.json({
@@ -815,33 +815,34 @@ class SummaryController {
       // Fetch all kelembagaan data
       const [rws, posyandus, karangTaruna, lpm, satlinmas, pkk, lembagaLainnya] = await Promise.all([
         prisma.rws.findMany({ 
-          where: { desa_id: parseInt(id) },
+          where: { desa_id: parseInt(id), status_kelembagaan: 'aktif' },
           orderBy: { nomor: 'asc' },
           include: {
             rts: {
+              where: { status_kelembagaan: 'aktif' },
               select: { id: true, nomor: true, status_kelembagaan: true, status_verifikasi: true },
               orderBy: { nomor: 'asc' }
             }
           }
         }),
         prisma.posyandus.findMany({ 
-          where: { desa_id: parseInt(id) },
+          where: { desa_id: parseInt(id), status_kelembagaan: 'aktif' },
           orderBy: { nama: 'asc' }
         }),
         prisma.karang_tarunas.findFirst({ 
-          where: { desa_id: parseInt(id) }
+          where: { desa_id: parseInt(id), status_kelembagaan: 'aktif' }
         }),
         prisma.lpms.findFirst({ 
-          where: { desa_id: parseInt(id) }
+          where: { desa_id: parseInt(id), status_kelembagaan: 'aktif' }
         }),
         prisma.satlinmas.findFirst({ 
-          where: { desa_id: parseInt(id) }
+          where: { desa_id: parseInt(id), status_kelembagaan: 'aktif' }
         }),
         prisma.pkks.findFirst({ 
-          where: { desa_id: parseInt(id) }
+          where: { desa_id: parseInt(id), status_kelembagaan: 'aktif' }
         }),
         prisma.lembaga_lainnyas.findMany({ 
-          where: { desa_id: parseInt(id) },
+          where: { desa_id: parseInt(id), status_kelembagaan: 'aktif' },
           orderBy: { nama: 'asc' }
         })
       ]);
@@ -941,10 +942,10 @@ class SummaryController {
     try {
       const { id } = req.params;
       const rws = await prisma.rws.findMany({
-        where: { desa_id: parseInt(id) },
+        where: { desa_id: parseInt(id), status_kelembagaan: 'aktif' },
         orderBy: { nomor: 'asc' },
         include: {
-          rts: { select: { id: true } }
+          rts: { where: { status_kelembagaan: 'aktif' }, select: { id: true } }
         }
       });
 
@@ -968,7 +969,7 @@ class SummaryController {
     try {
       const { id } = req.params;
       const rts = await prisma.rts.findMany({
-        where: { desa_id: parseInt(id) },
+        where: { desa_id: parseInt(id), status_kelembagaan: 'aktif' },
         include: {
           rws: {
             select: { id: true, nomor: true }
@@ -992,7 +993,7 @@ class SummaryController {
     try {
       const { id } = req.params;
       const posyandus = await prisma.posyandus.findMany({
-        where: { desa_id: parseInt(id) },
+        where: { desa_id: parseInt(id), status_kelembagaan: 'aktif' },
         orderBy: { nama: 'asc' }
       });
 
@@ -1011,7 +1012,7 @@ class SummaryController {
     try {
       const { id } = req.params;
       const karangTaruna = await prisma.karang_tarunas.findFirst({
-        where: { desa_id: parseInt(id) }
+        where: { desa_id: parseInt(id), status_kelembagaan: 'aktif' }
       });
 
       res.json({ success: true, data: karangTaruna });
@@ -1029,7 +1030,7 @@ class SummaryController {
     try {
       const { id } = req.params;
       const lpm = await prisma.lpms.findFirst({
-        where: { desa_id: parseInt(id) }
+        where: { desa_id: parseInt(id), status_kelembagaan: 'aktif' }
       });
 
       res.json({ success: true, data: lpm });
@@ -1047,7 +1048,7 @@ class SummaryController {
     try {
       const { id } = req.params;
       const satlinmas = await prisma.satlinmas.findFirst({
-        where: { desa_id: parseInt(id) }
+        where: { desa_id: parseInt(id), status_kelembagaan: 'aktif' }
       });
 
       res.json({ success: true, data: satlinmas });
@@ -1065,7 +1066,7 @@ class SummaryController {
     try {
       const { id } = req.params;
       const pkk = await prisma.pkks.findFirst({
-        where: { desa_id: parseInt(id) }
+        where: { desa_id: parseInt(id), status_kelembagaan: 'aktif' }
       });
 
       res.json({ success: true, data: pkk });
