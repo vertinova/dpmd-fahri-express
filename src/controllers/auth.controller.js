@@ -963,6 +963,16 @@ const checkTailscaleVpn = async (req, res) => {
 /**
  * Force Change Password - khusus user yang MASIH memakai password default.
  * Tidak butuh password lama (user terbukti default & sudah terautentikasi sesi ini).
+ *
+ * Untuk akun operator desa, layar ini sekaligus meminta IDENTITAS.
+ *
+ * Alasannya: akun operator kini bisa dibuat massal oleh staf bidang, dan akun
+ * hasil pembuatan massal lahir tanpa pemilik — namanya sementara ("Operator
+ * Bantuan Keuangan Desa Caringin") dan tidak ada nomor yang bisa dihubungi.
+ * Tanpa langkah ini, setiap unggahan desa tercatat atas nama pemegang jabatan
+ * yang tidak diketahui siapa orangnya. Satu-satunya saat orang itu pasti ada
+ * di depan layar adalah login pertamanya, jadi identitas diminta di sini —
+ * di pop-up yang memang tidak bisa dilewati.
  */
 const forceChangePassword = async (req, res) => {
   try {
@@ -990,16 +1000,56 @@ const forceChangePassword = async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
+    const dataUpdate = {
+      password: hashedPassword,
+      plain_password: user.role === 'superadmin' ? null : newPassword
+    };
+
+    // Identitas operator desa. Hanya untuk role 'desa': role lain sudah punya
+    // identitas dari data pegawai, dan memaksa mereka mengisinya di sini justru
+    // membuat dua sumber yang bisa berbeda.
+    if (user.role === 'desa') {
+      // Aturannya sama persis dengan identitas Admin Desa — termasuk penolakan
+      // nama bawaan sistem seperti "Operator Bantuan Keuangan Desa Caringin".
+      const identitas = validateDesaProfile({
+        name: req.body.name,
+        jabatan_desa: req.body.jabatan_desa,
+        no_hp: req.body.no_hp
+      });
+
+      if (!identitas.valid) {
+        return res.status(422).json({
+          success: false,
+          code: 'IDENTITAS_BELUM_LENGKAP',
+          message: Object.values(identitas.errors)[0],
+          errors: identitas.errors
+        });
+      }
+
+      dataUpdate.name = identitas.value.name.slice(0, 255);
+      dataUpdate.jabatan_desa = identitas.value.jabatan_desa.slice(0, 100);
+      dataUpdate.no_hp = identitas.value.no_hp;
+      dataUpdate.updated_at = new Date();
+    }
+
     await prisma.users.update({
       where: { id: BigInt(userId) },
-      data: {
-        password: hashedPassword,
-        plain_password: user.role === 'superadmin' ? null : newPassword
-      }
+      data: dataUpdate
     });
 
     logger.info(`🔑 Default password changed for ${user.email}`);
-    return res.json({ success: true, message: 'Password berhasil diganti' });
+    return res.json({
+      success: true,
+      message: 'Password berhasil diganti',
+      // Dikembalikan supaya sesi di perangkat langsung memakai identitas baru —
+      // sesi aplikasi ini tidak pernah kedaluwarsa, jadi tanpa ini nama lama
+      // ("Operator ...") akan menempel sampai user keluar sendiri.
+      data: {
+        name: dataUpdate.name || user.name,
+        jabatan_desa: dataUpdate.jabatan_desa ?? user.jabatan_desa,
+        no_hp: dataUpdate.no_hp ?? user.no_hp
+      }
+    });
   } catch (error) {
     logger.error('forceChangePassword error:', error);
     return res.status(500).json({ success: false, message: 'Gagal mengganti password', error: error.message });

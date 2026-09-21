@@ -1,13 +1,20 @@
 /**
- * Kelengkapan identitas Admin Desa.
+ * Kelengkapan identitas akun desa.
  *
- * DPMD perlu tahu SIAPA orang di balik akun Admin Desa dan bagaimana
- * menghubunginya, bukan sekadar nama bawaan sistem "Admin Desa <nama desa>"
- * hasil seeding. Selama tiga data ini belum lengkap, akun diblokir dari aktivitas.
+ * DPMD perlu tahu SIAPA orang di balik akun dan bagaimana menghubunginya,
+ * bukan sekadar nama bawaan sistem hasil seeding atau pembuatan massal.
+ *
+ * Dipakai dua pintu yang berbeda:
+ *   - Admin Desa lewat mustCompleteDesaProfile() — diblokir sampai lengkap.
+ *   - Operator desa lewat layar wajib ganti sandi (auth.controller), karena
+ *     akun operator bisa dibuat massal oleh staf bidang dan lahir tanpa
+ *     pemilik.
  */
 
-// Nama hasil seeding, mis. "Admin Desa Mekarsari" — bukan identitas orang.
-const PLACEHOLDER_NAME_PATTERN = /^admin\s+desa\b/i;
+// Nama bawaan sistem, bukan identitas orang:
+//   "Admin Desa Mekarsari"                      — hasil seeding
+//   "Operator Bantuan Keuangan Desa Caringin"   — hasil pembuatan massal bidang
+const PLACEHOLDER_NAME_PATTERN = /^(admin\s+desa|operator)\b/i;
 
 const MIN_NAME_LENGTH = 3;
 const MIN_PHONE_DIGITS = 9;
@@ -45,7 +52,8 @@ const validateDesaProfile = ({ name, jabatan_desa, no_hp }) => {
   if (cleanName.length < MIN_NAME_LENGTH) {
     errors.name = `Nama minimal ${MIN_NAME_LENGTH} karakter`;
   } else if (isPlaceholderName(cleanName)) {
-    errors.name = 'Isi dengan nama asli petugas, bukan nama bawaan sistem seperti "Admin Desa ..."';
+    errors.name =
+      'Isi dengan nama asli petugas, bukan nama bawaan sistem seperti "Admin Desa ..." atau "Operator ..."';
   }
 
   const cleanJabatan = text(jabatan_desa);
