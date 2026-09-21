@@ -363,20 +363,45 @@ exports.getRingkasan = jalankan(async (req, res) => {
 
   // Tiga pengambilan sekaligus, masing-masing dengan alasannya sendiri.
   //
-  // `/summary` boleh gagal tanpa menjatuhkan halaman — dan per September 2026
-  // memang selalu gagal: endpoint itu membalas 500 di sisi ASTA DESA. Tetap
-  // dipanggil supaya angka resmi mereka muncul sendiri begitu pulih.
+  // `/summary` dulu selalu membalas 500 di sisi ASTA DESA, sehingga halaman ini
+  // sepenuhnya bergantung pada penyusuran di bawah. Endpoint itu sudah pulih
+  // (perbaikan di repo ASTA DESA, 21 September 2026) dan sekarang menjadi
+  // sumber utama: satu permintaan, ~0,37 detik, agregat dihitung di SQL.
   //
-  // `hitunganLangsung` itulah penggantinya, dan ini yang memperbaiki selisih.
-  // Satu permintaan `per_page=1` tidak membawa baris yang berguna, tetapi
-  // `meta.total`-nya adalah `Sensus::count()` apa adanya — hitungan yang sama
-  // persis dengan yang dipakai panel ASTA DESA tiap kali halamannya dibuka.
-  // Murah, hidup, dan tidak bergantung pada endpoint yang sedang rusak.
-  const [ringkasanApi, hitunganLangsung, semua] = await Promise.all([
+  // `hitunganLangsung` tetap dipertahankan sebagai angka pokok yang paling
+  // hidup. Satu permintaan `per_page=1` tidak membawa baris yang berguna,
+  // tetapi `meta.total`-nya adalah `Sensus::count()` apa adanya — hitungan yang
+  // sama persis dengan yang dipakai panel ASTA DESA tiap kali dibuka.
+  //
+  // Penyusuran penuh kini DILEPAS KE LATAR kecuali diminta paksa. Ia memakan
+  // menit — 72 halaman per September 2026 — sementara axios di frontend
+  // menyerah pada detik ke-30, sehingga menunggunya berarti halaman tidak
+  // pernah terbit sama sekali. Rincian yang hanya bisa didapat dari baris
+  // mentah (per desa, tren harian, jumlah berkoordinat) menyusul pada siklus
+  // pembaruan berikutnya, persis seperti yang sudah dijanjikan teks di kaki
+  // halaman.
+  const [ringkasanApi, hitunganLangsung, susurMentah] = await Promise.all([
     asta.ambil('/summary', {}, { force }).catch(() => null),
     asta.ambil('/sensuses', { per_page: 1 }, { force, ttlMs: TTL_ANGKA_POKOK }).catch(() => null),
-    asta.ambilSemua('/sensuses', {}, { force })
+    asta.ambilSemua('/sensuses', {}, { force, latar: !force }).catch(() => null)
   ]);
+
+  // Disamakan sekali di sini supaya sisa fungsi tidak perlu memeriksa null di
+  // setiap tempat: penyusuran bisa gagal (null) atau belum siap (mode latar).
+  const semua = susurMentah ?? {
+    rows: [],
+    truncated: false,
+    total: null,
+    kembar: 0,
+    kurang: 0,
+    kena_pagar: false,
+    belum_siap: true
+  };
+
+  // Rincian di bawah disusun dari baris mentah. Bila penyusuran belum pernah
+  // selesai, tidak ada baris untuk disusun — dan yang tersaji sebagai gantinya
+  // adalah agregat dari `/summary`, yang dihitung di sisi basis data mereka.
+  const rincianDariBaris = semua.rows.length > 0;
 
   // Angka pokok, urut dari yang paling bisa dipercaya:
   //   1. meta.total dari permintaan ringan di atas — hitungan server, hidup.
@@ -439,6 +464,37 @@ exports.getRingkasan = jalankan(async (req, res) => {
     if (r.jumlah_anggota) totalAnggota += r.jumlah_anggota;
   });
 
+  // Bentuk pengganti dari `/summary`, dipakai selama penyusuran belum pernah
+  // selesai. Lapangan yang tidak bisa diketahui dari agregat — berapa desa di
+  // satu kecamatan, berapa yang berkoordinat, rincian status per kecamatan —
+  // sengaja dibiarkan null/kosong alih-alih ditebak: halaman lebih baik tidak
+  // menampilkan angka daripada menampilkan angka yang salah.
+  const isiRingkasan = ringkasanApi?.data ?? {};
+
+  const kecamatanRingkasan = (isiRingkasan.sensus_per_kecamatan ?? [])
+    .map((r) => ({
+      kecamatan: rapikan(r.kecamatan),
+      total: keAngka(r.jumlah) ?? 0,
+      total_desa: null,
+      berkoordinat: null,
+      per_status: []
+    }))
+    .sort((a, b) => b.total - a.total);
+
+  const statusRingkasan = (isiRingkasan.sensus_per_status ?? [])
+    .map((r) => ({ status: rapikan(r.status), total: keAngka(r.jumlah) ?? 0 }))
+    .sort((a, b) => b.total - a.total);
+
+  // Hanya sepuluh teratas — itulah yang dibawa endpoint ringkasan. Cukup untuk
+  // papan peringkat di halaman, dan itu memang satu-satunya tempat ia dipakai.
+  const petugasRingkasan = (isiRingkasan.petugas_teraktif ?? [])
+    .map((r) => ({
+      nama: rapikan(r.name) ?? rapikan(r.nama),
+      total: keAngka(r.jumlah_sensus) ?? 0,
+      kecamatan: rapikan(r.kecamatan) ? [rapikan(r.kecamatan)] : []
+    }))
+    .sort((a, b) => b.total - a.total);
+
   res.json({
     success: true,
     data: {
@@ -459,32 +515,60 @@ exports.getRingkasan = jalankan(async (req, res) => {
       total_terbaca: baris.length,
       kembar_terbuang: semua.kembar || 0,
 
-      total_kecamatan: perKecamatan.size,
-      total_desa: perDesa.size,
-      total_petugas: perPetugas.size,
-      total_anggota_tercatat: totalAnggota || null,
-      berkoordinat,
+      total_kecamatan: rincianDariBaris ? perKecamatan.size : kecamatanRingkasan.length || null,
+      total_desa: rincianDariBaris ? perDesa.size : null,
 
-      per_kecamatan: Array.from(perKecamatan.entries())
-        .map(([kecamatan, v]) => ({
-          kecamatan,
-          total: v.total,
-          total_desa: v.desa.size,
-          berkoordinat: v.berkoordinat,
-          per_status: keDaftar(v.status, 'status')
-        }))
-        .sort((a, b) => b.total - a.total),
+      // Sengaja null, bukan panjang `petugas_teraktif`. Endpoint ringkasan
+      // hanya memuat sepuluh petugas teratas; menyajikan 10 sebagai jumlah
+      // petugas se-kabupaten akan salah besar, dan halaman lebih baik tidak
+      // menampilkan angka daripada menampilkan angka yang keliru.
+      total_petugas: rincianDariBaris ? perPetugas.size : null,
 
-      per_desa: Array.from(perDesa.values()).sort((a, b) => b.total - a.total),
-      per_status: keDaftar(perStatus, 'status'),
+      total_anggota_tercatat: rincianDariBaris
+        ? totalAnggota || null
+        : keAngka(ringkasanApi?.data?.total?.sensus_anggotas),
 
-      petugas: Array.from(perPetugas.entries())
-        .map(([nama, v]) => ({ nama, total: v.total, kecamatan: Array.from(v.kecamatan) }))
-        .sort((a, b) => b.total - a.total),
+      // Hanya bisa dihitung dari baris mentah: ringkasan tidak membawa
+      // koordinat sama sekali.
+      berkoordinat: rincianDariBaris ? berkoordinat : null,
 
-      tren: Array.from(perHari.entries())
-        .map(([tanggal, total]) => ({ tanggal, total }))
-        .sort((a, b) => a.tanggal.localeCompare(b.tanggal)),
+      per_kecamatan: rincianDariBaris
+        ? Array.from(perKecamatan.entries())
+            .map(([kecamatan, v]) => ({
+              kecamatan,
+              total: v.total,
+              total_desa: v.desa.size,
+              berkoordinat: v.berkoordinat,
+              per_status: keDaftar(v.status, 'status')
+            }))
+            .sort((a, b) => b.total - a.total)
+        : kecamatanRingkasan,
+
+      // Rincian per desa tidak ada di ringkasan; ia hanya lahir dari baris.
+      per_desa: rincianDariBaris ? Array.from(perDesa.values()).sort((a, b) => b.total - a.total) : [],
+
+      per_status: rincianDariBaris ? keDaftar(perStatus, 'status') : statusRingkasan,
+
+      petugas: rincianDariBaris
+        ? Array.from(perPetugas.entries())
+            .map(([nama, v]) => ({ nama, total: v.total, kecamatan: Array.from(v.kecamatan) }))
+            .sort((a, b) => b.total - a.total)
+        : petugasRingkasan,
+
+      // Tren HARIAN hanya bisa disusun dari baris. Ringkasan membawa tren
+      // bulanan, dan menaruhnya di lapangan yang sama akan membuat halaman
+      // membaca dua belas bulan sebagai dua belas hari.
+      tren: rincianDariBaris
+        ? Array.from(perHari.entries())
+            .map(([tanggal, total]) => ({ tanggal, total }))
+            .sort((a, b) => a.tanggal.localeCompare(b.tanggal))
+        : [],
+
+      // Dari mana rincian di atas berasal, supaya halaman bisa mengatakannya
+      // apa adanya dan tidak menyajikan angka sebagian sebagai angka penuh.
+      rincian_dari: rincianDariBaris ? 'penyusuran' : 'ringkasan',
+      rincian_siap: rincianDariBaris,
+      rincian_basi: semua.basi === true,
 
       // Kejujuran soal kelengkapan. Bila penyusuran terhenti di pagar batas
       // baris, angka di atas adalah angka sebagian — dan halaman harus bisa

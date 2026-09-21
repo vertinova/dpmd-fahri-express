@@ -300,7 +300,30 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
 
   const tersimpan = cache.get(kunci);
   if (!opts.force && tersimpan && Date.now() - tersimpan.at < ttl) return tersimpan.value;
-  if (!opts.force && inflight.has(kunci)) return inflight.get(kunci);
+
+  // Jawaban untuk pemanggil mode latar: penyusuran tetap berjalan dan mengisi
+  // cache, tetapi HTTP tidak ikut menunggunya. Bila ada hasil lama, itu yang
+  // disajikan — data basi jauh lebih berguna daripada halaman kosong, dan
+  // siklus pembaruan otomatis akan menggantinya begitu penyusuran selesai.
+  const jawabanLatar = () =>
+    tersimpan
+      ? { ...tersimpan.value, basi: true, belum_siap: false }
+      : {
+          rows: [],
+          truncated: false,
+          pages: 0,
+          last_page: null,
+          total: null,
+          kembar: 0,
+          kurang: 0,
+          kena_pagar: false,
+          basi: false,
+          belum_siap: true
+        };
+
+  if (!opts.force && inflight.has(kunci)) {
+    return opts.latar ? jawabanLatar() : inflight.get(kunci);
+  }
 
   const batasBaris = opts.maxRows || MAX_ROWS_DEFAULT;
 
@@ -423,6 +446,21 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
   });
 
   inflight.set(kunci, promise);
+
+  // Mode latar dipakai halaman Ringkasan. Penyusuran penuh memakan menit —
+  // 72 halaman per September 2026 — sementara axios di frontend menyerah pada
+  // detik ke-30. Menunggunya berarti halaman TIDAK PERNAH tampil; dilepas ke
+  // latar, halaman terbit seketika dan rincian menyusul pada siklus pembaruan
+  // berikutnya.
+  //
+  // `catch` kosong itu WAJIB: tanpa pemegang penolakan, kegagalan penyusuran
+  // yang tak seorang pun tunggu menjadi unhandled rejection dan menjatuhkan
+  // proses Node.
+  if (opts.latar) {
+    promise.catch(() => {});
+    return jawabanLatar();
+  }
+
   return promise;
 };
 
