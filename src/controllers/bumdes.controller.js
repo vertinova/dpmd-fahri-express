@@ -1,12 +1,13 @@
 const prisma = require('../config/prisma');
 const {
-  sinkronkanKeProdukHukum, KOLOM_TERSINKRON,
+  sinkronkanKeProdukHukum, KOLOM_TERSINKRON, PADANAN,
 } = require('../services/sinkronProdukHukumBumdes.service');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const fs = require('fs').promises;
 const path = require('path');
 const { KOLOM_DESA, KOLOM_ADMIN, siapkanData } = require('../config/bumdesFields');
+const { v4: uuidv4 } = require('uuid');
 
 class BumdesController {
   
@@ -1208,6 +1209,206 @@ class BumdesController {
     } catch (error) {
       logger.error('Error getting produk hukum for bumdes:', error);
       next(error);
+    }
+  }
+
+  /**
+   * POST /api/desa/bumdes/produk-hukum
+   *
+   * Desa membuat Perdes / SK BUM Desa langsung dari formulir BUM Desa.
+   *
+   * MASALAH YANG DISELESAIKAN. Dasar hukum BUM Desa di halaman desa hanya bisa
+   * DIPILIH dari dokumen yang sudah ada di modul Produk Hukum. Padahal hak akses
+   * desa diberikan per fitur: banyak operator BUM Desa tidak dipegangi akses
+   * "produk-hukum" oleh Admin Desa-nya. Bagi mereka dropdown itu kosong dan
+   * tidak ada jalan mengisinya sendiri — datanya macet bukan karena dokumennya
+   * tidak ada, melainkan karena pintunya ada di ruangan lain.
+   *
+   * Yang dibuat di sini BUKAN dokumen kelas dua: barisnya masuk ke tabel
+   * produk_hukums yang sama, berkasnya ke folder yang sama, jenis dan
+   * singkatannya memakai PADANAN yang sama dengan unggahan SPKED. Jadi dokumen
+   * ini juga muncul di modul Produk Hukum untuk petugas desa yang memang
+   * memegang akses ke sana.
+   *
+   * Tautannya ke baris BUM Desa dipasang di sini juga, tidak menunggu formulir
+   * disimpan: petugas yang mengunggah lalu menutup halaman tetap mendapat
+   * hasilnya, dan formulir yang kemudian disimpan hanya menulis nilai yang sama.
+   */
+  async storeProdukHukumDesa(req, res, next) {
+    // Berkas sudah terlanjur ditulis multer sebelum validasi jalan. Apa pun
+    // yang gagal sesudah ini harus membersihkannya, kalau tidak folder produk
+    // hukum berisi PDF yatim yang tidak tercatat di mana pun.
+    const bersihkanBerkas = async () => {
+      if (req.file?.path) {
+        await fs.unlink(req.file.path).catch(() => {});
+      }
+    };
+
+    try {
+      const desaId = req.user.desa_id;
+      if (!desaId) {
+        await bersihkanBerkas();
+        return res.status(403).json({
+          success: false,
+          message: 'Akun Anda tidak terhubung dengan desa mana pun',
+        });
+      }
+
+      const fieldName = String(req.body.field_name || '').trim();
+      const padanan = PADANAN[fieldName];
+      if (!padanan) {
+        await bersihkanBerkas();
+        return res.status(422).json({
+          success: false,
+          message: `Jenis dokumen tidak dikenali. Pilihannya: ${Object.keys(PADANAN).join(', ')}`,
+        });
+      }
+
+      if (!req.file) {
+        return res.status(422).json({ success: false, message: 'Berkas PDF wajib diunggah' });
+      }
+
+      const nomor = String(req.body.nomor || '').trim();
+      const tahun = parseInt(req.body.tahun, 10);
+      const tanggalPenetapan = req.body.tanggal_penetapan
+        ? new Date(req.body.tanggal_penetapan)
+        : null;
+
+      if (!nomor) {
+        await bersihkanBerkas();
+        return res.status(422).json({ success: false, message: 'Nomor dokumen wajib diisi' });
+      }
+
+      const tahunSekarang = new Date().getFullYear();
+      if (!Number.isInteger(tahun) || tahun < 1945 || tahun > tahunSekarang + 1) {
+        await bersihkanBerkas();
+        return res.status(422).json({
+          success: false,
+          message: `Tahun tidak masuk akal. Isi antara 1945 dan ${tahunSekarang + 1}.`,
+        });
+      }
+
+      if (!tanggalPenetapan || Number.isNaN(tanggalPenetapan.getTime())) {
+        await bersihkanBerkas();
+        return res.status(422).json({
+          success: false,
+          message: 'Tanggal penetapan wajib diisi',
+        });
+      }
+
+      // Nama desa dipakai sebagai tempat penetapan bawaan. Diambil dari basis
+      // data, bukan dari kiriman klien: kolom ini muncul di dokumen resmi, dan
+      // akun desa tidak berkepentingan menuliskannya sebagai desa lain.
+      const desa = await prisma.desas.findUnique({
+        where: { id: BigInt(String(desaId)) },
+        select: { nama: true, kode: true },
+      });
+
+      /**
+       * Cari baris BUM Desa milik desa ini lewat DUA kunci.
+       *
+       * `bumdes.desa_id` adalah kunci yang benar secara skema, tapi seluruh data
+       * BUM Desa hasil impor CSV meninggalkannya NULL dan menyambung lewat
+       * `kode_desa` (mis. "32.01.11.2001") — 186 dari 187 baris di basis data
+       * saat ini seperti itu. Mencari lewat desa_id saja berarti dokumen yang
+       * baru diunggah tidak pernah tertaut ke BUM Desa mana pun, padahal
+       * barisnya ada.
+       *
+       * Catatan tipe: desa_id di tabel bumdes bertipe Int, sedangkan di desas
+       * dan produk_hukums bertipe BigInt — menyamakan ketiganya akan ditolak
+       * Prisma.
+       */
+      const bumdes = await prisma.bumdes.findFirst({
+        where: {
+          OR: [
+            { desa_id: Number(desaId) },
+            ...(desa?.kode ? [{ kode_desa: desa.kode }] : []),
+          ],
+        },
+        select: { id: true, namabumdesa: true },
+      });
+
+      const judul =
+        String(req.body.judul || '').trim() || padanan.judul(bumdes?.namabumdesa);
+
+      const id = uuidv4();
+      const sekarang = new Date();
+
+      const produkHukum = await prisma.produk_hukums.create({
+        data: {
+          id,
+          uuid: id,
+          desa_id: BigInt(String(desaId)),
+          judul: judul.slice(0, 255),
+          nomor: nomor.slice(0, 255),
+          tahun,
+          jenis: padanan.jenis,
+          singkatan_jenis: padanan.singkatan_jenis,
+          tempat_penetapan: (desa?.nama || 'Kabupaten Bogor').slice(0, 255),
+          tanggal_penetapan: tanggalPenetapan,
+          status_peraturan: 'berlaku',
+          sumber: 'Diunggah desa lewat modul BUM Desa',
+          subjek: 'BUM Desa',
+          file: req.file.filename,
+          created_at: sekarang,
+          updated_at: sekarang,
+        },
+      });
+
+      // Tautkan ke baris BUM Desa bila desanya sudah punya. Kegagalan di sini
+      // tidak menggagalkan permintaan: produk hukumnya sudah sah berdiri
+      // sendiri, dan formulir yang disimpan berikutnya akan memasang tautannya.
+      let tertaut = false;
+      if (bumdes) {
+        try {
+          await prisma.bumdes.update({
+            where: { id: bumdes.id },
+            data: { [padanan.kolomRelasi]: id },
+          });
+          tertaut = true;
+        } catch (errTaut) {
+          logger.error('Gagal menautkan produk hukum ke BUM Desa:', errTaut);
+        }
+      }
+
+      logger.info('Produk hukum BUM Desa dibuat desa', {
+        id,
+        desa_id: String(desaId),
+        field_name: fieldName,
+        tertaut,
+      });
+
+      ActivityLogger.log({
+        userId: BigInt(String(req.user.id)),
+        userName: req.user.name || req.user.email,
+        userRole: req.user.role,
+        module: 'bumdes',
+        action: 'create',
+        entityType: 'produk_hukum',
+        entityId: null,
+        entityName: judul,
+        description: `${req.user.name || req.user.email} membuat ${padanan.singkatan_jenis} "${judul}" (${nomor} Tahun ${tahun}) dari formulir BUM Desa`,
+        newValue: { id, nomor, tahun, jenis: padanan.jenis, field_name: fieldName },
+        ipAddress: ActivityLogger.getIpFromRequest(req),
+        userAgent: ActivityLogger.getUserAgentFromRequest(req),
+      }).catch(() => {});
+
+      return res.status(201).json({
+        success: true,
+        message: tertaut
+          ? 'Dokumen tersimpan dan langsung terpasang sebagai dasar hukum BUM Desa'
+          : 'Dokumen tersimpan sebagai produk hukum desa',
+        data: {
+          produk_hukum: produkHukum,
+          field_name: fieldName,
+          kolom_relasi: padanan.kolomRelasi,
+          tertaut,
+        },
+      });
+    } catch (error) {
+      await bersihkanBerkas();
+      logger.error('Gagal membuat produk hukum dari modul BUM Desa:', error);
+      return next(error);
     }
   }
 

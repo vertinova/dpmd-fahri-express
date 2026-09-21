@@ -173,4 +173,10 @@ const sinkronkanKeProdukHukum = async (bumdes, fieldName, namaBerkas) => {
 	return { id, dibuat: true };
 };
 
-module.exports = { sinkronkanKeProdukHukum, KOLOM_TERSINKRON, bacaNomorPerdes };
+// PADANAN ikut diekspor karena jalur KEDUA menuju hasil yang sama kini ada:
+// desa membuat Perdes/SK-nya langsung dari formulir BUM Desa
+// (bumdes.controller.storeProdukHukumDesa). Jenis, singkatan, kolom relasi, dan
+// pola judulnya harus sama persis dengan yang dipakai di sini — kalau tidak,
+// dokumen yang dibuat desa dan yang diunggah SPKED akan tampil sebagai dua
+// macam produk hukum yang berbeda untuk perkara yang sama.
+module.exports = { sinkronkanKeProdukHukum, KOLOM_TERSINKRON, bacaNomorPerdes, PADANAN };
