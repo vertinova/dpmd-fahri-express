@@ -24,9 +24,12 @@ const {
   getCorePermissionKeys,
   getPermissionCatalog,
   mergePermissions,
+  resolveModul,
 } = require('../config/bidangDesaPermissions');
 const { DESA_PERMISSIONS } = require('../config/desaPermissions');
 const { normalizePhone } = require('../config/desaProfile');
+const { SANDI_DEFAULT } = require('../config/sandiDefault');
+const { periksaTemplate, susunEmail, TEMPLATE_BAWAAN, TOKEN_TEMPLATE } = require('../config/templateAkunDesa');
 const { invalidateDesaPermissions } = require('../middlewares/desaPermission');
 const ActivityLogger = require('../utils/activityLogger');
 
@@ -36,6 +39,15 @@ const LOG_MODULE = 'manajemen_akun_desa';
 // Staf bidang membuatkan petugas, bukan menunjuk pengelola akun desa.
 const MANAGED_ROLE = 'desa';
 const MIN_PASSWORD_LENGTH = 6;
+
+/**
+ * Batas aman satu kali pembuatan massal.
+ *
+ * Kabupaten Bogor punya ~416 desa/kelurahan, jadi satu putaran se-kabupaten
+ * masih di bawah batas ini. Batasnya tetap dipasang supaya satu permintaan
+ * tidak pernah berubah menjadi ribuan INSERT bila daftar desa bertambah.
+ */
+const BATAS_GENERATE = 600;
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 const badRequest = (res, message) => res.status(400).json({ success: false, message });
@@ -170,12 +182,183 @@ const parseBigId = (nilai) => {
   }
 };
 
+/**
+ * ── Pembuatan massal akun operator ──────────────────────────────────────────
+ *
+ * Banyak desa tidak kunjung punya operator untuk satu fitur, dan membuatkannya
+ * satu per satu lewat form berarti ratusan kali mengetik nama, email, dan
+ * sandi. Yang dibuat di sini sengaja seragam: nama sementara, sandi bawaan,
+ * dan email dari satu template — identitas aslinya diisi operatornya sendiri
+ * saat login pertama, berbarengan dengan layar wajib ganti sandi.
+ *
+ * Aturan yang tidak boleh dilanggar: JANGAN PERNAH MENIMPA. Desa yang sudah
+ * punya pemegang fitur ini dilewati, apa pun keadaannya — termasuk bila
+ * akunnya sedang nonaktif, karena mengaktifkan kembali akun lama adalah
+ * keputusan yang harus diambil sadar, bukan efek samping tombol massal.
+ */
+
+/**
+ * Hitung rencana: desa mana yang akan dibuatkan akun, dengan email apa, dan
+ * yang mana dilewati beserta alasannya.
+ *
+ * Pratinjau dan eksekusi memakai fungsi yang SAMA. Kalau keduanya menghitung
+ * sendiri-sendiri, daftar yang dilihat staf sebelum menekan tombol bisa
+ * berbeda dari yang benar-benar dibuat — dan justru daftar itulah yang ia
+ * pakai untuk memutuskan.
+ */
+const susunRencanaGenerate = async (req) => {
+  const modul = resolveModul(req.modulAkunDesa);
+  if (!modul) {
+    return {
+      error:
+        'Pembuatan massal hanya tersedia dari halaman fitur, misalnya tab Bantuan Keuangan atau BUMDes.',
+    };
+  }
+
+  const core = getCorePermissionKeys(req.user, req.modulAkunDesa);
+  if (core.length === 0) return { error: 'Bidang Anda tidak memegang fitur ini.' };
+
+  const template = String(req.body.template || '').trim();
+  const cekTemplate = periksaTemplate(template);
+  if (!cekTemplate.valid) return { error: cekTemplate.message };
+
+  let kecamatanId = null;
+  if (req.body.kecamatan_id) {
+    kecamatanId = parseBigId(req.body.kecamatan_id);
+    if (!kecamatanId) return { error: 'Kecamatan tidak valid' };
+  }
+
+  const desas = await prisma.desas.findMany({
+    where: kecamatanId ? { kecamatan_id: kecamatanId } : {},
+    select: {
+      id: true,
+      nama: true,
+      kode: true,
+      status_pemerintahan: true,
+      kecamatan_id: true,
+      kecamatans: { select: { id: true, nama: true } },
+    },
+    orderBy: [{ kecamatan_id: 'asc' }, { nama: 'asc' }],
+    take: BATAS_GENERATE + 1,
+  });
+
+  if (desas.length === 0) return { error: 'Tidak ada desa pada cakupan yang dipilih.' };
+  if (desas.length > BATAS_GENERATE) {
+    return {
+      error: `Cakupan terlalu besar (lebih dari ${BATAS_GENERATE} desa). Jalankan per kecamatan.`,
+    };
+  }
+
+  const desaIds = desas.map((d) => d.id);
+
+  // Pemegang fitur ini per desa — aktif MAUPUN nonaktif. Keduanya membuat desa
+  // itu dilewati; bedanya hanya pada alasan yang ditampilkan ke staf.
+  const pemegang = await prisma.users.findMany({
+    where: {
+      role: MANAGED_ROLE,
+      desa_id: { in: desaIds },
+      desa_user_permissions: { some: { permission_key: { in: core } } },
+    },
+    select: { id: true, name: true, email: true, desa_id: true, is_active: true },
+  });
+
+  const petaPemegang = new Map();
+  pemegang.forEach((u) => {
+    const kunci = String(u.desa_id);
+    if (!petaPemegang.has(kunci)) petaPemegang.set(kunci, []);
+    petaPemegang.get(kunci).push(u);
+  });
+
+  const rencana = desas.map((d) => ({
+    desa: {
+      id: String(d.id),
+      nama: d.nama,
+      kode: d.kode,
+      status_pemerintahan: d.status_pemerintahan,
+      kecamatan: d.kecamatans ? { id: String(d.kecamatans.id), nama: d.kecamatans.nama } : null,
+    },
+    email: susunEmail(template, {
+      fitur: modul.slug_fitur,
+      kecamatan: d.kecamatans?.nama || '',
+      desa: d.nama,
+      kode: d.kode,
+    }),
+  }));
+
+  // Email yang sudah dipakai akun MANA PUN — bukan hanya akun desa. Kolom
+  // users.email unik se-tabel, jadi bentrok dengan akun pegawai pun menggagalkan
+  // INSERT. Lebih baik ketahuan di pratinjau daripada muncul sebagai kegagalan
+  // di tengah putaran.
+  const emailUnik = [...new Set(rencana.map((r) => r.email))];
+  const terpakai = await prisma.users.findMany({
+    where: { email: { in: emailUnik } },
+    select: { email: true, name: true, role: true },
+  });
+  const petaTerpakai = new Map(terpakai.map((u) => [u.email, u]));
+
+  // Dua desa yang menghasilkan alamat sama — mis. "Suka Maju" dan "Sukamaju"
+  // di kecamatan yang sama. Keduanya ditahan, bukan dibiarkan berebut.
+  const jumlahEmail = new Map();
+  rencana.forEach((r) => jumlahEmail.set(r.email, (jumlahEmail.get(r.email) || 0) + 1));
+
+  const kandidat = rencana.map((r) => {
+    const sudah = petaPemegang.get(r.desa.id) || [];
+    if (sudah.length > 0) {
+      const aktif = sudah.filter((u) => u.is_active);
+      return {
+        ...r,
+        status: aktif.length > 0 ? 'sudah_punya' : 'sudah_punya_nonaktif',
+        alasan:
+          aktif.length > 0
+            ? 'Sudah punya operator untuk fitur ini.'
+            : 'Operator fitur ini sudah ada tapi nonaktif — aktifkan yang lama, jangan buat baru.',
+        operator: sudah.map((u) => ({
+          id: String(u.id),
+          name: u.name,
+          email: u.email,
+          is_active: u.is_active,
+        })),
+      };
+    }
+
+    const bentrokAkun = petaTerpakai.get(r.email);
+    if (bentrokAkun) {
+      return {
+        ...r,
+        status: 'email_terpakai',
+        alasan: `Email ini sudah dipakai akun lain (${bentrokAkun.name}).`,
+      };
+    }
+
+    if ((jumlahEmail.get(r.email) || 0) > 1) {
+      return {
+        ...r,
+        status: 'email_bentrok',
+        alasan: 'Template menghasilkan email yang sama untuk lebih dari satu desa.',
+      };
+    }
+
+    return { ...r, status: 'baru', alasan: null };
+  });
+
+  const ringkasan = kandidat.reduce(
+    (acc, k) => {
+      acc[k.status] = (acc[k.status] || 0) + 1;
+      acc.total += 1;
+      return acc;
+    },
+    { total: 0 },
+  );
+
+  return { modul, core, template, kandidat, ringkasan };
+};
+
 class BidangAkunDesaController {
   /** Katalog hak akses + identitas bidang staf yang login. Dipanggil sekali saat halaman dibuka. */
   async getMeta(req, res) {
     try {
-      const allowed = getAllowedPermissionKeys(req.user);
-      const catalog = getPermissionCatalog(req.user);
+      const allowed = getAllowedPermissionKeys(req.user, req.modulAkunDesa);
+      const catalog = getPermissionCatalog(req.user, req.modulAkunDesa);
 
       let bidang = null;
       if (req.user.bidang_id) {
@@ -189,23 +372,42 @@ class BidangAkunDesaController {
         if (baris) bidang = { id: String(baris.id), nama: baris.nama };
       }
 
+      // Dihitung dari fitur INTI, bukan seluruh yang boleh diberikan: 'pesan'
+      // dimiliki hampir semua akun desa dan bukan wewenang bidang mana pun,
+      // sehingga menghitungnya membuat angka ini terbaca sebagai "seluruh akun
+      // desa se-kabupaten" alih-alih "akun yang saya kelola".
+      const core = getCorePermissionKeys(req.user, req.modulAkunDesa);
       const totalDikelola = await prisma.users.count({
         where: {
           role: MANAGED_ROLE,
-          desa_user_permissions: { some: { permission_key: { in: allowed } } },
+          desa_user_permissions: { some: { permission_key: { in: core } } },
         },
       });
+
+      const modul = resolveModul(req.modulAkunDesa);
 
       res.json({
         success: true,
         data: {
           bidang,
+          // null saat halaman dibuka penuh (PMD, Pemdes). Frontend memakainya
+          // untuk judul dan untuk nilai bawaan template email massal.
+          modul: modul
+            ? { slug: modul.slug, label: modul.label, slug_fitur: modul.slug_fitur }
+            : null,
           catalog,
           allowed_keys: allowed,
+          fitur_inti: core,
           // Dikirim supaya frontend bisa memberi nama pada hak akses bidang lain
           // yang ia tampilkan sebagai keterangan terkunci.
           catalog_lengkap: DESA_PERMISSIONS,
           total_akun_dikelola: totalDikelola,
+          // Bahan pop-up template username pada pembuatan massal.
+          template_bawaan: modul
+            ? TEMPLATE_BAWAAN.replace('{fitur}', modul.slug_fitur)
+            : TEMPLATE_BAWAAN,
+          token_template: TOKEN_TEMPLATE,
+          sandi_default: SANDI_DEFAULT,
         },
       });
     } catch (error) {
@@ -235,8 +437,8 @@ class BidangAkunDesaController {
    */
   async getRingkasanDesa(req, res) {
     try {
-      const allowed = getAllowedPermissionKeys(req.user);
-      const core = getCorePermissionKeys(req.user);
+      const allowed = getAllowedPermissionKeys(req.user, req.modulAkunDesa);
+      const core = getCorePermissionKeys(req.user, req.modulAkunDesa);
 
       const desaId = parseBigId(req.params.desaId);
       if (!desaId) return badRequest(res, 'Desa tidak valid');
@@ -318,7 +520,8 @@ class BidangAkunDesaController {
    */
   async getUsers(req, res) {
     try {
-      const allowed = getAllowedPermissionKeys(req.user);
+      const allowed = getAllowedPermissionKeys(req.user, req.modulAkunDesa);
+      const core = getCorePermissionKeys(req.user, req.modulAkunDesa);
       const desaId = req.query.desa_id ? parseBigId(req.query.desa_id) : null;
       const kecamatanId = req.query.kecamatan_id ? parseBigId(req.query.kecamatan_id) : null;
       const q = String(req.query.q || '').trim();
@@ -336,7 +539,12 @@ class BidangAkunDesaController {
         });
         where.desa_id = { in: desaSeKecamatan.map((d) => d.id) };
       } else if (!q) {
-        where.desa_user_permissions = { some: { permission_key: { in: allowed } } };
+        // Disaring dengan fitur INTI, bukan seluruh yang boleh diberikan.
+        // 'pesan' adalah fitur lintas bidang yang dipegang hampir semua akun
+        // desa, jadi menyaring dengan daftar yang memuatnya sama saja dengan
+        // tidak menyaring: daftar "operator Bantuan Keuangan" akan berisi
+        // seluruh akun desa se-kabupaten.
+        where.desa_user_permissions = { some: { permission_key: { in: core } } };
       }
 
       if (q) {
@@ -369,7 +577,7 @@ class BidangAkunDesaController {
   /** Buat akun operasional desa baru untuk desa pilihan staf. */
   async createUser(req, res) {
     try {
-      const allowed = getAllowedPermissionKeys(req.user);
+      const allowed = getAllowedPermissionKeys(req.user, req.modulAkunDesa);
 
       const desaId = parseBigId(req.body.desa_id);
       if (!desaId) return badRequest(res, 'Desa wajib dipilih');
@@ -396,7 +604,7 @@ class BidangAkunDesaController {
       // Akun baru belum punya hak akses apa pun, jadi merge di sini setara
       // dengan penyaringan biasa — tetap lewat fungsi yang sama agar aturannya
       // hanya hidup di satu tempat.
-      const permissions = mergePermissions([], req.body.permissions, req.user);
+      const permissions = mergePermissions([], req.body.permissions, req.user, req.modulAkunDesa);
       if (permissions.length === 0) {
         return badRequest(res, 'Pilih minimal satu hak akses fitur untuk akun ini');
       }
@@ -417,7 +625,7 @@ class BidangAkunDesaController {
        * satu urusan. Maka jawabannya 409 berisi daftar akun yang sudah ada, dan
        * staf bisa mengulang dengan `tetap_buat: true` setelah melihatnya.
        */
-      const core = getCorePermissionKeys(req.user);
+      const core = getCorePermissionKeys(req.user, req.modulAkunDesa);
       const coreDiberikan = permissions.filter((k) => core.includes(k));
 
       if (coreDiberikan.length > 0 && req.body.tetap_buat !== true) {
@@ -507,7 +715,7 @@ class BidangAkunDesaController {
    */
   async updateUser(req, res) {
     try {
-      const allowed = getAllowedPermissionKeys(req.user);
+      const allowed = getAllowedPermissionKeys(req.user, req.modulAkunDesa);
       const target = await findAkunDesa(req.params.id);
       if (!target) return notFound(res, 'Akun operasional desa tidak ditemukan');
 
@@ -558,7 +766,7 @@ class BidangAkunDesaController {
       const sebelum = (target.desa_user_permissions || []).map((p) => p.permission_key);
       const permissionsGiven = req.body.permissions !== undefined;
       const sesudah = permissionsGiven
-        ? mergePermissions(sebelum, req.body.permissions, req.user)
+        ? mergePermissions(sebelum, req.body.permissions, req.user, req.modulAkunDesa)
         : sebelum;
 
       const actorId = BigInt(String(req.user.id));
@@ -631,12 +839,12 @@ class BidangAkunDesaController {
   /** Ubah hak akses saja (tombol cepat di kartu akun). */
   async updatePermissions(req, res) {
     try {
-      const allowed = getAllowedPermissionKeys(req.user);
+      const allowed = getAllowedPermissionKeys(req.user, req.modulAkunDesa);
       const target = await findAkunDesa(req.params.id);
       if (!target) return notFound(res, 'Akun operasional desa tidak ditemukan');
 
       const sebelum = (target.desa_user_permissions || []).map((p) => p.permission_key);
-      const sesudah = mergePermissions(sebelum, req.body.permissions, req.user);
+      const sesudah = mergePermissions(sebelum, req.body.permissions, req.user, req.modulAkunDesa);
       const actorId = BigInt(String(req.user.id));
 
       await prisma.$transaction(async (tx) => {
@@ -677,6 +885,175 @@ class BidangAkunDesaController {
   }
 
   /**
+   * Pratinjau pembuatan massal — apa yang akan terjadi bila tombolnya ditekan.
+   *
+   * Sengaja dipisah dari eksekusi supaya staf melihat email yang akan dipakai
+   * dan desa mana saja yang dilewati SEBELUM ratusan akun terbentuk. Template
+   * yang salah ketik paling mahal diperbaiki setelah akunnya jadi.
+   */
+  async pratinjauGenerate(req, res) {
+    try {
+      const rencana = await susunRencanaGenerate(req);
+      if (rencana.error) return badRequest(res, rencana.error);
+
+      res.json({
+        success: true,
+        data: {
+          modul: { slug: rencana.modul.slug, label: rencana.modul.label },
+          template: rencana.template,
+          fitur_inti: rencana.core,
+          sandi_default: SANDI_DEFAULT,
+          ringkasan: rencana.ringkasan,
+          kandidat: rencana.kandidat,
+        },
+      });
+    } catch (error) {
+      logger.error('Gagal menyusun pratinjau akun massal:', error);
+      res.status(500).json({ success: false, message: 'Gagal menyusun pratinjau' });
+    }
+  }
+
+  /**
+   * Buat akun untuk desa yang BELUM punya operator fitur ini.
+   *
+   * Tiga hal yang membentuk cara kerjanya:
+   *
+   *   1. Sandi di-hash SEKALI, bukan per akun. Semua akun memakai sandi bawaan
+   *      yang sama, dan bcrypt cost 10 memakan ~100ms — 400 akun berarti ~40
+   *      detik hanya untuk hashing, cukup untuk membuat permintaannya mati di
+   *      tengah jalan dan menyisakan pekerjaan setengah jadi.
+   *   2. TIDAK dibungkus satu transaksi besar. Satu desa gagal (mis. email
+   *      diambil akun lain sedetik sebelumnya) tidak boleh membatalkan 400
+   *      yang lain; kegagalannya dicatat per desa dan dilaporkan balik.
+   *   3. Rencananya dihitung ulang di sini, tidak menerima daftar kiriman
+   *      frontend. Pratinjau bisa saja dibuka setengah jam lalu, dan sejak itu
+   *      desa yang sama mungkin sudah dibuatkan operator oleh staf lain.
+   */
+  async generateAkun(req, res) {
+    try {
+      const rencana = await susunRencanaGenerate(req);
+      if (rencana.error) return badRequest(res, rencana.error);
+
+      const { modul, kandidat, ringkasan, template } = rencana;
+      const sasaran = kandidat.filter((k) => k.status === 'baru');
+
+      if (sasaran.length === 0) {
+        return res.status(409).json({
+          success: false,
+          code: 'TIDAK_ADA_SASARAN',
+          message:
+            'Tidak ada desa yang perlu dibuatkan akun — semuanya sudah punya operator untuk fitur ini atau emailnya bentrok.',
+          data: { ringkasan, kandidat },
+        });
+      }
+
+      // Hak akses akun baru = fitur inti bidang untuk modul ini + fitur bersama
+      // ('pesan'), sama persis dengan centang bawaan pada form manual. Lewat
+      // mergePermissions supaya aturannya tetap satu pintu.
+      const permissions = mergePermissions(
+        [],
+        getAllowedPermissionKeys(req.user, req.modulAkunDesa),
+        req.user,
+        req.modulAkunDesa,
+      );
+
+      const hashedPassword = await bcrypt.hash(SANDI_DEFAULT, 10);
+      const actorId = BigInt(String(req.user.id));
+      const sekarang = new Date();
+
+      const dibuat = [];
+      const gagal = [];
+
+      for (const item of sasaran) {
+        const sebutan = item.desa.status_pemerintahan === 'kelurahan' ? 'Kelurahan' : 'Desa';
+        // Nama sementara, jelas-jelas bukan nama orang: operatornya mengisi
+        // identitas aslinya saat login pertama, di layar yang sama dengan
+        // wajib ganti sandi.
+        const nama = 'Operator ' + modul.label + ' ' + sebutan + ' ' + item.desa.nama;
+
+        try {
+          const created = await prisma.users.create({
+            data: {
+              name: nama.slice(0, 255),
+              email: item.email,
+              password: hashedPassword,
+              plain_password: SANDI_DEFAULT,
+              role: MANAGED_ROLE,
+              desa_id: BigInt(item.desa.id),
+              kecamatan_id: item.desa.kecamatan ? Number(item.desa.kecamatan.id) : null,
+              jabatan_desa: ('Operator ' + modul.label).slice(0, 100),
+              is_active: true,
+              created_at: sekarang,
+              updated_at: sekarang,
+              desa_user_permissions: {
+                create: permissions.map((key) => ({ permission_key: key, created_by: actorId })),
+              },
+            },
+            select: { id: true, name: true, email: true },
+          });
+
+          dibuat.push({
+            id: String(created.id),
+            name: created.name,
+            email: created.email,
+            desa: item.desa,
+          });
+        } catch (error) {
+          logger.error('Gagal membuat akun massal untuk desa ' + item.desa.nama + ':', error.message);
+          gagal.push({
+            desa: item.desa,
+            email: item.email,
+            alasan:
+              error.code === 'P2002'
+                ? 'Email sudah dipakai akun lain (dibuat bersamaan dengan proses ini).'
+                : 'Gagal menyimpan akun.',
+          });
+        }
+      }
+
+      logger.info(
+        '✅ ' + req.user.email + ' membuat ' + dibuat.length + ' akun operator ' + modul.slug +
+          ' secara massal (template: ' + template + ')',
+      );
+
+      // Satu catatan ringkas, bukan satu per akun: 400 baris log untuk satu
+      // tindakan membuat riwayat aktivitas tidak terbaca.
+      logAksi(req, {
+        action: 'create',
+        target: null,
+        description:
+          req.user.name + ' (DPMD) membuat ' + dibuat.length + ' akun operator ' + modul.label +
+          ' secara massal dengan template ' + template +
+          (gagal.length > 0 ? ', ' + gagal.length + ' gagal' : ''),
+        newValue: {
+          modul: modul.slug,
+          template,
+          permissions,
+          jumlah_dibuat: dibuat.length,
+          jumlah_gagal: gagal.length,
+          email: dibuat.map((d) => d.email),
+        },
+      });
+
+      res.status(201).json({
+        success: true,
+        message: dibuat.length + ' akun operator ' + modul.label + ' berhasil dibuat',
+        data: {
+          sandi_default: SANDI_DEFAULT,
+          template,
+          dibuat,
+          gagal,
+          dilewati: kandidat.filter((k) => k.status !== 'baru'),
+          ringkasan: { ...ringkasan, dibuat: dibuat.length, gagal: gagal.length },
+        },
+      });
+    } catch (error) {
+      logger.error('Gagal membuat akun massal:', error);
+      res.status(500).json({ success: false, message: 'Gagal membuat akun massal', error: error.message });
+    }
+  }
+
+  /**
    * Aktifkan / nonaktifkan akun.
    *
    * Sengaja tidak ada penghapusan akun di sini. Staf bidang tidak selalu tahu
@@ -686,7 +1063,7 @@ class BidangAkunDesaController {
    */
   async setStatus(req, res) {
     try {
-      const allowed = getAllowedPermissionKeys(req.user);
+      const allowed = getAllowedPermissionKeys(req.user, req.modulAkunDesa);
       const target = await findAkunDesa(req.params.id);
       if (!target) return notFound(res, 'Akun operasional desa tidak ditemukan');
 

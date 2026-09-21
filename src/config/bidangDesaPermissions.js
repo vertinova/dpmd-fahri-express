@@ -60,6 +60,44 @@ const PERMISSION_PER_BIDANG = {
 };
 
 /**
+ * Modul halaman bidang yang punya pintu "Akun Operator" sendiri.
+ *
+ * Satu bidang bisa berwenang atas beberapa fitur desa sekaligus (SPKED memegang
+ * empat), tapi staf yang sedang berada di tab Bantuan Keuangan tidak sedang
+ * mengurus BUMDes. Tanpa penyempitan ini, akun yang ia buat dari tab Bankeu
+ * ikut membawa hak akses BUMDes, dan — yang lebih merugikan — pemeriksaan
+ * "desa ini sudah punya operator?" jadi salah sasaran: desa yang sudah punya
+ * operator BUMDes akan terbaca sudah punya operator Bankeu juga.
+ *
+ * `keys` SELALU diiriskan dengan wewenang bidang, tidak pernah menambahnya.
+ * Jadi baris di sini tidak bisa dipakai memberi bidang fitur yang bukan
+ * miliknya; paling jauh ia mempersempit.
+ *
+ * `slug_fitur` dipakai sebagai nilai token {fitur} pada template email massal.
+ */
+const MODUL_AKUN_DESA = {
+  bankeu: {
+    slug: 'bankeu',
+    label: 'Bantuan Keuangan',
+    slug_fitur: 'bankeu',
+    keys: ['bankeu'],
+  },
+  bumdes: {
+    slug: 'bumdes',
+    label: 'BUMDes',
+    slug_fitur: 'bumdes',
+    keys: ['bumdes'],
+  },
+};
+
+/** Modul dari slug yang dikirim frontend. null = halaman akun desa penuh (perilaku lama). */
+const resolveModul = (slug) => {
+  const kunci = String(slug || '').trim().toLowerCase();
+  if (!kunci) return null;
+  return MODUL_AKUN_DESA[kunci] || null;
+};
+
+/**
  * Peran yang melihat seluruh katalog tanpa memandang bidang_id.
  * Sengaja sempit: pimpinan dinas mengawasi semua bidang, sedangkan kepala_bidang
  * TIDAK di sini — ia tetap terikat bidang yang dipimpinnya.
@@ -77,17 +115,17 @@ const parseBidangId = (nilai) => {
  * Hak akses yang boleh diberikan/dicabut oleh satu akun staf.
  * Array kosong berarti akun itu tidak berwenang mengelola akun desa sama sekali.
  */
-const getAllowedPermissionKeys = (user) => {
+const getAllowedPermissionKeys = (user, modulSlug = null) => {
   if (!user) return [];
 
-  if (PERAN_LINTAS_BIDANG.includes(normalkanPeran(user.role))) {
-    return [...DESA_PERMISSION_KEYS];
-  }
+  const milikBidang = PERAN_LINTAS_BIDANG.includes(normalkanPeran(user.role))
+    ? DESA_PERMISSION_KEYS.filter((key) => !PERMISSION_LINTAS_BIDANG.includes(key))
+    : (() => {
+        const bidangId = parseBidangId(user.bidang_id);
+        if (bidangId === null) return null;
+        return PERMISSION_PER_BIDANG[bidangId] || null;
+      })();
 
-  const bidangId = parseBidangId(user.bidang_id);
-  if (bidangId === null) return [];
-
-  const milikBidang = PERMISSION_PER_BIDANG[bidangId];
   if (!milikBidang) return [];
 
   // Bidang tanpa fitur desa (Sekretariat) tidak dapat pintu masuk lewat
@@ -95,11 +133,26 @@ const getAllowedPermissionKeys = (user) => {
   // berisi "pesan" saja, yang bukan wewenangnya.
   if (milikBidang.length === 0) return [];
 
+  const modul = resolveModul(modulSlug);
+  if (modul) {
+    // IRISAN, bukan penggantian: modul hanya boleh mempersempit. Bidang yang
+    // tidak memegang fitur modul ini berakhir dengan array kosong, dan
+    // canManageDesaAccounts() menolaknya di gerbang rute.
+    const inti = milikBidang.filter((key) => modul.keys.includes(key));
+    if (inti.length === 0) return [];
+    return [...new Set([...inti, ...PERMISSION_LINTAS_BIDANG])];
+  }
+
   return [...new Set([...milikBidang, ...PERMISSION_LINTAS_BIDANG])];
 };
 
-/** Benar bila akun staf ini berwenang mengelola akun operasional desa. */
-const canManageDesaAccounts = (user) => getAllowedPermissionKeys(user).length > 0;
+/**
+ * Benar bila akun staf ini berwenang mengelola akun operasional desa.
+ * Dengan `modulSlug`, pertanyaannya menyempit: "berwenang untuk modul ini?" —
+ * staf PMD yang membuka pintu akun operator Bankeu dijawab tidak.
+ */
+const canManageDesaAccounts = (user, modulSlug = null) =>
+  getAllowedPermissionKeys(user, modulSlug).length > 0;
 
 /**
  * Fitur INTI bidang — yang menjadi wewenangnya sendiri, tanpa fitur bersama.
@@ -112,18 +165,20 @@ const canManageDesaAccounts = (user) => getAllowedPermissionKeys(user).length > 
  * Untuk peran lintas bidang (superadmin, pimpinan dinas) hasilnya seluruh
  * katalog minus fitur bersama: mereka memang tidak mewakili satu bidang.
  */
-const getCorePermissionKeys = (user) =>
-  getAllowedPermissionKeys(user).filter((key) => !PERMISSION_LINTAS_BIDANG.includes(key));
+const getCorePermissionKeys = (user, modulSlug = null) =>
+  getAllowedPermissionKeys(user, modulSlug).filter(
+    (key) => !PERMISSION_LINTAS_BIDANG.includes(key),
+  );
 
 /** Katalog (key + label + deskripsi) yang ditampilkan ke staf, sudah tersaring. */
-const getPermissionCatalog = (user) => {
-  const diizinkan = getAllowedPermissionKeys(user);
+const getPermissionCatalog = (user, modulSlug = null) => {
+  const diizinkan = getAllowedPermissionKeys(user, modulSlug);
   return DESA_PERMISSIONS.filter((p) => diizinkan.includes(p.key));
 };
 
 /** Saring input sembarang menjadi key valid YANG JUGA menjadi wewenang staf ini. */
-const sanitizeForActor = (input, user) => {
-  const diizinkan = getAllowedPermissionKeys(user);
+const sanitizeForActor = (input, user, modulSlug = null) => {
+  const diizinkan = getAllowedPermissionKeys(user, modulSlug);
   const mentah = Array.isArray(input) ? input : [];
   const bersih = mentah
     .map((key) => String(key || '').trim())
@@ -141,16 +196,18 @@ const sanitizeForActor = (input, user) => {
  * MENGHAPUS `bankeu` tanpa pernah melihatnya. Maka: yang di luar wewenang staf
  * dipertahankan apa adanya, yang di dalam wewenangnya diganti dengan kiriman.
  */
-const mergePermissions = (existingKeys, submittedInput, user) => {
-  const diizinkan = getAllowedPermissionKeys(user);
+const mergePermissions = (existingKeys, submittedInput, user, modulSlug = null) => {
+  const diizinkan = getAllowedPermissionKeys(user, modulSlug);
   const diluarWewenang = (Array.isArray(existingKeys) ? existingKeys : []).filter(
     (key) => !diizinkan.includes(key),
   );
-  const didalamWewenang = sanitizeForActor(submittedInput, user);
+  const didalamWewenang = sanitizeForActor(submittedInput, user, modulSlug);
   return [...new Set([...diluarWewenang, ...didalamWewenang])];
 };
 
 module.exports = {
+  MODUL_AKUN_DESA,
+  resolveModul,
   PERMISSION_PER_BIDANG,
   PERMISSION_LINTAS_BIDANG,
   PERAN_LINTAS_BIDANG,
