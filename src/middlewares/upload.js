@@ -14,6 +14,7 @@ const uploadDirs = [
   'storage/uploads/surat-masuk',
   'storage/uploads/aparatur_desa_files',
   'storage/uploads/arsip-barang',
+  'storage/uploads/kerjasama_desa',
   'storage/produk_hukum'
 ];
 
@@ -205,6 +206,23 @@ const uploadBerita = multer({
   }
 });
 
+// Storage configuration for KERJA SAMA DESA (PDF only).
+// Dokumen per kegiatan: Permakades, SK BKD, PKS/MoU. Perdes payungnya TIDAK
+// lewat sini — ia didaftarkan ke modul Produk Hukum dan memakai
+// uploadProdukHukum, supaya berkasnya mendarat di folder yang dibaca modul itu.
+const storageKerjasamaDesa = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'storage/uploads/kerjasama_desa');
+  },
+  filename: function (req, file, cb) {
+    const timestamp = Date.now();
+    const ext = path.extname(file.originalname);
+    const nameWithoutExt = path.basename(file.originalname, ext);
+    const sanitizedName = nameWithoutExt.replace(/[^a-zA-Z0-9]/g, '_');
+    cb(null, `${sanitizedName}_${timestamp}${ext}`);
+  }
+});
+
 // Storage configuration for PRODUK HUKUM (PDF only)
 const storageProdukHukum = multer.diskStorage({
   destination: function (req, file, cb) {
@@ -238,6 +256,14 @@ const uploadProdukHukum = multer({
   fileFilter: pdfFilter,
   limits: {
     fileSize: 10 * 1024 * 1024 // 10MB for PDF
+  }
+});
+
+const uploadKerjasamaDesa = multer({
+  storage: storageKerjasamaDesa,
+  fileFilter: pdfFilter,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB, sama dengan produk hukum
   }
 });
 
@@ -736,6 +762,7 @@ module.exports = {
   uploadBerita,
   uploadProdukHukum,
   uploadProdukHukumBidang,
+  uploadKerjasamaDesa,
   uploadSuratMasuk,
   uploadAparaturDesa,
   uploadPengurus,

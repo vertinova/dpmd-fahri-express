@@ -40,11 +40,12 @@ const PERMISSION_PER_BIDANG = {
   // Sekretariat — persuratan & kepegawaian, desa tidak mengunggah apa pun ke sini.
   2: [],
 
-  // SPKED — empat tab di SpkedPage.jsx persis sama dengan empat fitur ini.
+  // SPKED — tab di SpkedPage.jsx persis sama dengan daftar fitur ini.
   // `bantuan-provinsi-lpj` MILIK SINI, bukan KKD: yang memverifikasinya
   // checkRole('sarana_prasarana') di routes/dpmdBantuanProvinsiLpj.routes.js,
-  // dan tabnya ada di SpkedPage.jsx.
-  3: ['bankeu', 'bankeu-perubahan', 'bumdes', 'bantuan-provinsi-lpj'],
+  // dan tabnya ada di SpkedPage.jsx. `kerjasama-desa` juga di sini: yang
+  // memantaunya tab Kerja Sama Desa di halaman bidang yang sama.
+  3: ['bankeu', 'bankeu-perubahan', 'bumdes', 'bantuan-provinsi-lpj', 'kerjasama-desa'],
 
   // KKD — ADD, Dana Desa, BHPRD, penyaluran Bankeu & Bantuan Provinsi. Semuanya
   // pencatatan penyaluran di sisi DPMD; tidak satu pun berupa unggahan desa,
@@ -87,6 +88,12 @@ const MODUL_AKUN_DESA = {
     label: 'BUMDes',
     slug_fitur: 'bumdes',
     keys: ['bumdes'],
+  },
+  'kerjasama-desa': {
+    slug: 'kerjasama-desa',
+    label: 'Kerja Sama Desa',
+    slug_fitur: 'kerjasama',
+    keys: ['kerjasama-desa'],
   },
 };
 

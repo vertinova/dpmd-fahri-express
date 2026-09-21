@@ -40,6 +40,7 @@ const requiredDirs = [
   path.join(__dirname, '../storage/uploads/bumdes_dokumen_badanhukum'),
   path.join(__dirname, '../storage/uploads/bumdes_laporan_keuangan'),
   path.join(__dirname, '../storage/uploads/bumdes'),
+  path.join(__dirname, '../storage/uploads/kerjasama_desa'),
   path.join(__dirname, '../storage/uploads/profil_desa'),
   path.join(__dirname, '../storage/uploads/bankeu-perubahan/berita-acara'),
   path.join(__dirname, '../storage/uploads/bankeu-perubahan/surat-pengantar'),
@@ -380,6 +381,11 @@ app.use('/api/push-notification', require('./routes/pushNotification'));
 app.use('/api/cron', require('./routes/cron.routes'));
 
 app.use('/api/desa/bumdes', bumdesRoutes);
+// Kerja Sama Desa — sisi desa (input) dan sisi DPMD/SPKED (pantau, hanya baca)
+app.use('/api/desa/kerjasama', require('./routes/kerjasamaDesa.routes'));
+app.use('/api/dpmd/kerjasama-desa', require('./routes/dpmdKerjasamaDesa.routes'));
+// Agregat ikhtisar bidang SPKED (grafik BUM Desa & Bankeu)
+app.use('/api/spked/ikhtisar', require('./routes/spkedIkhtisar.routes'));
 app.use('/api/bumdes', bumdesRoutes); // Admin routes
 app.use('/api/desa/musdesus', musdesusRoutes);
 app.use('/api/musdesus', musdesusRoutes); // Admin routes
