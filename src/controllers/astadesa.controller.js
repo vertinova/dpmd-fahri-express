@@ -591,7 +591,18 @@ exports.getRingkasan = jalankan(async (req, res) => {
  */
 exports.getSebaran = jalankan(async (req, res) => {
   const force = paksa(req);
-  const semua = await asta.ambilSemua('/sensuses', {}, { force });
+
+  // Dilepas ke latar dengan alasan yang sama seperti /ringkasan: penyusuran
+  // `/sensuses` terukur 80 detik untuk 73 halaman, sementara axios di frontend
+  // menyerah pada detik ke-30. Menunggunya berarti peta tidak pernah tampil
+  // sama sekali — dan memang itu yang terjadi: dua `upstream timed out` pada
+  // jalur ini tercatat hanya dalam satu hari.
+  //
+  // Bedanya dengan /ringkasan, di sini tidak ada agregat pengganti: titik peta
+  // hanya bisa lahir dari baris mentah. Jadi muatan pertama memang kosong, dan
+  // `rincian_siap` di bawah ada supaya halaman bisa mengatakan "sedang
+  // disiapkan" alih-alih menyajikan nol titik seolah itu kenyataannya.
+  const semua = await asta.ambilSemua('/sensuses', {}, { force, latar: !force });
   const baris = semua.rows.map(normalSensus);
 
   const berkoordinat = baris.filter((r) => r.lat !== null);
@@ -649,7 +660,12 @@ exports.getSebaran = jalankan(async (req, res) => {
       // diisi", yang satu lagi "koordinatnya salah" — dan hanya yang kedua yang
       // bisa diperbaiki dengan mendatangi barisnya di ASTA DESA.
       di_luar_wilayah: berkoordinat.length - diDalamWilayah.length,
-      sebagian: semua.truncated
+      sebagian: semua.truncated,
+
+      // Pembeda "belum siap" dari "memang nol". Tanpa ini halaman akan
+      // menyajikan peta kosong sebagai hasil pembacaan yang sah.
+      rincian_siap: semua.rows.length > 0,
+      rincian_basi: semua.basi === true
     }
   });
 });
@@ -734,9 +750,13 @@ exports.getPengguna = jalankan(async (req, res) => {
     search
   };
 
+  // `halaman` tetap ditunggu — itu satu permintaan biasa dan justru isi tabel
+  // yang sedang dilihat orang. Yang dilepas ke latar hanya rekapitulasinya:
+  // penyusuran `/users` terukur 21 detik untuk 40 halaman, cukup dekat dengan
+  // batas 30 detik untuk gagal begitu server sedang sibuk.
   const [halaman, semua] = await Promise.all([
     asta.ambil('/users', params, { force }),
-    asta.ambilSemua('/users', {}, { force })
+    asta.ambilSemua('/users', {}, { force, latar: !force })
   ]);
 
   const perRole = new Map();
@@ -770,7 +790,12 @@ exports.getPengguna = jalankan(async (req, res) => {
       // AKUN, yang kedua per NAMA petugas pada baris sensus, dan selisih di
       // antara keduanya menandakan baris yang petugasnya tidak tertaut akun.
       total_sensus_per_akun: totalSensusPerAkun,
-      sebagian: semua.truncated
+      sebagian: semua.truncated,
+
+      // Hanya menyangkut rekapitulasi di atas. Tabel akun per halaman tetap
+      // diambil langsung dan selalu terisi.
+      rincian_siap: semua.rows.length > 0,
+      rincian_basi: semua.basi === true
     }
   });
 });
@@ -806,7 +831,13 @@ const usiaDari = (row) => {
  */
 exports.getDemografi = jalankan(async (req, res) => {
   const force = paksa(req);
-  const semua = await asta.ambilSemua('/sensus-anggotas', {}, { force });
+
+  // Yang terberat dari semua: 40.826 anggota keluarga = 205 halaman, terukur
+  // 29 detik — dan itu pun BELUM seluruhnya. Penyusuran berhenti di pagar
+  // MAX_ROWS (20.000 baris), jadi angka di halaman ini sejak dulu disusun dari
+  // separuh data. `sebagian` di bawah sudah menandainya; yang berubah di sini
+  // hanya bahwa HTTP tidak lagi ikut menunggu.
+  const semua = await asta.ambilSemua('/sensus-anggotas', {}, { force, latar: !force });
 
   const perJk = new Map();
   const perPendidikan = new Map();
@@ -864,7 +895,9 @@ exports.getDemografi = jalankan(async (req, res) => {
       per_pekerjaan: keDaftar(perPekerjaan, 'label').slice(0, 20),
       per_hubungan: keDaftar(perHubungan, 'label'),
       per_disabilitas: keDaftar(perDisabilitas, 'label'),
-      sebagian: semua.truncated
+      sebagian: semua.truncated,
+      rincian_siap: semua.rows.length > 0,
+      rincian_basi: semua.basi === true
     }
   });
 });
@@ -915,7 +948,12 @@ exports.getPesan = jalankan(async (req, res) => {
  */
 exports.getSebaranPeta = jalankan(async (req, res) => {
   const force = paksa(req);
-  const semua = await asta.ambilSemua('/sensuses', {}, { force, pengguna: true });
+
+  // Sama seperti /sebaran: 73 halaman, 80 detik, batas frontend 30 detik.
+  // Cache-nya berbagi kunci dengan /sebaran hanya bila `pengguna` sama — di
+  // sini `pengguna: true`, jadi keduanya punya slot sendiri dan masing-masing
+  // memanaskan cache-nya sendiri.
+  const semua = await asta.ambilSemua('/sensuses', {}, { force, pengguna: true, latar: !force });
 
   let pakaiRumah = 0;
   let pakaiLokasi = 0;
@@ -979,7 +1017,9 @@ exports.getSebaranPeta = jalankan(async (req, res) => {
       // memakai koordinat rumah — satu-satunya sisa selisih dengan panel.
       pakai_koordinat_rumah: pakaiRumah,
       pakai_koordinat_lokasi: pakaiLokasi,
-      sebagian: semua.truncated
+      sebagian: semua.truncated,
+      rincian_siap: semua.rows.length > 0,
+      rincian_basi: semua.basi === true
     }
   });
 });
