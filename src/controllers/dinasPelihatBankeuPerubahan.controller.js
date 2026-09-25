@@ -6,11 +6,14 @@
  * modul ini sengaja hanya membungkus handler READ milik controller DPMD dan
  * tidak pernah menyentuh handler tulis (verify/cancel/troubleshoot/edit).
  *
- * Dua pembatas yang dipasang di sini:
+ * Dua pembatas yang dipasang di sini (untuk cakupan 'final', BPKAD/Inspektorat):
  *  1. Hanya proposal yang keputusan DPMD-nya sudah FINAL yang dikirim ke mereka
  *     — proposal yang masih berjalan (pending/revisi) bukan urusannya.
  *  2. Endpoint detail per-proposal menolak id yang belum final, supaya data
  *     tidak bisa dikorek satu per satu lewat URL.
+ *
+ * Cakupan 'all' (DLH, lihat req.bankeuPerubahanScope dari authorizeDinasPelihat)
+ * melihat SEMUA proposal di semua tahap — tetap tanpa satupun handler tulis.
  */
 const sequelize = require('../config/database');
 const logger = require('../utils/logger');
@@ -41,10 +44,14 @@ const finalOnly = (handler) => (req, res) => {
   return handler(req, capture);
 };
 
+const isScopeAll = (req) => req.bankeuPerubahanScope === 'all';
+
 /**
- * Pastikan proposal yang dibuka detailnya memang sudah final di DPMD.
+ * Pastikan proposal yang dibuka detailnya memang sudah final di DPMD
+ * (tidak berlaku untuk cakupan 'all').
  */
 const ensureFinalProposal = async (req, res, next) => {
+  if (isScopeAll(req)) return next();
   const id = req.params.id || req.params.proposalId;
   try {
     const [rows] = await sequelize.query(
@@ -68,10 +75,22 @@ const ensureFinalProposal = async (req, res, next) => {
   }
 };
 
+// Cakupan 'all' memakai query tracking DPMD, yang memang memuat SEMUA proposal
+// (termasuk yang masih di Desa/Kecamatan) lengkap dengan tautan dokumennya.
+const getProposals = (req, res) =>
+  isScopeAll(req)
+    ? dpmdController.getTracking(req, res)
+    : finalOnly(dpmdController.getProposals)(req, res);
+
+const getTracking = (req, res) =>
+  isScopeAll(req)
+    ? dpmdController.getTracking(req, res)
+    : finalOnly(dpmdController.getTracking)(req, res);
+
 module.exports = {
   ensureFinalProposal,
-  getProposals: finalOnly(dpmdController.getProposals),
-  getTracking: finalOnly(dpmdController.getTracking),
+  getProposals,
+  getTracking,
   getProposalVersions: dpmdController.getProposalVersions,
   getProposalRevisions: dpmdController.getProposalRevisions,
   getProposalVerificationHistory: dpmdController.getProposalVerificationHistory,

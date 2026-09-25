@@ -106,6 +106,7 @@ class BankeuPerubahanDpmdController {
           bp.id, bp.desa_id, bp.kecamatan_id, bp.tahun_anggaran,
           bp.jenis_kegiatan, bp.kegiatan_id, bp.kegiatan_nama, bp.nama_kegiatan_spesifik,
           bp.volume, bp.lokasi, bp.judul_proposal, bp.anggaran_usulan,
+          bp.file_proposal, bp.berita_acara_path, bp.surat_pengantar_kecamatan_path,
           bp.status,
           bp.kecamatan_status, bp.kecamatan_catatan, bp.kecamatan_verified_at,
           bp.dpmd_status, bp.dpmd_catatan, bp.dpmd_verified_at,

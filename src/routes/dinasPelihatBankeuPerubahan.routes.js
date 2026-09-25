@@ -1,9 +1,10 @@
-// Bankeu Perubahan — halaman dinas PELIHAT (BPKAD & Inspektorat).
+// Bankeu Perubahan — halaman dinas PELIHAT (BPKAD, Inspektorat & DLH).
 //
 // Semua rute di sini READ-ONLY: tidak ada POST/PATCH/PUT/DELETE sama sekali,
 // sehingga akun pelihat tidak punya jalan untuk memverifikasi atau mengubah
 // proposal, dokumen, maupun data lain. Guard authorizeDinasPelihat memastikan
-// hanya akun dinas yang kodenya terdaftar sebagai pelihat yang bisa masuk.
+// hanya akun dinas yang kodenya terdaftar sebagai pelihat yang bisa masuk, dan
+// menentukan cakupannya: BPKAD/Inspektorat hanya proposal final, DLH semua.
 const express = require('express');
 const router = express.Router();
 const controller = require('../controllers/dinasPelihatBankeuPerubahan.controller');

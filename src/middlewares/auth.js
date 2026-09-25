@@ -371,6 +371,13 @@ const denyDinasPelihat = async (req, res, next) => {
 // (dan barisnya di master_dinas).
 const KODE_DINAS_PELIHAT = ['BPKAD', 'INSPEKTORAT'];
 
+// Kode dinas yang boleh MELIHAT SELURUH proposal Bankeu Perubahan (semua tahap,
+// bukan hanya yang final di DPMD) lewat /api/dinas-pelihat/* — tetap read-only.
+// Berbeda dengan KODE_DINAS_PELIHAT, akun ini TIDAK ditutup dari jalur dinas
+// lainnya (mis. verifikasi Bankeu reguler DLH tetap berjalan seperti biasa).
+// Harus sama dengan KODE_DINAS_LIHAT_SEMUA di front-end (utils/dinasPelihat.js).
+const KODE_DINAS_LIHAT_SEMUA_PERUBAHAN = ['DLH', 'DLHK'];
+
 // Cache kecil id dinas -> kode_dinas supaya tidak query master_dinas tiap request.
 const dinasKodeCache = new Map();
 const getKodeDinas = async (dinasId) => {
@@ -392,11 +399,23 @@ const isDinasPelihatAccount = async (user) => {
   return KODE_DINAS_PELIHAT.includes(await getKodeDinas(user.dinas_id));
 };
 
+// Cakupan data Bankeu Perubahan yang boleh dilihat akun ini lewat
+// /api/dinas-pelihat/*: 'all' (DLH — semua proposal), 'final' (BPKAD/
+// Inspektorat — hanya yang final di DPMD), atau null (tidak berhak).
+const getBankeuPerubahanViewScope = async (user) => {
+  if (!user || !user.dinas_id) return null;
+  const kode = await getKodeDinas(user.dinas_id);
+  if (KODE_DINAS_LIHAT_SEMUA_PERUBAHAN.includes(kode)) return 'all';
+  if (KODE_DINAS_PELIHAT.includes(kode)) return 'final';
+  return null;
+};
+
 /**
  * Require dinas pelihat (read-only)
- * Hanya akun dinas yang kode dinasnya terdaftar di KODE_DINAS_PELIHAT yang
- * lolos. Dipakai untuk endpoint arsip Bankeu Perubahan versi lihat-saja; tidak
- * ada satupun endpoint tulis yang memakai middleware ini.
+ * Hanya akun dinas yang kodenya terdaftar di KODE_DINAS_PELIHAT atau
+ * KODE_DINAS_LIHAT_SEMUA_PERUBAHAN yang lolos; cakupannya ditaruh di
+ * req.bankeuPerubahanScope. Dipakai untuk endpoint Bankeu Perubahan versi
+ * lihat-saja; tidak ada satupun endpoint tulis yang memakai middleware ini.
  */
 const authorizeDinasPelihat = async (req, res, next) => {
   try {
@@ -410,11 +429,13 @@ const authorizeDinasPelihat = async (req, res, next) => {
       return res.status(403).json({ success: false, message: 'Access forbidden - Requires viewer dinas account' });
     }
 
-    if (!(await isDinasPelihatAccount(req.user))) {
+    const scope = await getBankeuPerubahanViewScope(req.user);
+    if (!scope) {
       logger.warn(`❌ Akses pelihat ditolak - User ${req.user.email} bukan akun dinas pelihat`);
       return res.status(403).json({ success: false, message: 'Access forbidden - Requires viewer dinas account' });
     }
 
+    req.bankeuPerubahanScope = scope;
     next();
   } catch (error) {
     logger.error('authorizeDinasPelihat error:', error);
