@@ -191,10 +191,12 @@ const parseBigId = (nilai) => {
  * dan email dari satu template — identitas aslinya diisi operatornya sendiri
  * saat login pertama, berbarengan dengan layar wajib ganti sandi.
  *
- * Aturan yang tidak boleh dilanggar: JANGAN PERNAH MENIMPA. Desa yang sudah
- * punya pemegang fitur ini dilewati, apa pun keadaannya — termasuk bila
- * akunnya sedang nonaktif, karena mengaktifkan kembali akun lama adalah
- * keputusan yang harus diambil sadar, bukan efek samping tombol massal.
+ * Aturan yang tidak boleh dilanggar: JANGAN PERNAH MENIMPA. Akun yang sudah
+ * ada tidak pernah diubah. Desa yang sudah punya operator fitur ini TETAP
+ * dibuatkan akun dari template (satu desa boleh punya beberapa operator,
+ * mis. operator desa umum + operator khusus BUMDes). Yang dilewati hanya desa
+ * yang akun dengan email template itu sudah ada — sehingga Generate aman
+ * ditekan berulang tanpa melahirkan akun ganda.
  */
 
 /**
@@ -262,6 +264,10 @@ const susunRencanaGenerate = async (req) => {
     select: { id: true, name: true, email: true, desa_id: true, is_active: true },
   });
 
+  // Pemegang fitur ini yang SUDAH ada hanya menjadi keterangan, tidak lagi
+  // membuat desa dilewati: satu desa boleh punya beberapa operator untuk fitur
+  // yang sama (mis. operator desa umum + operator khusus BUMDes). Yang mencegah
+  // akun ganda adalah email template — lihat status 'sudah_dibuat' di bawah.
   const petaPemegang = new Map();
   pemegang.forEach((u) => {
     const kunci = String(u.desa_id);
@@ -292,7 +298,7 @@ const susunRencanaGenerate = async (req) => {
   const emailUnik = [...new Set(rencana.map((r) => r.email))];
   const terpakai = await prisma.users.findMany({
     where: { email: { in: emailUnik } },
-    select: { email: true, name: true, role: true },
+    select: { email: true, name: true, role: true, desa_id: true },
   });
   const petaTerpakai = new Map(terpakai.map((u) => [u.email, u]));
 
@@ -303,30 +309,25 @@ const susunRencanaGenerate = async (req) => {
 
   const kandidat = rencana.map((r) => {
     const sudah = petaPemegang.get(r.desa.id) || [];
-    if (sudah.length > 0) {
-      const aktif = sudah.filter((u) => u.is_active);
-      return {
-        ...r,
-        status: aktif.length > 0 ? 'sudah_punya' : 'sudah_punya_nonaktif',
-        alasan:
-          aktif.length > 0
-            ? 'Sudah punya operator untuk fitur ini.'
-            : 'Operator fitur ini sudah ada tapi nonaktif — aktifkan yang lama, jangan buat baru.',
-        operator: sudah.map((u) => ({
-          id: String(u.id),
-          name: u.name,
-          email: u.email,
-          is_active: u.is_active,
-        })),
-      };
-    }
+    const operatorLain = sudah.map((u) => ({
+      id: String(u.id),
+      name: u.name,
+      email: u.email,
+      is_active: u.is_active,
+    }));
 
     const bentrokAkun = petaTerpakai.get(r.email);
     if (bentrokAkun) {
+      // Akun dari template yang sama untuk desa yang sama = hasil generate
+      // sebelumnya. Dilewati supaya menekan Generate berulang kali aman.
+      const milikDesaIni = bentrokAkun.role === MANAGED_ROLE && String(bentrokAkun.desa_id) === r.desa.id;
       return {
         ...r,
-        status: 'email_terpakai',
-        alasan: `Email ini sudah dipakai akun lain (${bentrokAkun.name}).`,
+        status: milikDesaIni ? 'sudah_dibuat' : 'email_terpakai',
+        alasan: milikDesaIni
+          ? 'Akun dengan email ini sudah dibuat sebelumnya.'
+          : `Email ini sudah dipakai akun lain (${bentrokAkun.name}).`,
+        operator: operatorLain,
       };
     }
 
@@ -338,7 +339,13 @@ const susunRencanaGenerate = async (req) => {
       };
     }
 
-    return { ...r, status: 'baru', alasan: null };
+    return {
+      ...r,
+      status: 'baru',
+      // Keterangan saja: desa ini tetap dibuatkan akun.
+      alasan: operatorLain.length > 0 ? `Tambahan — desa ini sudah punya ${operatorLain.length} operator fitur ini.` : null,
+      operator: operatorLain,
+    };
   });
 
   const ringkasan = kandidat.reduce(
@@ -571,6 +578,94 @@ class BidangAkunDesaController {
     } catch (error) {
       logger.error('Gagal memuat daftar akun desa:', error);
       res.status(500).json({ success: false, message: 'Gagal memuat daftar akun' });
+    }
+  }
+
+  /**
+   * Ekspor seluruh akun operator fitur ini untuk dibagikan ke penanggung jawab
+   * di desa. GET /ekspor?modul=&kecamatan_id=
+   *
+   * SANDI hanya ikut bila akun MASIH memakai sandi default — diuji dengan
+   * bcrypt terhadap hash sebenarnya, bukan kolom plain_password (yang bisa
+   * basi bila sandi diganti lewat jalur lain). Sandi yang sudah diganti
+   * pemiliknya tidak pernah keluar dari sini.
+   *
+   * Tanpa batas 300 seperti daftar di layar: ekspor harus memuat semua akun.
+   */
+  async eksporAkun(req, res) {
+    try {
+      const core = getCorePermissionKeys(req.user, req.modulAkunDesa);
+      if (core.length === 0) return badRequest(res, 'Bidang Anda tidak memegang fitur ini.');
+
+      const where = {
+        role: MANAGED_ROLE,
+        desa_user_permissions: { some: { permission_key: { in: core } } },
+      };
+      if (req.query.kecamatan_id) {
+        const kecamatanId = parseBigId(req.query.kecamatan_id);
+        if (!kecamatanId) return badRequest(res, 'Kecamatan tidak valid');
+        const desaSeKecamatan = await prisma.desas.findMany({ where: { kecamatan_id: kecamatanId }, select: { id: true } });
+        where.desa_id = { in: desaSeKecamatan.map((d) => d.id) };
+      }
+
+      const users = await prisma.users.findMany({
+        where,
+        select: { ...USER_SELECT, password: true },
+        orderBy: [{ desa_id: 'asc' }, { name: 'asc' }],
+      });
+      const petaDesa = await muatPetaDesa(users);
+
+      // Akun hasil generate massal berbagi SATU hash per gelombang, jadi hasil
+      // bcrypt di-cache per hash: ratusan akun cukup belasan perbandingan.
+      const cache = new Map();
+      const masihDefault = async (hash) => {
+        const kunci = String(hash || '');
+        if (!kunci) return false;
+        if (!cache.has(kunci)) cache.set(kunci, bcrypt.compare(SANDI_DEFAULT, kunci).catch(() => false));
+        return cache.get(kunci);
+      };
+
+      const baris = [];
+      for (const u of users) {
+        const desa = u.desa_id !== null && u.desa_id !== undefined ? petaDesa.get(String(u.desa_id)) : null;
+        const isDefault = await masihDefault(u.password);
+        baris.push({
+          id: String(u.id),
+          kecamatan: desa?.kecamatan?.nama || '',
+          desa: desa?.nama || '',
+          status_pemerintahan: desa?.status_pemerintahan || null,
+          nama: u.name,
+          email: u.email,
+          jabatan: u.jabatan_desa || '',
+          no_hp: u.no_hp || '',
+          aktif: u.is_active,
+          terakhir_aktif: u.last_active_at || null,
+          sandi_default: isDefault,
+          sandi: isDefault ? SANDI_DEFAULT : null,
+        });
+      }
+
+      baris.sort((a, b) =>
+        a.kecamatan.localeCompare(b.kecamatan, 'id') || a.desa.localeCompare(b.desa, 'id') || a.nama.localeCompare(b.nama, 'id'));
+
+      const jumlahDefault = baris.filter((b) => b.sandi_default).length;
+      logAksi(req, {
+        action: 'download',
+        target: null,
+        description:
+          `${req.user.name} mengekspor ${baris.length} akun operator ${req.modulAkunDesa || 'desa'}` +
+          ` (${jumlahDefault} masih sandi default ikut beserta sandinya)`,
+        newValue: { modul: req.modulAkunDesa, jumlah: baris.length, sandi_default: jumlahDefault },
+      });
+
+      res.json({
+        success: true,
+        data: baris,
+        ringkasan: { total: baris.length, sandi_default: jumlahDefault, sudah_diganti: baris.length - jumlahDefault },
+      });
+    } catch (error) {
+      logger.error('Gagal mengekspor akun operator:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengekspor akun operator' });
     }
   }
 
@@ -950,7 +1045,7 @@ class BidangAkunDesaController {
           success: false,
           code: 'TIDAK_ADA_SASARAN',
           message:
-            'Tidak ada desa yang perlu dibuatkan akun — semuanya sudah punya operator untuk fitur ini atau emailnya bentrok.',
+            'Tidak ada desa yang perlu dibuatkan akun — akun dari template ini sudah dibuat untuk semua desa, atau emailnya bentrok.',
           data: { ringkasan, kandidat },
         });
       }

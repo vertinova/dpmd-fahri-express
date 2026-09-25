@@ -85,6 +85,10 @@ router.post('/generate/pratinjau', bidangAkunDesaController.pratinjauGenerate);
 router.post('/generate', bidangAkunDesaController.generateAkun);
 
 router.get('/users', bidangAkunDesaController.getUsers);
+
+// Ekspor akun operator fitur ini — sandi hanya untuk akun yang masih memakai
+// sandi default (untuk dibagikan ke penanggung jawab di desa).
+router.get('/ekspor', bidangAkunDesaController.eksporAkun);
 router.post('/users', bidangAkunDesaController.createUser);
 router.put('/users/:id', bidangAkunDesaController.updateUser);
 router.put('/users/:id/permissions', bidangAkunDesaController.updatePermissions);
