@@ -1039,6 +1039,7 @@ model bumdes_produk {
   satuan     String?   @db.VarChar(50)
   foto       String?   @db.VarChar(255)
   tautan     String?   @db.VarChar(500)
+  whatsapp   String?   @db.VarChar(20)
   unggulan   Boolean   @default(false)
   is_active  Boolean   @default(true)
   created_by BigInt?   @db.UnsignedBigInt

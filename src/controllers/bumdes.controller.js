@@ -1672,31 +1672,40 @@ class BumdesController {
   /**
    * GET /api/desa/bumdes/katalog-produk — etalase produk SELURUH BUM Desa.
    * Tanpa transaksi: yang ditampilkan hanya informasi & kontak penjualnya.
-   * Query: q, kategori, kecamatan, unggulan=1, page, limit
+   * Query: q, kategori, kecamatan, jenis=produk|wisata, unggulan=1, page, limit
    */
   async getKatalogProduk(req, res, next) {
     try {
-      const { q, kategori, kecamatan } = req.query;
+      const { q, kategori, kecamatan, jenis } = req.query;
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 24, 1), 60);
       const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
 
-      const where = { is_active: true };
-      if (kategori) where.kategori = String(kategori);
-      if (req.query.unggulan === '1') where.unggulan = true;
-      const syaratBumdes = {};
-      if (kecamatan) syaratBumdes.kecamatan = String(kecamatan);
+      // Syarat digabung lewat AND supaya pencarian (OR) dan jenis (OR untuk
+      // kategori kosong) tidak saling menimpa.
+      const syarat = [{ is_active: true }];
+      if (kategori) syarat.push({ kategori: String(kategori) });
+      if (jenis === 'wisata') syarat.push({ kategori: { in: KATEGORI_WISATA } });
+      if (jenis === 'produk') syarat.push({ OR: [{ kategori: null }, { kategori: { notIn: KATEGORI_WISATA } }] });
+      if (req.query.unggulan === '1') syarat.push({ unggulan: true });
+      if (kecamatan) syarat.push({ bumdes: { kecamatan: String(kecamatan) } });
       if (q && String(q).trim()) {
         const kata = String(q).trim().slice(0, 100);
-        where.OR = [
-          { nama: { contains: kata } },
-          { deskripsi: { contains: kata } },
-          { bumdes: { namabumdesa: { contains: kata } } },
-          { bumdes: { desa: { contains: kata } } },
-        ];
+        syarat.push({
+          OR: [
+            { nama: { contains: kata } },
+            { deskripsi: { contains: kata } },
+            { bumdes: { namabumdesa: { contains: kata } } },
+            { bumdes: { desa: { contains: kata } } },
+          ],
+        });
       }
-      if (Object.keys(syaratBumdes).length) where.bumdes = syaratBumdes;
+      const where = { AND: syarat };
+      const tigaPuluhHariLalu = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
 
-      const [total, produk, totalSemua, perKategori, jumlahUnggulan, bumdesBerproduk, totalBumdes, unggulan, kecamatanRows] =
+      const [
+        total, produk, totalSemua, perKategori, jumlahUnggulan, bumdesBerproduk, totalBumdes,
+        unggulan, kecamatanRows, produkBaru, jumlahWisata,
+      ] =
         await Promise.all([
           prisma.bumdes_produk.count({ where }),
           prisma.bumdes_produk.findMany({
@@ -1715,7 +1724,7 @@ class BumdesController {
             where: { is_active: true, unggulan: true },
             include: { bumdes: { select: PILIH_BUMDES_KATALOG } },
             orderBy: { updated_at: 'desc' },
-            take: 4,
+            take: 6,
           }),
           prisma.bumdes.findMany({
             where: { bumdes_produk: { some: { is_active: true } } },
@@ -1723,6 +1732,8 @@ class BumdesController {
             distinct: ['kecamatan'],
             orderBy: { kecamatan: 'asc' },
           }),
+          prisma.bumdes_produk.count({ where: { is_active: true, created_at: { gte: tigaPuluhHariLalu } } }),
+          prisma.bumdes_produk.count({ where: { is_active: true, kategori: { in: KATEGORI_WISATA } } }),
         ]);
 
       return res.json({
@@ -1737,6 +1748,10 @@ class BumdesController {
             total_bumdes: totalBumdes,
             jumlah_kategori: perKategori.filter((k) => k.kategori).length,
             produk_unggulan: jumlahUnggulan,
+            // Angka nyata untuk penanda tren di kartu statistik.
+            produk_baru_30_hari: produkBaru,
+            jumlah_wisata: jumlahWisata,
+            jumlah_kecamatan: kecamatanRows.filter((k) => k.kecamatan).length,
           },
           kategori: perKategori
             .filter((k) => k.kategori)
@@ -1914,10 +1929,25 @@ const hapusBerkasBaru = async (req, res) => {
 /* ─────────────────────── Pembantu katalog produk ─────────────────────── */
 
 const KATEGORI_PRODUK = [
-  'Makanan & Minuman', 'Pertanian', 'Perkebunan', 'Peternakan', 'Perikanan',
-  'Kerajinan', 'Fashion & Tekstil', 'Kesehatan & Kecantikan', 'Jasa',
-  'Wisata', 'Lainnya',
+  'Makanan & Minuman', 'Makanan Ringan', 'Hasil Pertanian', 'Perkebunan',
+  'Peternakan', 'Perikanan', 'Produk Olahan', 'Kerajinan Tangan',
+  'Fashion & Aksesoris', 'Produk Herbal', 'Kesehatan & Kecantikan', 'Jasa',
+  'Wisata Desa', 'Lainnya',
 ];
+// Nama kategori versi pertama katalog — tetap diterima supaya produk lama
+// masih bisa disimpan ulang, tapi tidak lagi ditawarkan di pilihan.
+const KATEGORI_PRODUK_LAMA = ['Pertanian', 'Kerajinan', 'Fashion & Tekstil', 'Wisata'];
+// Kategori yang dihitung sebagai WISATA desa (tab Wisata Desa di katalog).
+const KATEGORI_WISATA = ['Wisata Desa', 'Wisata'];
+
+/** Nomor HP/WA → 62xxxxxxxxxx (format wa.me); null bila tidak masuk akal. */
+const nomorWhatsapp = (v) => {
+  let d = String(v || '').replace(/[^\d]/g, '');
+  if (!d) return null;
+  if (d.startsWith('0')) d = `62${d.slice(1)}`;
+  else if (d.startsWith('8')) d = `62${d}`;
+  return /^62\d{8,13}$/.test(d) ? d : null;
+};
 const MAKS_UNGGULAN = 3;
 const FOLDER_PRODUK = 'bumdes_produk';
 const DIR_PRODUK = path.join(__dirname, '../../storage/uploads', FOLDER_PRODUK);
@@ -1925,7 +1955,7 @@ const ROLE_SPKED = ['pegawai', 'kepala_bidang', 'kepala_dinas', 'ketua_tim'];
 
 const PILIH_BUMDES_KATALOG = {
   id: true, namabumdesa: true, desa: true, kecamatan: true,
-  TelfonBumdes: true, MediaSosial: true,
+  TelfonBumdes: true, HPDirektur: true, MediaSosial: true,
 };
 
 /** Desa (miliknya sendiri), SPKED (bidang 3), dan admin boleh mengelola. */
@@ -1971,7 +2001,16 @@ const bacaIsianProduk = (body) => {
   if (!nama) return { galat: 'Nama produk wajib diisi' };
 
   const kategori = teks(body.kategori, 100);
-  if (kategori && !KATEGORI_PRODUK.includes(kategori)) return { galat: 'Kategori produk tidak dikenal' };
+  if (kategori && ![...KATEGORI_PRODUK, ...KATEGORI_PRODUK_LAMA].includes(kategori)) {
+    return { galat: 'Kategori produk tidak dikenal' };
+  }
+
+  // Nomor WhatsApp penjual — tujuan tombol "Pesan" di katalog.
+  let whatsapp = null;
+  if (String(body.whatsapp ?? '').trim()) {
+    whatsapp = nomorWhatsapp(body.whatsapp);
+    if (!whatsapp) return { galat: 'Nomor WhatsApp tidak valid. Contoh: 081234567890' };
+  }
 
   let harga = null;
   if (body.harga !== undefined && String(body.harga).trim() !== '') {
@@ -1992,6 +2031,8 @@ const bacaIsianProduk = (body) => {
       harga,
       satuan: teks(body.satuan, 50),
       tautan,
+      // Hanya ditulis bila dikirim, supaya klien lama tidak mengosongkannya.
+      ...(body.whatsapp !== undefined ? { whatsapp } : {}),
       unggulan: benar(body.unggulan),
       is_active: body.is_active === undefined ? true : benar(body.is_active),
     },
@@ -2038,8 +2079,17 @@ const bentukProduk = (p) => ({
   satuan: p.satuan,
   foto: p.foto,
   tautan: p.tautan,
+  jenis: KATEGORI_WISATA.includes(p.kategori) ? 'wisata' : 'produk',
+  // Nomor yang diisi penjual untuk produk ini (untuk formulir).
+  whatsapp_produk: p.whatsapp || null,
+  // Tujuan tombol Pesan: nomor produk → telepon BUM Desa → HP Direktur.
+  whatsapp: p.whatsapp
+    || nomorWhatsapp(p.bumdes?.TelfonBumdes)
+    || nomorWhatsapp(p.bumdes?.HPDirektur)
+    || null,
   unggulan: p.unggulan,
   is_active: p.is_active,
+  created_at: p.created_at,
   updated_at: p.updated_at,
   bumdes: p.bumdes && p.bumdes.namabumdesa !== undefined
     ? {
