@@ -935,7 +935,15 @@ class BidangAkunDesaController {
       if (rencana.error) return badRequest(res, rencana.error);
 
       const { modul, kandidat, ringkasan, template } = rencana;
-      const sasaran = kandidat.filter((k) => k.status === 'baru');
+      const semuaSasaran = kandidat.filter((k) => k.status === 'baru');
+
+      // Diproses per GELOMBANG. Membuat ~416 akun berurutan dalam satu
+      // permintaan melewati batas waktu klien (30 detik) maupun proxy, sehingga
+      // se-kabupaten tidak pernah selesai. Frontend mengulang permintaan ini
+      // sampai `sisa` 0 — aman diulang karena rencananya dihitung ulang dan desa
+      // yang sudah dibuatkan akun otomatis dilewati.
+      const ukuranGelombang = Math.min(Math.max(parseInt(req.body.gelombang, 10) || 0, 0), BATAS_GENERATE);
+      const sasaran = ukuranGelombang ? semuaSasaran.slice(0, ukuranGelombang) : semuaSasaran;
 
       if (sasaran.length === 0) {
         return res.status(409).json({
@@ -1045,6 +1053,8 @@ class BidangAkunDesaController {
           gagal,
           dilewati: kandidat.filter((k) => k.status !== 'baru'),
           ringkasan: { ...ringkasan, dibuat: dibuat.length, gagal: gagal.length },
+          // Desa yang masih menunggu gelombang berikutnya.
+          sisa: semuaSasaran.length - sasaran.length,
         },
       });
     } catch (error) {

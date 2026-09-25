@@ -998,6 +998,23 @@ model bumdes {
   LinkLapKeuangan2021                                           String?        @db.Text
   LinkSKKepengurusan2021                                        String?        @db.Text
   CatatanTambahan                                               String?        @db.Text
+
+  // --- Perbaikan aplikasi BUM Desa (2026-09) — daftar JSON, lihat migrasi 20260925 ---
+  KategoriUsaha                                                 String?        @db.LongText
+  KategoriUsahaPangan                                           String?        @db.LongText
+  UnitUsaha                                                     String?        @db.LongText
+  RiwayatPermodalan                                             String?        @db.LongText
+  RiwayatAset                                                   String?        @db.LongText
+  RiwayatOmsetLaba                                              String?        @db.LongText
+  RiwayatKontribusiPADes                                        String?        @db.LongText
+  RiwayatKemitraan                                              String?        @db.LongText
+  PeranProgram                                                  String?        @db.LongText
+  LaporanPertanggungjawaban                                     String?        @db.LongText
+  MediaSosial                                                   String?        @db.LongText
+  StudiKelayakanUsaha                                           String?        @db.VarChar(255)
+  RABKetahananPangan                                            String?        @db.VarChar(255)
+  DokumentasiGeotagging                                         String?        @db.VarChar(255)
+  bumdes_produk                                                 bumdes_produk[]
   produk_hukums_bumdes_produk_hukum_perdes_idToproduk_hukums    produk_hukums? @relation("bumdes_produk_hukum_perdes_idToproduk_hukums", fields: [produk_hukum_perdes_id], references: [id], onUpdate: NoAction, map: "bumdes_produk_hukum_perdes_id_foreign")
   produk_hukums_bumdes_produk_hukum_sk_bumdes_idToproduk_hukums produk_hukums? @relation("bumdes_produk_hukum_sk_bumdes_idToproduk_hukums", fields: [produk_hukum_sk_bumdes_id], references: [id], onUpdate: NoAction, map: "bumdes_produk_hukum_sk_bumdes_id_foreign")
 
@@ -1007,6 +1024,31 @@ model bumdes {
   @@index([produk_hukum_perdes_id], map: "idx_produk_hukum_perdes_id")
   @@index([produk_hukum_sk_bumdes_id], map: "idx_produk_hukum_sk_bumdes_id")
   @@index([status], map: "idx_status")
+}
+
+/// Katalog produk BUM Desa — etalase tanpa transaksi, tampil di dasbor
+/// operator BUM Desa. Banyak baris per BUM Desa.
+model bumdes_produk {
+  id         BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  bumdes_id  Int
+  desa_id    BigInt?   @db.UnsignedBigInt
+  nama       String    @db.VarChar(255)
+  kategori   String?   @db.VarChar(100)
+  deskripsi  String?   @db.Text
+  harga      Decimal?  @db.Decimal(15, 2)
+  satuan     String?   @db.VarChar(50)
+  foto       String?   @db.VarChar(255)
+  tautan     String?   @db.VarChar(500)
+  unggulan   Boolean   @default(false)
+  is_active  Boolean   @default(true)
+  created_by BigInt?   @db.UnsignedBigInt
+  created_at DateTime? @db.Timestamp(0)
+  updated_at DateTime? @db.Timestamp(0)
+  bumdes     bumdes    @relation(fields: [bumdes_id], references: [id], onDelete: Cascade, map: "fk_bumdes_produk_bumdes")
+
+  @@index([bumdes_id], map: "bumdes_produk_bumdes_index")
+  @@index([desa_id], map: "bumdes_produk_desa_index")
+  @@index([kategori], map: "bumdes_produk_kategori_index")
 }
 
 model desa_bankeu_surat {

@@ -561,6 +561,15 @@ class KepalaDinasController {
           ProgramKerja: true, SK_BUM_Desa: true, ProfilBUMDesa: true, BeritaAcara: true,
           LaporanKeuangan2021: true, LaporanKeuangan2022: true,
           LaporanKeuangan2023: true, LaporanKeuangan2024: true,
+          // Isian formulir baru (2026-09): daftar bertahun & dokumen ketahanan
+          // pangan. Tanpa ini SPKED hanya melihat kolom tahunan lama, sehingga
+          // modal/omset/PADes 2026, LPJ tahun baru, MoU, dsb. tidak terlihat.
+          JenisUsahaLainnya: true, KategoriUsaha: true, UnitUsaha: true,
+          RiwayatPermodalan: true, RiwayatAset: true, RiwayatOmsetLaba: true,
+          RiwayatKontribusiPADes: true, RiwayatKemitraan: true, PeranProgram: true,
+          LaporanPertanggungjawaban: true, MediaSosial: true,
+          StudiKelayakanUsaha: true, RABKetahananPangan: true, DokumentasiGeotagging: true,
+          _count: { select: { bumdes_produk: { where: { is_active: true } } } },
           // Perdes/SK yang dipilih desa dari modul Produk Hukum. Berkasnya ada
           // di folder lain, jadi harus ikut supaya tombol dokumen di Core
           // Dashboard tidak kosong untuk desa yang menempuh jalur itu.
@@ -602,11 +611,52 @@ class KepalaDinasController {
         ['SK_BUM_Desa', 'SK BUM Desa'],
       ];
 
+      // Daftar JSON dari formulir baru. null = baris belum pernah disimpan
+      // lewat formulir baru → pakai kolom lama.
+      const daftar = (v) => {
+        if (!v) return null;
+        try { const x = JSON.parse(v); return Array.isArray(x) ? x : null; } catch { return null; }
+      };
+      const objek = (v) => {
+        if (!v) return {};
+        try { const x = JSON.parse(v); return x && typeof x === 'object' && !Array.isArray(x) ? x : {}; } catch { return {}; }
+      };
+      const urutTahun = (arr) => [...arr].sort((a, b) => (Number(a.tahun) || 0) - (Number(b.tahun) || 0));
+      // Nilai tahun terbaru yang terisi dari sebuah daftar.
+      const terbaru = (arr, kunci) => {
+        const baris = urutTahun((arr || []).filter((b) => b.tahun && angka(b[kunci]) !== null)).pop();
+        return baris ? { tahun: Number(baris.tahun), nilai: angka(baris[kunci]) } : null;
+      };
+
       const data = rows.map((r) => {
-        const modal = [
-          r.PenyertaanModal2019, r.PenyertaanModal2020, r.PenyertaanModal2021,
-          r.PenyertaanModal2022, r.PenyertaanModal2023, r.PenyertaanModal2024,
-        ].reduce((total, v) => total + (angka(v) || 0), 0);
+        const riwayatModal = daftar(r.RiwayatPermodalan);
+        const riwayatOmset = daftar(r.RiwayatOmsetLaba);
+        const riwayatPades = daftar(r.RiwayatKontribusiPADes);
+        const riwayatKemitraan = daftar(r.RiwayatKemitraan);
+        const riwayatAset = daftar(r.RiwayatAset);
+        const lpj = daftar(r.LaporanPertanggungjawaban) || [];
+
+        // Penyertaan modal DESA seluruh tahun. Dari daftar bila sudah ada
+        // (mencakup 2025, 2026, ...), kalau belum dari kolom 2019–2024.
+        const modal = riwayatModal
+          ? riwayatModal.filter((b) => (b.sumber || 'desa') === 'desa').reduce((t, b) => t + (angka(b.jumlah) || 0), 0)
+          : [
+            r.PenyertaanModal2019, r.PenyertaanModal2020, r.PenyertaanModal2021,
+            r.PenyertaanModal2022, r.PenyertaanModal2023, r.PenyertaanModal2024,
+          ].reduce((total, v) => total + (angka(v) || 0), 0);
+
+        const omsetBaru = terbaru(riwayatOmset, 'omset');
+        const labaBaru = terbaru(riwayatOmset, 'laba');
+        const padesBaru = terbaru(riwayatPades, 'jumlah');
+        const omsetLama = angka(r.Omset2025) !== null ? { tahun: 2025, nilai: angka(r.Omset2025) }
+          : angka(r.Omset2024) !== null ? { tahun: 2024, nilai: angka(r.Omset2024) } : null;
+        const padesLama = angka(r.KontribusiTerhadapPADes2025) !== null ? { tahun: 2025, nilai: angka(r.KontribusiTerhadapPADes2025) }
+          : angka(r.KontribusiTerhadapPADes2024) !== null ? { tahun: 2024, nilai: angka(r.KontribusiTerhadapPADes2024) } : null;
+        const omsetAkhir = omsetBaru || omsetLama;
+        const padesAkhir = padesBaru || padesLama;
+        const labaAkhir = labaBaru || (angka(r.Laba2025) !== null ? { tahun: 2025, nilai: angka(r.Laba2025) } : null);
+
+        const peranProgram = daftar(r.PeranProgram) || [];
 
         return {
           id: r.id,
@@ -645,13 +695,47 @@ class KepalaDinasController {
           desa_wisata: r.DesaWisata,
           ketahanan_pangan: r.Ketapang2025,
           peran_mbg: r.PeranMBG,
+          // Angka tahun terbaru (bisa 2026 dst.) — dipakai omsetTerbaru() dsb.
+          omset_terbaru: omsetAkhir?.nilai ?? null,
+          tahun_omset_terbaru: omsetAkhir?.tahun ?? null,
+          laba_terbaru: labaAkhir?.nilai ?? null,
+          tahun_laba_terbaru: labaAkhir?.tahun ?? null,
+          pades_terbaru: padesAkhir?.nilai ?? null,
+          tahun_pades_terbaru: padesAkhir?.tahun ?? null,
+          // Isian formulir baru, untuk detail SPKED.
+          kategori_usaha: daftar(r.KategoriUsaha) || [],
+          unit_usaha: (daftar(r.UnitUsaha) || []).filter((s) => String(s || '').trim()),
+          media_sosial: objek(r.MediaSosial),
+          peran_program: peranProgram,
+          riwayat: {
+            permodalan: riwayatModal ? urutTahun(riwayatModal) : null,
+            aset: riwayatAset ? urutTahun(riwayatAset) : null,
+            omset_laba: riwayatOmset ? urutTahun(riwayatOmset) : null,
+            pades: riwayatPades ? urutTahun(riwayatPades).map(({ bukti, ...b }) => b) : null,
+            kemitraan: riwayatKemitraan ? urutTahun(riwayatKemitraan).map(({ mou, ...b }) => b) : null,
+          },
+          jumlah_produk: r._count?.bumdes_produk ?? 0,
           // Berkas yang benar-benar bisa dibuka, dari dua jalur sekaligus:
           // diunggah lewat halaman BUMDes, atau dipilih desa dari Produk Hukum.
           berkas: [
             ...DOKUMEN_BADAN_HUKUM
               .map(([kolom, label]) => berkas(r[kolom], 'bumdes_dokumen_badanhukum', kolom, label)),
             ...['2021', '2022', '2023', '2024'].map((th) =>
-              berkas(r[`LaporanKeuangan${th}`], 'bumdes_laporan_keuangan', `LaporanKeuangan${th}`, `Laporan Keuangan ${th}`)),
+              berkas(r[`LaporanKeuangan${th}`], 'bumdes_laporan_keuangan', `LaporanKeuangan${th}`, `Laporan Pertanggungjawaban ${th}`)),
+            // Laporan pertanggungjawaban tahun lain dari formulir baru.
+            ...urutTahun(lpj).map((b, i) =>
+              berkas(b.berkas, 'bumdes_lampiran', `LPJ-${b.tahun || i}`, `Laporan Pertanggungjawaban ${b.tahun || ''}`.trim())),
+            // Dokumen ketahanan pangan.
+            ...[
+              ['StudiKelayakanUsaha', 'Studi Kelayakan Usaha'],
+              ['RABKetahananPangan', 'RAB Ketahanan Pangan'],
+              ['DokumentasiGeotagging', 'Dokumentasi Geotagging'],
+            ].map(([kolom, label]) => berkas(r[kolom], 'bumdes_ketahanan_pangan', kolom, label)),
+            // Bukti penyerahan PADes & MoU kemitraan.
+            ...urutTahun(riwayatPades || []).map((b, i) =>
+              berkas(b.bukti, 'bumdes_lampiran', `BuktiPADes-${b.tahun || i}`, `Bukti Penyerahan PADes ${b.tahun || ''}`.trim())),
+            ...urutTahun(riwayatKemitraan || []).map((b, i) =>
+              berkas(b.mou, 'bumdes_lampiran', `MoU-${i}`, `MoU Kemitraan${b.mitra ? ` — ${b.mitra}` : ''}`)),
             // Dokumen dari modul Produk Hukum. Dua catatan:
             //
             //  1. Berkasnya TIDAK berada di bawah /uploads melainkan di
@@ -677,18 +761,21 @@ class KepalaDinasController {
             }),
           ].filter(Boolean),
           // Penanda ada/tidak, dipakai penyaring kelengkapan dokumen.
+          // Perdes/SK dianggap ada juga bila desa memilihnya dari Produk Hukum
+          // — jalur yang dipakai halaman desa. Sebelumnya hanya unggahan SPKED
+          // yang terhitung, jadi desa yang sudah lengkap tampak "belum".
           dokumen: {
-            perdes: ada(r.Perdes),
+            perdes: ada(r.Perdes) || ada(r.produk_hukums_bumdes_produk_hukum_perdes_idToproduk_hukums?.file),
             anggaran_dasar: ada(r.AnggaranDasar),
             anggaran_rumah_tangga: ada(r.AnggaranRumahTangga),
             program_kerja: ada(r.ProgramKerja),
-            sk_bum_desa: ada(r.SK_BUM_Desa),
+            sk_bum_desa: ada(r.SK_BUM_Desa) || ada(r.produk_hukums_bumdes_produk_hukum_sk_bumdes_idToproduk_hukums?.file),
             profil: ada(r.ProfilBUMDesa),
             berita_acara: ada(r.BeritaAcara),
             laporan_keuangan: [
               r.LaporanKeuangan2021, r.LaporanKeuangan2022,
               r.LaporanKeuangan2023, r.LaporanKeuangan2024,
-            ].filter(ada).length,
+            ].filter(ada).length + lpj.filter((b) => ada(b.berkas)).length,
           },
         };
       });

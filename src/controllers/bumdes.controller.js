@@ -6,8 +6,54 @@ const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const fs = require('fs').promises;
 const path = require('path');
-const { KOLOM_DESA, KOLOM_ADMIN, siapkanData } = require('../config/bumdesFields');
+const { KOLOM_DESA, KOLOM_ADMIN, siapkanData, FOLDER_LAMPIRAN, bacaAngka } = require('../config/bumdesFields');
 const { v4: uuidv4 } = require('uuid');
+
+// Dokumen ketahanan pangan — kolom berkas biasa, diunggah lewat /upload-file.
+const KOLOM_BERKAS_PANGAN = ['StudiKelayakanUsaha', 'RABKetahananPangan', 'DokumentasiGeotagging'];
+const LABEL_BERKAS_PANGAN = {
+  StudiKelayakanUsaha: 'Studi Kelayakan Usaha',
+  RABKetahananPangan: 'RAB Ketahanan Pangan',
+  DokumentasiGeotagging: 'Dokumentasi Geotagging',
+};
+
+const bacaDaftarJson = (v) => {
+  if (!v) return [];
+  try { const x = JSON.parse(v); return Array.isArray(x) ? x : []; } catch { return []; }
+};
+
+/**
+ * Satu entri daftar dokumen untuk halaman Kelola Dokumen SPKED.
+ *
+ * `path` (folder/nama, relatif terhadap /uploads) atau `jalur` (URL-path utuh
+ * untuk berkas di luar /uploads, mis. /storage/produk_hukum/...) yang dipakai
+ * klien untuk merakit tautan — BUKAN url absolut dari BASE_URL, yang di
+ * lingkungan dev menunjuk origin frontend sehingga tautannya mati.
+ * `url`/`download_url` tetap dikirim untuk kompatibilitas.
+ */
+const entriDokumen = (bumdes, baseUrl, { nilai, folder, field, label, tahun, jalur, tambahan = {} }) => {
+  const filename = String(nilai).split('/').pop();
+  const relatif = jalur || `/uploads/${folder}/${filename}`;
+  return {
+    filename,
+    document_type: label,
+    field,
+    year: tahun ? String(tahun) : undefined,
+    path: jalur ? null : `${folder}/${filename}`,
+    jalur: jalur || null,
+    original_path: relatif.replace(/^\//, ''),
+    url: `${baseUrl}${relatif}`,
+    download_url: `${baseUrl}${relatif}`,
+    file_exists: true,
+    status: 'available',
+    sumber: 'unggahan',
+    bumdes_name: bumdes.namabumdesa || 'Tidak Diketahui',
+    desa: bumdes.desa || '',
+    kecamatan: bumdes.kecamatan || '',
+    bumdes_id: bumdes.id,
+    ...tambahan,
+  };
+};
 
 class BumdesController {
   
@@ -292,12 +338,18 @@ class BumdesController {
       // Determine folder based on field name
       const laporanKeuanganFields = ['LaporanKeuangan2021', 'LaporanKeuangan2022', 'LaporanKeuangan2023', 'LaporanKeuangan2024'];
       const dokumenBadanHukumFields = ['ProfilBUMDesa', 'BeritaAcara', 'AnggaranDasar', 'AnggaranRumahTangga', 'ProgramKerja', 'Perdes', 'SK_BUM_Desa'];
-      
+
       let folder = 'bumdes';
       if (laporanKeuanganFields.includes(field_name)) {
         folder = 'bumdes_laporan_keuangan';
       } else if (dokumenBadanHukumFields.includes(field_name)) {
         folder = 'bumdes_dokumen_badanhukum';
+      } else if (KOLOM_BERKAS_PANGAN.includes(field_name)) {
+        folder = 'bumdes_ketahanan_pangan';
+      } else {
+        // field_name menentukan kolom yang ditulis: nama di luar daftar berkas
+        // tidak boleh dipakai untuk menimpa kolom data biasa.
+        return res.status(400).json({ success: false, message: 'field_name tidak dikenal' });
       }
 
       // Path file yang di-upload oleh multer
@@ -525,7 +577,7 @@ class BumdesController {
       const fileFields = [
         'LaporanKeuangan2021', 'LaporanKeuangan2022', 'LaporanKeuangan2023', 'LaporanKeuangan2024',
         'ProfilBUMDesa', 'BeritaAcara', 'AnggaranDasar', 'AnggaranRumahTangga', 'ProgramKerja',
-        'Perdes', 'SK_BUM_Desa'
+        'Perdes', 'SK_BUM_Desa', ...KOLOM_BERKAS_PANGAN
       ];
 
       for (const field of fileFields) {
@@ -707,13 +759,13 @@ class BumdesController {
       const documents = [];
       const seenFiles = new Set(); // Track seen files to prevent duplicates
       const fileFields = [
-        { field: 'ProfilBUMDesa', label: 'Profil BUMDesa' },
+        { field: 'ProfilBUMDesa', label: 'Profil BUM Desa' },
         { field: 'BeritaAcara', label: 'Berita Acara' },
-        { field: 'AnggaranDasar', label: 'Anggaran Dasar' },
-        { field: 'AnggaranRumahTangga', label: 'Anggaran Rumah Tangga' },
+        { field: 'AnggaranDasar', label: 'Anggaran Dasar (AD)' },
+        { field: 'AnggaranRumahTangga', label: 'Anggaran Rumah Tangga (ART)' },
         { field: 'ProgramKerja', label: 'Program Kerja' },
-        { field: 'Perdes', label: 'Peraturan Desa' },
-        { field: 'SK_BUM_Desa', label: 'SK BUM Desa' }
+        { field: 'Perdes', label: 'Perdes Pendirian' },
+        { field: 'SK_BUM_Desa', label: 'SK Pendirian BUM Desa' }
       ];
 
       // Perdes dan SK BUM Desa punya dua jalur: diunggah langsung di halaman ini,
@@ -722,13 +774,13 @@ class BumdesController {
       const tautanProdukHukum = [
         {
           relasi: 'produk_hukums_bumdes_produk_hukum_perdes_idToproduk_hukums',
-          field: 'produk_hukum_perdes_id',
-          label: 'Peraturan Desa'
+          field: 'Perdes',
+          label: 'Perdes Pendirian'
         },
         {
           relasi: 'produk_hukums_bumdes_produk_hukum_sk_bumdes_idToproduk_hukums',
-          field: 'produk_hukum_sk_bumdes_id',
-          label: 'SK BUM Desa'
+          field: 'SK_BUM_Desa',
+          label: 'SK Pendirian BUM Desa'
         }
       ];
 
@@ -742,22 +794,9 @@ class BumdesController {
             
             if (!seenFiles.has(uniqueKey)) {
               seenFiles.add(uniqueKey);
-              
-              documents.push({
-                filename,
-                document_type: label,
-                original_path: `uploads/bumdes_dokumen_badanhukum/${filename}`,
-                url: `${baseUrl}/uploads/bumdes_dokumen_badanhukum/${filename}`,
-                download_url: `${baseUrl}/uploads/bumdes_dokumen_badanhukum/${filename}`,
-                file_exists: true, // File ada di database
-                status: 'available',
-                sumber: 'unggahan',
-                bumdes_name: bumdes.namabumdesa || 'Tidak Diketahui',
-                desa: bumdes.desa || '',
-                kecamatan: bumdes.kecamatan || '',
-                bumdes_id: bumdes.id, // Change from 'id' to 'bumdes_id' to be more explicit
-                field: field
-              });
+              documents.push(entriDokumen(bumdes, baseUrl, {
+                nilai: bumdes[field], folder: 'bumdes_dokumen_badanhukum', field, label,
+              }));
             }
           }
         }
@@ -767,32 +806,21 @@ class BumdesController {
           if (!ph || !ph.file) continue;
 
           const filename = ph.file.split('/').pop();
-          const uniqueKey = `${bumdes.id}_${filename}_${field}`;
-          if (seenFiles.has(uniqueKey)) continue;
-          seenFiles.add(uniqueKey);
+          // Dokumen yang sama bisa tercatat lewat dua jalur (unggahan SPKED
+          // ikut didaftarkan ke Produk Hukum) — jangan tampil kembar.
+          if (seenFiles.has(`${bumdes.id}_${filename}_${field}`)) continue;
+          seenFiles.add(`${bumdes.id}_${filename}_${field}`);
 
-          documents.push({
-            filename,
-            document_type: label,
-            original_path: `uploads/produk-hukum/${filename}`,
-            url: `${baseUrl}/uploads/produk-hukum/${filename}`,
-            download_url: `${baseUrl}/uploads/produk-hukum/${filename}`,
-            file_exists: true,
-            status: 'available',
-            // Berkasnya milik arsip Produk Hukum desa; jangan dihapus dari sini.
-            sumber: 'produk_hukum',
-            produk_hukum: {
-              id: ph.id,
-              judul: ph.judul,
-              nomor: ph.nomor,
-              tahun: ph.tahun
+          // Berkas Produk Hukum ada di storage/produk_hukum, BUKAN /uploads.
+          documents.push(entriDokumen(bumdes, baseUrl, {
+            nilai: filename, field, label,
+            jalur: `/storage/produk_hukum/${encodeURIComponent(filename)}`,
+            tambahan: {
+              // Berkasnya milik arsip Produk Hukum desa; jangan dihapus dari sini.
+              sumber: 'produk_hukum',
+              produk_hukum: { id: ph.id, judul: ph.judul, nomor: ph.nomor, tahun: ph.tahun },
             },
-            bumdes_name: bumdes.namabumdesa || 'Tidak Diketahui',
-            desa: bumdes.desa || '',
-            kecamatan: bumdes.kecamatan || '',
-            bumdes_id: bumdes.id,
-            field: field
-          });
+          }));
         }
       }
 
@@ -841,7 +869,9 @@ class BumdesController {
           LaporanKeuangan2021: true,
           LaporanKeuangan2022: true,
           LaporanKeuangan2023: true,
-          LaporanKeuangan2024: true
+          LaporanKeuangan2024: true,
+          // LPJ tahun berapa pun dari formulir baru.
+          LaporanPertanggungjawaban: true
         }
       });
 
@@ -865,30 +895,30 @@ class BumdesController {
             
             if (!seenFiles.has(uniqueKey)) {
               seenFiles.add(uniqueKey);
-              
-              documents.push({
-                filename,
-                document_type: `Laporan Keuangan ${year}`,
-                year: year,
-                original_path: `uploads/bumdes_laporan_keuangan/${filename}`,
-                url: `${baseUrl}/uploads/bumdes_laporan_keuangan/${filename}`,
-                download_url: `${baseUrl}/uploads/bumdes_laporan_keuangan/${filename}`,
-                file_exists: true, // File ada di database
-                status: 'available',
-                bumdes_name: bumdes.namabumdesa || 'Tidak Diketahui',
-                desa: bumdes.desa || '',
-                kecamatan: bumdes.kecamatan || '',
-                bumdes_id: bumdes.id, // Change from 'id' to 'bumdes_id' to be more explicit
-                field: field
-              });
+              documents.push(entriDokumen(bumdes, baseUrl, {
+                nilai: bumdes[field], folder: 'bumdes_laporan_keuangan', field,
+                label: `Laporan Pertanggungjawaban ${year}`, tahun: year,
+              }));
             }
           }
+        }
+
+        for (const lpj of bacaDaftarJson(bumdes.LaporanPertanggungjawaban)) {
+          if (!lpj?.berkas) continue;
+          const filename = String(lpj.berkas).split('/').pop();
+          const uniqueKey = `${bumdes.id}_${filename}_LPJ`;
+          if (seenFiles.has(uniqueKey)) continue;
+          seenFiles.add(uniqueKey);
+          documents.push(entriDokumen(bumdes, baseUrl, {
+            nilai: lpj.berkas, folder: 'bumdes_lampiran', field: 'LaporanPertanggungjawaban',
+            label: `Laporan Pertanggungjawaban ${lpj.tahun || ''}`.trim(), tahun: lpj.tahun || '',
+          }));
         }
       }
 
       // Sort by year DESC, then bumdes name
       documents.sort((a, b) => {
-        const yearDiff = b.year.localeCompare(a.year);
+        const yearDiff = String(b.year || '').localeCompare(String(a.year || ''));
         if (yearDiff !== 0) return yearDiff;
         return a.bumdes_name.localeCompare(b.bumdes_name);
       });
@@ -904,6 +934,65 @@ class BumdesController {
 
     } catch (error) {
       logger.error('Error getting laporan keuangan:', error);
+      next(error);
+    }
+  }
+
+  /**
+   * GET /api/bumdes/dokumen-pendukung — berkas dari formulir baru di luar
+   * dokumen pendirian & LPJ: dokumen ketahanan pangan (kolom berkas biasa),
+   * bukti penyerahan PADes, dan MoU kemitraan (di dalam daftar JSON).
+   */
+  async getDokumenPendukung(req, res, next) {
+    try {
+      const { bumdes_id } = req.query;
+      const baseUrl = process.env.BASE_URL || `${req.protocol}://${req.get('host')}`;
+
+      const allBumdes = await prisma.bumdes.findMany({
+        where: bumdes_id ? { id: parseInt(bumdes_id, 10) } : {},
+        select: {
+          id: true, namabumdesa: true, desa: true, kecamatan: true,
+          StudiKelayakanUsaha: true, RABKetahananPangan: true, DokumentasiGeotagging: true,
+          RiwayatKontribusiPADes: true, RiwayatKemitraan: true,
+        },
+      });
+
+      const documents = [];
+      for (const b of allBumdes) {
+        for (const field of KOLOM_BERKAS_PANGAN) {
+          if (!b[field]) continue;
+          documents.push(entriDokumen(b, baseUrl, {
+            nilai: b[field], folder: 'bumdes_ketahanan_pangan', field, label: LABEL_BERKAS_PANGAN[field],
+            tambahan: { kelompok: 'Ketahanan Pangan' },
+          }));
+        }
+        for (const p of bacaDaftarJson(b.RiwayatKontribusiPADes)) {
+          if (!p?.bukti) continue;
+          documents.push(entriDokumen(b, baseUrl, {
+            nilai: p.bukti, folder: FOLDER_LAMPIRAN, field: 'BuktiPADes', tahun: p.tahun,
+            label: `Bukti Penyerahan PADes ${p.tahun || ''}`.trim(),
+            tambahan: { kelompok: 'Kontribusi PADes' },
+          }));
+        }
+        for (const k of bacaDaftarJson(b.RiwayatKemitraan)) {
+          if (!k?.mou) continue;
+          documents.push(entriDokumen(b, baseUrl, {
+            nilai: k.mou, folder: FOLDER_LAMPIRAN, field: 'MoUKemitraan', tahun: k.tahun,
+            label: `MoU Kemitraan${k.mitra ? ` — ${k.mitra}` : ''}`,
+            tambahan: { kelompok: 'Kemitraan' },
+          }));
+        }
+      }
+
+      documents.sort((a, b) => a.bumdes_name.localeCompare(b.bumdes_name));
+      return res.json({
+        status: 'success',
+        message: 'Dokumen pendukung berhasil diambil',
+        data: documents,
+        total: documents.length,
+      });
+    } catch (error) {
+      logger.error('Error getting dokumen pendukung:', error);
       next(error);
     }
   }
@@ -1452,7 +1541,13 @@ class BumdesController {
         });
       }
 
-      logger.info('Deleting file:', { filename, document_type, bumdes_id });
+      logger.info('Deleting file:', { filename, document_type, bumdes_id, field: req.body.field });
+
+      // Berkas dari formulir baru (LPJ tahun baru, ketahanan pangan, bukti
+      // PADes, MoU) punya jalur hapus sendiri.
+      if (FIELD_BERKAS_BARU.includes(req.body.field)) {
+        return hapusBerkasBaru(req, res);
+      }
 
       // Determine folder based on document type
       let folder = '';
@@ -1541,7 +1636,422 @@ class BumdesController {
     }
   }
 
+  /**
+   * POST /api/desa/bumdes/lampiran — simpan satu berkas lampiran daftar JSON
+   * (bukti penyerahan PADes, MoU kemitraan, laporan pertanggungjawaban).
+   *
+   * Tidak menulis ke basis data: path yang dikembalikan ikut tersimpan
+   * bersama daftarnya saat formulir disimpan, dan backend hanya menerima path
+   * di folder lampiran (lihat bacaIsian 'berkas' di bumdesFields.js).
+   */
+  async uploadLampiran(req, res, next) {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ success: false, message: 'Berkas belum dipilih' });
+      }
+      if (!bolehKelolaBumdes(req.user)) {
+        await fs.unlink(req.file.path).catch(() => {});
+        return res.status(403).json({ success: false, message: 'Tidak berhak mengunggah lampiran BUMDes' });
+      }
+      return res.json({
+        success: true,
+        data: {
+          path: `${FOLDER_LAMPIRAN}/${req.file.filename}`,
+          nama_asli: req.file.originalname,
+          ukuran: req.file.size,
+        },
+      });
+    } catch (error) {
+      logger.error('Error uploading BUMDes lampiran:', error);
+      next(error);
+    }
+  }
+
+  /* ───────────────────────── Katalog produk BUM Desa ───────────────────────── */
+
+  /**
+   * GET /api/desa/bumdes/katalog-produk — etalase produk SELURUH BUM Desa.
+   * Tanpa transaksi: yang ditampilkan hanya informasi & kontak penjualnya.
+   * Query: q, kategori, kecamatan, unggulan=1, page, limit
+   */
+  async getKatalogProduk(req, res, next) {
+    try {
+      const { q, kategori, kecamatan } = req.query;
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 24, 1), 60);
+      const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+
+      const where = { is_active: true };
+      if (kategori) where.kategori = String(kategori);
+      if (req.query.unggulan === '1') where.unggulan = true;
+      const syaratBumdes = {};
+      if (kecamatan) syaratBumdes.kecamatan = String(kecamatan);
+      if (q && String(q).trim()) {
+        const kata = String(q).trim().slice(0, 100);
+        where.OR = [
+          { nama: { contains: kata } },
+          { deskripsi: { contains: kata } },
+          { bumdes: { namabumdesa: { contains: kata } } },
+          { bumdes: { desa: { contains: kata } } },
+        ];
+      }
+      if (Object.keys(syaratBumdes).length) where.bumdes = syaratBumdes;
+
+      const [total, produk, totalSemua, perKategori, jumlahUnggulan, bumdesBerproduk, totalBumdes, unggulan, kecamatanRows] =
+        await Promise.all([
+          prisma.bumdes_produk.count({ where }),
+          prisma.bumdes_produk.findMany({
+            where,
+            include: { bumdes: { select: PILIH_BUMDES_KATALOG } },
+            orderBy: [{ unggulan: 'desc' }, { updated_at: 'desc' }],
+            skip: (page - 1) * limit,
+            take: limit,
+          }),
+          prisma.bumdes_produk.count({ where: { is_active: true } }),
+          prisma.bumdes_produk.groupBy({ by: ['kategori'], where: { is_active: true }, _count: { _all: true } }),
+          prisma.bumdes_produk.count({ where: { is_active: true, unggulan: true } }),
+          prisma.bumdes_produk.groupBy({ by: ['bumdes_id'], where: { is_active: true } }),
+          prisma.bumdes.count(),
+          prisma.bumdes_produk.findMany({
+            where: { is_active: true, unggulan: true },
+            include: { bumdes: { select: PILIH_BUMDES_KATALOG } },
+            orderBy: { updated_at: 'desc' },
+            take: 4,
+          }),
+          prisma.bumdes.findMany({
+            where: { bumdes_produk: { some: { is_active: true } } },
+            select: { kecamatan: true },
+            distinct: ['kecamatan'],
+            orderBy: { kecamatan: 'asc' },
+          }),
+        ]);
+
+      return res.json({
+        success: true,
+        data: {
+          produk: produk.map(bentukProduk),
+          unggulan: unggulan.map(bentukProduk),
+          halaman: { page, limit, total, total_halaman: Math.max(1, Math.ceil(total / limit)) },
+          ringkasan: {
+            total_produk: totalSemua,
+            bumdes_berproduk: bumdesBerproduk.length,
+            total_bumdes: totalBumdes,
+            jumlah_kategori: perKategori.filter((k) => k.kategori).length,
+            produk_unggulan: jumlahUnggulan,
+          },
+          kategori: perKategori
+            .filter((k) => k.kategori)
+            .map((k) => ({ nama: k.kategori, jumlah: k._count._all }))
+            .sort((a, b) => b.jumlah - a.jumlah),
+          kecamatan: kecamatanRows.map((k) => k.kecamatan).filter(Boolean),
+          kategori_opsi: KATEGORI_PRODUK,
+        },
+      });
+    } catch (error) {
+      logger.error('Error getting katalog produk BUMDes:', error);
+      next(error);
+    }
+  }
+
+  /** GET /api/desa/bumdes/produk?bumdes_id= — produk milik satu BUM Desa. */
+  async getProdukBumdes(req, res, next) {
+    try {
+      const bumdes = await cariBumdesKelolaan(req, req.query.bumdes_id);
+      if (bumdes.galat) return res.status(bumdes.status).json({ success: false, message: bumdes.galat });
+      const produk = await prisma.bumdes_produk.findMany({
+        where: { bumdes_id: bumdes.id },
+        include: { bumdes: { select: PILIH_BUMDES_KATALOG } },
+        orderBy: [{ unggulan: 'desc' }, { created_at: 'desc' }],
+      });
+      return res.json({ success: true, data: produk.map(bentukProduk), kategori_opsi: KATEGORI_PRODUK });
+    } catch (error) {
+      logger.error('Error getting produk BUMDes:', error);
+      next(error);
+    }
+  }
+
+  /** POST /api/desa/bumdes/produk (multipart: foto) */
+  async storeProdukBumdes(req, res, next) {
+    try {
+      const bumdes = await cariBumdesKelolaan(req, req.body.bumdes_id);
+      if (bumdes.galat) return res.status(bumdes.status).json({ success: false, message: bumdes.galat });
+
+      const isian = bacaIsianProduk(req.body);
+      if (isian.galat) return res.status(400).json({ success: false, message: isian.galat });
+      if (isian.data.unggulan) {
+        const galat = await cekBatasUnggulan(bumdes.id);
+        if (galat) return res.status(400).json({ success: false, message: galat });
+      }
+
+      const sekarang = new Date();
+      let produk = await prisma.bumdes_produk.create({
+        data: {
+          ...isian.data,
+          bumdes_id: bumdes.id,
+          desa_id: bumdes.desa_id ? BigInt(bumdes.desa_id) : null,
+          created_by: BigInt(String(req.user.id)),
+          created_at: sekarang,
+          updated_at: sekarang,
+        },
+      });
+      if (req.file) {
+        const foto = await simpanFotoProduk(req.file.buffer, produk.id);
+        produk = await prisma.bumdes_produk.update({ where: { id: produk.id }, data: { foto } });
+      }
+
+      logger.info(`Produk BUMDes ${produk.id} ditambahkan untuk bumdes ${bumdes.id} oleh ${req.user.email}`);
+      return res.status(201).json({ success: true, message: 'Produk berhasil ditambahkan', data: bentukProduk(produk) });
+    } catch (error) {
+      logger.error('Error storing produk BUMDes:', error);
+      next(error);
+    }
+  }
+
+  /** PUT /api/desa/bumdes/produk/:produkId (multipart: foto opsional, hapus_foto=1) */
+  async updateProdukBumdes(req, res, next) {
+    try {
+      const lama = await cariProdukKelolaan(req, req.params.produkId);
+      if (lama.galat) return res.status(lama.status).json({ success: false, message: lama.galat });
+
+      const isian = bacaIsianProduk(req.body);
+      if (isian.galat) return res.status(400).json({ success: false, message: isian.galat });
+      if (isian.data.unggulan && !lama.unggulan) {
+        const galat = await cekBatasUnggulan(lama.bumdes_id);
+        if (galat) return res.status(400).json({ success: false, message: galat });
+      }
+
+      const data = { ...isian.data, updated_at: new Date() };
+      if (req.file) {
+        data.foto = await simpanFotoProduk(req.file.buffer, lama.id);
+        hapusFotoProduk(lama.foto);
+      } else if (req.body.hapus_foto === '1') {
+        data.foto = null;
+        hapusFotoProduk(lama.foto);
+      }
+
+      const produk = await prisma.bumdes_produk.update({ where: { id: lama.id }, data });
+      return res.json({ success: true, message: 'Produk diperbarui', data: bentukProduk(produk) });
+    } catch (error) {
+      logger.error('Error updating produk BUMDes:', error);
+      next(error);
+    }
+  }
+
+  /** DELETE /api/desa/bumdes/produk/:produkId */
+  async deleteProdukBumdes(req, res, next) {
+    try {
+      const lama = await cariProdukKelolaan(req, req.params.produkId);
+      if (lama.galat) return res.status(lama.status).json({ success: false, message: lama.galat });
+      await prisma.bumdes_produk.delete({ where: { id: lama.id } });
+      hapusFotoProduk(lama.foto);
+      return res.json({ success: true, message: 'Produk dihapus' });
+    } catch (error) {
+      logger.error('Error deleting produk BUMDes:', error);
+      next(error);
+    }
+  }
+
 }
+
+/* ─────────────────── Hapus berkas dari formulir baru ─────────────────── */
+
+// Field "virtual" yang dikirim halaman Kelola Dokumen untuk berkas di dalam
+// daftar JSON, ditambah kolom berkas ketahanan pangan.
+const FIELD_BERKAS_BARU = ['LaporanPertanggungjawaban', 'BuktiPADes', 'MoUKemitraan', ...KOLOM_BERKAS_PANGAN];
+
+const hapusBerkasBaru = async (req, res) => {
+  const { filename, bumdes_id, field } = req.body;
+  const nama = path.basename(String(filename || ''));
+  const id = parseInt(bumdes_id, 10);
+  if (!nama || !id) {
+    return res.status(400).json({ success: false, message: 'filename dan bumdes_id wajib diisi' });
+  }
+
+  const bumdes = await prisma.bumdes.findUnique({ where: { id } });
+  if (!bumdes) return res.status(404).json({ success: false, message: 'BUMDes tidak ditemukan' });
+  if (req.user.role === 'desa' && Number(bumdes.desa_id) !== Number(req.user.desa_id)) {
+    return res.status(403).json({ success: false, message: 'Berkas ini bukan milik BUMDes desa Anda' });
+  }
+
+  const cocok = (v) => v && path.basename(String(v)) === nama;
+  let data = null;
+  let folder = FOLDER_LAMPIRAN;
+
+  if (KOLOM_BERKAS_PANGAN.includes(field)) {
+    if (!cocok(bumdes[field])) return res.status(404).json({ success: false, message: 'Berkas tidak ditemukan pada BUMDes ini' });
+    data = { [field]: null };
+    folder = 'bumdes_ketahanan_pangan';
+  } else {
+    const kolom = { LaporanPertanggungjawaban: 'LaporanPertanggungjawaban', BuktiPADes: 'RiwayatKontribusiPADes', MoUKemitraan: 'RiwayatKemitraan' }[field];
+    const kunci = { LaporanPertanggungjawaban: 'berkas', BuktiPADes: 'bukti', MoUKemitraan: 'mou' }[field];
+    const daftar = bacaDaftarJson(bumdes[kolom]);
+    if (!daftar.some((b) => cocok(b?.[kunci]))) {
+      return res.status(404).json({ success: false, message: 'Berkas tidak ditemukan pada BUMDes ini' });
+    }
+    // LPJ: barisnya dibuang (LPJ tanpa berkas tidak bermakna). PADes & MoU:
+    // hanya lampirannya yang dilepas — angka kontribusi/mitra tetap tercatat.
+    const baru = field === 'LaporanPertanggungjawaban'
+      ? daftar.filter((b) => !cocok(b?.[kunci]))
+      : daftar.map((b) => {
+        if (!cocok(b?.[kunci])) return b;
+        const { [kunci]: _dibuang, ...sisa } = b;
+        return sisa;
+      });
+    data = { [kolom]: JSON.stringify(baru) };
+  }
+
+  await prisma.bumdes.update({ where: { id }, data: { ...data, updated_at: new Date() } });
+
+  // Hanya berkas di dalam folder yang semestinya yang boleh dihapus.
+  const target = path.resolve(path.join(__dirname, '../../storage/uploads', folder, nama));
+  if (target.startsWith(path.resolve(path.join(__dirname, '../../storage/uploads', folder)))) {
+    await fs.unlink(target).catch((e) => logger.warn(`Berkas fisik tidak terhapus: ${target} — ${e.message}`));
+  }
+
+  logger.info(`Berkas ${field} ${nama} dihapus dari BUMDes ${id} oleh ${req.user.email}`);
+  return res.json({ success: true, message: 'File berhasil dihapus', deleted_file: nama, updated_records: 1 });
+};
+
+/* ─────────────────────── Pembantu katalog produk ─────────────────────── */
+
+const KATEGORI_PRODUK = [
+  'Makanan & Minuman', 'Pertanian', 'Perkebunan', 'Peternakan', 'Perikanan',
+  'Kerajinan', 'Fashion & Tekstil', 'Kesehatan & Kecantikan', 'Jasa',
+  'Wisata', 'Lainnya',
+];
+const MAKS_UNGGULAN = 3;
+const FOLDER_PRODUK = 'bumdes_produk';
+const DIR_PRODUK = path.join(__dirname, '../../storage/uploads', FOLDER_PRODUK);
+const ROLE_SPKED = ['pegawai', 'kepala_bidang', 'kepala_dinas', 'ketua_tim'];
+
+const PILIH_BUMDES_KATALOG = {
+  id: true, namabumdesa: true, desa: true, kecamatan: true,
+  TelfonBumdes: true, MediaSosial: true,
+};
+
+/** Desa (miliknya sendiri), SPKED (bidang 3), dan admin boleh mengelola. */
+const bolehKelolaBumdes = (user) => {
+  if (!user) return false;
+  if (user.role === 'desa') return Boolean(user.desa_id);
+  if (['dinas', 'superadmin', 'sarana_prasarana'].includes(user.role)) return true;
+  return ROLE_SPKED.includes(user.role) && Number(user.bidang_id) === 3;
+};
+
+const cariBumdesKelolaan = async (req, bumdesId) => {
+  if (!bolehKelolaBumdes(req.user)) return { galat: 'Tidak berhak mengelola produk BUMDes', status: 403 };
+  const where = req.user.role === 'desa'
+    ? { desa_id: Number(req.user.desa_id) }
+    : { id: parseInt(bumdesId, 10) || -1 };
+  const bumdes = await prisma.bumdes.findFirst({ where, select: { id: true, desa_id: true } });
+  if (!bumdes) {
+    return {
+      galat: req.user.role === 'desa'
+        ? 'Simpan data BUMDes terlebih dahulu sebelum menambahkan produk'
+        : 'BUMDes tidak ditemukan',
+      status: 404,
+    };
+  }
+  return bumdes;
+};
+
+const cariProdukKelolaan = async (req, produkId) => {
+  let id;
+  try { id = BigInt(String(produkId)); } catch { return { galat: 'Produk tidak valid', status: 400 }; }
+  const produk = await prisma.bumdes_produk.findUnique({ where: { id }, include: { bumdes: { select: { desa_id: true } } } });
+  if (!produk) return { galat: 'Produk tidak ditemukan', status: 404 };
+  if (!bolehKelolaBumdes(req.user)) return { galat: 'Tidak berhak mengelola produk BUMDes', status: 403 };
+  if (req.user.role === 'desa' && Number(produk.bumdes?.desa_id) !== Number(req.user.desa_id)) {
+    return { galat: 'Produk ini bukan milik BUMDes desa Anda', status: 403 };
+  }
+  return produk;
+};
+
+const bacaIsianProduk = (body) => {
+  const teks = (v, maks) => { const s = String(v ?? '').trim(); return s ? s.slice(0, maks) : null; };
+  const nama = teks(body.nama, 255);
+  if (!nama) return { galat: 'Nama produk wajib diisi' };
+
+  const kategori = teks(body.kategori, 100);
+  if (kategori && !KATEGORI_PRODUK.includes(kategori)) return { galat: 'Kategori produk tidak dikenal' };
+
+  let harga = null;
+  if (body.harga !== undefined && String(body.harga).trim() !== '') {
+    const hasil = bacaAngka(body.harga);
+    if (!hasil.ok || hasil.nilai < 0) return { galat: 'Harga tidak valid' };
+    harga = hasil.nilai;
+  }
+
+  let tautan = teks(body.tautan, 500);
+  if (tautan && !/^https?:\/\//i.test(tautan)) tautan = `https://${tautan}`;
+
+  const benar = (v) => ['1', 'true', 'on', true, 1].includes(v);
+  return {
+    data: {
+      nama,
+      kategori,
+      deskripsi: teks(body.deskripsi, 2000),
+      harga,
+      satuan: teks(body.satuan, 50),
+      tautan,
+      unggulan: benar(body.unggulan),
+      is_active: body.is_active === undefined ? true : benar(body.is_active),
+    },
+  };
+};
+
+const cekBatasUnggulan = async (bumdesId) => {
+  const n = await prisma.bumdes_produk.count({ where: { bumdes_id: bumdesId, unggulan: true } });
+  return n >= MAKS_UNGGULAN ? `Maksimal ${MAKS_UNGGULAN} produk unggulan per BUMDes` : null;
+};
+
+/** Foto selalu di-re-encode ke WebP; .rotate() mengikuti orientasi EXIF foto HP. */
+const simpanFotoProduk = async (buffer, produkId) => {
+  const sharp = require('sharp');
+  await fs.mkdir(DIR_PRODUK, { recursive: true });
+  const nama = `produk_${produkId}_${Date.now()}.webp`;
+  await sharp(buffer)
+    .rotate()
+    .resize(1000, 1000, { fit: 'inside', withoutEnlargement: true })
+    .webp({ quality: 80 })
+    .toFile(path.join(DIR_PRODUK, nama));
+  return `${FOLDER_PRODUK}/${nama}`;
+};
+
+const hapusFotoProduk = (foto) => {
+  if (!foto) return;
+  const target = path.resolve(path.join(__dirname, '../../storage/uploads', foto));
+  if (!target.startsWith(path.resolve(DIR_PRODUK))) return;
+  fs.unlink(target).catch(() => {});
+};
+
+const bacaJson = (s, cadangan) => {
+  if (!s) return cadangan;
+  try { return JSON.parse(s); } catch { return cadangan; }
+};
+
+const bentukProduk = (p) => ({
+  id: String(p.id),
+  bumdes_id: p.bumdes_id,
+  nama: p.nama,
+  kategori: p.kategori,
+  deskripsi: p.deskripsi,
+  harga: p.harga === null || p.harga === undefined ? null : Number(p.harga),
+  satuan: p.satuan,
+  foto: p.foto,
+  tautan: p.tautan,
+  unggulan: p.unggulan,
+  is_active: p.is_active,
+  updated_at: p.updated_at,
+  bumdes: p.bumdes && p.bumdes.namabumdesa !== undefined
+    ? {
+      id: p.bumdes.id,
+      nama: p.bumdes.namabumdesa,
+      desa: p.bumdes.desa,
+      kecamatan: p.bumdes.kecamatan,
+      telepon: p.bumdes.TelfonBumdes,
+      media_sosial: bacaJson(p.bumdes.MediaSosial, {}),
+    }
+    : undefined,
+});
 
 function formatBytes(bytes, decimals = 2) {
   if (bytes === 0) return '0 Bytes';

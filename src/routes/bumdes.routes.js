@@ -3,7 +3,7 @@ const router = express.Router();
 const bumdesController = require('../controllers/bumdes.controller');
 const { auth, checkRole } = require('../middlewares/auth');
 const { requireDesaPermission } = require('../middlewares/desaPermission');
-const { uploadBumdes, uploadProdukHukum } = require('../middlewares/upload');
+const { uploadBumdes, uploadBumdesLampiran, uploadBumdesProduk, uploadProdukHukum } = require('../middlewares/upload');
 
 // Define allowed roles for BUMDes management (SPKED = Bidang 3)
 const bumdesRoles = ['desa', 'dinas', 'superadmin', 'sarana_prasarana', 'pegawai', 'kepala_bidang', 'kepala_dinas', 'ketua_tim'];
@@ -16,6 +16,7 @@ router.use(auth, requireDesaPermission('bumdes'));
 router.get('/statistics', auth, checkRole(...bumdesRoles), bumdesController.getStatistics);
 router.get('/dokumen-badan-hukum', auth, checkRole(...bumdesRoles), bumdesController.getDokumenBadanHukum);
 router.get('/laporan-keuangan', auth, checkRole(...bumdesRoles), bumdesController.getLaporanKeuangan);
+router.get('/dokumen-pendukung', auth, checkRole(...bumdesRoles), bumdesController.getDokumenPendukung);
 router.get('/produk-hukum', auth, checkRole(...bumdesRoles), bumdesController.getProdukHukum);
 router.get('/check-desa/:kode_desa', auth, checkRole(...bumdesRoles), bumdesController.checkDesaBumdes);
 
@@ -45,6 +46,19 @@ router.post(
   uploadProdukHukum.single('file'),
   bumdesController.storeProdukHukumDesa
 );
+
+// Lampiran daftar JSON (bukti PADes, MoU kemitraan, laporan
+// pertanggungjawaban). Pemeriksaan hak kelola ada di controller.
+router.post('/lampiran', auth, checkRole(...bumdesRoles), uploadBumdesLampiran.single('file'), bumdesController.uploadLampiran);
+
+// KATALOG PRODUK — etalase seluruh BUM Desa (tanpa transaksi) + kelola produk
+// milik BUM Desa sendiri. Harus di atas '/:id' supaya '/produk' tidak dibaca
+// sebagai id BUMDes.
+router.get('/katalog-produk', auth, checkRole(...bumdesRoles), bumdesController.getKatalogProduk);
+router.get('/produk', auth, checkRole(...bumdesRoles), bumdesController.getProdukBumdes);
+router.post('/produk', auth, checkRole(...bumdesRoles), uploadBumdesProduk.single('foto'), bumdesController.storeProdukBumdes);
+router.put('/produk/:produkId', auth, checkRole(...bumdesRoles), uploadBumdesProduk.single('foto'), bumdesController.updateProdukBumdes);
+router.delete('/produk/:produkId', auth, checkRole(...bumdesRoles), bumdesController.deleteProdukBumdes);
 
 // ADMIN ROUTES
 router.get('/all', auth, checkRole('dinas', 'superadmin', 'sarana_prasarana', 'pegawai', 'kepala_bidang', 'kepala_dinas', 'ketua_tim'), bumdesController.getAllBumdes);

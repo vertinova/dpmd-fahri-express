@@ -7,6 +7,9 @@ const uploadDirs = [
   'storage/uploads/bumdes',
   'storage/uploads/bumdes_laporan_keuangan',
   'storage/uploads/bumdes_dokumen_badanhukum',
+  'storage/uploads/bumdes_ketahanan_pangan',
+  'storage/uploads/bumdes_lampiran',
+  'storage/uploads/bumdes_produk',
   'storage/uploads/musdesus',
   'storage/uploads/perjalanan_dinas',
   'storage/uploads/hero-gallery',
@@ -35,11 +38,14 @@ const storageBumdes = multer.diskStorage({
     if (fieldName) {
       const laporanKeuanganFields = ['LaporanKeuangan2021', 'LaporanKeuangan2022', 'LaporanKeuangan2023', 'LaporanKeuangan2024'];
       const dokumenBadanHukumFields = ['ProfilBUMDesa', 'BeritaAcara', 'AnggaranDasar', 'AnggaranRumahTangga', 'ProgramKerja', 'Perdes', 'SK_BUM_Desa'];
-      
+      const ketahananPanganFields = ['StudiKelayakanUsaha', 'RABKetahananPangan', 'DokumentasiGeotagging'];
+
       if (laporanKeuanganFields.includes(fieldName)) {
         folder = 'storage/uploads/bumdes_laporan_keuangan';
       } else if (dokumenBadanHukumFields.includes(fieldName)) {
         folder = 'storage/uploads/bumdes_dokumen_badanhukum';
+      } else if (ketahananPanganFields.includes(fieldName)) {
+        folder = 'storage/uploads/bumdes_ketahanan_pangan';
       }
     }
     
@@ -145,13 +151,47 @@ const storageBerita = multer.diskStorage({
   }
 });
 
+// Dokumen BUM Desa boleh berupa dokumen ATAU foto: dokumentasi geotagging
+// ketahanan pangan, bukti penyerahan PADes, dan hasil pindai dokumen sering
+// hanya ada sebagai foto dari HP.
+const fileFilterBumdes = (req, file, cb) => {
+  const allowedExts = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.jpg', '.jpeg', '.png', '.webp'];
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (allowedExts.includes(ext)) cb(null, true);
+  else cb(new Error('Jenis berkas tidak didukung. Gunakan PDF, DOC, DOCX, XLS, XLSX, JPG, PNG, atau WEBP.'), false);
+};
+
 // Multer configurations
 const uploadBumdes = multer({
   storage: storageBumdes,
-  fileFilter: fileFilter,
+  fileFilter: fileFilterBumdes,
   limits: {
     fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 // 5MB default
   }
+});
+
+// Lampiran di dalam daftar JSON BUM Desa (bukti PADes, MoU kemitraan, laporan
+// pertanggungjawaban per tahun). Berkasnya disimpan dulu, path-nya lalu ikut
+// tersimpan bersama daftar saat formulir disimpan.
+const uploadBumdesLampiran = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => cb(null, 'storage/uploads/bumdes_lampiran'),
+    filename: (req, file, cb) => {
+      const ext = path.extname(file.originalname).toLowerCase();
+      const dasar = path.basename(file.originalname, path.extname(file.originalname))
+        .replace(/[^A-Za-z0-9_-]+/g, '_').slice(0, 60);
+      cb(null, `${Date.now()}_${Math.round(Math.random() * 1e6)}_${dasar}${ext}`);
+    },
+  }),
+  fileFilter: fileFilterBumdes,
+  limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 },
+});
+
+// Foto produk katalog BUM Desa — di-re-encode ke WebP oleh controller.
+const uploadBumdesProduk = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: imageFilter,
+  limits: { fileSize: 8 * 1024 * 1024 },
 });
 
 const uploadMusdesus = multer({
@@ -756,6 +796,8 @@ const uploadArsipBarang = multer({
 
 module.exports = {
   uploadBumdes,
+  uploadBumdesLampiran,
+  uploadBumdesProduk,
   uploadMusdesus,
   uploadPerjadinDinas,
   uploadHeroGallery,
