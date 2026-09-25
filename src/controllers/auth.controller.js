@@ -83,16 +83,12 @@ const login = async (req, res) => {
       });
     }
 
-    // Lokasi WAJIB saat login — koordinat valid harus disertakan.
+    // Lokasi TIDAK lagi diminta di halaman login. Koordinat tetap diterima
+    // (opsional) supaya klien lama yang masih mengirimnya — mis. PWA yang
+    // belum diperbarui — tercatat di riwayat login; tanpa koordinat login
+    // tetap berjalan dan riwayatnya berisi null.
     const latitude = parseCoordinate(req.body.latitude, -90, 90);
     const longitude = parseCoordinate(req.body.longitude, -180, 180);
-    if (latitude === null || longitude === null) {
-      return res.status(422).json({
-        success: false,
-        code: 'LOCATION_REQUIRED',
-        message: 'Lokasi wajib diaktifkan untuk login. Izinkan akses lokasi lalu coba lagi.'
-      });
-    }
 
     // Query user from database using Prisma
     const user = await prisma.users.findUnique({
