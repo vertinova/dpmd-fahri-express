@@ -10,6 +10,9 @@ const locationRoles = [
 	...PERAN_INTERNAL_DPMD,
 	'desa', 'kecamatan', 'dinas',
 	'sarana_prasarana', 'kekayaan_keuangan', 'pemberdayaan_masyarakat', 'pemerintahan_desa',
+	// Dinas terkait (mis. DLH) memakai daftar wilayah untuk grafik partisipasi
+	// desa di halaman Bankeu Perubahan. Isinya hanya nama wilayah.
+	'dinas_terkait', 'verifikator_dinas',
 ];
 
 // Get all kecamatans
