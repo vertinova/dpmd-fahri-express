@@ -541,7 +541,10 @@ class KepalaDinasController {
   // penanda ada/tidaknya, supaya lintasan penyimpanan tidak bocor ke browser.
   async getBumdesList(req, res, next) {
     try {
+      // req.lingkupBumdes diisi rute yang membatasi wilayah (akun kecamatan,
+      // lihat kecamatanBumdes.routes.js). Tanpa itu: seluruh kabupaten.
       const rows = await prisma.bumdes.findMany({
+        where: req.lingkupBumdes,
         orderBy: [{ kecamatan: 'asc' }, { desa: 'asc' }],
         select: {
           id: true, kode_desa: true, namabumdesa: true, desa: true, kecamatan: true,
@@ -780,7 +783,7 @@ class KepalaDinasController {
         };
       });
 
-      return res.json({ success: true, total: data.length, data });
+      return res.json({ success: true, total: data.length, wilayah: req.wilayahBumdes, data });
     } catch (error) {
       logger.error('Error getting BUMDes list:', error);
       next(error);

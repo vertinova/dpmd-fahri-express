@@ -427,6 +427,8 @@ app.use('/api/dinas', require('./routes/dinasConfig.routes')); // Dinas configur
 app.use('/api/dinas', dinasVerifikatorRoutes); // Dinas verifikator management
 app.use('/api/dinas/verifikator', verifikatorAksesDesaRoutes); // Verifikator akses desa management
 app.use('/api/verifikator/profile', require('./routes/verifikatorProfile.routes')); // Verifikator profile & TTD
+app.use('/api/kecamatan/bumdes', require('./routes/kecamatanBumdes.routes')); // BUMDes di wilayah kecamatan (lihat saja)
+app.use('/api/kecamatan/aparatur-desa', require('./routes/kecamatanAparatur.routes')); // Aparatur desa di wilayah kecamatan (lihat saja)
 app.use('/api/kecamatan', require('./routes/kecamatanBankeuTimConfig.routes')); // Kecamatan tim verifikasi config
 app.use('/api/kecamatan/kelembagaan', require('./routes/kecamatanKelembagaan.routes')); // Kecamatan kelembagaan verification
 app.use('/api/bankeu/questionnaire', require('./routes/bankeuQuestionnaire.routes')); // Verification questionnaire

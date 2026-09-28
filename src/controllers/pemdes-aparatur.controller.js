@@ -821,4 +821,8 @@ module.exports = {
 	updateAparaturDesa,
 	verifikasiAparaturDesa,
 	filterJenis,
+	// Dipakai rute aparatur akun kecamatan supaya aturan jabatan tidak bercabang.
+	jenisAparatur,
+	bakuJabatan,
+	peringkatJabatan,
 };
