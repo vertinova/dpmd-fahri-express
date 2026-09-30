@@ -573,6 +573,14 @@ function startServer() {
       logger.error('🖥️  Server monitor gagal dijalankan —', err.message);
     }
 
+    // Siapkan penyusuran ASTA DESA di latar supaya halaman Core Dashboard tidak
+    // pernah menunggu penyusuran ribuan halaman saat dibuka.
+    try {
+      require('./controllers/astadesa.controller').mulaiPemanasan();
+    } catch (err) {
+      logger.error('Pemanasan ASTA DESA gagal dijalankan —', err.message);
+    }
+
     // Auto-seed bankeu_perubahan_master_kegiatan (idempotent)
     // Fire-and-forget - jangan blocking startup, error tidak akan crash server
     const { seedBankeuPerubahanMasterKegiatan } = require('./utils/seedBankeuPerubahanMaster');

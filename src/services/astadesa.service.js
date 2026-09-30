@@ -37,7 +37,21 @@ const MAX_PER_PAGE = 200;
 // Pagar pengaman saat menyusuri seluruh halaman. Tabel `sensuses` di sana
 // berisi ribuan baris; tanpa batas, satu permintaan bisa menahan proses ini
 // selama puluhan detik dan menghabiskan memori.
-const MAX_ROWS_DEFAULT = Number(process.env.ASTADESA_MAX_ROWS || 20000);
+//
+// Dinaikkan dari 20.000 setelah pendataan melampaui 80 ribu keluarga (±330 ribu
+// anggota): pagar lama membuat setiap angka di halaman berasal dari seperempat
+// data. Memori tidak lagi menjadi alasan membatasi karena baris kini DIRINGKAS
+// atau langsung DIAGREGASI saat disusuri (lihat `profil` di ambilSemua).
+const MAX_ROWS_DEFAULT = Number(process.env.ASTADESA_MAX_ROWS || 600000);
+// Berapa halaman diminta bersamaan saat menyusuri. 413 halaman keluarga dan
+// ±1.650 halaman anggota tidak mungkin disusuri berurutan (±1 detik/halaman);
+// enam sekaligus memangkasnya ±6x tanpa membanjiri server ASTA DESA.
+const KONKURENSI = Math.max(1, Number(process.env.ASTADESA_KONKURENSI || 6));
+// Umur hasil penyusuran penuh. Lebih panjang dari cache per-halaman karena satu
+// penyusuran berarti ratusan permintaan ke ASTA DESA; rincian per kecamatan dan
+// demografi tidak berubah berarti dalam setengah jam. Selama umur ini lewat,
+// hasil lama TETAP disajikan sambil penyusuran baru berjalan di latar.
+const TTL_SUSUR_MS = Number(process.env.ASTADESA_TTL_SUSUR_MS || 30 * 60 * 1000);
 
 /** Galat yang membawa status HTTP supaya controller bisa meneruskannya apa adanya. */
 class AstaDesaError extends Error {
@@ -284,32 +298,47 @@ const ambilPublik = async (path, params = {}, opts = {}) => {
 };
 
 /**
- * Susuri seluruh halaman satu endpoint berpaginasi dan kembalikan barisnya.
+ * Susuri seluruh halaman satu endpoint berpaginasi.
  *
  * Dipakai untuk agregasi (peta sebaran, rekap per kecamatan, demografi) yang
  * mustahil dihitung dari satu halaman 200 baris. Hasilnya di-cache utuh karena
  * mahal: sekali susuri, banyak kartu di halaman memakainya.
+ *
+ * opts:
+ *   force    — abaikan cache (tetap tidak memulai penyusuran kedua bila satu
+ *              sedang berjalan)
+ *   latar    — jangan tunggu penyusuran; sajikan hasil lama (atau "belum siap")
+ *              dan biarkan penyusuran mengisi cache di latar
+ *   pengguna — pakai jalur `/v1/...` (bukan `/admin`)
+ *   profil   — { nama, ringkas(row) → baris|null, olah: { buat(), tambah(s,row), selesai(s) } }
+ *              `ringkas` memangkas baris sebelum disimpan (null = tidak disimpan);
+ *              `olah` mengagregasi baris tanpa menyimpannya. Keduanya WAJIB
+ *              untuk data sebesar ini: 82 ribu baris × 104 kolom mentah tidak
+ *              muat di memori dengan wajar. `nama` ikut menjadi kunci cache,
+ *              jadi semua pemakai satu penyusuran harus memakai profil yang sama.
  */
 const ambilSemua = async (path, params = {}, opts = {}) => {
-  // Kunci cache dibedakan per jalur: `/sensuses` versi admin dan versi pengguna
-  // punya jalur yang sama tetapi isi baris yang sama sekali berbeda, dan
-  // menumpuknya di satu slot akan menyajikan bentuk yang salah ke salah satu
-  // pemakainya.
-  const kunci = `ALL${opts.pengguna ? ':PENGGUNA' : ''} ${buatKunci(path, params)}`;
-  const ttl = opts.ttlMs ?? TTL_MS;
+  // Kunci cache dibedakan per jalur dan per profil: `/sensuses` versi admin dan
+  // versi pengguna punya jalur yang sama tetapi isi baris yang sama sekali
+  // berbeda, dan menumpuknya di satu slot akan menyajikan bentuk yang salah.
+  const profil = opts.profil || null;
+  const kunci = `ALL${opts.pengguna ? ':PENGGUNA' : ''}${profil ? `:${profil.nama}` : ''} ${buatKunci(path, params)}`;
+  const ttl = opts.ttlMs ?? TTL_SUSUR_MS;
 
   const tersimpan = cache.get(kunci);
-  if (!opts.force && tersimpan && Date.now() - tersimpan.at < ttl) return tersimpan.value;
+  const segar = tersimpan && Date.now() - tersimpan.at < ttl;
+  if (!opts.force && segar) return tersimpan.value;
 
   // Jawaban untuk pemanggil mode latar: penyusuran tetap berjalan dan mengisi
   // cache, tetapi HTTP tidak ikut menunggunya. Bila ada hasil lama, itu yang
-  // disajikan — data basi jauh lebih berguna daripada halaman kosong, dan
-  // siklus pembaruan otomatis akan menggantinya begitu penyusuran selesai.
+  // disajikan — data basi jauh lebih berguna daripada halaman kosong.
   const jawabanLatar = () =>
     tersimpan
       ? { ...tersimpan.value, basi: true, belum_siap: false }
       : {
           rows: [],
+          olahan: null,
+          terbaca: 0,
           truncated: false,
           pages: 0,
           last_page: null,
@@ -317,125 +346,154 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
           kembar: 0,
           kurang: 0,
           kena_pagar: false,
+          halaman_gagal: 0,
           basi: false,
           belum_siap: true
         };
 
-  if (!opts.force && inflight.has(kunci)) {
+  // Satu kunci, satu penyusuran — BAHKAN saat dipaksa. Dulu `force` memulai
+  // penyusuran baru di samping yang sedang berjalan; setiap klik "Muat ulang"
+  // menambah ratusan permintaan ke ASTA DESA dan tidak satu pun selesai lebih
+  // cepat karenanya.
+  if (inflight.has(kunci)) {
     return opts.latar ? jawabanLatar() : inflight.get(kunci);
   }
 
   const batasBaris = opts.maxRows || MAX_ROWS_DEFAULT;
+  const minta = opts.pengguna ? requestPengguna : requestMentah;
 
   const promise = (async () => {
     const baris = [];
+    const olahan = profil?.olah ? profil.olah.buat() : null;
     // Id yang sudah masuk, untuk menolak baris kembar.
     //
     // MENGAPA PERLU. `/admin/sensuses` mengurut `orderByDesc('id')` lalu
-    // memotongnya dengan OFFSET. Selama penyusuran berlangsung — terukur 17,8
-    // detik untuk 21 halaman — pendataan di lapangan terus memasukkan baris
-    // baru ber-id lebih besar, dan setiap sisipan menggeser SELURUH jendela satu
-    // langkah ke belakang. Akibatnya baris di perbatasan halaman terbaca DUA
-    // KALI, sementara baris terbaru yang mendorongnya tidak pernah terbaca sama
-    // sekali. Diukur langsung ke produksi: 4.056 baris terkumpul, 4.055 id unik,
-    // id 538 dobel, satu baris hilang.
+    // memotongnya dengan OFFSET. Selama penyusuran berlangsung pendataan di
+    // lapangan terus memasukkan baris baru, dan setiap sisipan menggeser SELURUH
+    // jendela satu langkah: baris di perbatasan halaman terbaca DUA KALI,
+    // sementara baris terbaru yang mendorongnya tidak terbaca sama sekali.
+    // Diukur langsung ke produksi: 4.056 baris terkumpul, 4.055 id unik.
     //
     // Yang dobel dibuang di sini. Yang hilang tidak bisa ditambal dari sisi ini
-    // — untuk itulah `total` di bawah dibawa apa adanya dari meta, supaya
-    // pemanggil memakai angka resmi server, bukan hasil hitungan array yang
-    // kebetulan.
+    // — untuk itulah `total` dibawa apa adanya dari meta.
     const idTerlihat = new Set();
     let kembar = 0;
-    let halaman = 1;
+    let terbaca = 0;
+    let totalMeta = null;
     let halamanTerakhir = 1;
+    let halamanGagal = 0;
     let terpotong = false;
     let kenaPagar = false;
-    let totalMeta = null;
 
-    const minta = opts.pengguna ? requestPengguna : requestMentah;
-
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      const body = await minta(path, { ...params, page: halaman, per_page: MAX_PER_PAGE });
-
-      // TIGA BENTUK PAGINATOR, semuanya nyata di ASTA DESA:
-      //   a. `{data:[…], meta:{last_page}}`   — endpoint admin (/sensuses, /users)
-      //   b. `{data:[…], last_page}`          — /messages, paginator rata
-      //   c. `{data:{data:[…], last_page}}`   — /v1/sensuses, paginator Laravel
-      //                                         utuh yang dibungkus lagi
-      // Bentuk (c) adalah yang paling mudah meleset: `body.data` di situ OBJEK,
-      // bukan array, sehingga pembacaan gaya (a) menghasilkan nol baris dan
-      // penyusuran berhenti di halaman pertama tanpa satu pun galat.
+    // TIGA BENTUK PAGINATOR, semuanya nyata di ASTA DESA:
+    //   a. `{data:[…], meta:{last_page}}`   — endpoint admin (/sensuses, /users)
+    //   b. `{data:[…], last_page}`          — /messages, paginator rata
+    //   c. `{data:{data:[…], last_page}}`   — /v1/sensuses, paginator Laravel
+    //                                         utuh yang dibungkus lagi
+    // Bentuk (c) paling mudah meleset: `body.data` di situ OBJEK, bukan array,
+    // sehingga pembacaan gaya (a) menghasilkan nol baris tanpa satu pun galat.
+    const serap = (body, halaman) => {
       const amplop = body?.data && !Array.isArray(body.data) ? body.data : body;
       const data = Array.isArray(amplop?.data) ? amplop.data : Array.isArray(body?.data) ? body.data : [];
 
       data.forEach((r) => {
         // Baris tanpa id tetap diambil: tidak ada yang bisa dipakai untuk
-        // membedakannya, dan membuangnya akan lebih merugikan daripada
-        // meloloskan kembar yang mungkin tidak pernah ada.
+        // membedakannya, dan membuangnya lebih merugikan daripada meloloskan
+        // kembar yang mungkin tidak pernah ada.
         const id = r?.id ?? r?.sensus_id;
-        if (id === undefined || id === null) {
-          baris.push(r);
-          return;
+        if (id !== undefined && id !== null) {
+          if (idTerlihat.has(id)) {
+            kembar += 1;
+            return;
+          }
+          idTerlihat.add(id);
         }
-        if (idTerlihat.has(id)) {
-          kembar += 1;
-          return;
-        }
-        idTerlihat.add(id);
-        baris.push(r);
+        terbaca += 1;
+        if (olahan) profil.olah.tambah(olahan, r);
+        const disimpan = profil?.ringkas ? profil.ringkas(r) : r;
+        if (disimpan !== null && disimpan !== undefined) baris.push(disimpan);
       });
 
-      halamanTerakhir = Number(
-        amplop?.last_page ?? amplop?.meta?.last_page ?? body?.meta?.last_page ?? body?.last_page ?? halaman
-      );
-      const total = Number(amplop?.total ?? body?.meta?.total ?? body?.total ?? baris.length);
-      if (Number.isFinite(total)) totalMeta = total;
-
-      if (baris.length >= batasBaris && halaman < halamanTerakhir) {
-        terpotong = true;
-        kenaPagar = true;
-        break;
+      if (halaman === 1) {
+        halamanTerakhir =
+          Number(amplop?.last_page ?? amplop?.meta?.last_page ?? body?.meta?.last_page ?? body?.last_page ?? 1) || 1;
       }
-      if (halaman >= halamanTerakhir || data.length === 0) break;
-      halaman += 1;
+      const total = Number(amplop?.total ?? body?.meta?.total ?? body?.total);
+      if (Number.isFinite(total)) totalMeta = total;
+      return data.length;
+    };
+
+    // Satu halaman dengan dua kali percobaan ulang. Dari ratusan permintaan,
+    // satu-dua yang tersendat itu normal; menggagalkan seluruh penyusuran
+    // karenanya berarti halaman tidak pernah punya data sama sekali.
+    const mintaHalaman = async (halaman) => {
+      for (let coba = 0; ; coba += 1) {
+        try {
+          return await minta(path, { ...params, page: halaman, per_page: MAX_PER_PAGE });
+        } catch (err) {
+          // Galat konfigurasi (token/izin) tidak akan sembuh dengan mengulang.
+          if (coba >= 2 || (err.status && err.status !== 504 && err.status !== 502)) throw err;
+          await new Promise((r) => setTimeout(r, 1000 * (coba + 1)));
+        }
+      }
+    };
+
+    // Halaman pertama sendirian: dari sanalah jumlah halaman diketahui. Kalau
+    // yang ini gagal, penyusuran memang tidak bisa dimulai — galatnya diteruskan.
+    const jumlahPertama = serap(await mintaHalaman(1), 1);
+
+    const batasHalaman = Math.min(halamanTerakhir, Math.max(1, Math.ceil(batasBaris / MAX_PER_PAGE)));
+    if (halamanTerakhir > batasHalaman) {
+      terpotong = true;
+      kenaPagar = true;
+    }
+
+    if (jumlahPertama > 0 && batasHalaman > 1) {
+      let berikut = 2;
+      const pekerja = async () => {
+        while (berikut <= batasHalaman) {
+          const halaman = berikut;
+          berikut += 1;
+          try {
+            serap(await mintaHalaman(halaman), halaman);
+          } catch (err) {
+            // Galat izin/token pada halaman mana pun berarti semua halaman lain
+            // juga akan ditolak — hentikan, jangan diam-diam menyajikan nol.
+            if (err.status === 401 || err.status === 403 || err.status === 503) throw err;
+            halamanGagal += 1;
+          }
+        }
+      };
+      await Promise.all(Array.from({ length: Math.min(KONKURENSI, batasHalaman - 1) }, pekerja));
     }
 
     // Berapa baris yang tidak sempat terbaca.
     //
     // SENGAJA TIDAK LANGSUNG DIANGGAP "data sebagian". Selama pendataan
-    // berjalan, penyusuran 18 detik hampir selalu ketinggalan satu-dua baris:
-    // paginasi di sana berbasis OFFSET dengan urutan menurun, jadi baris yang
-    // masuk saat penyusuran berlangsung menggeser jendela dan mendorong
-    // segelintir baris keluar. Itu keadaan normal, bukan kerusakan.
-    //
-    // Dulu ini tidak pernah terlihat karena baris kembar (dari pergeseran yang
-    // sama) menambal jumlahnya sampai pas. Setelah kembarnya dibuang, angkanya
-    // jujur — dan menandai setiap kekurangan satu baris sebagai "data sebagian"
-    // berarti memasang peringatan yang menyala terus-menerus, yang justru
-    // membuat peringatan itu berhenti dibaca saat benar-benar penting.
-    const kurang = totalMeta === null ? 0 : Math.max(0, totalMeta - baris.length);
-
-    // Ambangnya longgar tetapi tidak tak terbatas: 1% dari total, minimal 25
-    // baris. Di bawah itu penyebabnya pergeseran biasa; di atas itu ada yang
-    // salah dan halaman memang harus mengatakannya.
+    // berjalan, penyusuran hampir selalu ketinggalan satu-dua baris karena
+    // paginasi OFFSET bergeser. Ambangnya longgar tetapi tidak tak terbatas: 1%
+    // dari total, minimal 25 baris. Di atas itu ada yang salah dan halaman
+    // memang harus mengatakannya.
+    const kurang = totalMeta === null ? 0 : Math.max(0, totalMeta - terbaca);
     const toleransi = Math.max(25, Math.round((totalMeta || 0) * 0.01));
     if (!kenaPagar && kurang > toleransi) terpotong = true;
+    if (halamanGagal > 0) terpotong = true;
 
     const hasil = {
       rows: baris,
+      olahan: olahan ? profil.olah.selesai(olahan) : null,
+      terbaca,
       truncated: terpotong,
-      pages: halaman,
+      pages: batasHalaman,
       last_page: halamanTerakhir,
-      // Jumlah resmi menurut server, bukan panjang array. Keduanya bisa
-      // berbeda: array kehilangan baris yang tergeser keluar saat penyusuran.
+      // Jumlah resmi menurut server, bukan hitungan baris: yang tergeser keluar
+      // paginasi saat penyusuran tidak ikut terhitung.
       total: totalMeta,
       kembar,
       kurang,
-      // Dibedakan dari `truncated` supaya halaman bisa menjelaskan sebabnya
-      // dengan benar: pagar batas baris itu soal setelan, sedangkan kekurangan
-      // besar tanpa kena pagar itu soal sambungan atau paginasi di sana.
-      kena_pagar: kenaPagar
+      kena_pagar: kenaPagar,
+      halaman_gagal: halamanGagal,
+      disusun_pada: new Date().toISOString()
     };
     cache.set(kunci, { value: hasil, at: Date.now() });
     inflight.delete(kunci);
@@ -447,26 +505,32 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
 
   inflight.set(kunci, promise);
 
-  // Mode latar dipakai halaman Ringkasan. Penyusuran penuh memakan menit —
-  // 72 halaman per September 2026 — sementara axios di frontend menyerah pada
-  // detik ke-30. Menunggunya berarti halaman TIDAK PERNAH tampil; dilepas ke
-  // latar, halaman terbit seketika dan rincian menyusul pada siklus pembaruan
-  // berikutnya.
+  // Mode latar: penyusuran penuh memakan menit, sementara axios di frontend
+  // menyerah pada detik ke-30. Menunggunya berarti halaman TIDAK PERNAH tampil.
   //
-  // `catch` kosong itu WAJIB: tanpa pemegang penolakan, kegagalan penyusuran
-  // yang tak seorang pun tunggu menjadi unhandled rejection dan menjatuhkan
-  // proses Node.
+  // Pemegang penolakan itu WAJIB: tanpa itu, kegagalan penyusuran yang tak
+  // seorang pun tunggu menjadi unhandled rejection dan menjatuhkan proses Node.
   if (opts.latar) {
-    promise.catch(() => {});
+    promise.catch((err) => console.error(`[asta-desa] penyusuran ${kunci} gagal:`, err.message));
     return jawabanLatar();
   }
 
   return promise;
 };
 
-/** Buang seluruh cache respons (dipakai tombol "muat ulang" di halaman). */
+/**
+ * "Muat ulang" dari halaman.
+ *
+ * Cache per-halaman dibuang, tetapi hasil PENYUSURAN hanya ditandai kedaluwarsa
+ * — tidak dihapus. Menghapusnya membuat halaman kosong selama beberapa menit
+ * sampai penyusuran baru selesai; dengan ditandai, halaman tetap menyajikan
+ * angka terakhir sementara yang baru disiapkan di latar.
+ */
 const bersihkanCache = () => {
-  cache.clear();
+  for (const [kunci, isi] of cache.entries()) {
+    if (kunci.startsWith('ALL')) cache.set(kunci, { ...isi, at: 0 });
+    else cache.delete(kunci);
+  }
 };
 
 module.exports = {
@@ -478,5 +542,6 @@ module.exports = {
   terkonfigurasi,
   BASE_URL,
   MAX_PER_PAGE,
-  TTL_MS
+  TTL_MS,
+  TTL_SUSUR_MS
 };
