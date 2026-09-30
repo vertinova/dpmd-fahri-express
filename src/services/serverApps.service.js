@@ -155,7 +155,7 @@ const getServices = async () => {
   if (!IS_LINUX) return { available: false, services: [], note: 'Pemeriksaan systemd hanya di server Linux.' };
   const r = await jalankan('systemctl', [
     'show', ...SYSTEM_SERVICES.map((s) => s.unit), '--no-pager',
-    '--property=Id,LoadState,ActiveState,SubState,ActiveEnterTimestamp,MainPID,MemoryCurrent,Description',
+    '--property=Id,LoadState,ActiveState,SubState,ActiveEnterTimestamp,MainPID,MemoryCurrent,Description,UnitFileState,TriggeredBy',
   ]);
   if (!r.stdout) return { available: false, services: [], note: r.error || 'systemctl tidak tersedia' };
   const blok = r.stdout.trim().split(/\n\s*\n/);
@@ -178,11 +178,28 @@ const getServices = async () => {
       since: o.ActiveEnterTimestamp || null,
       pid: Number(o.MainPID) || null,
       memory: Number.isFinite(mem) && mem < 1e15 ? mem : null,
+      enabled: !['disabled', 'masked'].includes(o.UnitFileState),
+      socket: /\.socket\b/.test(o.TriggeredBy || ''),
     });
   });
+  // Layanan yang dinyalakan socket (mis. ssh.service lewat ssh.socket) wajar
+  // inactive selama tidak ada koneksi. systemd lama tidak mengisi TriggeredBy,
+  // jadi status <unit>.socket dicek langsung (satu baris per unit, urut).
+  const cekSocket = layanan.filter((x) => x.active !== 'active' && !x.socket);
+  if (cekSocket.length) {
+    const rs = await jalankan('systemctl', ['is-active', ...cekSocket.map((x) => x.unit.replace(/\.service$/, '.socket'))]);
+    rs.stdout.trim().split('\n').forEach((st, i) => {
+      if (st.trim() === 'active' && cekSocket[i]) cekSocket[i].socket = true;
+    });
+  }
+
   for (const s of layanan) {
     const key = `svc:${s.unit}`;
-    if (s.active !== 'active' && !['ufw.service', 'fail2ban.service'].includes(s.unit)) {
+    // Hanya layanan yang memang di-enable yang dianggap mati: unit yang sengaja
+    // dinonaktifkan (mis. SSH di container yang diakses lewat `pct`) atau yang
+    // diaktifkan socket wajar berstatus inactive.
+    const semestinyaJalan = s.enabled && !s.socket;
+    if (semestinyaJalan && s.active !== 'active' && !['ufw.service', 'fail2ban.service'].includes(s.unit)) {
       alerts.raise(key, { level: 'critical', kategori: 'layanan', title: `Layanan ${s.label} mati`, message: `${s.unit} berstatus ${s.active}/${s.sub}.` });
     } else {
       alerts.clear(key);

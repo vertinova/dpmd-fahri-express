@@ -67,10 +67,13 @@ const panggil = (method, jalur, body = null, { timeout = 15000 } = {}) => new Pr
       try { json = JSON.parse(data); } catch { /* bukan JSON */ }
       if (res.statusCode >= 400) {
         const rinci = json?.errors ? ` — ${Object.values(json.errors).join('; ')}` : '';
+        // Proxmox menaruh alasan penolakan di status line, mis.
+        // "Permission check failed (/vms/101, VM.Config.Options)".
+        const izinKurang = (String(res.statusMessage || '').match(/\(([^)]+)\)/) || [])[1];
         const pesan = res.statusCode === 401
           ? 'Token Proxmox ditolak (401). Periksa PROXMOX_TOKEN_ID/SECRET.'
           : res.statusCode === 403
-            ? `Token Proxmox tidak punya izin untuk aksi ini (403)${rinci}`
+            ? `Token Proxmox tidak punya izin untuk aksi ini${izinKurang ? ` — butuh ${izinKurang}` : ''}. Tambahkan hak tersebut ke role token di Proxmox (Datacenter → Permissions → Roles).${rinci}`
             : `Proxmox ${res.statusCode}: ${res.statusMessage}${rinci}`;
         reject(Object.assign(new Error(pesan), { status: res.statusCode }));
         return;
@@ -333,7 +336,12 @@ const powerAction = async (vmid, aksi) => {
 
 const SATUAN = { G: 1024 ** 3, M: 1024 ** 2 };
 
-/** Tambah kapasitas disk (Proxmox hanya mengizinkan membesar). */
+/**
+ * Tambah kapasitas disk (Proxmox hanya mengizinkan membesar).
+ * Untuk LXC, Proxmox juga memeriksa VM.Config.Options (parameter disk/size
+ * jatuh ke cabang "opsi lain" di check_ct_modify_config_perm), jadi role token
+ * wajib punya hak itu selain VM.Config.Disk & Datastore.AllocateSpace.
+ */
 const resizeDisk = async (vmid, diskKey, tambahGb) => {
   const g = await cariGuest(vmid);
   const tambah = Number(tambahGb);
