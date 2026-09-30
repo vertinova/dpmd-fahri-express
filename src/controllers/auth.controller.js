@@ -5,6 +5,7 @@ const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const { validateDesaProfile, mustCompleteDesaProfile } = require('../config/desaProfile');
 const { SANDI_DEFAULT } = require('../config/sandiDefault');
+const serverSecurity = require('../services/serverSecurity.service');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -132,6 +133,7 @@ const login = async (req, res) => {
 
     if (!user) {
       logger.warn(`Login failed: User not found - ${email}`);
+      serverSecurity.onLoginFailed({ ip: req.ip, email, userAgent: req.headers['user-agent'], alasan: 'email tidak terdaftar' });
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
@@ -143,6 +145,7 @@ const login = async (req, res) => {
 
     if (!isPasswordValid) {
       logger.warn(`Login failed: Invalid password - ${email}`);
+      serverSecurity.onLoginFailed({ ip: req.ip, email, userAgent: req.headers['user-agent'], alasan: 'sandi salah' });
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'

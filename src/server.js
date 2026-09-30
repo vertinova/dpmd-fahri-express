@@ -132,6 +132,12 @@ const app = express();
 // Use 2 for two reverse proxies to get real client IP for rate limiting
 app.set('trust proxy', 2);
 
+// Manajemen Server: tolak IP yang diblokir & catat trafik/respons. Dipasang
+// sebelum rate limiter supaya respons 429 miliknya ikut terhitung sebagai
+// indikasi serangan.
+const serverGuard = require('./middlewares/serverGuard');
+app.use(serverGuard.gerbang);
+
 // Security middleware - Configure helmet to allow PDF embedding via object tag
 app.use(helmet({
   contentSecurityPolicy: {
@@ -201,6 +207,10 @@ if (process.env.NODE_ENV === 'production') {
 // Body parsers with increased limits for file metadata
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Deteksi pola serangan (butuh body yang sudah diurai) dan kuota unggahan.
+app.use(serverGuard.pemeriksa);
+app.use('/api', serverGuard.kuotaUnggah);
 
 // Compression
 app.use(compression());
@@ -350,6 +360,7 @@ app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes); // User management routes
 app.use('/api/desa-admin', require('./routes/desaAdmin.routes')); // Manajemen akun oleh Admin Desa
 app.use('/api/superadmin/backup', require('./routes/backup.routes')); // Unduh cadangan database & berkas
+app.use('/api/superadmin/server', require('./routes/serverManagement.routes')); // Manajemen Server (pemantauan, storage, keamanan)
 app.use('/api/roles', require('./routes/role.routes')); // Role management routes
 app.use('/api/pegawai', pegawaiRoutes); // Pegawai routes
 app.use('/api/absensi', require('./routes/absensi.routes')); // Absensi pegawai routes
@@ -548,6 +559,19 @@ function startServer() {
 
     // Initialize scheduler for push notifications
     schedulerService.init();
+
+    // Pemantau Manajemen Server (metrik, keamanan, storage, uptime). Masing-
+    // masing hanya memasang timer ber-unref, jadi tidak menahan proses.
+    try {
+      require('./services/serverMetrics.service').start();
+      require('./services/serverSecurity.service').start();
+      require('./services/serverStorage.service').start();
+      require('./services/serverApps.service').start();
+      require('./services/serverProxmox.service').start();
+      logger.info('🖥️  Server monitor aktif');
+    } catch (err) {
+      logger.error('🖥️  Server monitor gagal dijalankan —', err.message);
+    }
 
     // Auto-seed bankeu_perubahan_master_kegiatan (idempotent)
     // Fire-and-forget - jangan blocking startup, error tidak akan crash server
