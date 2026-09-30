@@ -235,7 +235,10 @@ const sertifikat = new Map(); // host → { valid_to, issuer, days_left, checked
 const defaultMonitors = () => {
   const port = process.env.PORT || 3001;
   const daftar = [{ name: 'Backend API (lokal)', url: `http://127.0.0.1:${port}/health` }];
-  const frontend = process.env.FRONTEND_URL || (process.env.NODE_ENV === 'production' ? 'https://dpmd.bogorkab.go.id' : null);
+  // Bukan FRONTEND_URL: di .env produksi nilainya masih dpmdbogorkab.id, domain
+  // lama yang sejak 23 Juli 2026 hanya melayani halaman "domain pindah"
+  // (lihat nginx-dpmdbogorkab.conf) — memantaunya memberi alarm palsu.
+  const frontend = process.env.MONITOR_WEBSITE_URL || (process.env.NODE_ENV === 'production' ? 'https://dpmd.bogorkab.go.id' : null);
   if (frontend) daftar.push({ name: 'Website DPMD', url: frontend });
   if (IS_LINUX) daftar.push({ name: 'Webhook Deploy', url: 'http://127.0.0.1:9000/webhook/status' });
   return daftar;

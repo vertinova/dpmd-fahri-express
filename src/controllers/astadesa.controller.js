@@ -902,6 +902,208 @@ exports.getDemografi = jalankan(async (req, res) => {
   });
 });
 
+// ── Profil keluarga per kategori sensus ─────────────────────────────────────
+
+/**
+ * Nama kategori dari awalan kolom. Tabel `sensuses` punya ±104 kolom yang
+ * dikelompokkan lewat awalannya (`spp_*` sarana & prasarana permukiman,
+ * `sosial_*` bantuan sosial, …). Awalan yang belum dikenal TIDAK dibuang —
+ * ia tetap tampil dengan awalannya sendiri, supaya kolom baru di ASTA DESA
+ * langsung terbaca tanpa perubahan kode.
+ */
+const KATEGORI_SENSUS = {
+  spp: 'Rumah & Prasarana',
+  sosial: 'Sosial & Bantuan',
+  eko: 'Ekonomi',
+  ekonomi: 'Ekonomi',
+  usaha: 'Usaha',
+  kes: 'Kesehatan',
+  kesehatan: 'Kesehatan',
+  pdk: 'Pendidikan',
+  pendidikan: 'Pendidikan',
+  aset: 'Kepemilikan Aset',
+  lingkungan: 'Lingkungan',
+  lh: 'Lingkungan',
+  kk: 'Kepala Keluarga',
+  pangan: 'Ketahanan Pangan',
+  kb: 'Keluarga Berencana',
+};
+
+/**
+ * Kolom yang TIDAK PERNAH diagregasi: identitas warga, koordinat, berkas, dan
+ * kolom teknis. Endpoint ini hanya mengirim hitungan per nilai, tetapi kolom
+ * seperti nama/NIK tetap dikecualikan di sini — kalau suatu kolom identitas
+ * kebetulan hanya berisi sedikit nilai di satu desa, daftar "nilai" itu sudah
+ * sama dengan membocorkan identitasnya.
+ */
+const KOLOM_TERLARANG = /(^id$|_id$|^uuid|nik|no_kk|nomor_kk|nama|alamat|telp|tlp|_hp$|^hp|whatsapp|^wa$|email|lat$|lon$|lng$|koordinat|lokasi|foto|gambar|media|_urls?$|tanggal_lahir|tgl_lahir|tempat_lahir|catatan|keterangan|ttd|tanda_tangan|signature|token|password|_at$|^tanggal|^tgl|user|petugas|surveyor|^status$|^kecamatan$|^desa$|^kelurahan$|^rt$|^rw$|dusun|kode_pos|anggotas?)/i;
+
+/** Nilai yang tampak seperti nomor identitas (NIK/KK/telepon) — dibuang. */
+const MIRIP_NOMOR = /^\+?\d{9,}$/;
+
+const BATAS_KATEGORI = 40;
+
+const labelKolom = (kunci, awalan) => {
+  const tanpaAwalan = awalan && kunci.startsWith(`${awalan}_`) ? kunci.slice(awalan.length + 1) : kunci;
+  const s = tanpaAwalan.replace(/_/g, ' ').trim();
+  return s.charAt(0).toUpperCase() + s.slice(1);
+};
+
+/** Nilai mentah → daftar label. Array (pilihan ganda) dan JSON-array dipecah. */
+const nilaiKe = (v) => {
+  if (v === null || v === undefined || v === '') return [];
+  if (Array.isArray(v)) return v.flatMap((x) => (x !== null && typeof x === 'object' ? [] : [String(x).trim()])).filter(Boolean);
+  if (typeof v === 'object') return null; // objek bersarang: bukan kategori
+  if (typeof v === 'boolean') return [v ? 'Ya' : 'Tidak'];
+  const s = String(v).trim();
+  if (!s) return [];
+  if (s.startsWith('[') && s.endsWith(']')) {
+    try {
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr)) return arr.map((x) => String(x).trim()).filter(Boolean);
+    } catch { /* bukan JSON — perlakukan sebagai teks biasa */ }
+  }
+  return [s];
+};
+
+/**
+ * GET /api/asta-desa/demografi/kategori?kecamatan=&desa=
+ *
+ * Profil keluarga per kategori sensus: untuk SETIAP kolom kategorikal di
+ * tabel `sensuses`, berapa keluarga per nilai. Kolomnya ditemukan sendiri dari
+ * data (bukan daftar tetap) karena ASTA DESA tidak mendokumentasikan ±104
+ * kolomnya, dan daftar tetap akan diam-diam tertinggal begitu mereka
+ * menambah pertanyaan kuesioner.
+ *
+ * Sumbernya `/sensuses` jalur pengguna — sama dengan /sebaran-peta, sehingga
+ * berbagi cache penyusurannya. Resource admin tidak membawa kolom-kolom ini.
+ */
+exports.getKategoriSensus = jalankan(async (req, res) => {
+  const force = paksa(req);
+  const fKec = rapikan(req.query.kecamatan);
+  const fDesa = rapikan(req.query.desa);
+
+  const semua = await asta.ambilSemua('/sensuses', {}, { force, pengguna: true, latar: !force });
+
+  // Daftar wilayah untuk penyaring dihitung dari SELURUH baris, bukan baris
+  // tersaring — kalau tidak, memilih satu kecamatan menghapus pilihan lain.
+  const perKec = new Map();
+  const perDesa = new Map();
+  semua.rows.forEach((row) => {
+    const kec = rapikan(pilih(row, KUNCI_KECAMATAN)) || 'Tidak diketahui';
+    tambah(perKec, kec);
+    if (fKec && kec.toLowerCase() === fKec.toLowerCase()) {
+      tambah(perDesa, rapikan(pilih(row, KUNCI_DESA)) || 'Tidak diketahui');
+    }
+  });
+
+  const baris = semua.rows.filter((row) => {
+    if (fKec && (rapikan(pilih(row, KUNCI_KECAMATAN)) || '').toLowerCase() !== fKec.toLowerCase()) return false;
+    if (fDesa && (rapikan(pilih(row, KUNCI_DESA)) || '').toLowerCase() !== fDesa.toLowerCase()) return false;
+    return true;
+  });
+
+  // kunci → { hitung: Map(labelNormal → {label,total}), terisi, multi, angka[], bukanKategori }
+  const kolom = new Map();
+  baris.forEach((row) => {
+    Object.entries(row).forEach(([kunci, v]) => {
+      if (KOLOM_TERLARANG.test(kunci)) return;
+      let k = kolom.get(kunci);
+      if (!k) {
+        k = { hitung: new Map(), terisi: 0, multi: false, angka: [], semuaAngka: true, bukanKategori: false };
+        kolom.set(kunci, k);
+      }
+      if (k.bukanKategori) return;
+      const nilai = nilaiKe(v);
+      if (nilai === null) { k.bukanKategori = true; return; }
+      if (!nilai.length) return;
+      k.terisi += 1;
+      if (Array.isArray(v) || (typeof v === 'string' && v.trim().startsWith('['))) k.multi = true;
+      nilai.forEach((n) => {
+        if (MIRIP_NOMOR.test(n.replace(/[\s-]/g, ''))) { k.bukanKategori = true; return; }
+        const num = keAngka(n);
+        if (num === null) k.semuaAngka = false;
+        else k.angka.push(num);
+        const normal = n.toLowerCase();
+        const ada = k.hitung.get(normal);
+        if (ada) ada.total += 1;
+        else k.hitung.set(normal, { label: n, total: 1 });
+      });
+    });
+  });
+
+  const total = baris.length;
+  const perKategori = new Map();
+  kolom.forEach((k, kunci) => {
+    if (k.bukanKategori || !k.terisi) return;
+    const kode = kunci.includes('_') ? kunci.split('_')[0].toLowerCase() : 'lainnya';
+    const nilai = Array.from(k.hitung.values()).sort((a, b) => b.total - a.total);
+
+    let item;
+    if (k.semuaAngka && !k.multi && nilai.length > 12) {
+      // Angka sungguhan (luas lantai, jumlah ternak, …): ringkasan statistik,
+      // bukan 300 batang berisi masing-masing satu keluarga.
+      const urut = [...k.angka].sort((a, b) => a - b);
+      const jumlah = urut.reduce((a, b) => a + b, 0);
+      item = {
+        jenis: 'angka',
+        statistik: {
+          rata_rata: Math.round((jumlah / urut.length) * 100) / 100,
+          median: urut[Math.floor(urut.length / 2)],
+          min: urut[0],
+          maks: urut[urut.length - 1],
+        },
+      };
+    } else if (nilai.length > BATAS_KATEGORI) {
+      return; // teks bebas — tidak bisa dibaca sebagai kategori
+    } else {
+      item = { jenis: k.multi ? 'pilihan_ganda' : 'kategori', nilai };
+    }
+
+    if (!perKategori.has(kode)) perKategori.set(kode, []);
+    perKategori.get(kode).push({
+      kunci,
+      label: labelKolom(kunci, kode === 'lainnya' ? null : kode),
+      terisi: k.terisi,
+      ...item,
+    });
+  });
+
+  // Awalan tak dikenal yang hanya dipakai satu kolom (mis. `jumlah_kamar`)
+  // bukan kategori — ia digabung ke "Lainnya" dengan nama kolom utuh.
+  perKategori.forEach((daftar, kode) => {
+    if (kode === 'lainnya' || KATEGORI_SENSUS[kode] || daftar.length >= 2) return;
+    perKategori.delete(kode);
+    if (!perKategori.has('lainnya')) perKategori.set('lainnya', []);
+    daftar.forEach((d) => perKategori.get('lainnya').push({ ...d, label: labelKolom(d.kunci, null) }));
+  });
+
+  const kategori = Array.from(perKategori.entries())
+    .map(([kode, daftar]) => ({
+      kode,
+      label: KATEGORI_SENSUS[kode] || (kode === 'lainnya' ? 'Lainnya' : kode.toUpperCase()),
+      kolom: daftar.sort((a, b) => b.terisi - a.terisi),
+    }))
+    // Kategori yang dikenal lebih dulu, "Lainnya" selalu terakhir.
+    .sort((a, b) => (a.kode === 'lainnya') - (b.kode === 'lainnya') || (!KATEGORI_SENSUS[a.kode]) - (!KATEGORI_SENSUS[b.kode]) || b.kolom.length - a.kolom.length);
+
+  res.json({
+    success: true,
+    data: {
+      total_keluarga: total,
+      filter: { kecamatan: fKec, desa: fDesa },
+      wilayah: {
+        kecamatan: keDaftar(perKec, 'nama').sort((a, b) => a.nama.localeCompare(b.nama, 'id')),
+        desa: keDaftar(perDesa, 'nama').sort((a, b) => a.nama.localeCompare(b.nama, 'id')),
+      },
+      kategori,
+      sebagian: semua.truncated,
+      rincian_siap: semua.rows.length > 0,
+      rincian_basi: semua.basi === true,
+    },
+  });
+});
+
 /** GET /api/asta-desa/layer — daftar layer peta ASTA DESA. */
 exports.getLayer = jalankan(async (req, res) => {
   const body = await asta.ambil('/layers', {}, { force: paksa(req) });

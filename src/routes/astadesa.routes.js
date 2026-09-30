@@ -21,6 +21,7 @@ router.get('/ringkasan', controller.getRingkasan);
 router.get('/sebaran', controller.getSebaran);
 router.get('/sensus', controller.getSensus);
 router.get('/demografi', controller.getDemografi);
+router.get('/demografi/kategori', controller.getKategoriSensus);
 router.get('/pengguna', controller.getPengguna);
 router.get('/layer', controller.getLayer);
 router.get('/pesan', controller.getPesan);
