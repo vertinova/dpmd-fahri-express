@@ -37,7 +37,10 @@ const persen = (bagian, total) => (total > 0 ? Math.round((bagian / total) * 100
 const DERET = [
   { key: 'penyertaan_modal', label: 'Penyertaan Modal Desa', awalan: 'PenyertaanModal', tahun: [2019, 2020, 2021, 2022, 2023, 2024], slot: 1 },
   { key: 'omset', label: 'Omset', awalan: 'Omset', tahun: [2023, 2024], slot: 2 },
-  { key: 'laba', label: 'Laba', awalan: 'Laba', tahun: [2023, 2024], slot: 3 },
+  // Laba boleh negatif (BUMDes merugi). Rugi IKUT dijumlahkan sebagai laba
+  // bersih — membuangnya membuat total laba se-kabupaten tampak lebih besar
+  // dari kenyataan, justru pada BUMDes yang paling butuh pendampingan.
+  { key: 'laba', label: 'Laba', awalan: 'Laba', tahun: [2023, 2024], slot: 3, bolehMinus: true },
   { key: 'kontribusi_pades', label: 'Kontribusi terhadap PADes', awalan: 'KontribusiTerhadapPADes', tahun: [2021, 2022, 2023, 2024], slot: 4 },
 ];
 
@@ -99,6 +102,7 @@ const getOutputBumdes = async () => {
       for (const tahun of item.tahun) {
         const nilai = toNumber(row[namaKolom(item, tahun)]);
         if (nilai > 0) semuaNilai.push(nilai);
+        else if (item.bolehMinus && nilai < 0) semuaNilai.push(-nilai);
       }
     }
     const nilaiTengah = median(semuaNilai);
@@ -109,10 +113,11 @@ const getOutputBumdes = async () => {
       let jumlah = 0;
       let pengisi = 0;
       let dikecualikan = 0;
+      let rugi = 0;
       for (const row of rows) {
         const nilai = toNumber(row[kolom]);
-        if (nilai <= 0) continue;
-        if (nilai > ambang) {
+        if (item.bolehMinus ? nilai === 0 : nilai <= 0) continue;
+        if (Math.abs(nilai) > ambang) {
           dikecualikan += 1;
           janggal.push({
             deret: item.key,
@@ -126,12 +131,14 @@ const getOutputBumdes = async () => {
         }
         jumlah += nilai;
         pengisi += 1;
+        if (nilai < 0) rugi += 1;
       }
       return {
         tahun,
         nilai: jumlah,
         pengisi,
         dikecualikan,
+        ...(item.bolehMinus ? { rugi } : {}),
         persen_pengisi: persen(pengisi, rows.length),
         rata_rata: pengisi > 0 ? Math.round(jumlah / pengisi) : 0,
       };
