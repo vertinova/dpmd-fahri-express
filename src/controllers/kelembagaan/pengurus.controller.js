@@ -154,6 +154,49 @@ function mapJenisKelaminToEnum(jenisKelamin) {
   return null;
 }
 
+/**
+ * Lembaga yang bisa menjadi tujuan transfer pengurus, dikunci per nilai
+ * `pengurusable_type` yang tersimpan di tabel pengurus.
+ */
+const LEMBAGA_TRANSFER = {
+  rws: { model: 'rws', jenis: 'RW', label: (r) => `RW ${r.nomor}` },
+  rts: { model: 'rts', jenis: 'RT', label: (r) => `RT ${r.nomor}${r.rws ? ` / RW ${r.rws.nomor}` : ''}` },
+  posyandus: { model: 'posyandus', jenis: 'Posyandu', label: (r) => r.nama },
+  karang_tarunas: { model: 'karang_tarunas', jenis: 'Karang Taruna', label: (r) => r.nama },
+  lpms: { model: 'lpms', jenis: 'LPM', label: (r) => r.nama },
+  pkks: { model: 'pkks', jenis: 'PKK', label: (r) => r.nama },
+  satlinmas: { model: 'satlinmas', jenis: 'Satlinmas', label: (r) => r.nama },
+  'lembaga-lainnya': { model: 'lembaga_lainnyas', jenis: 'Lembaga Lainnya', label: (r) => r.nama },
+};
+
+// Staf DPMD boleh memindahkan pengurus, tetapi hanya di dalam desa pengurus
+// itu sendiri. Lintas desa khusus superadmin.
+const TRANSFER_ADMIN_ROLES = ['pemberdayaan_masyarakat', 'pegawai', 'kepala_bidang', 'ketua_tim', 'kepala_dinas', 'sekretaris_dinas'];
+
+// Jabatan yang wajar diisi banyak orang sekaligus; selain itu dianggap jabatan
+// tunggal (Ketua, Sekretaris, dst.) sehingga transfer yang menduplikasinya
+// perlu konfirmasi.
+const JABATAN_JAMAK = /^(ANGGOTA|KADER)/;
+
+function getTransferScope(user) {
+  if (user.role === 'superadmin') return { allowed: true, lintasDesa: true };
+  if (user.role === 'desa') {
+    return user.desa_id ? { allowed: true, lintasDesa: false, desaId: String(user.desa_id) } : { allowed: false };
+  }
+  if (TRANSFER_ADMIN_ROLES.includes(user.role)) return { allowed: true, lintasDesa: false };
+  return { allowed: false };
+}
+
+async function findLembagaTransfer(type, id) {
+  const def = LEMBAGA_TRANSFER[type];
+  if (!def || !id) return null;
+  const record = await prisma[def.model].findUnique({
+    where: { id: String(id) },
+    ...(type === 'rts' ? { include: { rws: { select: { nomor: true } } } } : {}),
+  });
+  return record ? { def, record } : null;
+}
+
 class PengurusController {
   /**
    * List pengurus for desa user
@@ -691,6 +734,165 @@ class PengurusController {
    * Update pengurus verification status (for admin only)
    * PUT /api/admin/pengurus/:id/verifikasi
    */
+  /**
+   * Daftar lembaga tujuan transfer dalam satu desa
+   * GET /api/desa/pengurus/transfer-targets?target_desa_id=
+   * Akun desa selalu dikunci ke desanya sendiri.
+   */
+  async getTransferTargets(req, res) {
+    try {
+      const scope = getTransferScope(req.user);
+      if (!scope.allowed) {
+        return res.status(403).json({ success: false, message: 'Anda tidak berwenang memindahkan pengurus' });
+      }
+
+      const desaId = scope.desaId || req.query.target_desa_id || req.query.desa_id;
+      if (!desaId) {
+        return res.status(400).json({ success: false, message: 'desa_id wajib diisi' });
+      }
+
+      const where = { desa_id: BigInt(desaId) };
+      const groups = await Promise.all(
+        Object.entries(LEMBAGA_TRANSFER).map(async ([type, def]) => {
+          const rows = await prisma[def.model].findMany({
+            where,
+            ...(type === 'rts' ? { include: { rws: { select: { nomor: true } } } } : {}),
+          });
+          return rows.map((r) => ({
+            type,
+            id: r.id,
+            jenis: def.jenis,
+            label: def.label(r),
+            status_kelembagaan: r.status_kelembagaan || 'aktif',
+          }));
+        })
+      );
+
+      const data = groups.flat().sort((a, b) =>
+        a.jenis === b.jenis
+          ? a.label.localeCompare(b.label, 'id', { numeric: true })
+          : a.jenis.localeCompare(b.jenis)
+      );
+
+      res.json({ success: true, data });
+    } catch (error) {
+      console.error('Error in getTransferTargets:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil daftar lembaga tujuan', error: error.message });
+    }
+  }
+
+  /**
+   * Pindahkan pengurus ke lembaga lain
+   * PUT /api/desa/pengurus/:id/transfer
+   * Body: { target_type, target_id, jabatan?, force? }
+   *
+   * Akun desa & staf DPMD: hanya antar-lembaga di desa pengurus itu.
+   * Superadmin: boleh ke lembaga di desa mana pun.
+   */
+  async transferPengurus(req, res) {
+    try {
+      const user = req.user;
+      const scope = getTransferScope(user);
+      if (!scope.allowed) {
+        return res.status(403).json({ success: false, message: 'Anda tidak berwenang memindahkan pengurus' });
+      }
+
+      const { target_type, target_id, jabatan, force } = req.body;
+      if (!target_type || !target_id) {
+        return res.status(400).json({ success: false, message: 'Lembaga tujuan wajib dipilih' });
+      }
+
+      const existing = await prisma.pengurus.findUnique({ where: { id: String(req.params.id) } });
+      if (!existing || (scope.desaId && String(existing.desa_id) !== scope.desaId)) {
+        return res.status(404).json({ success: false, message: 'Pengurus tidak ditemukan' });
+      }
+
+      const target = await findLembagaTransfer(target_type, target_id);
+      if (!target) {
+        return res.status(404).json({ success: false, message: 'Lembaga tujuan tidak ditemukan' });
+      }
+
+      const lintasDesa = String(target.record.desa_id) !== String(existing.desa_id);
+      if (lintasDesa && !scope.lintasDesa) {
+        return res.status(403).json({
+          success: false,
+          message: 'Pengurus hanya dapat dipindahkan ke lembaga di desa yang sama',
+        });
+      }
+
+      if (existing.pengurusable_type === target_type && existing.pengurusable_id === String(target_id)) {
+        return res.status(400).json({ success: false, message: 'Pengurus sudah berada di lembaga tersebut' });
+      }
+
+      const jabatanBaru = toUpper(jabatan) || existing.jabatan;
+
+      // Cegah dua Ketua RT (dsb.) aktif di satu lembaga tanpa disadari
+      if (!force && existing.status_jabatan === 'aktif' && !JABATAN_JAMAK.test(jabatanBaru || '')) {
+        const bentrok = await prisma.pengurus.findFirst({
+          where: {
+            pengurusable_type: target_type,
+            pengurusable_id: String(target_id),
+            jabatan: jabatanBaru,
+            status_jabatan: 'aktif',
+          },
+          select: { id: true, nama_lengkap: true },
+        });
+        if (bentrok) {
+          return res.status(409).json({
+            success: false,
+            code: 'JABATAN_TERISI',
+            message: `Jabatan ${jabatanBaru} di ${target.def.jenis} ${target.def.label(target.record)} sudah diisi ${bentrok.nama_lengkap} (aktif).`,
+            conflict: bentrok,
+          });
+        }
+      }
+
+      const updateData = {
+        pengurusable_type: target_type,
+        pengurusable_id: String(target_id),
+        desa_id: target.record.desa_id,
+        jabatan: jabatanBaru,
+      };
+      // SK pengangkatan milik desa asal tidak berlaku di desa lain
+      if (lintasDesa) updateData.produk_hukum_id = null;
+      // Data yang dipindahkan desa/staf perlu diverifikasi ulang di lembaga barunya
+      if (user.role !== 'superadmin') {
+        updateData.status_verifikasi = 'unverified';
+        updateData.catatan_verifikasi = null;
+      }
+
+      const updated = await prisma.pengurus.update({ where: { id: existing.id }, data: updateData });
+
+      const asal = await findLembagaTransfer(existing.pengurusable_type, existing.pengurusable_id);
+      const asalLabel = asal ? `${asal.def.jenis} ${asal.def.label(asal.record)}` : existing.pengurusable_type;
+      const tujuanLabel = `${target.def.jenis} ${target.def.label(target.record)}`;
+
+      await logKelembagaanActivity({
+        kelembagaanType: target_type,
+        kelembagaanId: String(target_id),
+        kelembagaanNama: target.def.label(target.record),
+        desaId: updated.desa_id,
+        activityType: ACTIVITY_TYPES.UPDATE_PENGURUS,
+        entityType: ENTITY_TYPES.PENGURUS,
+        entityId: updated.id,
+        entityName: `${updated.nama_lengkap} (${updated.jabatan})`,
+        oldValue: { lembaga: asalLabel, desa_id: String(existing.desa_id), jabatan: existing.jabatan },
+        newValue: { lembaga: tujuanLabel, desa_id: String(updated.desa_id), jabatan: updated.jabatan, keterangan: 'Transfer pengurus' },
+        userId: user.id,
+        userName: user.name,
+        userRole: user.role,
+        bidangId: user.bidang_id,
+        ipAddress: req.ip,
+        userAgent: req.get('user-agent'),
+      });
+
+      res.json({ success: true, message: `Pengurus dipindahkan ke ${tujuanLabel}`, data: updated });
+    } catch (error) {
+      console.error('Error in transferPengurus:', error);
+      res.status(500).json({ success: false, message: 'Gagal memindahkan pengurus', error: error.message });
+    }
+  }
+
   async updateVerifikasi(req, res) {
     try {
       const user = req.user;

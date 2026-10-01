@@ -132,6 +132,10 @@ router.get('/pengurus/import/stats', pengurusController.getImportStats.bind(peng
 router.get('/pengurus/import/desa/:desaId', pengurusController.getDesaPengurusList.bind(pengurusController));
 router.delete('/pengurus/import/desa/:desaId', pengurusController.deleteImportedByDesa.bind(pengurusController));
 
+// Transfer pengurus antar-lembaga (superadmin: lintas desa; staf lain: dalam desa yang sama)
+router.get('/pengurus/transfer-targets', pengurusController.getTransferTargets.bind(pengurusController));
+router.put('/pengurus/:id/transfer', pengurusController.transferPengurus.bind(pengurusController));
+
 router.get('/pengurus/:id', pengurusController.showPengurus.bind(pengurusController));
 router.get('/pengurus', pengurusController.getPengurusByKelembagaan.bind(pengurusController));
 router.delete('/pengurus/:id', pengurusController.deletePengurus.bind(pengurusController));

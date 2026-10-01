@@ -129,12 +129,14 @@ router.put('/lembaga-lainnya/:id/ajukan-ulang', lembagaLainnyaController.ajukanU
 // Pengurus routes (polymorphic - can be attached to any kelembagaan)
 router.get('/pengurus/by-kelembagaan', pengurusController.getPengurusByKelembagaan.bind(pengurusController));
 router.get('/pengurus/history', pengurusController.getPengurusHistory.bind(pengurusController));
+router.get('/pengurus/transfer-targets', pengurusController.getTransferTargets.bind(pengurusController));
 router.get('/pengurus', pengurusController.listDesaPengurus.bind(pengurusController));
 router.post('/pengurus', uploadPengurus.single('avatar'), pengurusController.createPengurus.bind(pengurusController));
 router.get('/pengurus/:id', pengurusController.showDesaPengurus.bind(pengurusController));
 router.put('/pengurus/:id', uploadPengurus.single('avatar'), pengurusController.updatePengurus.bind(pengurusController));
 router.delete('/pengurus/:id', pengurusController.deletePengurus.bind(pengurusController));
 router.put('/pengurus/:id/status', pengurusController.updatePengurusStatus.bind(pengurusController));
+router.put('/pengurus/:id/transfer', pengurusController.transferPengurus.bind(pengurusController));
 router.put('/pengurus/:id/ajukan-ulang', pengurusController.ajukanUlangVerifikasi.bind(pengurusController));
 
 module.exports = router;
