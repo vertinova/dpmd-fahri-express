@@ -3535,6 +3535,71 @@ model formulir_berkas {
   @@index([respons_id, pertanyaan_id], map: "idx_formulir_berkas_respons")
 }
 
+model video_desa_permintaan {
+  id                BigInt                          @id @default(autoincrement()) @db.UnsignedBigInt
+  bidang_id         BigInt                          @db.UnsignedBigInt
+  judul             String                          @db.VarChar(255)
+  deskripsi         String?                         @db.Text
+  token             String                          @unique(map: "uq_video_desa_permintaan_token") @db.Char(32)
+  status            video_desa_permintaan_status    @default(dibuka)
+  orientasi         video_desa_permintaan_orientasi @default(bebas)
+  maks_durasi_detik Int?                            @db.UnsignedInt
+  maks_per_desa     Int                             @default(2) @db.UnsignedInt
+  tutup_pada        DateTime?                       @db.DateTime(0)
+  created_by        BigInt?                         @db.UnsignedBigInt
+  updated_by        BigInt?                         @db.UnsignedBigInt
+  created_at        DateTime?                       @default(now()) @db.Timestamp(0)
+  updated_at        DateTime?                       @default(now()) @db.Timestamp(0)
+  deleted_at        DateTime?                       @db.Timestamp(0)
+  deleted_by        BigInt?                         @db.UnsignedBigInt
+
+  @@index([bidang_id, deleted_at], map: "idx_video_desa_permintaan_bidang")
+}
+
+model video_desa_kiriman {
+  id            BigInt                    @id @default(autoincrement()) @db.UnsignedBigInt
+  permintaan_id BigInt                    @db.UnsignedBigInt
+  desa_id       BigInt                    @db.UnsignedBigInt
+  nama_pengirim String                    @db.VarChar(150)
+  no_hp         String?                   @db.VarChar(30)
+  keterangan    String?                   @db.Text
+  nama_berkas   String                    @db.VarChar(255)
+  mime          String?                   @db.VarChar(100)
+  ukuran        BigInt                    @default(0) @db.UnsignedBigInt
+  durasi_detik  Decimal?                  @db.Decimal(10, 2)
+  lebar         Int?                      @db.UnsignedInt
+  tinggi        Int?                      @db.UnsignedInt
+  codec         String?                   @db.VarChar(30)
+  nama_disk     String                    @unique(map: "uq_video_desa_kiriman_disk") @db.VarChar(120)
+  jalur_disk    String                    @db.VarChar(500)
+  status        video_desa_kiriman_status @default(masuk)
+  catatan       String?                   @db.Text
+  ditinjau_oleh BigInt?                   @db.UnsignedBigInt
+  ditinjau_pada DateTime?                 @db.Timestamp(0)
+  ip            String?                   @db.VarChar(45)
+  created_at    DateTime?                 @default(now()) @db.Timestamp(0)
+
+  @@index([permintaan_id, created_at], map: "idx_video_desa_kiriman_permintaan")
+  @@index([permintaan_id, desa_id], map: "idx_video_desa_kiriman_desa")
+}
+
+enum video_desa_permintaan_status {
+  dibuka
+  ditutup
+}
+
+enum video_desa_permintaan_orientasi {
+  bebas
+  lanskap
+  potret
+}
+
+enum video_desa_kiriman_status {
+  masuk
+  disetujui
+  ditolak
+}
+
 enum formulir_status {
   draf
   terbit

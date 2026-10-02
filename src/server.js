@@ -490,6 +490,10 @@ app.use('/api/drive', require('./routes/drive.routes'));
 // TIDAK memakai auth — itu jalur pengisian lewat tautan yang dibagikan; sisanya
 // wajib login. Lampiran jawaban ikut disimpan di private/, bukan storage/.
 app.use('/api/formulir', require('./routes/formulir.routes'));
+// Video Desa: bidang meminta video (videotron & media sosial) dari desa lewat
+// tautan publik. /api/video-desa/publik/* tanpa auth (unggahan bertahap per
+// potongan); /putar/:id memakai tautan bertanda tangan. Videonya di private/.
+app.use('/api/video-desa', require('./routes/videoDesa.routes'));
 app.use('/api/activity-logs', require('./routes/activityLog.routes')); // Global Activity Logs (Superadmin)
 app.use('/api/kelembagaan', kelembagaanRoutes); // Kelembagaan routes (admin/global)
 app.use('/api/kelembagaan/activity-logs', require('./routes/kelembagaanActivityLogs.routes')); // Activity logs
