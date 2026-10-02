@@ -3566,6 +3566,8 @@ model video_desa_kiriman {
   nama_berkas   String                    @db.VarChar(255)
   mime          String?                   @db.VarChar(100)
   ukuran        BigInt                    @default(0) @db.UnsignedBigInt
+  ukuran_asli   BigInt                    @default(0) @db.UnsignedBigInt
+  sha256        String?                   @db.Char(64)
   durasi_detik  Decimal?                  @db.Decimal(10, 2)
   lebar         Int?                      @db.UnsignedInt
   tinggi        Int?                      @db.UnsignedInt
@@ -3573,6 +3575,8 @@ model video_desa_kiriman {
   nama_disk     String                    @unique(map: "uq_video_desa_kiriman_disk") @db.VarChar(120)
   jalur_disk    String                    @db.VarChar(500)
   status        video_desa_kiriman_status @default(masuk)
+  pemrosesan    video_desa_kiriman_proses @default(antre)
+  pesan_proses  String?                   @db.VarChar(500)
   catatan       String?                   @db.Text
   ditinjau_oleh BigInt?                   @db.UnsignedBigInt
   ditinjau_pada DateTime?                 @db.Timestamp(0)
@@ -3581,6 +3585,23 @@ model video_desa_kiriman {
 
   @@index([permintaan_id, created_at], map: "idx_video_desa_kiriman_permintaan")
   @@index([permintaan_id, desa_id], map: "idx_video_desa_kiriman_desa")
+  @@index([pemrosesan], map: "idx_video_desa_kiriman_proses")
+}
+
+model video_desa_tautan {
+  id         Int                          @id @db.UnsignedInt
+  token      String                       @unique(map: "uq_video_desa_tautan_token") @db.Char(32)
+  status     video_desa_permintaan_status @default(dibuka)
+  updated_by BigInt?                      @db.UnsignedBigInt
+  created_at DateTime?                    @default(now()) @db.Timestamp(0)
+  updated_at DateTime?                    @default(now()) @db.Timestamp(0)
+}
+
+enum video_desa_kiriman_proses {
+  antre
+  diproses
+  siap
+  gagal
 }
 
 enum video_desa_permintaan_status {

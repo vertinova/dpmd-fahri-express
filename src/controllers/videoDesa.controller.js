@@ -1,74 +1,64 @@
 /**
- * Video Desa: bidang meminta video dari desa lewat tautan publik.
+ * Video Desa: video kegiatan dari desa untuk videotron & media sosial DPMD.
  *
  * Alur:
- * 1. Bidang membuat "permintaan" (judul + arahan konten) dan membagikan
- *    tautannya (/v/<token>) ke desa.
- * 2. Desa membuka tautan tanpa login, memilih desanya, lalu mengunggah video.
- *    Unggahan dipecah per potongan (UKURAN_POTONGAN) — sinyal di desa sering
- *    putus, dan satu request 500 MB yang gagal di 90% harus diulang dari nol.
- *    Dengan potongan, yang diulang hanya potongan terakhir.
- * 3. Bidang meninjau kiriman (setujui/tolak), memutar, dan mengunduhnya untuk
- *    videotron dan media sosial.
+ * 1. Tiap bidang membuat "kegiatan video" (judul + arahan konten).
+ * 2. Bidang Sekretariat membagikan SATU tautan (/v/<token>) ke seluruh desa.
+ *    Di dalamnya tampil card semua kegiatan video yang sedang dibuka, dari
+ *    semua bidang.
+ * 3. Desa membuka tautan TANPA login, memilih desanya, lalu mengunggah satu
+ *    video per kegiatan. Unggahan dipecah per potongan (UKURAN_POTONGAN) —
+ *    sinyal di desa sering putus, dan yang diulang cukup potongan terakhir.
+ * 4. Video dibangun ulang menjadi MP4 bersih (services/videoDesaProses) sebelum
+ *    bisa diputar; lalu bidang pemilik kegiatan memverifikasinya.
  *
- * Penyimpanan di private/video-desa — sejajar dengan storage/, bukan di
- * dalamnya, karena storage/ disajikan statis tanpa login. Satu-satunya jalan
- * memutar/mengunduh adalah /putar/:id dengan tautan bertanda tangan berumur
- * pendek (elemen <video> tidak bisa mengirim header Authorization).
- *
- * Seluruh isi `publik*` dilayani ke internet terbuka: semua masukan divalidasi
- * ulang di sini, dan yang tidak perlu diketahui pengunggah tidak ikut dikirim.
+ * Jalur tanpa login dijaga berlapis: token tautan, kegiatan & tautan harus
+ * dibuka, satu video per desa per kegiatan, batas ukuran, batas sesi & jumlah
+ * unggahan per IP, pemeriksaan byte awal, ffprobe dengan format dibatasi,
+ * lalu pembangunan ulang penuh. Berkas di private/ (bukan storage/ yang
+ * statis-publik) dan hanya bisa diambil lewat tautan bertanda tangan.
  */
 
 const path = require('path');
 const fs = require('fs');
 const fsp = require('fs/promises');
 const crypto = require('crypto');
-const { spawn } = require('child_process');
 const jwt = require('jsonwebtoken');
 const prisma = require('../config/prisma');
 const storageServer = require('../services/serverStorage.service');
+const proses = require('../services/videoDesaProses.service');
 
-const VIDEO_ROOT = path.join(__dirname, '../../private/video-desa');
+const { VIDEO_ROOT, MENTAH_ROOT } = proses;
 const SEMENTARA_ROOT = path.join(VIDEO_ROOT, '_sementara');
 
 /**
- * 500 MB per video.
- *
- * Videotron memutar 1080p (sering lebih rendah — resolusi panel LED jarang
- * melampaui itu) dan klipnya pendek, 15–60 detik. Video 1080p H.264 dari HP
- * berbitrate ~10–17 Mbps, jadi 500 MB ≈ 4–6 menit rekaman mentah, atau jauh
- * lebih panjang untuk video yang sudah disunting. Lebih dari itu hampir pasti
- * 4K mentah yang tidak terpakai di videotron dan hanya memakan disk.
+ * 1 GB per video. Videotron memutar 1080p dan klipnya pendek; 1080p H.264
+ * dari HP ~10–17 Mbps, jadi 1 GB ≈ 8–13 menit rekaman mentah — longgar untuk
+ * video kegiatan yang belum disunting. Lebih dari itu hampir pasti 4K mentah.
  */
-const MAKS_UKURAN = 500 * 1024 * 1024;
+const MAKS_UKURAN = 1024 * 1024 * 1024;
 
-// 8 MB per potongan: cukup kecil untuk diulang di sinyal lemah, cukup besar
-// supaya 500 MB hanya ~63 request (rate limit anonim 1000/15 menit per IP).
+// 8 MB per potongan: kecil untuk diulang di sinyal lemah; 1 GB = 128 request
+// (rate limit anonim 1000/15 menit per IP).
 const UKURAN_POTONGAN = 8 * 1024 * 1024;
 
 const EKSTENSI_SAH = ['.mp4', '.mov', '.m4v', '.webm', '.mkv'];
 
-const MIME_EKSTENSI = {
-  '.mp4': 'video/mp4',
-  '.m4v': 'video/mp4',
-  '.mov': 'video/quicktime',
-  '.webm': 'video/webm',
-  '.mkv': 'video/x-matroska',
-};
-
-// Sesi unggah yang tidak selesai dalam sehari dianggap ditinggalkan.
 const UMUR_SESI_MS = 24 * 60 * 60 * 1000;
-
 const UMUR_TAUTAN_PUTAR = '3h';
 
+// Pembatas penyalahgunaan per IP pada jalur tanpa login.
+const MAKS_MULAI_PER_JAM = 30;
+const MAKS_SESI_AKTIF_PER_IP = 3;
+const SESI_AKTIF_MS = 30 * 60 * 1000;
+
 const PIMPINAN = ['superadmin', 'kepala_dinas', 'sekretaris_dinas'];
+const BIDANG_SEKRETARIAT = 2;
 
 fs.mkdirSync(SEMENTARA_ROOT, { recursive: true });
 
 /* ------------------------------------------------------------- bantuan -- */
 
-/** BigInt/Decimal tidak bisa di-JSON.stringify; dinormalkan ke Number. */
 const rapikan = (obj) => {
   if (obj === null || obj === undefined) return obj;
   if (typeof obj === 'bigint') return Number(obj);
@@ -86,16 +76,22 @@ const teks = (v, maks) => String(v ?? '').trim().slice(0, maks);
 const bolehKelola = (user, bidangPemilik) =>
   PIMPINAN.includes(user.role) || Number(user.bidang_id) === Number(bidangPemilik);
 
+/** Pengelola tautan tunggal: Bidang Sekretariat (dan pimpinan). */
+const bolehKelolaTautan = (user) =>
+  PIMPINAN.includes(user.role) || user.role === 'sekretariat' || Number(user.bidang_id) === BIDANG_SEKRETARIAT;
+
+/** Kiriman yang aman dibagikan ke bidang (tanpa jalur disk & IP). */
+const kirimanAman = (k) => {
+  const { jalur_disk, nama_disk, ip, sha256, ...aman } = k;
+  return rapikan(aman);
+};
+
 const ambilPermintaan = async (user, id) => {
   let idBig;
-  try { idBig = BigInt(id); } catch { return { kode: 404, pesan: 'Permintaan tidak ditemukan.' }; }
-  const permintaan = await prisma.video_desa_permintaan.findFirst({
-    where: { id: idBig, deleted_at: null },
-  });
-  if (!permintaan) return { kode: 404, pesan: 'Permintaan tidak ditemukan.' };
-  if (!bolehKelola(user, permintaan.bidang_id)) {
-    return { kode: 403, pesan: 'Permintaan video ini milik bidang lain.' };
-  }
+  try { idBig = BigInt(id); } catch { return { kode: 404, pesan: 'Kegiatan video tidak ditemukan.' }; }
+  const permintaan = await prisma.video_desa_permintaan.findFirst({ where: { id: idBig, deleted_at: null } });
+  if (!permintaan) return { kode: 404, pesan: 'Kegiatan video tidak ditemukan.' };
+  if (!bolehKelola(user, permintaan.bidang_id)) return { kode: 403, pesan: 'Kegiatan video ini milik bidang lain.' };
   return { permintaan };
 };
 
@@ -109,12 +105,9 @@ const ambilKiriman = async (user, id) => {
   return { kiriman, permintaan };
 };
 
-/** Alasan permintaan tidak menerima unggahan, atau null bila terbuka. */
 const alasanTertutup = (p) => {
-  if (p.status === 'ditutup') return 'Permintaan video ini sudah ditutup oleh bidang.';
-  if (p.tutup_pada && new Date(p.tutup_pada) < new Date()) {
-    return 'Batas waktu pengunggahan video ini sudah lewat.';
-  }
+  if (p.status === 'ditutup') return 'Kegiatan video ini sudah ditutup.';
+  if (p.tutup_pada && new Date(p.tutup_pada) < new Date()) return 'Batas waktu unggah kegiatan ini sudah lewat.';
   return null;
 };
 
@@ -124,12 +117,11 @@ const tanggalAtauNull = (v) => {
   return Number.isNaN(d.getTime()) ? undefined : d;
 };
 
-/** Bersihkan & validasi isian pengaturan permintaan. { data } atau { pesan }. */
 const siapkanPengaturan = (body, { parsial = false } = {}) => {
   const data = {};
   if (!parsial || body.judul !== undefined) {
     data.judul = teks(body.judul, 255);
-    if (!data.judul) return { pesan: 'Judul video wajib diisi.' };
+    if (!data.judul) return { pesan: 'Judul kegiatan video wajib diisi.' };
   }
   if (!parsial || body.deskripsi !== undefined) data.deskripsi = teks(body.deskripsi, 5000) || null;
   if (body.orientasi !== undefined) {
@@ -141,14 +133,9 @@ const siapkanPengaturan = (body, { parsial = false } = {}) => {
       data.maks_durasi_detik = null;
     } else {
       const n = Number(body.maks_durasi_detik);
-      if (!Number.isInteger(n) || n < 5 || n > 3600) return { pesan: 'Batas durasi harus 5–3600 detik.' };
+      if (!Number.isInteger(n) || n < 5 || n > 1800) return { pesan: 'Batas durasi harus 5–1800 detik.' };
       data.maks_durasi_detik = n;
     }
-  }
-  if (body.maks_per_desa !== undefined) {
-    const n = Number(body.maks_per_desa);
-    if (!Number.isInteger(n) || n < 1 || n > 10) return { pesan: 'Batas video per desa harus 1–10.' };
-    data.maks_per_desa = n;
   }
   if (body.tutup_pada !== undefined) {
     const d = tanggalAtauNull(body.tutup_pada);
@@ -162,16 +149,14 @@ const siapkanPengaturan = (body, { parsial = false } = {}) => {
   return { data };
 };
 
-/** Peta id → { desa, kecamatan } untuk daftar kiriman. */
 const petaWilayah = async (desaIds) => {
   if (!desaIds.length) return new Map();
   const desas = await prisma.desas.findMany({
     where: { id: { in: desaIds } },
     select: { id: true, nama: true, status_pemerintahan: true, kecamatan_id: true },
   });
-  const kecIds = [...new Set(desas.map((d) => d.kecamatan_id))];
   const kecs = await prisma.kecamatans.findMany({
-    where: { id: { in: kecIds } },
+    where: { id: { in: [...new Set(desas.map((d) => d.kecamatan_id))] } },
     select: { id: true, nama: true },
   });
   const petaKec = new Map(kecs.map((k) => [String(k.id), k.nama]));
@@ -182,7 +167,7 @@ const petaWilayah = async (desaIds) => {
   }]));
 };
 
-/** Kenali video dari byte awalnya — ekstensi dan MIME dari browser bisa dikarang. */
+/** Kenali kontainer video dari byte awal — ekstensi & MIME bisa dikarang. */
 const cekTandaVideo = async (berkas) => {
   const fh = await fsp.open(berkas, 'r');
   try {
@@ -196,55 +181,48 @@ const cekTandaVideo = async (berkas) => {
   }
 };
 
+const hapusBerkasKiriman = (k) => Promise.all([
+  fsp.unlink(path.join(VIDEO_ROOT, k.jalur_disk)).catch(() => {}),
+  fsp.unlink(path.join(MENTAH_ROOT, k.nama_disk)).catch(() => {}),
+]);
+
 /**
- * Baca durasi & resolusi dengan ffprobe. Fail-open: tanpa ffprobe (atau bila
- * gagal membaca) video tetap diterima, hanya metadatanya kosong.
+ * Kiriman yang "memakai jatah" satu video per desa per kegiatan. Yang ditolak
+ * bidang atau gagal diperiksa tidak dihitung — desa harus bisa mengirim ulang.
  */
-const bacaMetadata = (berkas) => new Promise((resolve) => {
-  let keluar = '';
-  let selesai = false;
-  const akhiri = (hasil) => { if (!selesai) { selesai = true; resolve(hasil); } };
-  try {
-    const p = spawn('ffprobe', [
-      '-v', 'error', '-print_format', 'json', '-show_format', '-show_streams', berkas,
-    ]);
-    const batas = setTimeout(() => { p.kill('SIGKILL'); akhiri({}); }, 30000);
-    p.stdout.on('data', (d) => { keluar += d; });
-    p.on('error', () => { clearTimeout(batas); akhiri({}); });
-    p.on('close', () => {
-      clearTimeout(batas);
-      try {
-        const j = JSON.parse(keluar);
-        const v = (j.streams || []).find((s) => s.codec_type === 'video') || {};
-        // Video HP sering direkam lanskap lalu diberi tanda rotasi 90°.
-        const rotasi = Math.abs(Number(
-          v.tags?.rotate ?? (v.side_data_list || []).find((s) => s.rotation !== undefined)?.rotation ?? 0
-        ));
-        const tegak = rotasi === 90 || rotasi === 270;
-        const durasi = Number(j.format?.duration);
-        akhiri({
-          durasi_detik: Number.isFinite(durasi) ? Math.round(durasi * 100) / 100 : null,
-          lebar: (tegak ? v.height : v.width) || null,
-          tinggi: (tegak ? v.width : v.height) || null,
-          codec: v.codec_name ? String(v.codec_name).slice(0, 30) : null,
-        });
-      } catch {
-        akhiri({});
-      }
-    });
-  } catch {
-    akhiri({});
-  }
-});
+const kirimanBerlaku = (permintaanId, desaId) =>
+  prisma.video_desa_kiriman.findFirst({
+    where: {
+      permintaan_id: permintaanId,
+      desa_id: desaId,
+      status: { not: 'ditolak' },
+      pemrosesan: { not: 'gagal' },
+    },
+  });
+
+/* -------------------------------------------------------- tautan tunggal -- */
+
+const ambilTautan = () => prisma.video_desa_tautan.findUnique({ where: { id: 1 } });
+
+/** Tautan sah & dibuka untuk token ini, atau { kode, pesan }. */
+const cekTautanPublik = async (token) => {
+  const t = await ambilTautan();
+  const diberikan = String(token || '');
+  const cocok = t && diberikan.length === t.token.length
+    && crypto.timingSafeEqual(Buffer.from(diberikan), Buffer.from(t.token));
+  if (!cocok) return { kode: 404, pesan: 'Tautan video tidak ditemukan atau sudah diganti. Minta tautan terbaru ke DPMD.' };
+  if (t.status === 'ditutup') return { kode: 403, pesan: 'Pengumpulan video desa sedang ditutup.' };
+  return { tautan: t };
+};
 
 /* ------------------------------------------------------- sesi unggahan -- */
 
 const ID_SESI_RE = /^[a-f0-9]{32}$/;
 const sedangDitulis = new Set();
 
-const folderSesi = (uploadId) => path.join(SEMENTARA_ROOT, uploadId);
-const berkasMeta = (uploadId) => path.join(folderSesi(uploadId), 'meta.json');
-const berkasData = (uploadId) => path.join(folderSesi(uploadId), 'data.part');
+const folderSesi = (id) => path.join(SEMENTARA_ROOT, id);
+const berkasMeta = (id) => path.join(folderSesi(id), 'meta.json');
+const berkasData = (id) => path.join(folderSesi(id), 'data.part');
 
 const bacaSesi = async (token, uploadId) => {
   if (!ID_SESI_RE.test(String(uploadId))) return null;
@@ -256,35 +234,45 @@ const bacaSesi = async (token, uploadId) => {
   }
 };
 
-const tulisSesi = (meta) => fsp.writeFile(berkasMeta(meta.upload_id), JSON.stringify(meta));
+const tulisSesi = (meta) => fsp.writeFile(berkasMeta(meta.upload_id), JSON.stringify({ ...meta, aktif: Date.now() }));
 
-const hapusSesi = (uploadId) =>
-  fsp.rm(folderSesi(uploadId), { recursive: true, force: true }).catch(() => {});
+const hapusSesi = (id) => fsp.rm(folderSesi(id), { recursive: true, force: true }).catch(() => {});
+
+/** Semua sesi yang masih tersimpan (jumlahnya kecil; dibaca dari disk). */
+const daftarSesi = async () => {
+  const hasil = [];
+  try {
+    for (const nama of await fsp.readdir(SEMENTARA_ROOT)) {
+      try { hasil.push(JSON.parse(await fsp.readFile(berkasMeta(nama), 'utf8'))); } catch { /* sesi rusak */ }
+    }
+  } catch { /* abaikan */ }
+  return hasil;
+};
 
 let terakhirBersih = 0;
-/** Buang sesi yang ditinggalkan. Paling sering sejam sekali, fail-open. */
 const bersihkanSesiLama = async () => {
   if (Date.now() - terakhirBersih < 60 * 60 * 1000) return;
   terakhirBersih = Date.now();
   try {
-    const isi = await fsp.readdir(SEMENTARA_ROOT);
-    await Promise.all(isi.map(async (nama) => {
+    for (const nama of await fsp.readdir(SEMENTARA_ROOT)) {
       const st = await fsp.stat(path.join(SEMENTARA_ROOT, nama)).catch(() => null);
       if (st && Date.now() - st.mtimeMs > UMUR_SESI_MS) await hapusSesi(nama);
-    }));
+    }
   } catch { /* abaikan */ }
 };
 
-/**
- * Jumlah kiriman sebuah desa yang dihitung ke batas per desa. Kiriman yang
- * ditolak tidak dihitung — desa harus bisa mengirim ulang versi perbaikannya.
- */
-const hitungKirimanDesa = (permintaanId, desaId) =>
-  prisma.video_desa_kiriman.count({
-    where: { permintaan_id: permintaanId, desa_id: desaId, status: { not: 'ditolak' } },
-  });
+/** Jejak "mulai unggah" per IP selama sejam terakhir. */
+const jejakMulai = new Map();
+const catatMulai = (ip) => {
+  const kini = Date.now();
+  const daftar = (jejakMulai.get(ip) || []).filter((t) => kini - t < 3600000);
+  if (daftar.length >= MAKS_MULAI_PER_JAM) return false;
+  daftar.push(kini);
+  jejakMulai.set(ip, daftar);
+  if (jejakMulai.size > 5000) jejakMulai.clear();
+  return true;
+};
 
-/** Desa yang terkunci untuk akun desa yang sedang login (bila ada). */
 const desaDariToken = (req) => {
   const h = req.headers.authorization;
   if (!h || !h.startsWith('Bearer ')) return null;
@@ -296,66 +284,133 @@ const desaDariToken = (req) => {
   }
 };
 
-const ambilPermintaanPublik = (token) =>
-  prisma.video_desa_permintaan.findFirst({
-    where: { token: String(token || '').slice(0, 32), deleted_at: null },
+const kegiatanTerbuka = async () => {
+  const daftar = await prisma.video_desa_permintaan.findMany({
+    where: { deleted_at: null, status: 'dibuka', OR: [{ tutup_pada: null }, { tutup_pada: { gt: new Date() } }] },
+    orderBy: [{ bidang_id: 'asc' }, { created_at: 'asc' }],
   });
+  const bidangs = await prisma.bidangs.findMany({
+    where: { id: { in: [...new Set(daftar.map((p) => p.bidang_id))] } },
+    select: { id: true, nama: true },
+  });
+  const nama = new Map(bidangs.map((b) => [String(b.id), b.nama]));
+  return daftar.map((p) => ({
+    id: Number(p.id),
+    bidang_id: Number(p.bidang_id),
+    bidang: nama.get(String(p.bidang_id)) || null,
+    judul: p.judul,
+    deskripsi: p.deskripsi,
+    orientasi: p.orientasi,
+    maks_durasi_detik: p.maks_durasi_detik,
+    tutup_pada: p.tutup_pada,
+  }));
+};
 
 /* ========================================================== controller == */
 
 class VideoDesaController {
-  /* ---------------------------------------------------- pengelolaan -- */
+  /* ------------------------------------------------ tautan (Sekretariat) -- */
+
+  async lihatTautan(req, res) {
+    try {
+      const t = await ambilTautan();
+      res.json({
+        success: true,
+        data: { ada: !!t, token: t?.token || null, status: t?.status || null, boleh_kelola: bolehKelolaTautan(req.user) },
+      });
+    } catch (error) {
+      console.error('Error tautan video desa:', error);
+      res.status(500).json({ success: false, message: 'Gagal memuat tautan video desa.' });
+    }
+  }
+
+  /** Buat tautan, atau ganti tokennya (tautan lama langsung mati). */
+  async buatTautan(req, res) {
+    try {
+      if (!bolehKelolaTautan(req.user)) {
+        return res.status(403).json({ success: false, message: 'Tautan video desa dikelola Bidang Sekretariat.' });
+      }
+      const token = crypto.randomBytes(16).toString('hex');
+      const t = await prisma.video_desa_tautan.upsert({
+        where: { id: 1 },
+        create: { id: 1, token, status: 'dibuka', updated_by: BigInt(req.user.id) },
+        update: { token, updated_by: BigInt(req.user.id), updated_at: new Date() },
+      });
+      res.json({ success: true, data: { ada: true, token: t.token, status: t.status, boleh_kelola: true } });
+    } catch (error) {
+      console.error('Error buat tautan video desa:', error);
+      res.status(500).json({ success: false, message: 'Gagal membuat tautan.' });
+    }
+  }
+
+  async ubahTautan(req, res) {
+    try {
+      if (!bolehKelolaTautan(req.user)) {
+        return res.status(403).json({ success: false, message: 'Tautan video desa dikelola Bidang Sekretariat.' });
+      }
+      const status = req.body?.status;
+      if (!['dibuka', 'ditutup'].includes(status)) return res.status(400).json({ success: false, message: 'Status tidak dikenal.' });
+      if (!(await ambilTautan())) return res.status(404).json({ success: false, message: 'Tautan belum dibuat.' });
+      const t = await prisma.video_desa_tautan.update({
+        where: { id: 1 },
+        data: { status, updated_by: BigInt(req.user.id), updated_at: new Date() },
+      });
+      res.json({ success: true, data: { ada: true, token: t.token, status: t.status, boleh_kelola: true } });
+    } catch (error) {
+      console.error('Error ubah tautan video desa:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengubah tautan.' });
+    }
+  }
+
+  /* ------------------------------------------------ kegiatan per bidang -- */
 
   async daftar(req, res) {
     try {
-      const bidangId = BigInt(req.params.bidangId);
       const daftar = await prisma.video_desa_permintaan.findMany({
-        where: { bidang_id: bidangId, deleted_at: null },
+        where: { bidang_id: BigInt(req.params.bidangId), deleted_at: null },
         orderBy: { created_at: 'desc' },
       });
-
       const ids = daftar.map((p) => p.id);
-      const hitung = ids.length
-        ? await prisma.video_desa_kiriman.groupBy({
-            by: ['permintaan_id', 'status'],
+      const kiriman = ids.length
+        ? await prisma.video_desa_kiriman.findMany({
             where: { permintaan_id: { in: ids } },
-            _count: { _all: true },
-            _sum: { ukuran: true },
-          })
-        : [];
-      const desaPer = ids.length
-        ? await prisma.video_desa_kiriman.groupBy({
-            by: ['permintaan_id', 'desa_id'],
-            where: { permintaan_id: { in: ids } },
+            select: { permintaan_id: true, desa_id: true, status: true, pemrosesan: true, ukuran: true },
           })
         : [];
 
       const ringkas = new Map();
-      for (const h of hitung) {
-        const k = String(h.permintaan_id);
-        const r = ringkas.get(k) || { jumlah_video: 0, menunggu: 0, disetujui: 0, ukuran_total: 0, jumlah_desa: 0 };
-        r.jumlah_video += h._count._all;
-        if (h.status === 'masuk') r.menunggu += h._count._all;
-        if (h.status === 'disetujui') r.disetujui += h._count._all;
-        r.ukuran_total += Number(h._sum.ukuran || 0);
-        ringkas.set(k, r);
-      }
-      for (const d of desaPer) {
-        const r = ringkas.get(String(d.permintaan_id));
-        if (r) r.jumlah_desa += 1;
+      for (const k of kiriman) {
+        const kunci = String(k.permintaan_id);
+        const r = ringkas.get(kunci) || { jumlah_video: 0, menunggu: 0, disetujui: 0, diproses: 0, ukuran_total: 0, desa: new Set() };
+        r.jumlah_video += 1;
+        r.desa.add(String(k.desa_id));
+        if (['antre', 'diproses'].includes(k.pemrosesan)) r.diproses += 1;
+        else if (k.pemrosesan === 'siap' && k.status === 'masuk') r.menunggu += 1;
+        if (k.status === 'disetujui') r.disetujui += 1;
+        r.ukuran_total += Number(k.ukuran || 0);
+        ringkas.set(kunci, r);
       }
 
       res.json({
         success: true,
-        data: daftar.map((p) => ({
-          ...rapikan(p),
-          tertutup: alasanTertutup(p),
-          ...(ringkas.get(String(p.id)) || { jumlah_video: 0, menunggu: 0, disetujui: 0, ukuran_total: 0, jumlah_desa: 0 }),
-        })),
+        data: daftar.map((p) => {
+          const r = ringkas.get(String(p.id));
+          const { token, maks_per_desa, ...aman } = p;
+          return {
+            ...rapikan(aman),
+            tertutup: alasanTertutup(p),
+            jumlah_video: r?.jumlah_video || 0,
+            menunggu: r?.menunggu || 0,
+            disetujui: r?.disetujui || 0,
+            diproses: r?.diproses || 0,
+            ukuran_total: r?.ukuran_total || 0,
+            jumlah_desa: r?.desa.size || 0,
+          };
+        }),
       });
     } catch (error) {
       console.error('Error daftar video desa:', error);
-      res.status(500).json({ success: false, message: 'Gagal memuat permintaan video.' });
+      res.status(500).json({ success: false, message: 'Gagal memuat kegiatan video.' });
     }
   }
 
@@ -363,20 +418,22 @@ class VideoDesaController {
     try {
       const { data, pesan } = siapkanPengaturan(req.body || {});
       if (pesan) return res.status(400).json({ success: false, message: pesan });
-
-      const permintaan = await prisma.video_desa_permintaan.create({
+      const p = await prisma.video_desa_permintaan.create({
         data: {
           ...data,
           bidang_id: BigInt(req.params.bidangId),
+          // Kolom lama dari versi tautan-per-kegiatan; tetap diisi karena unik
+          // & wajib, tapi tidak dipakai di jalur publik mana pun.
           token: crypto.randomBytes(16).toString('hex'),
+          maks_per_desa: 1,
           created_by: BigInt(req.user.id),
           updated_by: BigInt(req.user.id),
         },
       });
-      res.status(201).json({ success: true, data: rapikan(permintaan) });
+      res.status(201).json({ success: true, data: { id: Number(p.id) } });
     } catch (error) {
-      console.error('Error buat permintaan video desa:', error);
-      res.status(500).json({ success: false, message: 'Gagal membuat permintaan video.' });
+      console.error('Error buat kegiatan video desa:', error);
+      res.status(500).json({ success: false, message: 'Gagal membuat kegiatan video.' });
     }
   }
 
@@ -390,22 +447,24 @@ class VideoDesaController {
         orderBy: { created_at: 'desc' },
       });
       const wilayah = await petaWilayah([...new Set(kiriman.map((k) => k.desa_id))]);
+      const { token, maks_per_desa, ...aman } = permintaan;
 
       res.json({
         success: true,
         data: {
-          ...rapikan(permintaan),
+          ...rapikan(aman),
           tertutup: alasanTertutup(permintaan),
           maks_ukuran: MAKS_UKURAN,
-          kiriman: kiriman.map((k) => {
-            const { jalur_disk, nama_disk, ip, ...aman } = k;
-            return { ...rapikan(aman), ...(wilayah.get(String(k.desa_id)) || {}) };
-          }),
+          kiriman: kiriman.map((k) => ({
+            ...kirimanAman(k),
+            ...(wilayah.get(String(k.desa_id)) || {}),
+            posisi_antrean: k.pemrosesan === 'antre' ? proses.posisiAntrean(k.id) : null,
+          })),
         },
       });
     } catch (error) {
       console.error('Error detail video desa:', error);
-      res.status(500).json({ success: false, message: 'Gagal memuat permintaan video.' });
+      res.status(500).json({ success: false, message: 'Gagal memuat kegiatan video.' });
     }
   }
 
@@ -413,36 +472,25 @@ class VideoDesaController {
     try {
       const { permintaan, kode, pesan } = await ambilPermintaan(req.user, req.params.id);
       if (!permintaan) return res.status(kode).json({ success: false, message: pesan });
-
       const hasil = siapkanPengaturan(req.body || {}, { parsial: true });
       if (hasil.pesan) return res.status(400).json({ success: false, message: hasil.pesan });
-
       const baru = await prisma.video_desa_permintaan.update({
         where: { id: permintaan.id },
         data: { ...hasil.data, updated_by: BigInt(req.user.id), updated_at: new Date() },
       });
-      res.json({ success: true, data: { ...rapikan(baru), tertutup: alasanTertutup(baru) } });
+      res.json({ success: true, data: { id: Number(baru.id), tertutup: alasanTertutup(baru) } });
     } catch (error) {
       console.error('Error ubah video desa:', error);
       res.status(500).json({ success: false, message: 'Gagal menyimpan perubahan.' });
     }
   }
 
-  /**
-   * Hapus permintaan beserta SELURUH videonya dari disk. Permintaan sendiri
-   * hanya ditandai terhapus (jejak tetap ada), tapi videonya benar-benar
-   * dibuang — menyisakan ratusan MB per kiriman tanpa jalan mengaksesnya hanya
-   * menghabiskan disk.
-   */
+  /** Hapus kegiatan + SELURUH videonya dari disk (jejak kegiatan tetap ada). */
   async hapus(req, res) {
     try {
       const { permintaan, kode, pesan } = await ambilPermintaan(req.user, req.params.id);
       if (!permintaan) return res.status(kode).json({ success: false, message: pesan });
-
-      const kiriman = await prisma.video_desa_kiriman.findMany({
-        where: { permintaan_id: permintaan.id },
-        select: { jalur_disk: true },
-      });
+      const kiriman = await prisma.video_desa_kiriman.findMany({ where: { permintaan_id: permintaan.id } });
       await prisma.$transaction([
         prisma.video_desa_kiriman.deleteMany({ where: { permintaan_id: permintaan.id } }),
         prisma.video_desa_permintaan.update({
@@ -450,23 +498,26 @@ class VideoDesaController {
           data: { deleted_at: new Date(), deleted_by: BigInt(req.user.id) },
         }),
       ]);
-      await Promise.all(kiriman.map((k) => fsp.unlink(path.join(VIDEO_ROOT, k.jalur_disk)).catch(() => {})));
-
-      res.json({ success: true, message: 'Permintaan video dihapus.' });
+      await Promise.all(kiriman.map(hapusBerkasKiriman));
+      res.json({ success: true, message: 'Kegiatan video dihapus.' });
     } catch (error) {
       console.error('Error hapus video desa:', error);
-      res.status(500).json({ success: false, message: 'Gagal menghapus permintaan video.' });
+      res.status(500).json({ success: false, message: 'Gagal menghapus kegiatan video.' });
     }
   }
+
+  /* --------------------------------------------------- verifikasi bidang -- */
 
   async tinjau(req, res) {
     try {
       const { kiriman, kode, pesan } = await ambilKiriman(req.user, req.params.id);
       if (!kiriman) return res.status(kode).json({ success: false, message: pesan });
-
       const status = req.body?.status;
       if (!['masuk', 'disetujui', 'ditolak'].includes(status)) {
-        return res.status(400).json({ success: false, message: 'Status tinjauan tidak dikenal.' });
+        return res.status(400).json({ success: false, message: 'Status verifikasi tidak dikenal.' });
+      }
+      if (status === 'disetujui' && kiriman.pemrosesan !== 'siap') {
+        return res.status(409).json({ success: false, message: 'Video belum selesai diperiksa sistem.' });
       }
       const baru = await prisma.video_desa_kiriman.update({
         where: { id: kiriman.id },
@@ -477,11 +528,10 @@ class VideoDesaController {
           ditinjau_pada: status === 'masuk' ? null : new Date(),
         },
       });
-      const { jalur_disk, nama_disk, ip, ...aman } = baru;
-      res.json({ success: true, data: rapikan(aman) });
+      res.json({ success: true, data: kirimanAman(baru) });
     } catch (error) {
       console.error('Error tinjau video desa:', error);
-      res.status(500).json({ success: false, message: 'Gagal menyimpan tinjauan.' });
+      res.status(500).json({ success: false, message: 'Gagal menyimpan verifikasi.' });
     }
   }
 
@@ -489,9 +539,11 @@ class VideoDesaController {
     try {
       const { kiriman, kode, pesan } = await ambilKiriman(req.user, req.params.id);
       if (!kiriman) return res.status(kode).json({ success: false, message: pesan });
-
+      if (kiriman.pemrosesan === 'diproses') {
+        return res.status(409).json({ success: false, message: 'Video sedang diproses; hapus setelah selesai.' });
+      }
       await prisma.video_desa_kiriman.delete({ where: { id: kiriman.id } });
-      await fsp.unlink(path.join(VIDEO_ROOT, kiriman.jalur_disk)).catch(() => {});
+      await hapusBerkasKiriman(kiriman);
       res.json({ success: true, message: 'Video dihapus.' });
     } catch (error) {
       console.error('Error hapus kiriman video desa:', error);
@@ -500,19 +552,18 @@ class VideoDesaController {
   }
 
   /**
-   * Tautan putar/unduh bertanda tangan. Elemen <video> dan tautan unduhan
-   * biasa tidak bisa mengirim header Authorization, dan mengunduh 500 MB lewat
-   * blob di memori browser tidak masuk akal — jadi izinnya ditaruh di tautan,
-   * berumur pendek dan hanya untuk satu video.
+   * Tautan putar/unduh bertanda tangan. Elemen <video> tidak bisa mengirim
+   * header Authorization, dan mengunduh ratusan MB lewat blob di memori browser
+   * tidak masuk akal — izinnya di tautan, berumur pendek, untuk satu video.
    */
-  async tautan(req, res) {
+  async tautanPutar(req, res) {
     try {
       const { kiriman, kode, pesan } = await ambilKiriman(req.user, req.params.id);
       if (!kiriman) return res.status(kode).json({ success: false, message: pesan });
-
-      const t = jwt.sign({ k: 'video-desa', id: String(kiriman.id) }, process.env.JWT_SECRET, {
-        expiresIn: UMUR_TAUTAN_PUTAR,
-      });
+      if (kiriman.pemrosesan !== 'siap') {
+        return res.status(409).json({ success: false, message: 'Video belum selesai diperiksa sistem.' });
+      }
+      const t = jwt.sign({ k: 'video-desa', id: String(kiriman.id) }, process.env.JWT_SECRET, { expiresIn: UMUR_TAUTAN_PUTAR });
       const dasar = `/api/video-desa/putar/${kiriman.id}?t=${encodeURIComponent(t)}`;
       res.json({ success: true, data: { putar: dasar, unduh: `${dasar}&unduh=1` } });
     } catch (error) {
@@ -521,7 +572,6 @@ class VideoDesaController {
     }
   }
 
-  /** Sajikan video (mendukung Range, jadi bisa digeser di pemutar). */
   async putar(req, res) {
     try {
       let muatan;
@@ -533,22 +583,23 @@ class VideoDesaController {
       if (muatan.k !== 'video-desa' || muatan.id !== String(req.params.id)) {
         return res.status(403).json({ success: false, message: 'Tautan tidak berlaku untuk video ini.' });
       }
+      const k = await prisma.video_desa_kiriman.findUnique({ where: { id: BigInt(req.params.id) } });
+      if (!k || k.pemrosesan !== 'siap') return res.status(404).json({ success: false, message: 'Video tidak tersedia.' });
 
-      const kiriman = await prisma.video_desa_kiriman.findUnique({ where: { id: BigInt(req.params.id) } });
-      if (!kiriman) return res.status(404).json({ success: false, message: 'Video tidak ditemukan.' });
-
-      const jalur = path.join(VIDEO_ROOT, kiriman.jalur_disk);
+      const jalur = path.join(VIDEO_ROOT, k.jalur_disk);
       if (!jalur.startsWith(VIDEO_ROOT + path.sep) || !fs.existsSync(jalur)) {
         return res.status(404).json({ success: false, message: 'Berkas video tidak ada di server.' });
       }
 
+      // Disajikan hanya sebagai video: tidak boleh ditafsirkan sebagai halaman.
+      res.setHeader('Content-Security-Policy', "default-src 'none'; sandbox");
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Cache-Control', 'private, max-age=3600');
       if (req.query.unduh) {
-        const ext = path.extname(kiriman.jalur_disk);
-        const dasarNama = path.basename(kiriman.nama_berkas, path.extname(kiriman.nama_berkas)) || 'video-desa';
-        return res.download(jalur, `${dasarNama}${ext}`);
+        const dasar = path.basename(k.nama_berkas, path.extname(k.nama_berkas)).replace(/[^\w\- .()]/g, '_') || 'video-desa';
+        return res.download(jalur, `${dasar}.mp4`, { headers: { 'Content-Type': 'video/mp4' } });
       }
-      res.setHeader('Content-Type', kiriman.mime || MIME_EKSTENSI[path.extname(jalur)] || 'video/mp4');
-      return res.sendFile(jalur);
+      return res.sendFile(jalur, { headers: { 'Content-Type': 'video/mp4' } });
     } catch (error) {
       console.error('Error putar video desa:', error);
       if (!res.headersSent) res.status(500).json({ success: false, message: 'Gagal memutar video.' });
@@ -559,27 +610,21 @@ class VideoDesaController {
 
   async publik(req, res) {
     try {
-      const p = await ambilPermintaanPublik(req.params.token);
-      if (!p) return res.status(404).json({ success: false, message: 'Tautan video tidak ditemukan atau sudah dihapus.' });
+      const { tautan, kode, pesan } = await cekTautanPublik(req.params.token);
+      if (!tautan) return res.status(kode).json({ success: false, message: pesan });
 
-      const [kecamatan, desa] = await Promise.all([
+      const [kegiatan, kecamatan, desa] = await Promise.all([
+        kegiatanTerbuka(),
         prisma.kecamatans.findMany({ select: { id: true, nama: true }, orderBy: { nama: 'asc' } }),
         prisma.desas.findMany({
           select: { id: true, nama: true, kecamatan_id: true, status_pemerintahan: true },
           orderBy: { nama: 'asc' },
         }),
       ]);
-
       res.json({
         success: true,
         data: {
-          judul: p.judul,
-          deskripsi: p.deskripsi,
-          orientasi: p.orientasi,
-          maks_durasi_detik: p.maks_durasi_detik,
-          maks_per_desa: p.maks_per_desa,
-          tutup_pada: p.tutup_pada,
-          tertutup: alasanTertutup(p),
+          kegiatan,
           maks_ukuran: MAKS_UKURAN,
           ukuran_potongan: UKURAN_POTONGAN,
           ekstensi: EKSTENSI_SAH,
@@ -594,21 +639,53 @@ class VideoDesaController {
     }
   }
 
-  /** Mulai sesi unggah: validasi isian & kuota, lalu kembalikan upload_id. */
+  /**
+   * Status kiriman satu desa per kegiatan — supaya card bisa menampilkan
+   * "sudah terkirim / ditolak, kirim ulang". Hanya status & alasan penolakan;
+   * nama pengirim, nomor HP, dan berkasnya tidak ikut.
+   */
+  async statusDesa(req, res) {
+    try {
+      const { tautan, kode, pesan } = await cekTautanPublik(req.params.token);
+      if (!tautan) return res.status(kode).json({ success: false, message: pesan });
+      let desaId;
+      try { desaId = BigInt(req.params.desaId); } catch { return res.status(400).json({ success: false, message: 'Desa tidak valid.' }); }
+      const kiriman = await prisma.video_desa_kiriman.findMany({
+        where: { desa_id: desaId },
+        orderBy: { created_at: 'desc' },
+        select: { permintaan_id: true, status: true, pemrosesan: true, catatan: true, pesan_proses: true, created_at: true },
+      });
+      // Hanya kiriman terbaru per kegiatan yang relevan bagi desa.
+      const terbaru = new Map();
+      for (const k of kiriman) if (!terbaru.has(String(k.permintaan_id))) terbaru.set(String(k.permintaan_id), k);
+      res.json({
+        success: true,
+        data: [...terbaru.values()].map((k) => ({
+          permintaan_id: Number(k.permintaan_id),
+          status: k.status,
+          pemrosesan: k.pemrosesan,
+          alasan: k.status === 'ditolak' ? k.catatan : (k.pemrosesan === 'gagal' ? k.pesan_proses : null),
+          dikirim_pada: k.created_at,
+        })),
+      });
+    } catch (error) {
+      console.error('Error status desa video desa:', error);
+      res.status(500).json({ success: false, message: 'Gagal memuat status desa.' });
+    }
+  }
+
   async mulaiUnggah(req, res) {
     try {
       bersihkanSesiLama();
+      const { tautan, kode, pesan } = await cekTautanPublik(req.params.token);
+      if (!tautan) return res.status(kode).json({ success: false, message: pesan });
 
-      const p = await ambilPermintaanPublik(req.params.token);
-      if (!p) return res.status(404).json({ success: false, message: 'Tautan video tidak ditemukan.' });
-      const tertutup = alasanTertutup(p);
-      if (tertutup) return res.status(403).json({ success: false, message: tertutup });
-
+      const ip = String(req.ip || '');
       const b = req.body || {};
       const nama_pengirim = teks(b.nama_pengirim, 150);
       const no_hp = teks(b.no_hp, 30).replace(/[^\d+]/g, '');
       const keterangan = teks(b.keterangan, 2000) || null;
-      const nama_berkas = path.basename(teks(b.nama_berkas, 255)) || 'video';
+      const nama_berkas = path.basename(teks(b.nama_berkas, 255)).replace(/[\u0000-\u001f]/g, '') || 'video';
       const ukuran = Number(b.ukuran);
       const ext = path.extname(nama_berkas).toLowerCase();
 
@@ -618,32 +695,50 @@ class VideoDesaController {
         return res.status(400).json({ success: false, message: `Format video harus ${EKSTENSI_SAH.join(', ')}. Disarankan MP4.` });
       }
       if (!Number.isInteger(ukuran) || ukuran <= 0) return res.status(400).json({ success: false, message: 'Ukuran berkas tidak valid.' });
-      if (ukuran > MAKS_UKURAN) {
-        return res.status(413).json({ success: false, message: `Ukuran video maksimal ${MAKS_UKURAN / 1048576} MB.` });
-      }
+      if (ukuran > MAKS_UKURAN) return res.status(413).json({ success: false, message: 'Ukuran video maksimal 1 GB.' });
 
+      let permintaanId;
       let desaId;
-      try { desaId = BigInt(b.desa_id); } catch { desaId = null; }
+      try { permintaanId = BigInt(b.permintaan_id); desaId = BigInt(b.desa_id); } catch { /* divalidasi di bawah */ }
+      const p = permintaanId
+        ? await prisma.video_desa_permintaan.findFirst({ where: { id: permintaanId, deleted_at: null } })
+        : null;
+      if (!p) return res.status(400).json({ success: false, message: 'Kegiatan video tidak ditemukan.' });
+      const tertutup = alasanTertutup(p);
+      if (tertutup) return res.status(403).json({ success: false, message: tertutup });
       const desa = desaId ? await prisma.desas.findUnique({ where: { id: desaId }, select: { id: true } }) : null;
       if (!desa) return res.status(400).json({ success: false, message: 'Pilih desa terlebih dahulu.' });
 
-      const sudah = await hitungKirimanDesa(p.id, desa.id);
-      if (sudah >= p.maks_per_desa) {
-        return res.status(409).json({
-          success: false,
-          message: `Desa ini sudah mengirim ${sudah} video — batas untuk permintaan ini ${p.maks_per_desa} video per desa.`,
-        });
+      if (await kirimanBerlaku(p.id, desa.id)) {
+        return res.status(409).json({ success: false, message: 'Desa ini sudah mengirim video untuk kegiatan ini.' });
       }
 
-      const tolakKuota = storageServer.cekUnggahan(ukuran);
+      const sesi = await daftarSesi();
+      const kini = Date.now();
+      // Sesi paralel untuk desa & kegiatan yang sama: yang lama digantikan.
+      await Promise.all(sesi
+        .filter((s) => s.permintaan_id === String(p.id) && s.desa_id === String(desa.id))
+        .map((s) => hapusSesi(s.upload_id)));
+      const aktifIp = sesi.filter((s) => s.ip === ip && kini - (s.aktif || s.dibuat) < SESI_AKTIF_MS
+        && !(s.permintaan_id === String(p.id) && s.desa_id === String(desa.id)));
+      if (aktifIp.length >= MAKS_SESI_AKTIF_PER_IP) {
+        return res.status(429).json({ success: false, message: 'Terlalu banyak unggahan berjalan dari jaringan ini. Selesaikan yang lain dulu.' });
+      }
+      if (!catatMulai(ip)) {
+        return res.status(429).json({ success: false, message: 'Terlalu banyak unggahan dari jaringan ini. Coba lagi sejam lagi.' });
+      }
+
+      // Disk: berkas mentah + hasil bersih sempat berdampingan saat diproses.
+      const tolakKuota = storageServer.cekUnggahan(ukuran * 2);
       if (tolakKuota) return res.status(tolakKuota.status).json({ success: false, message: tolakKuota.message });
 
       const upload_id = crypto.randomBytes(16).toString('hex');
       await fsp.mkdir(folderSesi(upload_id), { recursive: true });
       await fsp.writeFile(berkasData(upload_id), Buffer.alloc(0));
+      const jumlah_potongan = Math.ceil(ukuran / UKURAN_POTONGAN);
       await tulisSesi({
         upload_id,
-        token: p.token,
+        token: tautan.token,
         permintaan_id: String(p.id),
         desa_id: String(desa.id),
         nama_pengirim,
@@ -652,38 +747,29 @@ class VideoDesaController {
         nama_berkas,
         ext,
         ukuran,
-        jumlah_potongan: Math.ceil(ukuran / UKURAN_POTONGAN),
+        jumlah_potongan,
         diterima: 0,
-        dibuat: Date.now(),
+        ip,
+        dibuat: kini,
       });
-
-      res.status(201).json({
-        success: true,
-        data: { upload_id, ukuran_potongan: UKURAN_POTONGAN, jumlah_potongan: Math.ceil(ukuran / UKURAN_POTONGAN) },
-      });
+      res.status(201).json({ success: true, data: { upload_id, ukuran_potongan: UKURAN_POTONGAN, jumlah_potongan } });
     } catch (error) {
       console.error('Error mulai unggah video desa:', error);
       res.status(500).json({ success: false, message: 'Gagal memulai unggahan.' });
     }
   }
 
-  /** Status sesi — dipakai klien untuk melanjutkan setelah koneksi putus. */
   async statusUnggah(req, res) {
     const meta = await bacaSesi(req.params.token, req.params.uploadId);
     if (!meta) return res.status(404).json({ success: false, message: 'Sesi unggah tidak ditemukan. Mulai ulang unggahan.' });
     res.json({ success: true, data: { diterima: meta.diterima, jumlah_potongan: meta.jumlah_potongan } });
   }
 
-  /**
-   * Terima satu potongan (body mentah). Potongan wajib datang berurutan; potongan
-   * yang sudah diterima dianggap sukses (pengulangan setelah balasan hilang).
-   */
+  /** Satu potongan (body mentah), wajib berurutan; pengulangan dianggap sukses. */
   async potongan(req, res) {
     const { token, uploadId } = req.params;
     const indeks = Number(req.params.indeks);
-    if (sedangDitulis.has(uploadId)) {
-      return res.status(409).json({ success: false, message: 'Potongan sebelumnya masih diproses.' });
-    }
+    if (sedangDitulis.has(uploadId)) return res.status(409).json({ success: false, message: 'Potongan sebelumnya masih diproses.' });
     sedangDitulis.add(uploadId);
     try {
       const meta = await bacaSesi(token, uploadId);
@@ -695,19 +781,18 @@ class VideoDesaController {
       if (indeks > meta.diterima) {
         return res.status(409).json({ success: false, message: 'Potongan tidak berurutan.', data: { diterima: meta.diterima } });
       }
-
       const isi = req.body;
-      if (!Buffer.isBuffer(isi) || !isi.length) {
-        return res.status(400).json({ success: false, message: 'Potongan kosong.' });
-      }
+      if (!Buffer.isBuffer(isi) || !isi.length) return res.status(400).json({ success: false, message: 'Potongan kosong.' });
       const terakhir = indeks === meta.jumlah_potongan - 1;
       const seharusnya = terakhir ? meta.ukuran - indeks * UKURAN_POTONGAN : UKURAN_POTONGAN;
-      if (isi.length !== seharusnya) {
-        return res.status(400).json({ success: false, message: 'Ukuran potongan tidak sesuai.' });
+      if (isi.length !== seharusnya) return res.status(400).json({ success: false, message: 'Ukuran potongan tidak sesuai.' });
+      // Potongan pertama langsung diperiksa: berkas yang jelas bukan video
+      // tidak perlu dibiarkan mengirim ratusan MB lagi.
+      if (indeks === 0 && (isi.length < 12 || (isi.toString('ascii', 4, 8) !== 'ftyp' && isi.readUInt32BE(0) !== 0x1a45dfa3))) {
+        await hapusSesi(uploadId);
+        return res.status(400).json({ success: false, message: 'Berkas ini bukan video yang dikenali. Gunakan MP4, MOV, atau WebM.' });
       }
 
-      // Tulis di posisi yang pasti (bukan append) supaya potongan yang sempat
-      // tertulis sebagian sebelum server mati tertimpa dengan benar.
       const fh = await fsp.open(berkasData(uploadId), 'r+');
       try {
         await fh.write(isi, 0, isi.length, indeks * UKURAN_POTONGAN);
@@ -725,7 +810,7 @@ class VideoDesaController {
     }
   }
 
-  /** Rakit: periksa kelengkapan & jenis berkas, pindahkan, catat kiriman. */
+  /** Rakit, periksa cepat, lalu serahkan ke antrean pembersih. */
   async selesaiUnggah(req, res) {
     const { token, uploadId } = req.params;
     try {
@@ -734,45 +819,28 @@ class VideoDesaController {
       if (meta.diterima !== meta.jumlah_potongan) {
         return res.status(409).json({ success: false, message: 'Video belum terunggah seluruhnya.', data: { diterima: meta.diterima } });
       }
-
-      const p = await ambilPermintaanPublik(token);
-      if (!p) return res.status(404).json({ success: false, message: 'Tautan video tidak ditemukan.' });
-      const tertutup = alasanTertutup(p);
-      if (tertutup) {
-        await hapusSesi(uploadId);
-        return res.status(403).json({ success: false, message: tertutup });
-      }
+      const { tautan, kode, pesan } = await cekTautanPublik(token);
+      if (!tautan) { await hapusSesi(uploadId); return res.status(kode).json({ success: false, message: pesan }); }
+      const p = await prisma.video_desa_permintaan.findFirst({ where: { id: BigInt(meta.permintaan_id), deleted_at: null } });
+      const tertutup = p ? alasanTertutup(p) : 'Kegiatan video tidak ditemukan.';
+      if (tertutup) { await hapusSesi(uploadId); return res.status(403).json({ success: false, message: tertutup }); }
 
       const sementara = berkasData(uploadId);
       const st = await fsp.stat(sementara);
-      if (st.size !== meta.ukuran) {
-        await hapusSesi(uploadId);
-        return res.status(400).json({ success: false, message: 'Berkas yang diterima tidak utuh. Silakan unggah ulang.' });
-      }
-      if (!(await cekTandaVideo(sementara))) {
-        await hapusSesi(uploadId);
-        return res.status(400).json({ success: false, message: 'Berkas ini bukan video yang dikenali. Gunakan MP4, MOV, atau WebM.' });
-      }
+      const tolak = async (kodeHttp, pesanTolak) => { await hapusSesi(uploadId); return res.status(kodeHttp).json({ success: false, message: pesanTolak }); };
+      if (st.size !== meta.ukuran) return tolak(400, 'Berkas yang diterima tidak utuh. Silakan unggah ulang.');
+      if (!(await cekTandaVideo(sementara))) return tolak(400, 'Berkas ini bukan video yang dikenali. Gunakan MP4, MOV, atau WebM.');
+      const info = await proses.periksa(sementara);
+      if (info.galat) return tolak(400, `${info.galat} Periksa kembali berkasnya.`);
 
-      // Diperiksa ulang: dua sesi dari desa yang sama bisa berjalan bersamaan.
-      const sudah = await hitungKirimanDesa(p.id, BigInt(meta.desa_id));
-      if (sudah >= p.maks_per_desa) {
-        await hapusSesi(uploadId);
-        return res.status(409).json({
-          success: false,
-          message: `Desa ini sudah mengirim ${sudah} video — batas untuk permintaan ini ${p.maks_per_desa} video per desa.`,
-        });
-      }
+      // Diperiksa ulang: dua sesi untuk desa & kegiatan yang sama bisa selesai bersamaan.
+      if (await kirimanBerlaku(p.id, BigInt(meta.desa_id))) return tolak(409, 'Desa ini sudah mengirim video untuk kegiatan ini.');
 
       const kini = new Date();
       const segmen = path.join(String(p.id), String(kini.getFullYear()), String(kini.getMonth() + 1).padStart(2, '0'));
-      await fsp.mkdir(path.join(VIDEO_ROOT, segmen), { recursive: true });
       const nama_disk = `${crypto.randomBytes(24).toString('hex')}${meta.ext}`;
-      const jalur_disk = path.join(segmen, nama_disk);
-      await fsp.rename(sementara, path.join(VIDEO_ROOT, jalur_disk));
+      await fsp.rename(sementara, path.join(MENTAH_ROOT, nama_disk));
       await hapusSesi(uploadId);
-
-      const info = await bacaMetadata(path.join(VIDEO_ROOT, jalur_disk));
 
       const kiriman = await prisma.video_desa_kiriman.create({
         data: {
@@ -782,27 +850,17 @@ class VideoDesaController {
           no_hp: meta.no_hp || null,
           keterangan: meta.keterangan,
           nama_berkas: meta.nama_berkas,
-          mime: MIME_EKSTENSI[meta.ext] || null,
           ukuran: BigInt(meta.ukuran),
-          durasi_detik: info.durasi_detik ?? null,
-          lebar: info.lebar ?? null,
-          tinggi: info.tinggi ?? null,
-          codec: info.codec ?? null,
+          ukuran_asli: BigInt(meta.ukuran),
           nama_disk,
-          jalur_disk,
+          jalur_disk: path.join(segmen, nama_disk),
+          pemrosesan: 'antre',
           ip: String(req.ip || '').slice(0, 45),
         },
       });
+      proses.masukkan(kiriman.id);
 
-      res.status(201).json({
-        success: true,
-        data: {
-          id: Number(kiriman.id),
-          durasi_detik: info.durasi_detik ?? null,
-          lebar: info.lebar ?? null,
-          tinggi: info.tinggi ?? null,
-        },
-      });
+      res.status(201).json({ success: true, data: { id: Number(kiriman.id), pemrosesan: 'antre' } });
     } catch (error) {
       console.error('Error selesai unggah video desa:', error);
       res.status(500).json({ success: false, message: 'Gagal menyimpan video.' });
@@ -817,6 +875,5 @@ class VideoDesaController {
 }
 
 module.exports = new VideoDesaController();
-module.exports.VIDEO_ROOT = VIDEO_ROOT;
-module.exports.MAKS_UKURAN = MAKS_UKURAN;
 module.exports.UKURAN_POTONGAN = UKURAN_POTONGAN;
+module.exports.MAKS_UKURAN = MAKS_UKURAN;
