@@ -5,6 +5,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
+const jwt = require('jsonwebtoken');
 const fs = require('fs');
 const path = require('path');
 require('dotenv').config();
@@ -174,11 +175,37 @@ app.use(cors({
   exposedHeaders: ['X-Renewed-Token']
 }));
 
+/**
+ * Kunci rate limit: per AKUN bila request membawa JWT yang sah, per IP bila
+ * tidak.
+ *
+ * Seluruh pegawai di kantor keluar lewat satu IP NAT (103.51.103.197). Dengan
+ * kunci per IP, jatah 1000 request itu milik sekantor — pada 2026-10-02 satu HP
+ * yang terjebak loop tanpa token menghabiskannya dalam beberapa detik dan semua
+ * orang di kantor menerima 429 ("backend mati"). Sekarang tiap akun punya
+ * jatahnya sendiri, dan request anonim dari IP itu hanya menghabiskan keranjang
+ * anonim. Tokennya diverifikasi (bukan sekadar dibaca) supaya token karangan
+ * tidak bisa dipakai untuk membuat keranjang baru tanpa batas.
+ */
+const kunciRateLimit = (req) => {
+  const h = req.headers.authorization;
+  if (h && h.startsWith('Bearer ')) {
+    try {
+      const muatan = jwt.verify(h.slice(7), process.env.JWT_SECRET);
+      if (muatan?.id !== undefined && muatan?.id !== null) return `akun:${muatan.id}`;
+    } catch {
+      // Token kedaluwarsa/rusak: jatuh ke kunci IP di bawah.
+    }
+  }
+  return `ip:${req.ip}`;
+};
+
 // Rate limiting - Standard API requests
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // 1000 requests per windowMs
-  message: 'Terlalu banyak request dari IP ini, silakan coba lagi nanti.',
+  max: 1000, // 1000 requests per windowMs, per akun (atau per IP bila anonim)
+  keyGenerator: kunciRateLimit,
+  message: 'Terlalu banyak request, silakan coba lagi beberapa menit lagi.',
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -186,7 +213,8 @@ const limiter = rateLimit({
 // Rate limiting - More permissive for Bankeu uploads (1 juta proposals scenario)
 const bankeuUploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5000, // 5000 uploads per 15 minutes per IP
+  max: 5000, // 5000 uploads per 15 minutes, per akun (atau per IP bila anonim)
+  keyGenerator: kunciRateLimit,
   message: 'Terlalu banyak upload, silakan tunggu beberapa menit.',
   standardHeaders: true,
   legacyHeaders: false,
@@ -199,7 +227,7 @@ if (process.env.NODE_ENV === 'production') {
   app.use('/api/desa/bankeu-perubahan', bankeuUploadLimiter);
   // Apply standard rate limit to other API routes
   app.use('/api/', limiter);
-  logger.info('🛡️  Rate limiting enabled (1000 req/15min API, 5000 req/15min Bankeu uploads)');
+  logger.info('🛡️  Rate limiting enabled (per akun/IP: 1000 req/15min API, 5000 req/15min Bankeu uploads)');
 } else {
   logger.info('⚠️  Rate limiting disabled for development');
 }
