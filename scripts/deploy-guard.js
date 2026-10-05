@@ -55,11 +55,21 @@ const GIT = process.env.GUARD_GIT || '/usr/bin/git';
 
 const catat = (pesan) => console.log(`[${new Date().toISOString()}] ${pesan}`);
 
-/** Jalankan git dan kembalikan stdout yang sudah dirapikan. */
+/**
+ * Jalankan git dan kembalikan stdout yang sudah dirapikan.
+ *
+ * stderr sengaja DITANGKAP, bukan diwariskan. Bawaan execFileSync meneruskan
+ * stderr anak ke stderr induk, dan `git fetch` menulis "From https://..." ke
+ * sana pada setiap pemanggilan — lewat cron tiap 5 menit itu 288 baris per hari
+ * di log, yang justru mengubur baris yang benar-benar perlu dibaca. Kalau git
+ * gagal, pesannya tetap sampai: execFileSync melempar dan stderr-nya ikut di
+ * dalam error.message.
+ */
 const git = (...argumen) =>
 	execFileSync(GIT, ['-C', REPO_DIR, ...argumen], {
 		encoding: 'utf8',
 		timeout: 120000,
+		stdio: ['ignore', 'pipe', 'pipe'],
 	}).trim();
 
 /**
@@ -129,7 +139,7 @@ const picuDeploy = (secret, sha) =>
 
 (async () => {
 	try {
-		git('fetch', 'origin', BRANCH);
+		git('fetch', '--quiet', 'origin', BRANCH);
 
 		const tertinggal = Number(git('rev-list', '--count', `HEAD..origin/${BRANCH}`));
 		if (!Number.isFinite(tertinggal)) {
