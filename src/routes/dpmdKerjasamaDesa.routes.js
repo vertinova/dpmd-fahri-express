@@ -12,9 +12,11 @@ const express = require('express');
 const router = express.Router();
 const controller = require('../controllers/kerjasamaDesaMonitoring.controller');
 const { auth, checkRole } = require('../middlewares/auth');
-const { PERAN_INTERNAL_DPMD } = require('../config/peranDpmd');
+const { PERAN_PEMANTAU_SPKED } = require('../config/peranDpmd');
 
-router.use(auth, checkRole(PERAN_INTERNAL_DPMD));
+// Staf DPMD + Tenaga Ahli. Yang terakhir hanya membaca — dan karena seluruh
+// berkas ini memang hanya GET, tidak ada yang perlu dibatasi lebih jauh.
+router.use(auth, checkRole(PERAN_PEMANTAU_SPKED));
 
 // Bahan penyaring: katalog bidang/jenis, daftar kecamatan, tahun yang ada datanya.
 router.get('/meta', controller.meta);
