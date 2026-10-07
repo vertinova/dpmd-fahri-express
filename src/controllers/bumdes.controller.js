@@ -9,13 +9,24 @@ const path = require('path');
 const { KOLOM_DESA, KOLOM_ADMIN, siapkanData, FOLDER_LAMPIRAN, bacaAngka } = require('../config/bumdesFields');
 const { v4: uuidv4 } = require('uuid');
 
-// Dokumen ketahanan pangan — kolom berkas biasa, diunggah lewat /upload-file.
+// Dokumen ketahanan pangan LAMA — kolom berkas tunggal tanpa tahun, diunggah
+// lewat /upload-file. Masih dibaca karena berkasnya sudah ada di produksi;
+// unggahan baru masuk ke daftar bertahun di bawah.
 const KOLOM_BERKAS_PANGAN = ['StudiKelayakanUsaha', 'RABKetahananPangan', 'DokumentasiGeotagging'];
 const LABEL_BERKAS_PANGAN = {
   StudiKelayakanUsaha: 'Studi Kelayakan Usaha',
   RABKetahananPangan: 'RAB Ketahanan Pangan',
   DokumentasiGeotagging: 'Dokumentasi Geotagging',
 };
+
+// Dokumen ketahanan pangan PER TAHUN (kolom daftar JSON DokumenKetahananPangan).
+// Kuncinya dipakai bersama front-end (skemaBumdes.js) dan validator daftar
+// (KOLOM_DAFTAR di bumdesFields.js) — ketiganya harus sama.
+const ISIAN_BERKAS_PANGAN = [
+  ['studi_kelayakan', 'Studi Kelayakan Usaha'],
+  ['rab', 'RAB Ketahanan Pangan'],
+  ['geotagging', 'Dokumentasi Geotagging'],
+];
 
 const bacaDaftarJson = (v) => {
   if (!v) return [];
@@ -953,6 +964,7 @@ class BumdesController {
         select: {
           id: true, namabumdesa: true, desa: true, kecamatan: true,
           StudiKelayakanUsaha: true, RABKetahananPangan: true, DokumentasiGeotagging: true,
+          DokumenKetahananPangan: true,
           RiwayatKontribusiPADes: true, RiwayatKemitraan: true,
         },
       });
@@ -962,9 +974,24 @@ class BumdesController {
         for (const field of KOLOM_BERKAS_PANGAN) {
           if (!b[field]) continue;
           documents.push(entriDokumen(b, baseUrl, {
-            nilai: b[field], folder: 'bumdes_ketahanan_pangan', field, label: LABEL_BERKAS_PANGAN[field],
+            nilai: b[field], folder: 'bumdes_ketahanan_pangan', field,
+            // Tahunnya tidak pernah tercatat untuk kolom lama. Disebut apa
+            // adanya, bukan ditebak — petugas yang tahu tahunnya bisa
+            // mengunggah ulang ke daftar bertahun.
+            label: `${LABEL_BERKAS_PANGAN[field]} (tanpa tahun)`,
             tambahan: { kelompok: 'Ketahanan Pangan' },
           }));
+        }
+        // Dokumen ketahanan pangan per tahun.
+        for (const p of bacaDaftarJson(b.DokumenKetahananPangan)) {
+          for (const [kunci, label] of ISIAN_BERKAS_PANGAN) {
+            if (!p?.[kunci]) continue;
+            documents.push(entriDokumen(b, baseUrl, {
+              nilai: p[kunci], folder: FOLDER_LAMPIRAN, field: `DokumenPangan:${kunci}`,
+              tahun: p.tahun, label: `${label} ${p.tahun || ''}`.trim(),
+              tambahan: { kelompok: 'Ketahanan Pangan' },
+            }));
+          }
         }
         for (const p of bacaDaftarJson(b.RiwayatKontribusiPADes)) {
           if (!p?.bukti) continue;
@@ -1545,7 +1572,10 @@ class BumdesController {
 
       // Berkas dari formulir baru (LPJ tahun baru, ketahanan pangan, bukti
       // PADes, MoU) punya jalur hapus sendiri.
-      if (FIELD_BERKAS_BARU.includes(req.body.field)) {
+      if (
+        FIELD_BERKAS_BARU.includes(req.body.field)
+        || String(req.body.field || '').startsWith(PREFIKS_PANGAN_TAHUNAN)
+      ) {
         return hapusBerkasBaru(req, res);
       }
 
@@ -1871,6 +1901,9 @@ class BumdesController {
 
 // Field "virtual" yang dikirim halaman Kelola Dokumen untuk berkas di dalam
 // daftar JSON, ditambah kolom berkas ketahanan pangan.
+// "DokumenPangan:<kunci>" menunjuk satu berkas di dalam baris tahun pada
+// DokumenKetahananPangan (mis. "DokumenPangan:rab").
+const PREFIKS_PANGAN_TAHUNAN = 'DokumenPangan:';
 const FIELD_BERKAS_BARU = ['LaporanPertanggungjawaban', 'BuktiPADes', 'MoUKemitraan', ...KOLOM_BERKAS_PANGAN];
 
 const hapusBerkasBaru = async (req, res) => {
@@ -1895,6 +1928,25 @@ const hapusBerkasBaru = async (req, res) => {
     if (!cocok(bumdes[field])) return res.status(404).json({ success: false, message: 'Berkas tidak ditemukan pada BUMDes ini' });
     data = { [field]: null };
     folder = 'bumdes_ketahanan_pangan';
+  } else if (String(field || '').startsWith(PREFIKS_PANGAN_TAHUNAN)) {
+    const kunci = String(field).slice(PREFIKS_PANGAN_TAHUNAN.length);
+    if (!ISIAN_BERKAS_PANGAN.some(([k]) => k === kunci)) {
+      return res.status(400).json({ success: false, message: 'Jenis dokumen ketahanan pangan tidak dikenal' });
+    }
+    const daftar = bacaDaftarJson(bumdes.DokumenKetahananPangan);
+    if (!daftar.some((b) => cocok(b?.[kunci]))) {
+      return res.status(404).json({ success: false, message: 'Berkas tidak ditemukan pada BUMDes ini' });
+    }
+    // Hanya lampirannya yang dilepas; baris tahunnya tetap selama masih
+    // memegang berkas lain. Baris yang jadi kosong (tinggal tahun) dibuang.
+    const baru = daftar
+      .map((b) => {
+        if (!cocok(b?.[kunci])) return b;
+        const { [kunci]: _dibuang, ...sisa } = b;
+        return sisa;
+      })
+      .filter((b) => ISIAN_BERKAS_PANGAN.some(([k]) => b?.[k]));
+    data = { DokumenKetahananPangan: JSON.stringify(baru) };
   } else {
     const kolom = { LaporanPertanggungjawaban: 'LaporanPertanggungjawaban', BuktiPADes: 'RiwayatKontribusiPADes', MoUKemitraan: 'RiwayatKemitraan' }[field];
     const kunci = { LaporanPertanggungjawaban: 'berkas', BuktiPADes: 'bukti', MoUKemitraan: 'mou' }[field];

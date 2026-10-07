@@ -572,6 +572,8 @@ class KepalaDinasController {
           RiwayatKontribusiPADes: true, RiwayatKemitraan: true, PeranProgram: true,
           LaporanPertanggungjawaban: true, MediaSosial: true,
           StudiKelayakanUsaha: true, RABKetahananPangan: true, DokumentasiGeotagging: true,
+          // Dokumen ketahanan pangan per tahun (2026-10).
+          DokumenKetahananPangan: true,
           _count: { select: { bumdes_produk: { where: { is_active: true } } } },
           // Perdes/SK yang dipilih desa dari modul Produk Hukum. Berkasnya ada
           // di folder lain, jadi harus ikut supaya tombol dokumen di Core
@@ -638,6 +640,7 @@ class KepalaDinasController {
         const riwayatKemitraan = daftar(r.RiwayatKemitraan);
         const riwayatAset = daftar(r.RiwayatAset);
         const lpj = daftar(r.LaporanPertanggungjawaban) || [];
+        const dokPangan = daftar(r.DokumenKetahananPangan) || [];
 
         // Penyertaan modal DESA seluruh tahun. Dari daftar bila sudah ada
         // (mencakup 2025, 2026, ...), kalau belum dari kolom 2019–2024.
@@ -716,6 +719,15 @@ class KepalaDinasController {
             omset_laba: riwayatOmset ? urutTahun(riwayatOmset) : null,
             pades: riwayatPades ? urutTahun(riwayatPades).map(({ bukti, ...b }) => b) : null,
             kemitraan: riwayatKemitraan ? urutTahun(riwayatKemitraan).map(({ mou, ...b }) => b) : null,
+            // Tahun kegiatan ketahanan pangan + jumlah dokumen per tahun. Path
+            // berkasnya tidak dikirim di sini — tautannya sudah ada di `berkas`.
+            dokumen_pangan: dokPangan.length
+              ? urutTahun(dokPangan).map((b) => ({
+                tahun: b.tahun ?? null,
+                keterangan: b.keterangan ?? null,
+                jumlah_berkas: ['studi_kelayakan', 'rab', 'geotagging'].filter((k) => ada(b[k])).length,
+              }))
+              : null,
           },
           jumlah_produk: r._count?.bumdes_produk ?? 0,
           // Berkas yang benar-benar bisa dibuka, dari dua jalur sekaligus:
@@ -728,12 +740,22 @@ class KepalaDinasController {
             // Laporan pertanggungjawaban tahun lain dari formulir baru.
             ...urutTahun(lpj).map((b, i) =>
               berkas(b.berkas, 'bumdes_lampiran', `LPJ-${b.tahun || i}`, `Laporan Pertanggungjawaban ${b.tahun || ''}`.trim())),
-            // Dokumen ketahanan pangan.
+            // Dokumen ketahanan pangan tanpa tahun (kolom lama).
             ...[
               ['StudiKelayakanUsaha', 'Studi Kelayakan Usaha'],
               ['RABKetahananPangan', 'RAB Ketahanan Pangan'],
               ['DokumentasiGeotagging', 'Dokumentasi Geotagging'],
-            ].map(([kolom, label]) => berkas(r[kolom], 'bumdes_ketahanan_pangan', kolom, label)),
+            ].map(([kolom, label]) => berkas(r[kolom], 'bumdes_ketahanan_pangan', kolom, `${label} (tanpa tahun)`)),
+            // Dokumen ketahanan pangan per tahun (daftar JSON).
+            ...urutTahun(dokPangan).flatMap((b, i) => [
+              ['studi_kelayakan', 'Studi Kelayakan Usaha'],
+              ['rab', 'RAB Ketahanan Pangan'],
+              ['geotagging', 'Dokumentasi Geotagging'],
+            ].map(([kunci, label]) => berkas(
+              b[kunci], 'bumdes_lampiran',
+              `DokumenPangan:${kunci}-${b.tahun || i}`,
+              `${label} ${b.tahun || ''}`.trim(),
+            ))),
             // Bukti penyerahan PADes & MoU kemitraan.
             ...urutTahun(riwayatPades || []).map((b, i) =>
               berkas(b.bukti, 'bumdes_lampiran', `BuktiPADes-${b.tahun || i}`, `Bukti Penyerahan PADes ${b.tahun || ''}`.trim())),

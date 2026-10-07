@@ -74,6 +74,7 @@ const KOLOM_DESA = [
   'RiwayatPermodalan', 'RiwayatAset', 'RiwayatOmsetLaba',
   'RiwayatKontribusiPADes', 'RiwayatKemitraan', 'PeranProgram',
   'LaporanPertanggungjawaban', 'MediaSosial',
+  'DokumenKetahananPangan',
 ];
 
 /**
@@ -302,6 +303,16 @@ const KOLOM_DAFTAR = {
   RiwayatKemitraan: { bentuk: 'entri', isian: { tahun: 'tahun', mitra: 'teks', periode: 'teks', kontribusi: 'uang', mou: 'berkas' } },
   PeranProgram: { bentuk: 'entri', isian: { program: PROGRAM_PEMERINTAH, program_lain: 'teks', peran: PERAN_PROGRAM, produk: 'teks', keterangan: 'teks' } },
   LaporanPertanggungjawaban: { bentuk: 'entri', isian: { tahun: 'tahun', berkas: 'berkas' } },
+  // Dokumen ketahanan pangan dipisah per tahun: ada BUM Desa yang menerima
+  // kegiatan ketahanan pangan lebih dari sekali, dan sebelumnya berkas tahun
+  // baru menimpa berkas tahun lama.
+  DokumenKetahananPangan: {
+    bentuk: 'entri',
+    isian: {
+      tahun: 'tahun', studi_kelayakan: 'berkas', rab: 'berkas',
+      geotagging: 'berkas', keterangan: 'teks',
+    },
+  },
   MediaSosial: { bentuk: 'objek', isian: ['instagram', 'facebook', 'tiktok', 'website', 'shopee', 'tokopedia', 'ecommerce_lain'] },
 };
 

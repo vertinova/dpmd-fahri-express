@@ -425,7 +425,12 @@ app.use('/api/desa/kerjasama', require('./routes/kerjasamaDesa.routes'));
 app.use('/api/dpmd/kerjasama-desa', require('./routes/dpmdKerjasamaDesa.routes'));
 // Agregat ikhtisar bidang SPKED (grafik BUM Desa & Bankeu)
 app.use('/api/spked/ikhtisar', require('./routes/spkedIkhtisar.routes'));
+// Ekspor BUM Desa (data lengkap .xlsx + arsip berkas .zip). HARUS di atas
+// '/api/bumdes': bumdesRoutes punya rute '/:id' yang akan menelan '/ekspor'.
+app.use('/api/bumdes/ekspor', require('./routes/bumdesEkspor.routes'));
 app.use('/api/bumdes', bumdesRoutes); // Admin routes
+// Pasar BUM Desa untuk publik (tanpa login) — dipakai landing page.
+app.use('/api/public/bumdes', require('./routes/bumdesPublic.routes'));
 app.use('/api/desa/musdesus', musdesusRoutes);
 app.use('/api/musdesus', musdesusRoutes); // Admin routes
 app.use('/api/desa', desaKelembagaanRoutes); // Desa kelembagaan routes (RW, RT, Posyandu, etc.)

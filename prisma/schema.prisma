@@ -1014,6 +1014,11 @@ model bumdes {
   StudiKelayakanUsaha                                           String?        @db.VarChar(255)
   RABKetahananPangan                                            String?        @db.VarChar(255)
   DokumentasiGeotagging                                         String?        @db.VarChar(255)
+
+  // --- Dokumen ketahanan pangan per tahun (2026-10) — lihat migrasi 20261007 ---
+  // Daftar JSON. Tiga kolom berkas di atas adalah berkas lama yang tahunnya
+  // tidak pernah tercatat; keduanya sengaja hidup berdampingan.
+  DokumenKetahananPangan                                        String?        @db.LongText
   bumdes_produk                                                 bumdes_produk[]
   produk_hukums_bumdes_produk_hukum_perdes_idToproduk_hukums    produk_hukums? @relation("bumdes_produk_hukum_perdes_idToproduk_hukums", fields: [produk_hukum_perdes_id], references: [id], onUpdate: NoAction, map: "bumdes_produk_hukum_perdes_id_foreign")
   produk_hukums_bumdes_produk_hukum_sk_bumdes_idToproduk_hukums produk_hukums? @relation("bumdes_produk_hukum_sk_bumdes_idToproduk_hukums", fields: [produk_hukum_sk_bumdes_id], references: [id], onUpdate: NoAction, map: "bumdes_produk_hukum_sk_bumdes_id_foreign")
