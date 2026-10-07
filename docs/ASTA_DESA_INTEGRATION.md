@@ -492,3 +492,25 @@ Pola yang disarankan, dan yang disebut di halaman petunjuk:
 | Peta sebaran, piramida usia, tren harian | `titik`, `piramida`, `tren` | Hanya bila `rincian_siap === true`; selain itu tampilkan keadaan memuat |
 | Label "terakhir diperbarui" | `diambil_pada` | Selalu — jangan memakai waktu permintaan sendiri |
 
+### 9.8 `sebagian` + `kurang_terbaca` — rincian tidak lengkap
+
+Penyusuran bisa kehilangan halaman di sisi sumber. Terlihat langsung di log
+produksi 7 Okt 2026:
+
+```
+[asta-desa] /sensuses: 174352 baris, 956 halaman, 1639 dtk, 84 halaman gagal
+[asta-desa] /sensuses: 191446 baris, 958 halaman,  934 dtk
+```
+
+Penyusuran pertama kehilangan 84 halaman (±17.000 baris, 9%). `halaman_gagal`
+sendiri **tidak dikirim** di respons — ia hanya masuk log. Yang dikirim adalah
+akibatnya: `kurang = total_resmi − total_terbaca`, dan bila `kurang` melebihi
+**1% dari total (minimal 25 baris)** maka `sebagian: true` menyala, dengan
+besarannya di `kurang_terbaca`. Ambang 1% itu longgar dengan sengaja — selama
+pendataan berjalan, paginasi OFFSET memang selalu menggeser satu-dua baris.
+
+Jadi kehilangan sebesar itu **tidak lolos diam-diam**, asalkan pihak penerima
+membaca `sebagian`. Kalau tidak dibaca, papan akan memampang rekap yang kurang
+9% tanpa tanda apa pun — sementara `total_sensus` di kartu utama tetap benar,
+sehingga selisihnya justru terlihat seperti kesalahan hitung.
+
