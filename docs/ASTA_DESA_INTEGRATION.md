@@ -458,3 +458,37 @@ curl -s -H "X-API-Key: $ASTADESA_BUPATI_API_KEY" \
 | `503` + "Sambungan ke sumber data ASTA DESA belum disetel" | Kuncinya benar, tetapi `ASTADESA_IDENTITY`/`ASTADESA_TOKEN` yang kosong |
 | `401` | Kunci tidak dikirim atau tidak cocok |
 | `429` | Pihak penerima melewati 60 permintaan/menit |
+
+### 9.7 `rincian_siap` — penanda yang WAJIB dibaca pihak penerima
+
+Diverifikasi langsung ke produksi (7 Okt 2026, 191.433 baris sensus): tepat
+setelah backend di-restart, `/ringkasan` membalas **200** dengan
+
+```json
+{ "total_sensus": 191433, "total_anggota_tercatat": 534881,
+  "total_terbaca": 0, "total_desa": null, "berkoordinat": null,
+  "rincian_dari": "ringkasan", "rincian_siap": false }
+```
+
+dan `/sebaran` membalas `titik: []` dengan `rincian_siap: false`.
+
+Itu **bukan** galat dan bukan "tidak ada data". Rincian yang dihitung dari
+seluruh baris baru ada setelah penyusuran ±958 halaman selesai — dan cache-nya
+ada di memori proses, jadi **setiap restart backend (termasuk setiap deploy)
+mengosongkannya**. Angka pokok (`total_sensus`, `total_anggota_tercatat`) tidak
+ikut kosong: keduanya datang dari rekap ringkas ASTA DESA dan selalu terisi.
+
+Konsekuensinya untuk Command Center Bupati: kalau `rincian_siap` tidak dibaca,
+papan akan memampang **peta kosong dan grafik bernilai 0** setiap kali DPMD
+melakukan deploy — persis jenis kekeliruan yang paling meyakinkan, karena
+statusnya 200 dan tidak ada galat apa pun yang muncul.
+
+Pola yang disarankan, dan yang disebut di halaman petunjuk:
+
+| Komponen papan | Sumber | Kapan ditampilkan |
+| --- | --- | --- |
+| Kartu angka utama | `total_sensus`, `total_anggota_tercatat` | Selalu — keduanya selalu terisi |
+| Rekap per kecamatan | `per_kecamatan` | Selalu (terisi di kedua mode; rincian `total_desa`/`berkoordinat` ikut `null` saat `rincian_dari: "ringkasan"`) |
+| Peta sebaran, piramida usia, tren harian | `titik`, `piramida`, `tren` | Hanya bila `rincian_siap === true`; selain itu tampilkan keadaan memuat |
+| Label "terakhir diperbarui" | `diambil_pada` | Selalu — jangan memakai waktu permintaan sendiri |
+

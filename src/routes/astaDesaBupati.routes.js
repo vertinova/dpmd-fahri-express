@@ -204,15 +204,21 @@ curl -H "Authorization: Bearer &lt;kunci-anda&gt;" "${asal}/ringkasan"</pre>
       <tr><th>Field</th><th>Artinya</th></tr>
       <tr><td><code>total_sensus</code></td><td>Angka resmi, hitungan hidup dari server ASTA DESA. <strong>Pakai ini</strong> untuk menyebut jumlah keluarga terdata — jangan menghitung panjang array.</td></tr>
       <tr><td><code>total_terbaca</code></td><td>Berapa baris yang benar-benar terbaca dan menyusun rekap di bawahnya. Bisa lebih kecil dari <code>total_sensus</code>.</td></tr>
-      <tr><td><code>sebagian</code></td><td>Bila <code>true</code>: pembacaan berhenti di pagar pengaman, jadi rekapnya angka sebagian — bukan total resmi.</td></tr>
+      <tr><td><code>rincian_siap</code></td><td><strong>Periksa ini lebih dulu.</strong> Bila <code>false</code>, rincian yang dihitung dari seluruh baris belum tersedia — <code>/sebaran</code> membalas <code>titik: []</code> dan beberapa angka bernilai <code>null</code>. Itu berarti "belum terbaca", <strong>bukan</strong> "tidak ada data". Jangan menggambar peta kosong atau angka 0; tampilkan keadaan memuat. Terjadi beberapa menit setelah backend DPMD di-restart, karena rinciannya disusun dari penyusuran ±190.000 baris yang perlu waktu.</td></tr>
+      <tr><td><code>rincian_dari</code></td><td><code>"baris"</code> = rincian dihitung dari seluruh baris sensus (lengkap). <code>"ringkasan"</code> = masih memakai rekap ringkas dari ASTA DESA, jadi rincian seperti jumlah desa dan berapa yang berkoordinat belum bisa diketahui dan dikirim sebagai <code>null</code>.</td></tr>
+      <tr><td><code>rincian_basi</code></td><td>Rincian yang dikirim berasal dari pembacaan sebelumnya yang sudah kedaluwarsa, sementara pembacaan baru masih berjalan. Angkanya tetap layak dipakai, hanya tidak paling baru.</td></tr>
+      <tr><td><code>sebagian</code> / <code>kena_pagar</code></td><td>Bila <code>true</code>: pembacaan berhenti di pagar pengaman, jadi rekapnya angka sebagian — bukan total resmi.</td></tr>
       <tr><td><code>tanpa_koordinat</code></td><td>Baris yang tidak bisa dipetakan. Lubang di peta berarti "koordinat belum diisi", bukan "tidak ada keluarga di sana" — tampilkan angka ini di samping petanya.</td></tr>
       <tr><td><code>di_luar_wilayah</code></td><td>Baris berkoordinat tetapi koordinatnya jatuh di luar Kabupaten Bogor (koordinat salah).</td></tr>
+      <tr><td><code>diambil_pada</code></td><td>Waktu data ini dibaca dari ASTA DESA (ISO 8601). Pakai ini untuk label "terakhir diperbarui", bukan waktu permintaan Anda sendiri.</td></tr>
     </table>
+
+    <p><strong>Pola pembacaan yang disarankan:</strong> <code>total_sensus</code> dan <code>total_anggota_tercatat</code> selalu terisi dan selalu angka resmi — pakai keduanya untuk kartu angka utama, sehingga papan utama tidak pernah kosong. Grafik dan peta yang bergantung pada rincian ditampilkan hanya bila <code>rincian_siap === true</code>.</p>
 
     <div class="nb">
       <strong>NIK dan nomor KK selalu tersamar</strong> — hanya 6 digit pertama yang dikirim, sisanya bintang. Tidak ada cara memperoleh nomor utuh lewat API ini.
       Batas laju <strong>60 permintaan per menit</strong> per alamat IP. Respons di-cache ±10 menit di sisi kami, kecuali angka pokok yang disegarkan tiap menit —
-      menyegarkan lebih cepat dari itu tidak menghasilkan angka yang lebih baru.
+      menyegarkan lebih cepat dari itu tidak menghasilkan angka yang lebih baru, dan <code>?force=1</code> tidak berlaku di sini.
     </div>
 
     <footer>Butuh kunci, kenaikan batas laju, atau endpoint lain? Hubungi Bidang SPKED DPMD Kabupaten Bogor.</footer>
