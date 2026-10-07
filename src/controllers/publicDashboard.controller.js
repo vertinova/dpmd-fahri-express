@@ -1,6 +1,8 @@
 const prisma = require('../config/prisma');
 const sipandaService = require('../services/sipanda.service');
-const crypto = require('crypto');
+const {
+  timingSafeEquals, isUnsafeConfiguredApiKey, getRequestApiKey, dariPeramban,
+} = require('../utils/apiKey');
 
 const CORE_DASHBOARD_API_KEY_ENV = 'CORE_DASHBOARD_API_KEY';
 
@@ -169,47 +171,11 @@ const safeAggregate = async (model, args = {}) => {
   }
 };
 
-const timingSafeEquals = (actual, expected) => {
-  if (!actual || !expected) return false;
-
-  const actualBuffer = Buffer.from(String(actual));
-  const expectedBuffer = Buffer.from(String(expected));
-
-  if (actualBuffer.length !== expectedBuffer.length) return false;
-
-  return crypto.timingSafeEqual(actualBuffer, expectedBuffer);
-};
-
-const isUnsafeConfiguredApiKey = (apiKey) => {
-  if (!apiKey || apiKey.length < 32) return true;
-
-  const normalized = apiKey.toLowerCase();
-  return (
-    normalized.includes('change-this') ||
-    normalized.includes('change_to') ||
-    normalized.includes('replace-with') ||
-    normalized.includes('replace_with') ||
-    normalized.includes('your_api') ||
-    normalized.includes('password') ||
-    normalized.includes('secret')
-  );
-};
-
-const getRequestApiKey = (req) => {
-  const authorization = req.get('authorization') || '';
-  const bearerMatch = authorization.match(/^Bearer\s+(.+)$/i);
-
-  return (
-    req.get('x-api-key') ||
-    req.get('x-core-dashboard-key') ||
-    (bearerMatch ? bearerMatch[1] : '')
-  );
-};
-
-const wantsBrowserDashboardPage = (req) => {
-  const acceptHeader = req.get('accept') || '';
-  return req.method === 'GET' && acceptHeader.includes('text/html') && !getRequestApiKey(req);
-};
+// Pemeriksaan API key dipindah ke src/utils/apiKey.js karena API Asta Desa
+// untuk Bupati memakai yang sama persis. Disalin akan membuat salah satunya
+// diam-diam tertinggal — mis. satu sisi menolak kunci bawaan "REPLACE_WITH_…"
+// dan sisi lain menerimanya.
+const wantsBrowserDashboardPage = dariPeramban;
 
 const sendCoreDashboardPage = (res) => {
   res.status(200).type('html').send(`<!doctype html>

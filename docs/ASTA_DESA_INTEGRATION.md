@@ -342,3 +342,119 @@ curl -s -X POST https://astadesa.rmlabs.id/api/v1/login \
   -H 'Accept: application/json' \
   -d "identity=$ASTADESA_IDENTITY&password=$ASTADESA_PASSWORD"
 ```
+
+---
+
+## 9. API Asta Desa untuk pihak Bupati (`/api/eksternal/asta-desa`)
+
+Data Asta Desa yang sudah diolah di sini juga diserahkan ke pihak Bupati sebagai
+API JSON, dijaga **API key** — bukan login DPMD.
+
+### 9.1 Yang perlu dipegang lebih dulu, sebelum kuncinya diserahkan
+
+Data ini **bukan milik DPMD**. Ia dibaca dari `astadesa.rmlabs.id` memakai token
+`super_admin` bernama `core-dashboard-dpmd` yang diterbitkan untuk Core Dashboard
+DPMD. Menyalurkannya ke instansi lain — khususnya baris per-keluarga — adalah
+keputusan berbagi-pakai data, bukan sekadar menyalakan endpoint. **Izin pemilik
+data ASTA DESA perlu dipegang** sebelum kunci diserahkan ke pihak Bupati.
+
+Itulah sebabnya kuncinya berdiri sendiri (`ASTADESA_BUPATI_API_KEY`), terpisah
+dari `CORE_DASHBOARD_API_KEY`: mencabut akses pihak Bupati cukup dengan
+mengosongkan satu variabel lalu menjalankan ulang backend — tanpa menyentuh
+akses lain dan tanpa mencabut token ASTA DESA.
+
+### 9.2 Memasang kuncinya
+
+Terbitkan kunci acak, lalu pasang di `.env` server **produksi** (bukan di repo —
+`.env` tidak ikut ter-commit):
+
+```bash
+openssl rand -hex 32                      # 64 karakter heksadesimal
+# lalu di /var/www/backend/.env:
+#   ASTADESA_BUPATI_API_KEY=<hasil di atas>
+pm2 restart dpmd-backend
+```
+
+Selama variabelnya kosong, seluruh endpoint di bawah ini membalas **503** dengan
+keterangan bahwa kuncinya belum disetel — bukan 401. Membalas 401 akan membuat
+pihak penerima mengira kuncinya salah lalu menagih kunci baru, padahal yang
+kurang ada di sisi kita.
+
+Penjaganya juga **menolak kunci contoh**: kurang dari 32 karakter, atau memuat
+`secret` / `password` / `replace_with` / `change-this`, dianggap belum diganti.
+Pemeriksaannya ada di [`src/utils/apiKey.js`](../src/utils/apiKey.js) dan dipakai
+bersama dengan Core Dashboard publik.
+
+### 9.3 Endpoint yang dibuka
+
+Kunci dikirim lewat `X-API-Key`, `X-Core-Dashboard-Key`, atau
+`Authorization: Bearer <kunci>` — ketiganya diterima.
+
+| Path | Isi |
+| --- | --- |
+| `GET /ringkasan` | Total keluarga terdata, rekap per kecamatan & desa, per status, petugas teraktif, tren harian |
+| `GET /demografi` | Agregat anggota keluarga: jenis kelamin, piramida usia, pendidikan, hubungan keluarga, disabilitas |
+| `GET /sebaran` | Titik koordinat peta + rekap per kecamatan |
+| `GET /sensus` | Baris per keluarga; penyaring `kecamatan`, `desa`, `status`, `dari`, `sampai`, `search`, `page`, `per_page` |
+| `GET /wilayah/kecamatan` | Daftar nama kecamatan |
+| `GET /wilayah/desa?kecamatan=` | Daftar nama desa satu kecamatan |
+
+Membukanya di peramban tanpa kunci menyajikan **halaman petunjuk** berisi daftar
+di atas dan contoh `curl`, bukan 401 JSON — yang pertama membuka tautannya
+hampir pasti belum tahu harus mengirim header apa.
+
+### 9.4 Yang sengaja TIDAK dibuka
+
+| Endpoint internal | Alasan |
+| --- | --- |
+| `/sensus/:id` | Membalas ±104 kolom apa adanya: alamat lengkap, tanggal & tempat lahir, nomor telepon, foto rumah, seluruh anggota keluarga. Yang disetujui keluar adalah **baris** per keluarga, bukan berkas keluarganya |
+| `/pengguna` | Akun pegawai ASTA DESA beserta email dan NIP — bukan data pendataan |
+| `/pesan` | Isi percakapan antar petugas |
+| `/segarkan` | Dari luar ini tombol untuk membebani server ASTA DESA, bukan fitur |
+| `/demografi/kategori`, `/layer`, `/wilayah/geojson`, `/cuaca`, `/sebaran-peta` | Belum ada yang memintanya. Menambah endpoint nanti mudah; menarik kembali endpoint yang sudah dipakai pihak lain tidak |
+
+### 9.5 Pagar pengaman yang dipasang di lapisan luar
+
+Handler-nya **dipakai ulang**, bukan disalin: angka yang dilihat pihak Bupati
+harus mustahil berbeda dari angka di Core Dashboard DPMD. Yang ditambahkan hanya
+empat lapis di sekelilingnya, di
+[`src/routes/astaDesaBupati.routes.js`](../src/routes/astaDesaBupati.routes.js):
+
+1. **NIK & nomor KK selalu disamarkan** (6 digit pertama, sisanya bintang) pada
+   kunci apa pun yang cocok pola `nik` / `no_kk` / `nomor_kk`, sedalam apa pun
+   strukturnya. Dikerjakan pada respons yang sudah jadi, **tidak** bergantung pada
+   penyamaran di hulu: `normalSensus` meneruskan `kk_nik` utuh karena di dalam
+   DPMD itu yang dibutuhkan, dan penyamaran di sisi ASTA DESA bisa dicabut kapan
+   pun tanpa memberi tahu kita. Keduanya berarti NIK utuh ikut keluar tanpa satu
+   pun galat muncul — kebocoran yang tidak berbunyi.
+2. **`?force=1` dicabut.** Di jalur internal ia melewati cache untuk sekali tarik.
+   Dari luar, satu permintaan ber-`force` memicu penyusuran sampai
+   `ASTADESA_MAX_ROWS` baris ke ASTA DESA; aplikasi pihak ketiga yang
+   memasangnya di auto-refresh akan menjatuhkan server **orang lain**.
+3. **Batas laju 60 permintaan/menit per IP.**
+4. **503 bila sambungan ASTA DESA belum disetel**, bukan 200 berisi nol. Di dalam
+   DPMD handler-nya toleran (halaman memunculkan petunjuk pemasangan); dari luar
+   toleransi yang sama membuat dashboard Bupati memasang "0 keluarga terdata"
+   sebagai angka resmi.
+
+### 9.6 Memeriksa saat bermasalah
+
+```bash
+# Harus 200 dan berupa HTML (halaman petunjuk)
+curl -s -o /dev/null -w '%{http_code} %{content_type}\n' \
+  -H 'Accept: text/html' https://dpmd.bogorkab.go.id/api/eksternal/asta-desa/ringkasan
+
+# Tanpa kunci: 401. Kunci belum dipasang di server: 503.
+curl -s https://dpmd.bogorkab.go.id/api/eksternal/asta-desa/ringkasan
+
+# Dengan kunci
+curl -s -H "X-API-Key: $ASTADESA_BUPATI_API_KEY" \
+  https://dpmd.bogorkab.go.id/api/eksternal/asta-desa/ringkasan
+```
+
+| Balasan | Artinya |
+| --- | --- |
+| `503` + "belum dikonfigurasi di server" | `ASTADESA_BUPATI_API_KEY` kosong atau masih berupa kunci contoh |
+| `503` + "Sambungan ke sumber data ASTA DESA belum disetel" | Kuncinya benar, tetapi `ASTADESA_IDENTITY`/`ASTADESA_TOKEN` yang kosong |
+| `401` | Kunci tidak dikirim atau tidak cocok |
+| `429` | Pihak penerima melewati 60 permintaan/menit |

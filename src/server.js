@@ -532,6 +532,10 @@ app.use('/api/produk-hukum-bidang', require('./routes/produkHukumBidang.routes')
 app.use('/api/produk-hukum-gabungan', require('./routes/produkHukumGabungan.routes')); // Ringkasan desa + bidang + referensi
 app.use('/api/gema', require('./routes/gema.routes')); // Asisten suara Core Dashboard
 app.use('/api/asta-desa', require('./routes/astadesa.routes')); // Proxy baca API super admin ASTA DESA
+// API Asta Desa untuk pihak Bupati — dijaga API key, bukan login DPMD. Namespace
+// '/api/eksternal' dipisah dari '/api/public' supaya tidak ada yang mengira
+// endpoint ini terbuka seperti tetangga-tetangganya di sana.
+app.use('/api/eksternal/asta-desa', require('./routes/astaDesaBupati.routes'));
 
 // Video Meeting routes (SFU mediasoup) — aktif kembali setelah port RTC dibuka
 app.use('/api/video-meetings', require('./routes/videoMeeting.routes'));
