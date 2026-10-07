@@ -110,6 +110,28 @@ function verifySignature(payload, signature) {
 
 // ─── Sequential Command Runner ───────────────────────────────────────────────────
 
+/**
+ * Potong keluaran panjang dari KEDUA ujung, bukan hanya awalnya.
+ *
+ * Sebelumnya dipakai `stdout.substring(0, 500)`. Masalahnya, satu-satunya bagian
+ * yang menyatakan BERHASIL atau GAGAL selalu ada di AKHIR keluaran: auto-migrate
+ * mencetak ratusan baris "Skipped (already ran)" sebelum menyebut migrasi yang
+ * baru dijalankan, dan ringkasannya ("Ran N new migration(s)" / "❌ Failed")
+ * paling belakang. Akibatnya hasil migrasi tidak pernah terlihat di log — deploy
+ * tetap dilaporkan "11/11 OK" walau sebuah ALTER TABLE gagal, karena
+ * auto-migrate memang sengaja lanjut ke migrasi berikutnya dan keluar dengan
+ * kode 0.
+ */
+const AWAL_LOG = 500;
+const AKHIR_LOG = 1200;
+
+function potong(teks) {
+  const t = String(teks);
+  if (t.length <= AWAL_LOG + AKHIR_LOG) return t;
+  const dibuang = t.length - AWAL_LOG - AKHIR_LOG;
+  return `${t.slice(0, AWAL_LOG)}\n  …[${dibuang} karakter di tengah dilewati]…\n${t.slice(-AKHIR_LOG)}`;
+}
+
 function runCommands(commands, cwd) {
   return new Promise((resolve) => {
     const results = [];
@@ -131,8 +153,8 @@ function runCommands(commands, cwd) {
         shell: '/bin/bash',
         timeout: CMD_TIMEOUT,
       }, (error, stdout, stderr) => {
-        if (stdout) log(`  stdout: ${stdout.substring(0, 500)}`);
-        if (stderr) log(`  stderr: ${stderr.substring(0, 500)}`);
+        if (stdout) log(`  stdout: ${potong(stdout)}`);
+        if (stderr) log(`  stderr: ${potong(stderr)}`);
         if (error) log(`  error (continuing): ${error.message}`);
         results.push({ cmd, ok: !error });
         next();
