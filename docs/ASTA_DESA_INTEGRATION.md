@@ -106,7 +106,9 @@ Core Dashboard lain. Lihat [`src/routes/astadesa.routes.js`](../src/routes/astad
 | GET | `/api/asta-desa/sensus` | Tabel sensus (filter & paginasi diteruskan ke ASTA DESA) |
 | GET | `/api/asta-desa/sensus/:id` | Detail satu sensus — `{ sensus, anggotas, petugas }` |
 | GET | `/api/asta-desa/pengguna` | Halaman daftar akun + rekap peran dari seluruh akun |
-| GET | `/api/asta-desa/demografi` | Agregat anggota keluarga: jenis kelamin, piramida usia, pendidikan, hubungan, disabilitas |
+| GET | `/api/asta-desa/demografi?kecamatan=&desa=` | Agregat anggota keluarga: jenis kelamin, piramida usia, pendidikan, hubungan, disabilitas. Penyaring wilayah dilayani lewat pemetaan anggota→keluarga; selama pemetaan belum siap, jawabannya se-kabupaten beserta `per_wilayah_siap: false` |
+| GET | `/api/asta-desa/demografi/wilayah` | **Bahan ekspor.** Seluruh rincian demografi per kecamatan DAN per desa dalam satu muatan: definisi kolom sekali di `kolom`, lalu deret angka sejajar per wilayah. Menolak **409** selama potretnya belum selaras dengan hitungan ASTA DESA (`abaikan_kesegaran=1` memaksa) |
+| GET | `/api/asta-desa/sensus/ekspor` | **Bahan ekspor.** Seluruh baris yang cocok dengan penyaring (bukan satu halaman). Disaring di atas potret penyusuran, bukan diteruskan ke ASTA DESA. NIK/No. KK tersamar kecuali `lengkap=1`. Menolak 409 dengan aturan kesegaran yang sama |
 | GET | `/api/asta-desa/layer` | Layer peta ASTA DESA |
 | GET | `/api/asta-desa/pesan` | Riwayat pesan (berpaginasi) |
 | GET | `/api/asta-desa/sebaran-peta` | Titik sebaran berkoordinat **rumah** — sumber peta penuh |
@@ -199,6 +201,7 @@ jadi periksa daftar ini lebih dulu saat ada angka yang tampak mustahil.
 | `petugas` pada `/sensuses` | **objek** `{user_id, nama, nip, no_tlp, akun:{id,name,email}}`, bukan string. Tanpa penanganan, `String(objek)` membuat seluruh rekap petugas jadi satu baris "[object Object]" |
 | `nama_petugas` | hanya ada pada **detail**, tidak pada baris daftar |
 | Jumlah anggota per keluarga | `anggotas_count` |
+| Wilayah pada `/sensus-anggotas` | **TIDAK ADA** kolom kecamatan/desa. Satu-satunya jalan memecah demografi anggota per wilayah adalah rujukan ke keluarganya (`sensus_id` dan kerabatnya), dipasangkan dengan peta `id keluarga -> wilayah` yang dibangun saat penyusuran `/sensuses`. Bila nama kolom rujukannya berubah, demografi per desa akan diam-diam kosong — yang terbaca sebagai `per_wilayah_siap: false` dan `anggota_tanpa_wilayah` mendekati total, bukan sebagai galat |
 | Hubungan keluarga | `hubungan_kk` (bukan `hubungan_keluarga`/`shdk`) |
 | Usia anggota | **tidak ada kolom umur** — hanya `tanggal_lahir`, jadi usia dihitung di kode (backend untuk piramida, frontend untuk tabel anggota) |
 | Pekerjaan anggota | **tidak ada** di `sensus_anggotas`. Pembacaannya tetap disiapkan; panelnya di frontend menyembunyikan diri selama kosong dan otomatis muncul bila mereka menambahkannya |
@@ -264,12 +267,15 @@ Tombol **Muat ulang** membuang keduanya lalu menarik ulang dengan `force=1`.
 | `AstaDesaPage.jsx` | Kerangka halaman, lima tab + satu tautan keluar ke Peta Sebaran, penundaan pengambilan per tab |
 | `RingkasanTab.jsx` | Kartu angka, laju pendataan, tahap verifikasi, peringkat kecamatan, petugas |
 | `SensusTab.jsx` | Tabel sensus + panel detail satu keluarga |
-| `DemografiTab.jsx` | Piramida usia, jenis kelamin, pendidikan, hubungan keluarga, disabilitas |
+| `DemografiTab.jsx` | Piramida usia, jenis kelamin, pendidikan, hubungan keluarga, disabilitas, kategori sensus + tombol ekspor |
 | `PenggunaTab.jsx` | Komposisi peran, produktivitas petugas, daftar akun |
 | `LayerPesanTab.jsx` | Layer peta & riwayat pesan |
 | `useAstaDesa.js` | Pengambil data + cache tingkat modul |
 | `warna.js` | Palet data (sudah lolos uji keterbacaan buta warna) + pemformat angka |
 | `ui.jsx` | Panel, kartu angka, daftar batang, keadaan memuat/kosong/galat |
+| `eksporAstaDesa.js` | Perakit berkas Excel & PDF untuk Demografi dan Data Sensus (bagian 8b) |
+| `usePengekspor.js` | Daur hidup satu klik ekspor, termasuk penanganan penolakan `belum_realtime` |
+| `ekspor.jsx` | Tombol Excel/PDF + baris keadaannya (terpisah dari hook-nya karena aturan react-refresh) |
 
 **Frontend — Peta Sebaran penuh** — `src/pages/core-dashboard/asta-desa/peta/`
 
@@ -345,6 +351,70 @@ curl -s -X POST https://astadesa.rmlabs.id/api/v1/login \
 
 ---
 
+## 8b. Ekspor Excel & PDF (Demografi dan Data Sensus)
+
+Dua tombol di tab **Demografi** dan dua lagi di tab **Data Sensus**. Berkasnya
+dirakit **di browser** (`src/pages/core-dashboard/asta-desa/eksporAstaDesa.js`)
+dari muatan satu endpoint, dengan pustaka `xlsx`/`jspdf` yang dimuat saat
+tombolnya ditekan — bukan saat halaman dibuka.
+
+### Kesegaran dulu, berkas kemudian
+
+Ekspor **ditolak** selama potret data di server belum layak dicetak. Yang diukur
+bukan umurnya, melainkan dua hal yang benar-benar menandakan ketinggalan
+(`kesiapanSusur`):
+
+| Syarat | Alasan |
+| --- | --- |
+| Penyusuran sudah pernah selesai | Tanpa ini tidak ada apa pun untuk diekspor |
+| Potretnya belum kedaluwarsa (`basi`) | Di luar `TTL_SUSUR_MS` ia sedang disusun ulang |
+| `meta.total` ASTA DESA detik ini tidak menjauh dari yang terbaca saat penyusuran | Toleransi 1% dari total, minimal 25 baris — pendataan lapangan tidak berhenti selama penyusuran, jadi selisih kecil itu normal |
+
+Penolakannya **409** beserta `kode: 'belum_realtime'`, `message`, dan `kesiapan`
+lengkap; permintaan itu sekaligus **memulai penyusunan ulang di latar**. Halaman
+menawarkan dua jalan: *Coba lagi* (tunggu penyusunan selesai) atau *Ekspor
+potret ini* (`abaikan_kesegaran=1`), dan yang kedua menuliskan sendiri ke dalam
+berkasnya bahwa ia diekspor tanpa menunggu.
+
+Umur SENGAJA bukan syarat: penyusuran ±1.650 halaman anggota memakan menit dan
+hanya diulang tiap TTL, jadi menuntut potret berumur di bawah lima menit akan
+memblokir ekspor selamanya — bukan membuatnya lebih benar.
+
+### Bentuk muatan `/demografi/wilayah`
+
+Definisi kolom dikirim **sekali** di `kolom`; tiap wilayah hanya membawa deret
+angka yang sejajar dengannya. Dengan 400-an desa x ~80 kolom, mengulang label
+nilai di setiap desa berarti muatan belasan megabyte berisi teks yang sama
+berulang-ulang.
+
+```
+kolom:        [{ kunci, label, kategori, kategori_label, jenis, terisi, nilai: [label…] }]
+per_kecamatan [{ kecamatan, total_keluarga, total_desa, kolom: [{t, n:[…]} | {t, s:{…}} | null], anggota }]
+per_desa      [{ kecamatan, desa, total_keluarga, kolom: […], anggota }]
+anggota       { per_wilayah_siap, terpeta, tanpa_wilayah, kelompok_usia, label:{…}, … }
+```
+
+`kolom[i]` pada wilayah sejajar dengan `kolom[i]` di akar; `null` berarti kolom
+itu tidak terisi seorang pun di wilayah tersebut. `anggota: null` pada satu
+wilayah berarti rinciannya **tidak terlacak** — berkasnya menuliskan tanda pisah,
+bukan nol, karena nol akan terbaca sebagai "tidak ada penduduk di desa ini".
+
+### Isi berkas
+
+| Berkas | Isi |
+| --- | --- |
+| Demografi — Excel | 15 lembar: Ringkasan, Rekap/Piramida/Pendidikan/Hubungan/Disabilitas per kecamatan **dan** per desa, rincian kolom sensus bentuk panjang (siap dipivot), statistik kolom angka |
+| Demografi — PDF | Rekap per kecamatan & per desa utuh; rincian ~80 kolom sensus hanya untuk lingkup yang sedang dipilih. Tanpa penyaring, yang dicetak agregat kabupaten — tabel 139 ribu baris di A4 bukan dokumen |
+| Data Sensus — Excel | Ringkasan penyaring + seluruh baris + rekap per kecamatan/desa/tahap/harian |
+| Data Sensus — PDF | Rekap lebih dulu, rincian baris dibatasi 3.000 pertama dengan catatan ke Excel |
+
+Lembar **Sensus Desa** dilewati bila rinciannya melampaui 300.000 baris; lembar
+Ringkasan menuliskan alasannya beserta jalan keluarnya (pilih satu kecamatan,
+ekspor ulang). Batas itu bukan batas Excel, melainkan batas kewarasan tab
+peramban yang harus merakitnya.
+
+---
+
 ## 9. API Asta Desa untuk pihak Bupati (`/api/eksternal/asta-desa`)
 
 Data Asta Desa yang sudah diolah di sini juga diserahkan ke pihak Bupati sebagai
@@ -412,6 +482,7 @@ hampir pasti belum tahu harus mengirim header apa.
 | `/pesan` | Isi percakapan antar petugas |
 | `/segarkan` | Dari luar ini tombol untuk membebani server ASTA DESA, bukan fitur |
 | `/demografi/kategori`, `/layer`, `/wilayah/geojson`, `/cuaca`, `/sebaran-peta` | Belum ada yang memintanya. Menambah endpoint nanti mudah; menarik kembali endpoint yang sudah dipakai pihak lain tidak |
+| `/demografi/wilayah`, `/sensus/ekspor` | Muatan sekali jalan berukuran megabyte, dan `sensus/ekspor?lengkap=1` membawa NIK serta nomor KK utuh. Keduanya dibuat untuk tombol ekspor di halaman internal, bukan untuk ditarik berulang dari luar |
 
 ### 9.5 Pagar pengaman yang dipasang di lapisan luar
 
