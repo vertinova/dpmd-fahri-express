@@ -49,6 +49,11 @@ ASTADESA_BASE_URL=https://astadesa.rmlabs.id/api/v1
 ASTADESA_TIMEOUT_MS=20000
 ASTADESA_TTL_MS=600000    # umur cache respons (10 menit)
 ASTADESA_MAX_ROWS=20000   # pagar pengaman penyusuran seluruh halaman
+
+# Ekspor: berapa halaman paling banyak ditarik saat menyusul baris terbaru
+# ke ASTA DESA, dan batas baris satu berkas Data Sensus.
+ASTADESA_MAX_HALAMAN_SUSULAN=10
+ASTADESA_MAX_BARIS_EKSPOR=100000
 ```
 
 Setelah diubah, **jalankan ulang proses backend** (token dan cache ada di memori).
@@ -117,6 +122,9 @@ Core Dashboard lain. Lihat [`src/routes/astadesa.routes.js`](../src/routes/astad
 | GET | `/api/asta-desa/wilayah/geojson?kecamatan=&desa=` | Geometri batas wilayah untuk disorot di peta |
 | GET | `/api/asta-desa/cuaca?lat=&lon=` | Prakiraan BMKG pada satu koordinat |
 | POST | `/api/asta-desa/segarkan` | Buang cache; dipakai tombol **Muat ulang** di halaman |
+
+Kedua endpoint ekspor **menyusul baris terbaru** dari ASTA DESA saat dipanggil,
+bukan mengekspor potret apa adanya — lihat bagian 8b.
 
 `/sebaran-peta` adalah satu-satunya endpoint di sini yang menyusuri **`/api/v1/sensuses`**
 (jalur pengguna biasa, bukan grup `/admin`). Alasannya: resource admin tidak
@@ -358,17 +366,50 @@ dirakit **di browser** (`src/pages/core-dashboard/asta-desa/eksporAstaDesa.js`)
 dari muatan satu endpoint, dengan pustaka `xlsx`/`jspdf` yang dimuat saat
 tombolnya ditekan — bukan saat halaman dibuka.
 
-### Kesegaran dulu, berkas kemudian
+### Penyusulan baris terbaru — inti janji "realtime"
 
-Ekspor **ditolak** selama potret data di server belum layak dicetak. Yang diukur
-bukan umurnya, melainkan dua hal yang benar-benar menandakan ketinggalan
-(`kesiapanSusur`):
+Potret penyusuran berumur sampai `TTL_SUSUR_MS` (30 menit), sementara pendataan
+di lapangan tidak berhenti. Jadi ekspor **tidak** mengekspor potret apa adanya:
+pada detik tombol ditekan, baris yang masuk ke ASTA DESA **setelah** potret
+disusun ditarik lebih dulu dan ikut ke dalam berkas (`susulBaris`).
+
+Yang membuat ini mungkin dalam satu permintaan HTTP: yang berubah sejak potret
+disusun hampir seluruhnya **baris baru**, dan baris baru selalu berada di ujung
+urutan id. Jadi yang ditarik hanya ujungnya — beberapa halaman 200 baris — bukan
+960 halaman.
+
+**Arah urutan dideteksi, tidak diasumsikan.** `/admin/sensuses` mengurut
+`orderByDesc('id')` sehingga yang terbaru di halaman 1, tetapi paginator Laravel
+tanpa `orderBy` eksplisit mengurut **naik** — di situ yang terbaru ada di
+halaman **terakhir**. Menebaknya salah berarti menarik 200 baris tertua berulang
+kali lalu menyimpulkan "tidak ada yang baru", persis saat ada ribuan yang baru.
+Arahnya ditentukan dari perbandingan id baris pertama dan terakhir halaman 1.
+
+Penarikan berhenti pada halaman pertama yang **tidak** seluruhnya berisi baris
+baru — di situlah potret dan data terkini bertemu. Pagarnya
+`ASTADESA_MAX_HALAMAN_SUSULAN` (bawaan 10 halaman = 2.000 baris); bila pagar itu
+tersentuh, ekspor **ditolak** dan penyusuran penuh dimulai, sebab ada lonjakan
+yang harus disusun ulang dari awal, bukan ditambal.
+
+Baris susulan dijalankan lewat **olah yang sama** dengan penyusuran
+(`OLAH_KATEGORI`, `isiEmber`) lalu digabung ke potret
+(`terapkanSusulanKeluarga`, `terapkanSusulanAnggota`) — pada **salinan**, bukan
+pada objek cache, supaya satu ekspor tidak menggandakan baris di cache bersama.
+Uji diferensialnya membandingkan hasil potret+susulan dengan hasil penyusuran
+ulang penuh dan menuntut keduanya identik.
+
+### Kapan ekspor tetap ditolak
 
 | Syarat | Alasan |
 | --- | --- |
-| Penyusuran sudah pernah selesai | Tanpa ini tidak ada apa pun untuk diekspor |
-| Potretnya belum kedaluwarsa (`basi`) | Di luar `TTL_SUSUR_MS` ia sedang disusun ulang |
-| `meta.total` ASTA DESA detik ini tidak menjauh dari yang terbaca saat penyusuran | Toleransi 1% dari total, minimal 25 baris — pendataan lapangan tidak berhenti selama penyusuran, jadi selisih kecil itu normal |
+| Penyusuran sudah pernah selesai | Tanpa potret, tidak ada patokan "sampai mana sudah terbaca" — penyusulan pun tidak bisa dimulai |
+| Potretnya belum kedaluwarsa (`basi`) | Di luar TTL ia sedang disusun ulang; menambal potret yang sudah ditandai basi hanya memperpanjang umurnya |
+| Penyusulan tuntas (`susulan_tuntas`) | Pagar halaman tersentuh = masih ada baris baru yang belum ikut |
+| Jumlah baris yang dipegang sepadan dengan hitungan ASTA DESA | Toleransi 0,5% dari total, minimal 25 baris. Sisa selisih setelah penyusulan hanya mungkin dari baris yang **tergeser keluar paginasi** saat penyusuran berlangsung (terukur ±1 dari 4.000) — bukan dari data baru |
+
+Yang dibandingkan adalah **baris yang dipegang** (`terbaca` + baris susulan),
+bukan `meta.total` saat penyusuran; memakai yang kedua akan menutupi justru
+baris yang tergeser itu.
 
 Penolakannya **409** beserta `kode: 'belum_realtime'`, `message`, dan `kesiapan`
 lengkap; permintaan itu sekaligus **memulai penyusunan ulang di latar**. Halaman
@@ -376,9 +417,30 @@ menawarkan dua jalan: *Coba lagi* (tunggu penyusunan selesai) atau *Ekspor
 potret ini* (`abaikan_kesegaran=1`), dan yang kedua menuliskan sendiri ke dalam
 berkasnya bahwa ia diekspor tanpa menunggu.
 
-Umur SENGAJA bukan syarat: penyusuran ±1.650 halaman anggota memakan menit dan
-hanya diulang tiap TTL, jadi menuntut potret berumur di bawah lima menit akan
-memblokir ekspor selamanya — bukan membuatnya lebih benar.
+Umur potret SENGAJA bukan syarat: penyusuran ±1.650 halaman anggota memakan
+menit dan hanya diulang tiap TTL, jadi menuntut potret berumur di bawah lima
+menit akan memblokir ekspor selamanya — bukan membuatnya lebih benar. Yang
+menjembatani umur itu adalah penyusulan di atas.
+
+### Cap waktu di dalam berkas
+
+| Tempat | Isi |
+| --- | --- |
+| Nama berkas | `…-20261009-1842` — tanggal dan jam ekspor, zona WIB |
+| Excel, lembar Ringkasan | `DIEKSPOR TANGGAL` dan `DIEKSPOR JAM` berdiri sendiri, lalu rincian kesegaran berbaris (potret disusun, baris disusul, baris tercakup, selisih) |
+| Excel, properti berkas | `Title`/`Subject`/`Comments`/`CreatedDate` — terbaca di Info berkas tanpa membuka lembar mana pun |
+| PDF, kepala halaman 1 | "Diekspor <tanggal>" dan "pukul <jam>" dicetak tebal di kanan atas |
+| PDF, kaki SETIAP halaman | "Diekspor <tanggal jam> WIB · DINAS …" — dokumen seperti ini dipisah halamannya, difotokopi sebagian, dilampirkan selembar ke notula |
+
+Zonanya **dipatok Asia/Jakarta**, bukan zona perangkat yang mengekspor: berkas
+ini beredar sebagai lampiran, dan "08.15" tanpa keterangan zona tidak bisa
+dipakai membandingkan dua berkas. Capnya **dibekukan sekali per berkas**
+(`capEkspor`) — memanggil `new Date()` di tiap tempat membuat halaman 1 dan
+halaman 40 membawa jam yang berbeda.
+
+"Potret data disusun" sengaja **dipisahkan** dari "Diekspor". Keduanya hampir
+selalu berbeda, dan menyatukannya menjadi satu "tanggal laporan" adalah cara
+tercepat membuat orang mengira datanya sebaru jam cetaknya.
 
 ### Bentuk muatan `/demografi/wilayah`
 

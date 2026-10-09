@@ -342,6 +342,121 @@ const jalankan = (handler) => async (req, res) => {
 const paksa = (req) => req.query.force === '1' || req.query.force === 'true';
 
 /**
+ * Berapa halaman paling banyak ditarik saat menyusul baris terbaru.
+ *
+ * Sepuluh halaman = 2.000 baris. Laju masuknya pendataan terukur ±3 baris per
+ * menit, jadi dalam satu TTL penyusuran (30 menit) yang tertinggal paling
+ * banyak ratusan baris — sepuluh halaman memberi kelonggaran berkali-kali di
+ * atasnya. Bila pagar ini sampai tersentuh, ekspor TIDAK dilanjutkan: artinya
+ * ada lonjakan yang membuat potretnya memang harus disusun ulang dari awal,
+ * bukan ditambal.
+ */
+const MAX_HALAMAN_SUSULAN = Number(process.env.ASTADESA_MAX_HALAMAN_SUSULAN || 10);
+
+/** Isi satu halaman paginator, apa pun dari tiga bentuk amplop yang dipakai ASTA DESA. */
+const bacaHalaman = (body) => {
+  const amplop = body?.data && !Array.isArray(body.data) ? body.data : body;
+  const rows = Array.isArray(amplop?.data) ? amplop.data : Array.isArray(body?.data) ? body.data : [];
+  const halamanAkhir =
+    Number(amplop?.last_page ?? amplop?.meta?.last_page ?? body?.meta?.last_page ?? body?.last_page ?? 1) || 1;
+  const total = Number(amplop?.total ?? body?.meta?.total ?? body?.total);
+  return { rows, halamanAkhir, total: Number.isFinite(total) ? total : null };
+};
+
+const idBaris = (r) => {
+  const v = r?.id ?? r?.sensus_id;
+  if (v === null || v === undefined) return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+};
+
+/**
+ * Tarik baris yang MASUK SETELAH potret disusun.
+ *
+ * INILAH yang membuat ekspor benar-benar sepadan dengan ASTA DESA, bukan
+ * sekadar penolakan saat potretnya basi. Penyusuran penuh memakan menit dan
+ * tidak mungkin ditunggu oleh satu permintaan HTTP; tetapi yang berubah sejak
+ * potret disusun hampir seluruhnya BARIS BARU, dan baris baru selalu berada di
+ * ujung urutan id. Jadi yang ditarik hanya ujungnya — beberapa halaman — lalu
+ * disatukan dengan potret.
+ *
+ * ARAH URUTAN DIDETEKSI, TIDAK DIASUMSIKAN. `/admin/sensuses` mengurut
+ * `orderByDesc('id')` sehingga yang terbaru ada di halaman 1, tetapi
+ * `/sensus-anggotas` belum pernah diperiksa dan paginator Laravel tanpa
+ * `orderBy` eksplisit mengurut naik — di situ yang terbaru ada di halaman
+ * TERAKHIR. Menebaknya salah berarti menarik 200 baris tertua berulang kali
+ * dan menyimpulkan "tidak ada yang baru", persis saat ada ribuan yang baru.
+ *
+ * Penarikan berhenti pada halaman pertama yang TIDAK seluruhnya berisi baris
+ * baru: di situlah potret dan data terkini bertemu.
+ *
+ * @param {number|null} idTerbesar id tertinggi yang sudah ada di potret
+ * @returns {{rows: array, halaman: number, total: number|null, tuntas: boolean}}
+ */
+const susulBaris = async (jalur, { pengguna = false } = {}, idTerbesar) => {
+  const minta = (params) =>
+    pengguna
+      ? asta.ambilPengguna(jalur, params, { force: true })
+      : asta.ambil(jalur, params, { force: true });
+
+  const pertama = bacaHalaman(await minta({ page: 1, per_page: asta.MAX_PER_PAGE }));
+  if (idTerbesar === null || idTerbesar === undefined) {
+    return { rows: [], halaman: 1, total: pertama.total, tuntas: false };
+  }
+
+  // Dua baris pertama sudah cukup menentukan arahnya. Bila halamannya hanya
+  // berisi satu baris, diperlakukan sebagai urut TURUN — itulah yang dipakai
+  // endpoint admin, dan satu halaman berarti seluruh datanya memang di situ.
+  const idAwal = idBaris(pertama.rows[0]);
+  const idAkhir = idBaris(pertama.rows[pertama.rows.length - 1]);
+  const turun = pertama.rows.length < 2 || idAwal === null || idAkhir === null || idAwal >= idAkhir;
+
+  const urutan = [];
+  if (turun) for (let h = 1; h <= pertama.halamanAkhir; h += 1) urutan.push(h);
+  else for (let h = pertama.halamanAkhir; h >= 1; h -= 1) urutan.push(h);
+
+  const baru = [];
+  let halaman = 0;
+  let tuntas = false;
+
+  for (const nomor of urutan) {
+    if (halaman >= MAX_HALAMAN_SUSULAN) break;
+    const isi = nomor === 1 && turun ? pertama : bacaHalaman(await minta({ page: nomor, per_page: asta.MAX_PER_PAGE }));
+    halaman += 1;
+    if (!isi.rows.length) {
+      tuntas = true;
+      break;
+    }
+    let jumlahBaru = 0;
+    isi.rows.forEach((r) => {
+      const id = idBaris(r);
+      if (id !== null && id > idTerbesar) {
+        baru.push(r);
+        jumlahBaru += 1;
+      }
+    });
+    // Halaman yang tidak seluruhnya baru berarti kita sudah menyentuh baris
+    // yang ada di potret — tidak ada lagi yang perlu disusul.
+    if (jumlahBaru < isi.rows.length) {
+      tuntas = true;
+      break;
+    }
+  }
+
+  return { rows: baru, halaman, total: pertama.total, tuntas };
+};
+
+/** id tertinggi di antara baris potret (yang barisnya memang disimpan). */
+const idTerbesarBaris = (rows) => {
+  let maks = null;
+  for (const r of rows || []) {
+    const id = idBaris(r);
+    if (id !== null && (maks === null || id > maks)) maks = id;
+  }
+  return maks;
+};
+
+/**
  * Hitungan keluarga terdata DETIK INI menurut ASTA DESA.
  *
  * `per_page=1` sengaja: yang dibutuhkan hanya `meta.total`, dan itulah
@@ -367,33 +482,53 @@ const hitungTerkini = async (force = false) => {
  * dulu". Toleransinya sama dengan yang dipakai service saat memutuskan apakah
  * sebuah penyusuran layak disebut sebagian: 1% dari total, minimal 25 baris.
  */
-const kesiapanSusur = (semua, totalHidup = null) => {
+const kesiapanSusur = (semua, totalHidup = null, susulan = null) => {
   const disusunPada = semua?.disusun_pada || null;
   const umurMs = disusunPada ? Math.max(0, Date.now() - new Date(disusunPada).getTime()) : null;
   const totalSnapshot = semua?.total ?? null;
-  const selisih = totalHidup !== null && totalSnapshot !== null ? Math.max(0, totalHidup - totalSnapshot) : null;
-  const toleransi = Math.max(25, Math.round((totalHidup || totalSnapshot || 0) * 0.01));
+
+  // Hitungan terkini diambil dari meta halaman yang ditarik PENYUSULAN bila
+  // ada: itu permintaan paling belakangan, jadi angkanya paling sepadan dengan
+  // baris yang benar-benar sedang dipegang.
+  const hidup = susulan?.total ?? totalHidup;
+  const barisSusulan = susulan?.rows?.length || 0;
+
+  // Yang dibandingkan BARIS YANG DIPEGANG, bukan `meta.total` saat penyusuran.
+  // `terbaca` adalah jumlah baris unik yang sungguh terkumpul; memakai
+  // `total_snapshot` akan menutupi baris yang tergeser keluar paginasi di
+  // tengah penyusuran — persis hal yang ingin diketahui di sini.
+  const tercakup = semua?.terbaca !== undefined && semua?.terbaca !== null ? semua.terbaca + barisSusulan : null;
+  const selisih = hidup !== null && tercakup !== null ? Math.max(0, hidup - tercakup) : null;
+  const toleransi = Math.max(25, Math.round((hidup || totalSnapshot || 0) * 0.005));
 
   const siap = Boolean(semua && semua.belum_siap !== true && disusunPada);
   const selaras = selisih === null || selisih <= toleransi;
+  // Penyusulan dianggap tuntas bila ia memang menyentuh baris yang sudah ada di
+  // potret. Bila pagar halaman tersentuh lebih dulu, masih ada baris baru yang
+  // belum ikut — dan ekspor tidak boleh berpura-pura lengkap.
+  const susulanTuntas = susulan ? susulan.tuntas === true : true;
 
   return {
     siap,
     // UMURNYA SENGAJA BUKAN SYARAT. Penyusuran 1.650 halaman anggota memakan
     // menit dan hanya diulang tiap TTL, jadi menuntut potret berumur di bawah
     // lima menit akan memblokir ekspor selamanya — bukan membuatnya lebih
-    // benar. Yang betul-betul mengukur "ketinggalan atau tidak" adalah dua hal
-    // di bawah: potretnya belum kedaluwarsa (`basi`), dan hitungan keluarga
-    // di server ASTA DESA detik ini belum menjauh dari yang terbaca saat
-    // penyusuran (`selaras`).
-    realtime: siap && semua.basi !== true && selaras,
+    // benar. Yang betul-betul menentukan ada tiga, dan ketiganya di bawah:
+    // potretnya belum kedaluwarsa, seluruh baris baru sudah disusul, dan
+    // jumlah baris yang dipegang sepadan dengan hitungan ASTA DESA detik ini.
+    realtime: siap && semua.basi !== true && susulanTuntas && selaras,
     basi: semua?.basi === true,
     sebagian: semua?.truncated === true,
     disusun_pada: disusunPada,
     umur_ms: umurMs,
     batas_umur_ms: asta.TTL_SUSUR_MS,
     total_snapshot: totalSnapshot,
-    total_hidup: totalHidup,
+    total_hidup: hidup,
+    baris_potret: semua?.terbaca ?? null,
+    baris_susulan: barisSusulan,
+    halaman_susulan: susulan?.halaman ?? 0,
+    susulan_tuntas: susulanTuntas,
+    baris_tercakup: tercakup,
     selisih,
     toleransi_selisih: toleransi
   };
@@ -1105,8 +1240,14 @@ const wilayahAnggota = (a, lookup) => {
  * profilnya ikut mengatakan yang mana (lihat `profilAnggota`).
  */
 const olahDemografi = (lookup) => ({
-  buat: () => ({ kab: emberAnggota(), perWilayah: new Map(), terpeta: 0, tanpaWilayah: 0 }),
+  buat: () => ({ kab: emberAnggota(), perWilayah: new Map(), terpeta: 0, tanpaWilayah: 0, idTerbesar: null }),
   tambah: (s, a) => {
+    // id tertinggi dicatat di sini karena barisnya TIDAK disimpan (ringkas ->
+    // null). Tanpa angka ini, penyusulan baris terbaru saat ekspor tidak punya
+    // patokan "sampai mana potret ini sudah membaca".
+    const id = idBaris(a);
+    if (id !== null && (s.idTerbesar === null || id > s.idTerbesar)) s.idTerbesar = id;
+
     const n = bacaAnggota(a);
     isiEmber(s.kab, n);
 
@@ -1125,9 +1266,15 @@ const olahDemografi = (lookup) => ({
   },
   selesai: (s) => ({
     ...bentukEmber(s.kab),
+    // Ember kabupaten MENTAH ikut dibawa, bukan hanya bentuk jadinya: hasil
+    // `bentukEmber` sudah diurutkan dan dipangkas 20 teratas, sehingga
+    // menambahkan baris susulan ke atasnya akan kehilangan nilai yang
+    // kebetulan peringkat 21 sebelum susulan masuk.
+    mentah: s.kab,
     per_wilayah: s.perWilayah,
     terpeta: s.terpeta,
-    tanpa_wilayah: s.tanpaWilayah
+    tanpa_wilayah: s.tanpaWilayah,
+    id_terbesar: s.idTerbesar
   })
 });
 
@@ -1377,6 +1524,58 @@ const gabungKolom = (grup) => {
   return gabung;
 };
 
+/**
+ * Satukan dua catatan sifat kolom (potret + susulan).
+ *
+ * Sifat kolom — teks bebas? angka? pilihan ganda? — ditetapkan se-kabupaten,
+ * jadi penilaian dari baris susulan harus bergabung dengan penilaian potret,
+ * bukan menggantikannya. Yang menular SELALU yang lebih membatasi: sekali
+ * sebuah kolom dinilai teks bebas atau wajib dibuang di salah satu sisi, ia
+ * tetap begitu — kalau tidak, satu kolom bisa terbaca kategori di angka
+ * kabupaten dan teks bebas di angka desa pada berkas yang sama.
+ */
+const gabungMetaKolom = (a, b) => {
+  if (!a) return b;
+  if (!b) return a;
+  const teksAwal = a.teks || b.teks;
+  const beda = teksAwal ? new Set() : new Set([...a.beda, ...b.beda]);
+  const teks = teksAwal || beda.size > BATAS_KATEGORI;
+  return {
+    buang: a.buang || b.buang,
+    teks,
+    multi: a.multi || b.multi,
+    semuaAngka: a.semuaAngka && b.semuaAngka,
+    beda: teks ? new Set() : beda
+  };
+};
+
+/**
+ * Satukan kelompok desa yang muncul dua kali (dari potret dan dari susulan)
+ * menjadi satu kelompok per desa.
+ *
+ * Tanpa ini, satu desa yang kebetulan menerima pendataan baru akan tampil
+ * sebagai DUA baris di lembar "Rekap Desa" — satu berisi angka potret, satu
+ * berisi angka susulan — dan keduanya salah.
+ */
+const gabungGrupWilayah = (daftar) => {
+  const peta = new Map();
+  daftar.forEach((g) => {
+    const ada = peta.get(g.kunci);
+    if (!ada) {
+      peta.set(g.kunci, g);
+      return;
+    }
+    peta.set(g.kunci, {
+      kunci: g.kunci,
+      kecamatan: g.kecamatan,
+      desa: g.desa,
+      n: ada.n + g.n,
+      kolom: gabungKolom([ada, g])
+    });
+  });
+  return Array.from(peta.values());
+};
+
 /** Ringkasan statistik satu kolom angka, atau null bila tak ada angkanya. */
 const statistikAngka = (angkaArr) => {
   if (!angkaArr.length) return null;
@@ -1515,6 +1714,89 @@ exports.getKategoriSensus = jalankan(async (req, res) => {
   });
 });
 
+/** Angka untuk pesan yang dibaca orang: 1204 -> "1.204". */
+const angkaId = (n) => Number(n ?? 0).toLocaleString('id-ID');
+
+/**
+ * Potret keluarga + baris susulan, disatukan menjadi satu bentuk yang sama.
+ *
+ * Baris susulan dijalankan lewat OLAH_KATEGORI yang SAMA dengan penyusuran —
+ * bukan lewat penghitung terpisah — supaya satu baris baru dihitung dengan
+ * aturan yang persis sama di mana pun ia masuk.
+ */
+const terapkanSusulanKeluarga = (o, rowsBaru) => {
+  if (!rowsBaru.length) {
+    return { grup: o.daftarGrup, kolom: o.kolom, wilayahPerId: o.wilayahPerId };
+  }
+
+  const delta = OLAH_KATEGORI.buat();
+  rowsBaru.forEach((r) => OLAH_KATEGORI.tambah(delta, r));
+  OLAH_KATEGORI.selesai(delta);
+
+  // Salinan, BUKAN penimpaan. Objek potret tinggal di cache dan dibaca
+  // permintaan lain; menambahkan susulan ke dalamnya berarti setiap ekspor
+  // menggandakan baris yang sama di cache bersama.
+  const kolom = new Map(o.kolom);
+  delta.kolom.forEach((m, k) => kolom.set(k, gabungMetaKolom(kolom.get(k), m)));
+
+  const wilayahPerId = new Map(o.wilayahPerId);
+  delta.wilayahPerId.forEach((v, k) => wilayahPerId.set(k, v));
+
+  return {
+    grup: gabungGrupWilayah([...o.daftarGrup, ...delta.daftarGrup]),
+    kolom,
+    wilayahPerId
+  };
+};
+
+/** Agregat anggota dari baris susulan, siap digabung ke potret. */
+const olahSusulanAnggota = (rowsBaru, lookup) => {
+  const kab = emberAnggota();
+  const perWilayah = new Map();
+  let terpeta = 0;
+  let tanpaWilayah = 0;
+
+  rowsBaru.forEach((a) => {
+    const n = bacaAnggota(a);
+    isiEmber(kab, n);
+    const wilayah = wilayahAnggota(a, lookup);
+    if (!wilayah) {
+      tanpaWilayah += 1;
+      return;
+    }
+    terpeta += 1;
+    let e = perWilayah.get(wilayah);
+    if (!e) {
+      e = emberAnggota();
+      perWilayah.set(wilayah, e);
+    }
+    isiEmber(e, n);
+  });
+
+  return { kab, perWilayah, terpeta, tanpaWilayah };
+};
+
+/** Potret anggota + susulannya, dalam bentuk yang sama dengan potret. */
+const terapkanSusulanAnggota = (o, rowsBaru, lookup) => {
+  if (!o || !rowsBaru.length) return o;
+  const delta = olahSusulanAnggota(rowsBaru, lookup);
+
+  const perWilayah = new Map(o.per_wilayah);
+  delta.perWilayah.forEach((e, kunci) => {
+    const ada = perWilayah.get(kunci);
+    perWilayah.set(kunci, ada ? gabungEmber([ada, e]) : e);
+  });
+
+  return {
+    ...bentukEmber(gabungEmber([o.mentah, delta.kab])),
+    mentah: null,
+    per_wilayah: perWilayah,
+    terpeta: o.terpeta + delta.terpeta,
+    tanpa_wilayah: o.tanpa_wilayah + delta.tanpaWilayah,
+    id_terbesar: o.id_terbesar
+  };
+};
+
 /** Berapa baris sensus paling banyak boleh ikut satu berkas ekspor. */
 const MAX_BARIS_EKSPOR = Number(process.env.ASTADESA_MAX_BARIS_EKSPOR || 100000);
 
@@ -1532,7 +1814,9 @@ const tolakBelumRealtime = (res, kesiapan, mulaiUlang) => {
     ? 'Rincian per kecamatan/desa belum selesai disusun di server. Penyusunannya sudah berjalan — coba ekspor lagi beberapa menit.'
     : kesiapan.basi
       ? 'Data di server sudah kedaluwarsa dan sedang disusun ulang. Ekspor dibuka begitu potret terbarunya selesai.'
-      : `Potret data tertinggal ${kesiapan.selisih} keluarga dari hitungan ASTA DESA saat ini. Penyusunan ulang sudah berjalan — coba ekspor lagi beberapa menit.`;
+      : !kesiapan.susulan_tuntas
+        ? `Baris baru di ASTA DESA terlalu banyak untuk disusul sekaligus (lebih dari ${angkaId(MAX_HALAMAN_SUSULAN * asta.MAX_PER_PAGE)} baris). Penyusunan ulang dari awal sudah berjalan — coba ekspor lagi beberapa menit.`
+        : `Jumlah baris yang dipegang server masih berselisih ${angkaId(kesiapan.selisih)} dari hitungan ASTA DESA saat ini (toleransi ${angkaId(kesiapan.toleransi_selisih)}). Penyusunan ulang sudah berjalan — coba ekspor lagi beberapa menit.`;
   return res.status(409).json({ success: false, kode: 'belum_realtime', message: pesan, kesiapan });
 };
 
@@ -1568,7 +1852,13 @@ exports.getDemografiWilayah = jalankan(async (req, res) => {
     hitungTerkini(force)
   ]);
   const o = peta.olahan;
-  const kesiapanKeluarga = kesiapanSusur(peta, hidup);
+
+  // Baris keluarga terbaru disusul LEBIH DULU, dan kesiapan dinilai SETELAHNYA.
+  // Urutan ini yang membuat ekspor sepadan dengan ASTA DESA: menilai lebih dulu
+  // berarti menolak potret yang sebenarnya hanya tertinggal beberapa ratus
+  // baris — baris yang bisa ditarik dalam satu dua permintaan.
+  const susulanKeluarga = o ? await susulBaris('/sensuses', { pengguna: true }, idTerbesarBaris(peta.rows)) : null;
+  const kesiapanKeluarga = kesiapanSusur(peta, hidup, susulanKeluarga);
 
   if (!o || (!kesiapanKeluarga.realtime && !abaikan)) {
     return tolakBelumRealtime(res, kesiapanKeluarga, () => {
@@ -1578,17 +1868,35 @@ exports.getDemografiWilayah = jalankan(async (req, res) => {
     });
   }
 
-  const lookup = o.wilayahPerId?.size ? o.wilayahPerId : null;
-  const anggotaSemua = await asta.ambilSemua('/sensus-anggotas', {}, {
+  const gabungan = terapkanSusulanKeluarga(o, susulanKeluarga.rows);
+  const grupSemua = gabungan.grup;
+  const lookup = gabungan.wilayahPerId?.size ? gabungan.wilayahPerId : null;
+
+  const potretAnggota = await asta.ambilSemua('/sensus-anggotas', {}, {
     force,
     latar: true,
     profil: profilAnggota(lookup)
   });
-  const anggota = anggotaSemua.olahan;
+  // Anggota keluarga baru ikut disusul dengan cara yang sama. Tanpa ini,
+  // keluarga yang baru masuk akan tampil di rekap keluarga tetapi anggotanya
+  // tidak terhitung — selisih yang justru paling mudah dikira kesalahan hitung.
+  const susulanAnggota = potretAnggota.olahan
+    ? await susulBaris('/sensus-anggotas', {}, potretAnggota.olahan.id_terbesar)
+    : null;
+  const kesiapanAnggota = kesiapanSusur(potretAnggota, null, susulanAnggota);
+
+  if (potretAnggota.olahan && !kesiapanAnggota.realtime && !abaikan) {
+    return tolakBelumRealtime(res, kesiapanAnggota, () => {
+      asta
+        .ambilSemua('/sensus-anggotas', {}, { force: true, latar: true, profil: profilAnggota(lookup) })
+        .catch(() => {});
+    });
+  }
+
+  const anggota = terapkanSusulanAnggota(potretAnggota.olahan, susulanAnggota?.rows || [], lookup);
   const anggotaPerWilayahSiap = Boolean(anggota?.per_wilayah?.size);
 
-  const grupSemua = o.daftarGrup;
-  const kategori = susunKategori(gabungKolom(grupSemua), o.kolom);
+  const kategori = susunKategori(gabungKolom(grupSemua), gabungan.kolom);
 
   // Definisi kolom diratakan menjadi satu deret. `penyelaras` menyimpan kunci
   // normal tiap nilai — itulah yang dipakai mencocokkan hitungan per desa
@@ -1711,10 +2019,10 @@ exports.getDemografiWilayah = jalankan(async (req, res) => {
         per_pekerjaan: anggota?.per_pekerjaan || []
       },
       kesiapan: {
-        realtime: kesiapanKeluarga.realtime,
+        realtime: kesiapanKeluarga.realtime && kesiapanAnggota.realtime,
         dipaksa: abaikan,
         keluarga: kesiapanKeluarga,
-        anggota: kesiapanSusur(anggotaSemua)
+        anggota: kesiapanAnggota
       }
     }
   });
@@ -1758,7 +2066,15 @@ exports.getSensusEkspor = jalankan(async (req, res) => {
     asta.ambilSemua('/sensuses', {}, { force, latar: true, profil: PROFIL_ADMIN }),
     hitungTerkini(force)
   ]);
-  const kesiapan = kesiapanSusur(semua, hidup);
+
+  // Baris yang masuk setelah potret disusun ditarik dan IKUT diekspor — bukan
+  // sekadar dijadikan alasan menolak. Inilah yang membuat berkasnya memuat
+  // pendataan yang baru masuk pagi ini, bukan hanya yang terbaca setengah jam
+  // lalu. Hanya dicoba bila potretnya memang sudah ada: tanpa potret, tidak
+  // ada patokan "sampai mana sudah terbaca".
+  const adaPotret = semua.belum_siap !== true && Boolean(semua.disusun_pada);
+  const susulan = adaPotret ? await susulBaris('/sensuses', {}, idTerbesarBaris(semua.rows)) : null;
+  const kesiapan = kesiapanSusur(semua, hidup, susulan);
 
   if (!kesiapan.siap || (!kesiapan.realtime && !abaikan)) {
     return tolakBelumRealtime(res, kesiapan, () => {
@@ -1779,7 +2095,12 @@ exports.getSensusEkspor = jalankan(async (req, res) => {
 
   const terpakai = [];
   let cocok = 0;
-  for (const mentah of semua.rows) {
+  // `normalSensus` boleh dijalankan pada keduanya: baris potret sudah berbentuk
+  // ringkas dan fungsi itu membaca kembali kunci keluarannya sendiri, sementara
+  // baris susulan masih mentah. Baris susulan tidak mungkin kembar dengan
+  // potret — yang ditarik hanya yang id-nya DI ATAS id tertinggi potret.
+  const sumber = susulan?.rows?.length ? [...semua.rows, ...susulan.rows] : semua.rows;
+  for (const mentah of sumber) {
     const r = normalSensus(mentah);
     if (fKec && r.kecamatan.toLowerCase() !== fKec) continue;
     if (fDesa && r.desa.toLowerCase() !== fDesa) continue;

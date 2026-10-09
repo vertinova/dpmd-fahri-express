@@ -298,6 +298,40 @@ const ambilPublik = async (path, params = {}, opts = {}) => {
 };
 
 /**
+ * Versi `ambil` untuk jalur BERTOKEN DI LUAR grup admin (`/v1/...`).
+ *
+ * Kuncinya berawalan 'USR ' supaya tidak pernah bertabrakan dengan kunci
+ * endpoint admin: `/sensuses` ada di kedua jalur dengan isi baris yang sama
+ * sekali berbeda, dan menumpuknya di satu slot akan menyajikan bentuk yang
+ * salah tanpa satu pun galat.
+ *
+ * Dipakai penyusulan baris terbaru saat ekspor: di sana yang dibutuhkan satu
+ * dua halaman terdepan, bukan penyusuran penuh.
+ */
+const ambilPengguna = async (path, params = {}, opts = {}) => {
+  const kunci = `USR ${buatKunci(path, params)}`;
+  const ttl = opts.ttlMs ?? TTL_MS;
+
+  const tersimpan = cache.get(kunci);
+  if (!opts.force && tersimpan && Date.now() - tersimpan.at < ttl) return tersimpan.value;
+  if (!opts.force && inflight.has(kunci)) return inflight.get(kunci);
+
+  const promise = requestPengguna(path, params)
+    .then((value) => {
+      cache.set(kunci, { value, at: Date.now() });
+      inflight.delete(kunci);
+      return value;
+    })
+    .catch((err) => {
+      inflight.delete(kunci);
+      throw err;
+    });
+
+  inflight.set(kunci, promise);
+  return promise;
+};
+
+/**
  * Susuri seluruh halaman satu endpoint berpaginasi.
  *
  * Dipakai untuk agregasi (peta sebaran, rekap per kecamatan, demografi) yang
@@ -536,6 +570,7 @@ const bersihkanCache = () => {
 module.exports = {
   AstaDesaError,
   ambil,
+  ambilPengguna,
   ambilPublik,
   ambilSemua,
   bersihkanCache,
