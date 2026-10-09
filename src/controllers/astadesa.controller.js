@@ -503,6 +503,14 @@ const kesiapanSusur = (semua, totalHidup = null, susulan = null) => {
 
   const siap = Boolean(semua && semua.belum_siap !== true && disusunPada);
   const selaras = selisih === null || selisih <= toleransi;
+  // Penyusuran yang berhenti di pagar `ASTADESA_MAX_ROWS` memblokir ekspor
+  // SECARA TERSENDIRI, bukan hanya lewat selisih di atas. Keduanya memang
+  // biasanya menyala bersamaan, tetapi sebabnya berbeda dan hanya yang ini
+  // bisa diperbaiki — dengan menaikkan satu variabel di server. Tanpa penanda
+  // terpisah, penolakannya akan menyebut "baris baru terlalu banyak disusul",
+  // yang membuat orang menunggu penyusunan ulang yang tidak akan pernah
+  // menutup selisihnya.
+  const kenaPagar = semua?.kena_pagar === true;
   // Penyusulan dianggap tuntas bila ia memang menyentuh baris yang sudah ada di
   // potret. Bila pagar halaman tersentuh lebih dulu, masih ada baris baru yang
   // belum ikut — dan ekspor tidak boleh berpura-pura lengkap.
@@ -516,9 +524,10 @@ const kesiapanSusur = (semua, totalHidup = null, susulan = null) => {
     // benar. Yang betul-betul menentukan ada tiga, dan ketiganya di bawah:
     // potretnya belum kedaluwarsa, seluruh baris baru sudah disusul, dan
     // jumlah baris yang dipegang sepadan dengan hitungan ASTA DESA detik ini.
-    realtime: siap && semua.basi !== true && susulanTuntas && selaras,
+    realtime: siap && semua.basi !== true && !kenaPagar && susulanTuntas && selaras,
     basi: semua?.basi === true,
     sebagian: semua?.truncated === true,
+    kena_pagar: kenaPagar,
     disusun_pada: disusunPada,
     umur_ms: umurMs,
     batas_umur_ms: asta.TTL_SUSUR_MS,
@@ -1809,14 +1818,21 @@ const MAX_BARIS_EKSPOR = Number(process.env.ASTADESA_MAX_BARIS_EKSPOR || 100000)
  * alasan itu bisa diperiksa sendiri oleh pembaca — bukan "coba lagi nanti".
  */
 const tolakBelumRealtime = (res, kesiapan, mulaiUlang) => {
-  mulaiUlang();
+  // Penyusunan ulang TIDAK dipicu bila sebabnya pagar batas baris: hasilnya
+  // akan berhenti di pagar yang sama, dan memicunya hanya membebani ASTA DESA
+  // dengan ratusan permintaan yang sudah dipastikan tidak mengubah apa pun.
+  if (!kesiapan.kena_pagar) mulaiUlang();
   const pesan = !kesiapan.siap
     ? 'Rincian per kecamatan/desa belum selesai disusun di server. Penyusunannya sudah berjalan — coba ekspor lagi beberapa menit.'
-    : kesiapan.basi
-      ? 'Data di server sudah kedaluwarsa dan sedang disusun ulang. Ekspor dibuka begitu potret terbarunya selesai.'
-      : !kesiapan.susulan_tuntas
-        ? `Baris baru di ASTA DESA terlalu banyak untuk disusul sekaligus (lebih dari ${angkaId(MAX_HALAMAN_SUSULAN * asta.MAX_PER_PAGE)} baris). Penyusunan ulang dari awal sudah berjalan — coba ekspor lagi beberapa menit.`
-        : `Jumlah baris yang dipegang server masih berselisih ${angkaId(kesiapan.selisih)} dari hitungan ASTA DESA saat ini (toleransi ${angkaId(kesiapan.toleransi_selisih)}). Penyusunan ulang sudah berjalan — coba ekspor lagi beberapa menit.`;
+    : kesiapan.kena_pagar
+      ? `Penyusuran di server berhenti di pagar batas baris: hanya ${angkaId(kesiapan.baris_potret)} dari ${angkaId(kesiapan.total_hidup)} baris yang terbaca. ` +
+        'Ini TIDAK akan membaik dengan menunggu — pengelola server perlu menaikkan ASTADESA_MAX_ROWS di .env lalu menjalankan ulang backend. ' +
+        'Mengekspor sekarang berarti mengekspor sebagian data sebagai seolah-olah seluruhnya.'
+      : kesiapan.basi
+        ? 'Data di server sudah kedaluwarsa dan sedang disusun ulang. Ekspor dibuka begitu potret terbarunya selesai.'
+        : !kesiapan.susulan_tuntas
+          ? `Baris baru di ASTA DESA terlalu banyak untuk disusul sekaligus (lebih dari ${angkaId(MAX_HALAMAN_SUSULAN * asta.MAX_PER_PAGE)} baris). Penyusunan ulang dari awal sudah berjalan — coba ekspor lagi beberapa menit.`
+          : `Jumlah baris yang dipegang server masih berselisih ${angkaId(kesiapan.selisih)} dari hitungan ASTA DESA saat ini (toleransi ${angkaId(kesiapan.toleransi_selisih)}). Penyusunan ulang sudah berjalan — coba ekspor lagi beberapa menit.`;
   return res.status(409).json({ success: false, kode: 'belum_realtime', message: pesan, kesiapan });
 };
 

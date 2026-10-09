@@ -404,8 +404,11 @@ ulang penuh dan menuntut keduanya identik.
 | --- | --- |
 | Penyusuran sudah pernah selesai | Tanpa potret, tidak ada patokan "sampai mana sudah terbaca" — penyusulan pun tidak bisa dimulai |
 | Potretnya belum kedaluwarsa (`basi`) | Di luar TTL ia sedang disusun ulang; menambal potret yang sudah ditandai basi hanya memperpanjang umurnya |
+| Penyusuran tidak berhenti di pagar baris (`kena_pagar`) | Potret yang terpotong `ASTADESA_MAX_ROWS` TIDAK boleh diekspor sebagai seluruhnya. Ini satu-satunya sebab penolakan yang **tidak membaik dengan menunggu**, jadi penolakannya menyebut variabelnya dan penyusunan ulang sengaja TIDAK dipicu — hasilnya akan mentok di pagar yang sama |
 | Penyusulan tuntas (`susulan_tuntas`) | Pagar halaman tersentuh = masih ada baris baru yang belum ikut |
 | Jumlah baris yang dipegang sepadan dengan hitungan ASTA DESA | Toleransi 0,5% dari total, minimal 25 baris. Sisa selisih setelah penyusulan hanya mungkin dari baris yang **tergeser keluar paginasi** saat penyusuran berlangsung (terukur ±1 dari 4.000) — bukan dari data baru |
+
+Terukur di produksi 2026-10-09: 230.412 keluarga (terbaca 230.307, selisih 105 — lolos) tetapi **643.948 anggota dengan `ASTADESA_MAX_ROWS=250000`**, sehingga penyusuran anggota berhenti di 249.961 dan ekspor Demografi ditolak sampai pagarnya dinaikkan. Pagar itu perlu ditinjau setiap kali pendataan tumbuh — ia tidak menyesuaikan diri.
 
 Yang dibandingkan adalah **baris yang dipegang** (`terbaca` + baris susulan),
 bukan `meta.total` saat penyusuran; memakai yang kedua akan menutupi justru
