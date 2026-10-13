@@ -4,7 +4,7 @@ const XLSX = require('xlsx');
 
 const DATA_DIR = path.join(__dirname, '..', 'data');
 const ADD_FILE = path.join(DATA_DIR, 'rtrwadd.xlsx');
-const BPJS_FILE = path.join(DATA_DIR, 'rtrwbpjs20260626.xlsx');
+const BPJS_FILE = path.join(DATA_DIR, 'rtrwbpjs.xlsx');
 const ADD_JSON_FILE = path.join(DATA_DIR, 'rtrwadd.json');
 const BPJS_JSON_FILE = path.join(DATA_DIR, 'rtrwbpjs.json');
 const CACHE_VERSION = 1;
@@ -274,27 +274,49 @@ function formatBytes(value) {
   return `${(value / 1024 / 1024).toFixed(2)} MB`;
 }
 
-function main() {
+// `only` membatasi regenerasi ke salah satu sumber. Dipakai oleh fitur import
+// Excel: mengganti rtrwbpjs.xlsx tidak perlu mem-parse ulang 150rb+ baris ADD
+// (selisihnya ~20 detik vs ~3 detik).
+function regenerate({ only = 'all' } = {}) {
   const startedAt = Date.now();
-  const add = parseAddData();
-  const addMeta = writeCache(ADD_JSON_FILE, ADD_FILE, add);
+  const result = { ms: 0 };
 
-  const bpjs = parseBpjsData();
-  const bpjsMeta = writeCache(BPJS_JSON_FILE, BPJS_FILE, bpjs);
-
-  console.log(JSON.stringify({
-    ms: Date.now() - startedAt,
-    add: {
+  if (only === 'all' || only === 'add') {
+    const add = parseAddData();
+    const addMeta = writeCache(ADD_JSON_FILE, ADD_FILE, add);
+    result.add = {
       target: path.relative(process.cwd(), ADD_JSON_FILE),
       size: formatBytes(addMeta.size),
+      sheetName: add.sheetName,
       ...add.meta,
-    },
-    bpjs: {
+    };
+  }
+
+  if (only === 'all' || only === 'bpjs') {
+    const bpjs = parseBpjsData();
+    const bpjsMeta = writeCache(BPJS_JSON_FILE, BPJS_FILE, bpjs);
+    result.bpjs = {
       target: path.relative(process.cwd(), BPJS_JSON_FILE),
       size: formatBytes(bpjsMeta.size),
+      sheetName: bpjs.sheetName,
       ...bpjs.meta,
-    },
-  }, null, 2));
+    };
+  }
+
+  result.ms = Date.now() - startedAt;
+  return result;
 }
 
-main();
+function main() {
+  const onlyArg = process.argv.find((arg) => arg.startsWith('--only='));
+  const only = onlyArg ? onlyArg.slice('--only='.length) : 'all';
+  if (!['all', 'add', 'bpjs'].includes(only)) {
+    console.error(`--only tidak dikenal: ${only}. Pilihan: all, add, bpjs`);
+    process.exit(1);
+  }
+  console.log(JSON.stringify(regenerate({ only }), null, 2));
+}
+
+if (require.main === module) main();
+
+module.exports = { regenerate, parseAddData, parseBpjsData, ADD_FILE, BPJS_FILE, ADD_JSON_FILE, BPJS_JSON_FILE };

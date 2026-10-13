@@ -2,7 +2,8 @@ const express = require('express');
 const path = require('path');
 const multer = require('multer');
 const router = express.Router();
-const { auth } = require('../middlewares/auth');
+const fs = require('fs');
+const { auth, checkRole } = require('../middlewares/auth');
 
 // In-memory multer for Excel import (no disk write)
 const uploadExcelMemory = multer({
@@ -14,6 +15,40 @@ const uploadExcelMemory = multer({
   },
   limits: { fileSize: 50 * 1024 * 1024 },
 }).array('files', 20);
+
+// Import sumber data Persandingan RT/RW. Pakai disk storage (bukan memory)
+// karena file ADD bisa >15MB dan controller membacanya lewat XLSX.readFile.
+const RTRW_IMPORT_TEMP = 'storage/uploads/temp';
+const uploadRtrwSource = multer({
+  storage: multer.diskStorage({
+    destination: (req, file, cb) => {
+      fs.mkdirSync(RTRW_IMPORT_TEMP, { recursive: true });
+      cb(null, RTRW_IMPORT_TEMP);
+    },
+    filename: (req, file, cb) => {
+      const suffix = `${Date.now()}-${Math.round(Math.random() * 1e9)}`;
+      cb(null, `rtrw-source-${suffix}${path.extname(file.originalname)}`);
+    },
+  }),
+  fileFilter: (req, file, cb) => {
+    const ext = path.extname(file.originalname).toLowerCase();
+    if (['.xlsx', '.xls'].includes(ext)) cb(null, true);
+    else cb(new Error('Hanya file Excel (.xlsx/.xls) yang diperbolehkan'));
+  },
+  limits: { fileSize: 60 * 1024 * 1024 },
+}).single('file');
+
+// Error multer (ukuran/ekstensi) harus jadi 400 ber-JSON, bukan 500 HTML.
+const handleRtrwUpload = (req, res, next) => {
+  uploadRtrwSource(req, res, (error) => {
+    if (!error) return next();
+    const tooLarge = error.code === 'LIMIT_FILE_SIZE';
+    return res.status(400).json({
+      success: false,
+      message: tooLarge ? 'Ukuran file melebihi batas 60 MB.' : error.message,
+    });
+  });
+};
 
 // Import new modular controllers
 const {
@@ -30,6 +65,7 @@ const {
 } = require('../controllers/kelembagaan/index');
 const posyanduComparisonController = require('../controllers/kelembagaan/posyanduComparison.controller');
 const rtrwComparisonController = require('../controllers/kelembagaan/rtrwComparison.controller');
+const rtrwImportController = require('../controllers/kelembagaan/rtrwImport.controller');
 
 // All kelembagaan routes require authentication
 router.use(auth);
@@ -37,6 +73,18 @@ router.use(auth);
 // Posyandu comparison endpoint
 router.get('/posyandu-comparison', posyanduComparisonController.getComparison.bind(posyanduComparisonController));
 router.get('/rtrw-comparison', rtrwComparisonController.getComparison.bind(rtrwComparisonController));
+
+// Import Excel sumber Persandingan RT/RW (BPJS / ADD).
+// Mengganti Excel wajib diikuti regenerasi cache JSON — ditangani controller.
+const RTRW_IMPORT_ROLES = ['superadmin', 'pemerintahan_desa', 'kepala_bidang', 'kepala_dinas'];
+router.get('/rtrw-comparison/import/info', rtrwImportController.getInfo.bind(rtrwImportController));
+router.get('/rtrw-comparison/import/status', rtrwImportController.getStatus.bind(rtrwImportController));
+router.post(
+  '/rtrw-comparison/import',
+  checkRole(...RTRW_IMPORT_ROLES),
+  handleRtrwUpload,
+  rtrwImportController.importExcel.bind(rtrwImportController)
+);
 
 // Summary and overview endpoints
 router.get('/', summaryController.index.bind(summaryController));

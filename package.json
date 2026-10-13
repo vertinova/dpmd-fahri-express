@@ -13,6 +13,8 @@
     "db:setup": "npm run db:push && npm run db:generate && npm run db:seed",
     "kelembagaan:import": "node scripts/import-kelembagaan-workbook.js",
     "rtrw:generate-json": "node scripts/generate-rtrw-json-cache.js",
+    "rtrw:generate-json:add": "node scripts/generate-rtrw-json-cache.js --only=add",
+    "rtrw:generate-json:bpjs": "node scripts/generate-rtrw-json-cache.js --only=bpjs",
     "postinstall": "npx prisma generate"
   },
   "keywords": [

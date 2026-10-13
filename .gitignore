@@ -30,6 +30,12 @@ storage/backups/
 # Public backups
 public/backups/
 
+# Cadangan + arsip bertanggal sumber Persandingan RT/RW (dibuat fitur
+# import Excel). Tiap cadangan ~9MB, tidak perlu masuk repo.
+data/backups/
+data/rtrwbpjs20*.xlsx
+data/rtrwadd20*.xlsx
+
 # OS
 .DS_Store
 Thumbs.db
