@@ -207,11 +207,39 @@ function parseBpjsData() {
   const sheet = workbook.Sheets[sheetName];
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
   const grouped = new Map();
+  const unmappable = [];
 
-  rows.forEach((row) => {
-    const desaKode = normalizeBpjsDesaKode(row.ID_PEGAWAI || row.ID_Pegawai || row['ID Pegawai']);
+  // Baris mentah apa adanya — dipakai untuk daftar data yang tidak terpetakan,
+  // jadi nilai aslinya (termasuk yang kosong/salah) harus ikut tersimpan.
+  const rawDetail = (row, index) => ({
+    barisExcel: index + 2, // +2: baris 1 header, index mulai 0
+    nik: toText(row.NIK),
+    idPegawai: toText(row.ID_PEGAWAI || row.ID_Pegawai || row['ID Pegawai']),
+    kpj: toText(row.KPJ),
+    kodeTk: toText(row.KODE_TK),
+    namaLengkap: toText(row.NAMA_LENGKAP),
+    tglLahir: dateToStr(row.TGL_LAHIR),
+    upah: numberValue(row.UPAH),
+    rapel: numberValue(row.RAPEL),
+    blth: dateToStr(row.BLTH),
+    npp: toText(row.NPP),
+  });
+
+  rows.forEach((row, index) => {
+    const idPegawaiRaw = toText(row.ID_PEGAWAI || row.ID_Pegawai || row['ID Pegawai']);
+    const desaKode = normalizeBpjsDesaKode(idPegawaiRaw);
     const nama = normalizeName(row.NAMA_LENGKAP);
-    if (!desaKode || !nama) return;
+
+    // Baris tanpa ID_PEGAWAI atau tanpa nama dulu dibuang diam-diam sehingga
+    // hilang dari seluruh persandingan tanpa jejak. Sekarang disimpan terpisah
+    // supaya bisa ditampilkan dan ditindaklanjuti ke desa.
+    if (!desaKode || !nama) {
+      unmappable.push({
+        ...rawDetail(row, index),
+        sebab: !desaKode ? 'id_kosong' : 'nama_kosong',
+      });
+      return;
+    }
 
     const nik = normalizeNik(row.NIK);
     const key = `${desaKode}|${nik || nama}`;
@@ -248,10 +276,12 @@ function parseBpjsData() {
   return {
     sheetName,
     data: Array.from(grouped.values()),
+    unmappable,
     meta: {
       totalRows: rows.length,
       totalPenerima: grouped.size,
       totalDesa: new Set(Array.from(grouped.values()).map((item) => item.desaKode)).size,
+      totalUnmappable: unmappable.length,
     },
   };
 }
@@ -264,6 +294,8 @@ function writeCache(targetFile, sourceFile, parsed) {
     sheetName: parsed.sheetName,
     meta: parsed.meta,
     data: parsed.data,
+    // Hanya ada untuk BPJS; ADD belum mengumpulkan baris tak terpetakan.
+    unmappable: parsed.unmappable || [],
   };
 
   fs.writeFileSync(targetFile, JSON.stringify(payload));

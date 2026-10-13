@@ -34,6 +34,7 @@ let sourceCache = {
   key: null,
   addData: [],
   bpjsData: [],
+  bpjsUnmappableRaw: [],
   addMeta: {},
   bpjsMeta: {},
   sourceType: null,
@@ -298,6 +299,107 @@ function readBpjsStatus() {
 // sumber data tersendiri — beda dari Data BPJS (rtrwbpjs.json). Cache status tidak
 // menyimpan nama peserta AKTIF (indexnya NIK), jadi nama diambil dari master BPJS
 // via NIK/KPJ; peserta NON-AKTIF namanya ada di key `nama|desaKode`.
+// Peserta BPJS yang tidak bisa dipetakan ke satu desa di database, sehingga
+// tidak pernah muncul di persandingan (comparison hanya mengiterasi desa DB).
+// Dua asalnya: baris yang dibuang saat parsing (ID_PEGAWAI/nama kosong) dan
+// baris dengan kode yang tidak dikenal desaByKode.
+const UNMAPPABLE_SEBAB = {
+  id_kosong: 'ID_PEGAWAI kosong',
+  nama_kosong: 'NAMA_LENGKAP kosong',
+  kode_wilayah_lain: 'Kode wilayah di luar Kab. Bogor',
+  kode_tidak_dikenal: 'Kode tidak dikenal database',
+};
+
+function classifyUnknownKode(kode) {
+  // 32.01 = Kab. Bogor. Kode berpola wilayah tapi berawalan lain berarti salah
+  // kabupaten; selain itu formatnya memang tidak terbaca.
+  if (/^\d{2}\.\d{2}\.\d{2}\.\d{4}$/.test(kode)) {
+    return kode.startsWith('32.01.') ? 'kode_tidak_dikenal' : 'kode_wilayah_lain';
+  }
+  return 'kode_tidak_dikenal';
+}
+
+function buildBpjsUnmappableList(bpjsUnmappableRaw, bpjsData, desaByKode, dbItems) {
+  const rows = [];
+
+  // Petunjuk perbaikan: kalau NIK-nya ada di database, desanya bisa langsung
+  // ditunjuk sehingga ID_PEGAWAI yang benar tinggal diisikan ke file BPJS.
+  const dbDesaByNik = new Map();
+  (dbItems || []).forEach((d) => {
+    const nik = toText(d.nik);
+    if (!nik) return;
+    if (!dbDesaByNik.has(nik)) dbDesaByNik.set(nik, new Map());
+    dbDesaByNik.get(nik).set(d.desaKode, d);
+  });
+
+  const petunjuk = (nik) => {
+    const found = dbDesaByNik.get(toText(nik).replace(/\D/g, ''));
+    if (!found || found.size === 0) return { petunjukKode: '', petunjukLabel: '' };
+    const list = [...found.values()];
+    if (list.length > 1) {
+      return {
+        petunjukKode: '',
+        petunjukLabel: `NIK ada di ${list.length} desa — perlu verifikasi`,
+      };
+    }
+    const d = list[0];
+    return {
+      petunjukKode: d.desaKode,
+      petunjukLabel: `${d.desaKode} ${d.desaNama || ''}`.trim(),
+    };
+  };
+
+  (bpjsUnmappableRaw || []).forEach((rec, index) => {
+    rows.push({
+      key: `unmap-raw::${index}`,
+      ...petunjuk(rec.nik),
+      sebab: rec.sebab,
+      sebabLabel: UNMAPPABLE_SEBAB[rec.sebab] || rec.sebab,
+      barisExcel: rec.barisExcel ?? null,
+      idPegawai: rec.idPegawai || '',
+      nama: rec.namaLengkap || '',
+      nik: rec.nik || '',
+      kpj: rec.kpj || '',
+      kodeTk: rec.kodeTk || '',
+      tglLahir: rec.tglLahir || '',
+      upah: rec.upah || 0,
+      blth: rec.blth || '',
+      npp: rec.npp || '',
+    });
+  });
+
+  // Item yang lolos parsing tapi kodenya tidak ada di database desa. Satu item
+  // bisa punya >1 detail (baris Excel) — masing-masing ditampilkan terpisah
+  // supaya jumlahnya sepadan dengan jumlah baris di file.
+  (bpjsData || []).forEach((item) => {
+    if (desaByKode.has(item.desaKode)) return;
+    const sebab = classifyUnknownKode(item.desaKode);
+    (item.details || []).forEach((d, i) => {
+      rows.push({
+        key: `unmap-kode::${item.desaKode}::${item.nik || item.nama}::${i}`,
+        ...petunjuk(d.nik || item.nik),
+        sebab,
+        sebabLabel: UNMAPPABLE_SEBAB[sebab],
+        barisExcel: null,
+        idPegawai: d.idPegawai || item.desaKode,
+        nama: d.namaLengkap || item.nama || '',
+        nik: d.nik || item.nik || '',
+        kpj: d.kpj || '',
+        kodeTk: d.kodeTk || '',
+        tglLahir: d.tglLahir || '',
+        upah: d.upah || 0,
+        blth: d.blth || '',
+        npp: d.npp || '',
+      });
+    });
+  });
+
+  return rows.sort((a, b) =>
+    String(a.sebab).localeCompare(String(b.sebab))
+    || String(a.idPegawai).localeCompare(String(b.idPegawai))
+    || String(a.nama).localeCompare(String(b.nama)));
+}
+
 function buildBpjsStatusList(membershipByNik, membershipByKpj, membershipByNameDesa, bpjsData, desaByKode) {
   const namaByNik = new Map();
   const namaByKpj = new Map();
@@ -388,6 +490,7 @@ function readPreparedJson(filePath, label) {
 
   return {
     data: payload.data,
+    unmappable: payload.unmappable || [],
     meta: payload.meta || {},
     generatedAt: payload.generatedAt || null,
   };
@@ -478,11 +581,34 @@ function parseBpjsData() {
   const sheet = workbook.Sheets.DATABASE || workbook.Sheets.data_upah || workbook.Sheets[workbook.SheetNames[0]];
   const rows = XLSX.utils.sheet_to_json(sheet, { defval: '' });
   const grouped = new Map();
+  const unmappable = [];
 
-  rows.forEach((row) => {
+  // Harus sama persis dengan scripts/generate-rtrw-json-cache.js — jalur ini
+  // hanya dipakai bila cache JSON belum ada.
+  const rawDetail = (row, index) => ({
+    barisExcel: index + 2,
+    nik: toText(row.NIK),
+    idPegawai: toText(row.ID_PEGAWAI || row.ID_Pegawai || row['ID Pegawai']),
+    kpj: toText(row.KPJ),
+    kodeTk: toText(row.KODE_TK),
+    namaLengkap: toText(row.NAMA_LENGKAP),
+    tglLahir: dateToStr(row.TGL_LAHIR),
+    upah: numberValue(row.UPAH),
+    rapel: numberValue(row.RAPEL),
+    blth: dateToStr(row.BLTH),
+    npp: toText(row.NPP),
+  });
+
+  rows.forEach((row, index) => {
     const desaKode = normalizeBpjsDesaKode(row.ID_PEGAWAI || row.ID_Pegawai || row['ID Pegawai']);
     const nama = normalizeName(row.NAMA_LENGKAP);
-    if (!desaKode || !nama) return;
+    if (!desaKode || !nama) {
+      unmappable.push({
+        ...rawDetail(row, index),
+        sebab: !desaKode ? 'id_kosong' : 'nama_kosong',
+      });
+      return;
+    }
 
     const nik = normalizeNik(row.NIK);
     const key = `${desaKode}|${nik || nama}`;
@@ -518,10 +644,12 @@ function parseBpjsData() {
 
   return {
     data: Array.from(grouped.values()),
+    unmappable,
     meta: {
       totalRows: rows.length,
       totalPenerima: grouped.size,
       totalDesa: new Set(Array.from(grouped.values()).map((item) => item.desaKode)).size,
+      totalUnmappable: unmappable.length,
     },
   };
 }
@@ -538,6 +666,7 @@ function readSourceData() {
     key,
     addData: add.data,
     bpjsData: bpjs.data,
+    bpjsUnmappableRaw: bpjs.unmappable || [],
     addMeta: add.meta,
     bpjsMeta: bpjs.meta,
     sourceType: usingJsonCache ? 'json' : 'excel',
@@ -1320,7 +1449,7 @@ async function computeComparison({
       ]);
       logTiming('database loaded');
 
-      const { addData, bpjsData, addMeta, bpjsMeta, sourceType, membershipByNik, membershipByKpj, membershipByNameDesa, baruData, statusMeta } = readSourceData();
+      const { addData, bpjsData, bpjsUnmappableRaw, addMeta, bpjsMeta, sourceType, membershipByNik, membershipByKpj, membershipByNameDesa, baruData, statusMeta } = readSourceData();
       logTiming('excel loaded');
       const desaByKode = new Map(allDesa.map((desa) => [desa.kode, desa]));
       const rwById = new Map(allRws.map((rw) => [rw.id, rw]));
@@ -1487,6 +1616,13 @@ async function computeComparison({
       const bpjsStatus = buildBpjsStatusList(membershipByNik, membershipByKpj, membershipByNameDesa, bpjsData, desaByKode);
       logTiming('bpjs status list built');
 
+      // Dipakai tab "Tidak Terpetakan". WAJIB memakai effectiveBpjsData (hasil
+      // fallback), bukan bpjsData mentah: applyCrossDesaNikFallback memindahkan
+      // peserta berkode tak dikenal ke desa DB bila NIK-nya ketemu unik di sana.
+      // Peserta seperti itu sudah terpetakan dan tidak boleh ikut dilaporkan.
+      const bpjsUnmappable = buildBpjsUnmappableList(bpjsUnmappableRaw, effectiveBpjsData, desaByKode, dbItems);
+      logTiming('bpjs unmappable list built');
+
       const unmatchedAddDesa = [...new Set(addData.map((item) => item.desaKode))]
         .filter((kode) => !desaByKode.has(kode))
         .sort();
@@ -1552,6 +1688,12 @@ async function computeComparison({
         fuzzyEnabled: enableFuzzy,
         unmatchedAddDesa,
         unmatchedBpjsDesa,
+        // Data BPJS yang tidak bisa dipetakan ke desa mana pun di database.
+        totalBpjsUnmappable: bpjsUnmappable.length,
+        bpjsUnmappableBySebab: bpjsUnmappable.reduce((acc, row) => {
+          acc[row.sebab] = (acc[row.sebab] || 0) + 1;
+          return acc;
+        }, {}),
         desaWithoutDb,
         desaWithoutAdd,
         desaWithoutBpjs,
@@ -1575,6 +1717,7 @@ async function computeComparison({
     tangkilUnresolved: tangkilUnresolvedForResponse,
     baruList,
     bpjsStatus,
+    bpjsUnmappable,
     meta: {
       cacheReady: true,
       sourceType,
@@ -1627,7 +1770,7 @@ class RtrwComparisonController {
         await warming;
       }
 
-      const { summary, comparison, tangkilUnresolved, baruList, bpjsStatus, meta } = await computeComparison({
+      const { summary, comparison, tangkilUnresolved, baruList, bpjsStatus, bpjsUnmappable, meta } = await computeComparison({
         enableFuzzy,
         includeDetails,
         desaKodeFilter,
@@ -1643,6 +1786,7 @@ class RtrwComparisonController {
           tangkilUnresolved,
           baruList,
           bpjsStatus,
+          bpjsUnmappable,
           meta,
         },
       });
