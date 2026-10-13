@@ -3,7 +3,8 @@ const router = express.Router();
 const {
   getListActivityLogs,
   getDetailActivityLogs,
-  getAllActivityLogs
+  getAllActivityLogs,
+  getPengurusActivityLogs
 } = require('../controllers/kelembagaanActivityLogs.controller');
 const { auth } = require('../middlewares/auth');
 
@@ -20,6 +21,9 @@ router.get('/list', auth, getListActivityLogs);
 
 // Detail page logs (untuk detail page semua kelembagaan)
 router.get('/detail/:type/:id', auth, getDetailActivityLogs);
+
+// Log satu pengurus (untuk detail page pengurus)
+router.get('/pengurus/:id', auth, getPengurusActivityLogs);
 
 // All logs with filters (admin/monitoring purpose)
 router.get('/', auth, getAllActivityLogs);

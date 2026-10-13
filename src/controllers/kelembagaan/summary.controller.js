@@ -1202,12 +1202,33 @@ class SummaryController {
         ? Math.round((grandTotals.aktif / grandTotals.total) * 100)
         : 0;
 
+      // Rekap per verifikator: lembaga (6 tabel di atas) & pengurus yang saat ini berstatus verified.
+      // Nama diambil dari kolom verifikator_nama; data lama tanpa nama dikelompokkan sebagai null.
+      const lembagaUnion = tables
+        .map(t => `SELECT verifikator_nama FROM ${t.model} WHERE status_verifikasi = 'verified'`)
+        .join(' UNION ALL ');
+      const [lembagaPerVerifikator, pengurusPerVerifikator] = await Promise.all([
+        prisma.$queryRawUnsafe(`SELECT verifikator_nama AS nama, COUNT(*) AS jumlah FROM (${lembagaUnion}) x GROUP BY verifikator_nama`),
+        prisma.$queryRawUnsafe(`SELECT verifikator_nama AS nama, COUNT(*) AS jumlah FROM pengurus WHERE status_verifikasi = 'verified' GROUP BY verifikator_nama`),
+      ]);
+      const verifikatorMap = new Map();
+      const tambah = (rows, field) => rows.forEach(r => {
+        const nama = r.nama || null;
+        if (!verifikatorMap.has(nama)) verifikatorMap.set(nama, { nama, lembaga: 0, pengurus: 0 });
+        verifikatorMap.get(nama)[field] = Number(r.jumlah);
+      });
+      tambah(lembagaPerVerifikator, 'lembaga');
+      tambah(pengurusPerVerifikator, 'pengurus');
+      const verifikator = [...verifikatorMap.values()]
+        .sort((a, b) => (b.lembaga + b.pengurus) - (a.lembaga + a.pengurus));
+
       res.json({
         success: true,
         data: {
           years,
           per_lembaga: perLembaga,
           grand_totals: grandTotals,
+          verifikator,
         }
       });
     } catch (error) {

@@ -1799,6 +1799,79 @@ class RtrwComparisonController {
       });
     }
   }
+
+  /**
+   * Status kepesertaan BPJS satu pengurus (khusus Ketua RT/RW) untuk bulan berjalan.
+   * Dicocokkan lewat NIK ke data master BPJS (rtrwbpjs.json, kolom BLTH = bulan iuran).
+   * GET /api/kelembagaan/pengurus/:id/bpjs
+   */
+  async getPengurusBpjs(req, res) {
+    try {
+      const pengurus = await prisma.pengurus.findUnique({
+        where: { id: String(req.params.id) },
+        select: { nik: true, jabatan: true, pengurusable_type: true, desa_id: true },
+      });
+      if (!pengurus) return res.status(404).json({ success: false, message: 'Pengurus tidak ditemukan' });
+      if (req.user.role === 'desa' && Number(req.user.desa_id) !== Number(pengurus.desa_id)) {
+        return res.status(403).json({ success: false, message: 'User tidak memiliki akses' });
+      }
+
+      const eligible = RT_RW_TYPES.includes(pengurus.pengurusable_type) && isKetuaRtRw(pengurus.jabatan);
+      if (!eligible) return res.json({ success: true, data: { eligible: false } });
+
+      // Bulan berjalan menurut WIB, format YYYY-MM (sama dengan awalan BLTH)
+      const bulan = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }).slice(0, 7);
+      const nik = normalizeNik(pengurus.nik);
+      if (!nik) return res.json({ success: true, data: { eligible: true, bulan, nik_kosong: true } });
+
+      const source = await warmSourceCache();
+      const index = getBpjsNikIndex(source);
+      const peserta = index.byNik.get(nik) || null;
+      const details = peserta?.details || [];
+      const bulanIni = details.find((d) => String(d.blth || '').startsWith(bulan)) || null;
+      const terakhir = [...details].sort((a, b) => String(b.blth).localeCompare(String(a.blth)))[0] || null;
+      const statusDesk = source.membershipByNik?.[nik] || null;
+
+      res.json({
+        success: true,
+        data: {
+          eligible: true,
+          bulan,
+          periode_data: index.periodeTerbaru, // BLTH terbaru di data master (YYYY-MM)
+          data_bulan_ini_tersedia: index.periodeTerbaru === bulan,
+          terdaftar: Boolean(peserta),
+          tercover: Boolean(bulanIni),
+          peserta: peserta && {
+            nama: peserta.nama,
+            kpj: (bulanIni || terakhir)?.kpj || null,
+            upah: (bulanIni || terakhir)?.upah ?? null,
+            blth_terakhir: terakhir?.blth || null,
+          },
+          status_desk: statusDesk && { status: statusDesk.status, kpj: statusDesk.kpj || null },
+        },
+      });
+    } catch (error) {
+      console.error('Error in getPengurusBpjs:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil status BPJS pengurus', error: error.message });
+    }
+  }
+}
+
+// Indeks NIK → peserta BPJS, dibangun sekali per versi cache sumber (~20rb baris).
+let bpjsNikIndex = { key: null, byNik: new Map(), periodeTerbaru: null };
+function getBpjsNikIndex(source) {
+  if (bpjsNikIndex.key === source.key) return bpjsNikIndex;
+  const byNik = new Map();
+  let periodeTerbaru = null;
+  for (const item of source.bpjsData) {
+    if (item.nik) byNik.set(item.nik, item);
+    for (const d of item.details || []) {
+      const p = String(d.blth || '').slice(0, 7);
+      if (p && (!periodeTerbaru || p > periodeTerbaru)) periodeTerbaru = p;
+    }
+  }
+  bpjsNikIndex = { key: source.key, byNik, periodeTerbaru };
+  return bpjsNikIndex;
 }
 
 module.exports = new RtrwComparisonController();

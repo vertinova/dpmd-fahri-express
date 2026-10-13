@@ -1,5 +1,6 @@
-const { 
-  getListPageActivityLogs, 
+const prisma = require('../config/prisma');
+const {
+  getListPageActivityLogs,
   getDetailPageActivityLogs,
   getActivityLogs: fetchActivityLogs 
 } = require('../utils/kelembagaanActivityLogger');
@@ -215,8 +216,47 @@ const getAllActivityLogs = async (req, res) => {
   }
 };
 
+/**
+ * Get activity logs milik satu pengurus (untuk detail page pengurus)
+ * Endpoint: GET /api/kelembagaan/activity-logs/pengurus/:id
+ */
+const getPengurusActivityLogs = async (req, res) => {
+  try {
+    const where = { entity_type: 'pengurus', entity_id: String(req.params.id) };
+    // User desa hanya boleh melihat log desanya sendiri
+    if (req.user.role === 'desa') where.desa_id = req.user.desa_id;
+
+    const logs = await prisma.kelembagaan_activity_logs.findMany({
+      where,
+      orderBy: { created_at: 'desc' },
+      take: 200, // ponytail: tanpa paginasi, satu pengurus jarang punya >200 log
+      select: {
+        id: true,
+        activity_type: true,
+        action_description: true,
+        kelembagaan_nama: true,
+        old_value: true,
+        new_value: true,
+        user_name: true,
+        user_role: true,
+        created_at: true,
+      },
+    });
+
+    return res.status(200).json({ success: true, data: logs });
+  } catch (error) {
+    console.error('Error getting pengurus activity logs:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Gagal mengambil activity logs pengurus',
+      error: error.message
+    });
+  }
+};
+
 module.exports = {
   getListActivityLogs,
   getDetailActivityLogs,
-  getAllActivityLogs
+  getAllActivityLogs,
+  getPengurusActivityLogs
 };

@@ -897,10 +897,9 @@ class PengurusController {
     try {
       const user = req.user;
       
-      // Kecamatan, admin bidang PMD (bidang_id=5), dan superadmin boleh verifikasi
+      // Kecamatan, staf bidang PMD (bidang_id=5: kepala bidang, pegawai, bendahara), dan superadmin boleh verifikasi
       const isAdminPMD = user.role === 'superadmin' ||
-                         (user.role === 'kepala_bidang' && user.bidang_id === 5) ||
-                         (user.role === 'pegawai' && user.bidang_id === 5);
+                         (['kepala_bidang', 'pegawai', 'bendahara'].includes(user.role) && Number(user.bidang_id) === 5);
       const isKecamatan = user.role === 'kecamatan';
 
       if (!isAdminPMD && !isKecamatan) {

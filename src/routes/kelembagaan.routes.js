@@ -184,6 +184,7 @@ router.delete('/pengurus/import/desa/:desaId', pengurusController.deleteImported
 router.get('/pengurus/transfer-targets', pengurusController.getTransferTargets.bind(pengurusController));
 router.put('/pengurus/:id/transfer', pengurusController.transferPengurus.bind(pengurusController));
 
+router.get('/pengurus/:id/bpjs', rtrwComparisonController.getPengurusBpjs.bind(rtrwComparisonController));
 router.get('/pengurus/:id', pengurusController.showPengurus.bind(pengurusController));
 router.get('/pengurus', pengurusController.getPengurusByKelembagaan.bind(pengurusController));
 router.delete('/pengurus/:id', pengurusController.deletePengurus.bind(pengurusController));
