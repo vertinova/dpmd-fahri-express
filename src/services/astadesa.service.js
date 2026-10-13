@@ -246,6 +246,10 @@ const requestPublik = async (path, params = {}) => {
 // ── Cache respons ────────────────────────────────────────────────────────────
 const cache = new Map(); // key -> { value, at }
 const inflight = new Map(); // key -> Promise
+// Penyusuran yang sedang berjalan: baris yang SUDAH terbaca beserta
+// kemajuannya. Dibaca pemanggil `sebagianBoleh` (Peta Sebaran) supaya titik
+// muncul bertahap selama penyusuran, bukan baru setelah 10–20 menit.
+const progres = new Map(); // key -> { rows, terbaca, selesai, dari, total, mulai }
 
 // ── Potret penyusuran di disk ────────────────────────────────────────────────
 //
@@ -558,9 +562,40 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
   // Jawaban untuk pemanggil mode latar: penyusuran tetap berjalan dan mengisi
   // cache, tetapi HTTP tidak ikut menunggunya. Bila ada hasil lama, itu yang
   // disajikan — data basi jauh lebih berguna daripada halaman kosong.
+  //
+  // `sebagianBoleh`: bila belum ada hasil lama sama sekali, sajikan baris yang
+  // sudah terbaca dari penyusuran yang sedang berjalan. Tetap `belum_siap:
+  // true` — pemanggil wajib menyebutnya sebagian — dan `olahan` null karena
+  // agregat baru sah setelah baris terakhir masuk. Hasil lama yang utuh selalu
+  // didahulukan daripada hasil baru yang setengah jadi.
+  const jalan = progres.get(kunci);
   const jawabanLatar = () =>
     tersimpan
       ? { ...tersimpan.value, basi: true, belum_siap: false }
+      : opts.sebagianBoleh && jalan
+      ? {
+          rows: jalan.rows,
+          olahan: null,
+          terbaca: jalan.terbaca,
+          truncated: true,
+          pages: jalan.dari,
+          last_page: jalan.dari,
+          total: jalan.total,
+          kembar: 0,
+          kurang: 0,
+          kena_pagar: false,
+          halaman_gagal: 0,
+          basi: false,
+          belum_siap: true,
+          progres: {
+            halaman: jalan.selesai,
+            dari: jalan.dari,
+            terbaca: jalan.terbaca,
+            total: jalan.total,
+            persen: jalan.dari ? Math.min(99, Math.floor((jalan.selesai / jalan.dari) * 100)) : 0,
+            berjalan_detik: Math.round((Date.now() - jalan.mulai) / 1000)
+          }
+        }
       : {
           rows: [],
           olahan: null,
@@ -679,6 +714,11 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
     const jumlahPertama = serap(await mintaHalaman(1), 1);
 
     const batasHalaman = Math.min(halamanTerakhir, Math.max(1, Math.ceil(batasBaris / MAX_PER_PAGE)));
+
+    // Kemajuan yang bisa dibaca selama penyusuran. `rows` adalah array yang
+    // SAMA dengan `baris` (hanya bertambah), jadi tidak ada salinan.
+    const jalanIni = { rows: baris, terbaca, selesai: 1, dari: batasHalaman, total: totalMeta, mulai: Date.now() };
+    progres.set(kunci, jalanIni);
     if (halamanTerakhir > batasHalaman) {
       terpotong = true;
       kenaPagar = true;
@@ -698,6 +738,9 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
             if ((err.status === 401 || err.status === 403 || err.status === 503) && !err.dibatasi) throw err;
             halamanGagal += 1;
           }
+          jalanIni.selesai += 1;
+          jalanIni.terbaca = terbaca;
+          if (totalMeta !== null) jalanIni.total = totalMeta;
         }
       };
       await Promise.all(Array.from({ length: Math.min(KONKURENSI, batasHalaman - 1) }, pekerja));
@@ -734,10 +777,12 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
     const pada = Date.now();
     cache.set(kunci, { value: hasil, at: pada });
     inflight.delete(kunci);
+    progres.delete(kunci);
     if (process.env.ASTADESA_POTRET !== '0') simpanPotret(kunci, hasil, pada);
     return hasil;
   })().catch((err) => {
     inflight.delete(kunci);
+    progres.delete(kunci);
     throw err;
   });
 

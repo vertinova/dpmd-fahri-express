@@ -595,7 +595,7 @@ exports.getRingkasan = jalankan(async (req, res) => {
   const [ringkasanApi, hitunganLangsung, susurMentah] = await Promise.all([
     asta.ambil('/summary', {}, { force }).catch(() => null),
     asta.ambil('/sensuses', { per_page: 1 }, { force, ttlMs: TTL_ANGKA_POKOK }).catch(() => null),
-    asta.ambilSemua('/sensuses', {}, { force, latar: true, profil: PROFIL_ADMIN }).catch(() => null)
+    asta.ambilSemua('/sensuses', {}, { force, latar: true, sebagianBoleh: true, profil: PROFIL_ADMIN }).catch(() => null)
   ]);
 
   // Disamakan sekali di sini supaya sisa fungsi tidak perlu memeriksa null di
@@ -613,7 +613,18 @@ exports.getRingkasan = jalankan(async (req, res) => {
   // Rincian di bawah disusun dari baris mentah. Bila penyusuran belum pernah
   // selesai, tidak ada baris untuk disusun — dan yang tersaji sebagai gantinya
   // adalah agregat dari `/summary`, yang dihitung di sisi basis data mereka.
-  const rincianDariBaris = semua.rows.length > 0;
+  //
+  // BERTAHAP. Selama penyusuran pertama berjalan (setelah restart tanpa
+  // potret), `semua` berisi baris yang SUDAH terbaca dengan `belum_siap: true`
+  // dan `progres`. Rincian yang hanya bisa lahir dari baris — jumlah desa,
+  // petugas, koordinat, laju harian — disajikan dari baris itu sebagai angka
+  // SEMENTARA yang terus bertambah, alih-alih kosong 10–20 menit. Rincian yang
+  // punya versi resmi utuh di `/summary` (per kecamatan, per status, sepuluh
+  // petugas teratas) tetap dari sana, karena angka sebagian lebih buruk
+  // daripada angka utuh.
+  const barisAda = semua.rows.length > 0;
+  const rincianDariBaris = barisAda && semua.belum_siap !== true;
+  const rincianSementara = barisAda && semua.belum_siap === true;
 
   // Angka pokok, urut dari yang paling bisa dipercaya:
   //   1. meta.total dari permintaan ringan di atas — hitungan server, hidup.
@@ -727,50 +738,58 @@ exports.getRingkasan = jalankan(async (req, res) => {
       total_terbaca: baris.length,
       kembar_terbuang: semua.kembar || 0,
 
-      total_kecamatan: rincianDariBaris ? perKecamatan.size : kecamatanRingkasan.length || null,
-      total_desa: rincianDariBaris ? perDesa.size : null,
+      total_kecamatan: rincianDariBaris
+        ? perKecamatan.size
+        : kecamatanRingkasan.length || (rincianSementara ? perKecamatan.size : null),
+      total_desa: barisAda ? perDesa.size : null,
 
-      // Sengaja null, bukan panjang `petugas_teraktif`. Endpoint ringkasan
-      // hanya memuat sepuluh petugas teratas; menyajikan 10 sebagai jumlah
-      // petugas se-kabupaten akan salah besar, dan halaman lebih baik tidak
-      // menampilkan angka daripada menampilkan angka yang keliru.
-      total_petugas: rincianDariBaris ? perPetugas.size : null,
+      // Bukan panjang `petugas_teraktif`: endpoint ringkasan hanya memuat
+      // sepuluh petugas teratas, dan menyajikan 10 sebagai jumlah petugas
+      // se-kabupaten akan salah besar. Selama penyusuran berjalan, ini hitungan
+      // sementara dari baris yang sudah terbaca (`rincian_progres` ada).
+      total_petugas: barisAda ? perPetugas.size : null,
 
       total_anggota_tercatat: rincianDariBaris
         ? totalAnggota || null
         : keAngka(ringkasanApi?.data?.total?.sensus_anggotas),
 
       // Hanya bisa dihitung dari baris mentah: ringkasan tidak membawa
-      // koordinat sama sekali.
-      berkoordinat: rincianDariBaris ? berkoordinat : null,
+      // koordinat sama sekali. Dibagi `total_terbaca`, jadi persentase dari
+      // baris sementara tetap perkiraan yang sah.
+      berkoordinat: barisAda ? berkoordinat : null,
 
-      per_kecamatan: rincianDariBaris
-        ? Array.from(perKecamatan.entries())
-            .map(([kecamatan, v]) => ({
-              kecamatan,
-              total: v.total,
-              total_desa: v.desa.size,
-              berkoordinat: v.berkoordinat,
-              per_status: keDaftar(v.status, 'status')
-            }))
-            .sort((a, b) => b.total - a.total)
-        : kecamatanRingkasan,
+      per_kecamatan:
+        rincianDariBaris || (rincianSementara && !kecamatanRingkasan.length)
+          ? Array.from(perKecamatan.entries())
+              .map(([kecamatan, v]) => ({
+                kecamatan,
+                total: v.total,
+                total_desa: v.desa.size,
+                berkoordinat: v.berkoordinat,
+                per_status: keDaftar(v.status, 'status')
+              }))
+              .sort((a, b) => b.total - a.total)
+          : kecamatanRingkasan,
 
       // Rincian per desa tidak ada di ringkasan; ia hanya lahir dari baris.
-      per_desa: rincianDariBaris ? Array.from(perDesa.values()).sort((a, b) => b.total - a.total) : [],
+      per_desa: barisAda ? Array.from(perDesa.values()).sort((a, b) => b.total - a.total) : [],
 
-      per_status: rincianDariBaris ? keDaftar(perStatus, 'status') : statusRingkasan,
+      per_status:
+        rincianDariBaris || (rincianSementara && !statusRingkasan.length)
+          ? keDaftar(perStatus, 'status')
+          : statusRingkasan,
 
-      petugas: rincianDariBaris
-        ? Array.from(perPetugas.entries())
-            .map(([nama, v]) => ({ nama, total: v.total, kecamatan: Array.from(v.kecamatan) }))
-            .sort((a, b) => b.total - a.total)
-        : petugasRingkasan,
+      petugas:
+        rincianDariBaris || (rincianSementara && !petugasRingkasan.length)
+          ? Array.from(perPetugas.entries())
+              .map(([nama, v]) => ({ nama, total: v.total, kecamatan: Array.from(v.kecamatan) }))
+              .sort((a, b) => b.total - a.total)
+          : petugasRingkasan,
 
       // Tren HARIAN hanya bisa disusun dari baris. Ringkasan membawa tren
       // bulanan, dan menaruhnya di lapangan yang sama akan membuat halaman
       // membaca dua belas bulan sebagai dua belas hari.
-      tren: rincianDariBaris
+      tren: barisAda
         ? Array.from(perHari.entries())
             .map(([tanggal, total]) => ({ tanggal, total }))
             .sort((a, b) => a.tanggal.localeCompare(b.tanggal))
@@ -778,14 +797,17 @@ exports.getRingkasan = jalankan(async (req, res) => {
 
       // Dari mana rincian di atas berasal, supaya halaman bisa mengatakannya
       // apa adanya dan tidak menyajikan angka sebagian sebagai angka penuh.
-      rincian_dari: rincianDariBaris ? 'penyusuran' : 'ringkasan',
+      rincian_dari: rincianDariBaris ? 'penyusuran' : rincianSementara ? 'penyusuran-berjalan' : 'ringkasan',
       rincian_siap: rincianDariBaris,
+      // { halaman, dari, terbaca, total, persen, berjalan_detik } selama
+      // penyusuran pertama masih berjalan; null bila rincian sudah utuh.
+      rincian_progres: rincianSementara ? semua.progres || null : null,
       rincian_basi: semua.basi === true,
 
       // Kejujuran soal kelengkapan. Bila penyusuran terhenti di pagar batas
       // baris, angka di atas adalah angka sebagian — dan halaman harus bisa
       // mengatakannya, bukan menyajikannya sebagai total resmi.
-      sebagian: semua.truncated,
+      sebagian: semua.truncated && !rincianSementara,
       // Sebab `sebagian`, supaya halaman tidak menuduh pagar batas baris saat
       // yang terjadi sebenarnya lain.
       kena_pagar: semua.kena_pagar || false,
@@ -1701,7 +1723,12 @@ exports.getKategoriSensus = jalankan(async (req, res) => {
   const fKec = rapikan(req.query.kecamatan)?.toLowerCase() || null;
   const fDesa = rapikan(req.query.desa)?.toLowerCase() || null;
 
-  const semua = await asta.ambilSemua('/sensuses', {}, { force, pengguna: true, latar: true, profil: PROFIL_PENGGUNA });
+  const semua = await asta.ambilSemua('/sensuses', {}, {
+    force,
+    pengguna: true,
+    latar: true,
+    profil: PROFIL_PENGGUNA
+  });
   const o = semua.olahan;
   const grupSemua = o ? o.daftarGrup : [];
 
@@ -2243,7 +2270,13 @@ exports.getSebaranPeta = jalankan(async (req, res) => {
   // Cache-nya berbagi kunci dengan /sebaran hanya bila `pengguna` sama — di
   // sini `pengguna: true`, jadi keduanya punya slot sendiri dan masing-masing
   // memanaskan cache-nya sendiri.
-  const semua = await asta.ambilSemua('/sensuses', {}, { force, pengguna: true, latar: true, profil: PROFIL_PENGGUNA });
+  const semua = await asta.ambilSemua('/sensuses', {}, {
+    force,
+    pengguna: true,
+    latar: true,
+    sebagianBoleh: true,
+    profil: PROFIL_PENGGUNA
+  });
 
   let pakaiRumah = 0;
   let pakaiLokasi = 0;
@@ -2307,8 +2340,11 @@ exports.getSebaranPeta = jalankan(async (req, res) => {
       // memakai koordinat rumah — satu-satunya sisa selisih dengan panel.
       pakai_koordinat_rumah: pakaiRumah,
       pakai_koordinat_lokasi: pakaiLokasi,
-      sebagian: semua.truncated,
-      rincian_siap: semua.rows.length > 0,
+      // Selama penyusuran pertama berjalan, titik di atas adalah yang SUDAH
+      // terbaca (muncul bertahap); `rincian_siap` tetap false sampai utuh.
+      sebagian: semua.truncated && semua.belum_siap !== true,
+      rincian_siap: semua.rows.length > 0 && semua.belum_siap !== true,
+      rincian_progres: semua.belum_siap === true ? semua.progres || null : null,
       rincian_basi: semua.basi === true
     }
   });
