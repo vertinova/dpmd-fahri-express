@@ -149,11 +149,27 @@ const requestBertoken = async (jalurPenuh, params = {}, sudahUlang = false) => {
     if (status === 404) {
       throw new AstaDesaError(`Endpoint ASTA DESA tidak ditemukan: ${jalurPenuh}`, 404);
     }
+    if (status === 429) throw galatDibatasi(err);
     if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
       throw new AstaDesaError('Server ASTA DESA tidak merespons dalam batas waktu.', 504);
     }
     throw new AstaDesaError(`Permintaan ASTA DESA gagal: ${err.message}`, 502, err.response?.data || null);
   }
+};
+
+/**
+ * 429 dari ASTA DESA sendiri (throttle Laravel). Dibawa sebagai 503 +
+ * `jedaDetik`, BUKAN 429: kalau diteruskan sebagai 429, browser tidak bisa
+ * membedakannya dari rate limiter backend kita, dan pesan yang tampil akan
+ * menyalahkan pemakai halaman. Penyusuran memakai `jedaDetik` untuk menunggu
+ * lalu mengulang halaman itu, bukan membuangnya.
+ */
+const galatDibatasi = (err) => {
+  const jeda = Number(err.response?.headers?.['retry-after']);
+  const galat = new AstaDesaError('Server ASTA DESA sedang membatasi permintaan. Data akan dicoba lagi otomatis.', 503);
+  galat.dibatasi = true;
+  galat.jedaDetik = Number.isFinite(jeda) && jeda >= 0 ? jeda : null;
+  return galat;
 };
 
 /** Endpoint grup admin — `/api/v1/admin/<path>`. Bentuk pemanggilan lama. */
@@ -215,6 +231,7 @@ const requestPublik = async (path, params = {}) => {
     if (status === 422) {
       throw new AstaDesaError('Parameter wilayah tidak diterima ASTA DESA.', 422, err.response?.data || null);
     }
+    if (status === 429) throw galatDibatasi(err);
     if (err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT') {
       throw new AstaDesaError('Server ASTA DESA tidak merespons dalam batas waktu.', 504);
     }
@@ -460,11 +477,21 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
     // Satu halaman dengan dua kali percobaan ulang. Dari ratusan permintaan,
     // satu-dua yang tersendat itu normal; menggagalkan seluruh penyusuran
     // karenanya berarti halaman tidak pernah punya data sama sekali.
+    //
+    // Throttle dari ASTA DESA (`dibatasi`) mendapat napas lebih panjang: lima
+    // kali, menunggu sesuai Retry-After (paling lama 30 detik). Membuang
+    // halamannya berarti angka per kecamatan bolong sampai siklus berikutnya.
     const mintaHalaman = async (halaman) => {
       for (let coba = 0; ; coba += 1) {
         try {
           return await minta(path, { ...params, page: halaman, per_page: MAX_PER_PAGE });
         } catch (err) {
+          if (err.dibatasi) {
+            if (coba >= 5) throw err;
+            const jeda = Math.min(30, Math.max(2, err.jedaDetik ?? 3 * (coba + 1)));
+            await new Promise((r) => setTimeout(r, jeda * 1000));
+            continue;
+          }
           // Galat konfigurasi (token/izin) tidak akan sembuh dengan mengulang.
           if (coba >= 2 || (err.status && err.status !== 504 && err.status !== 502)) throw err;
           await new Promise((r) => setTimeout(r, 1000 * (coba + 1)));
@@ -493,7 +520,7 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
           } catch (err) {
             // Galat izin/token pada halaman mana pun berarti semua halaman lain
             // juga akan ditolak — hentikan, jangan diam-diam menyajikan nol.
-            if (err.status === 401 || err.status === 403 || err.status === 503) throw err;
+            if ((err.status === 401 || err.status === 403 || err.status === 503) && !err.dibatasi) throw err;
             halamanGagal += 1;
           }
         }

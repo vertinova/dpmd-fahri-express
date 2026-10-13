@@ -331,9 +331,12 @@ const jalankan = (handler) => async (req, res) => {
     if (status >= 500 && status !== 503) {
       console.error('[asta-desa]', err.message);
     }
+    // Throttle dari ASTA DESA: beri tahu browser kapan boleh bertanya lagi.
+    if (err.jedaDetik !== undefined && err.jedaDetik !== null) res.set('Retry-After', String(err.jedaDetik));
     res.status(status).json({
       success: false,
       message: err.message || 'Gagal mengambil data Asta Desa',
+      ...(err.jedaDetik !== undefined && err.jedaDetik !== null ? { retry_after: err.jedaDetik } : {}),
       ...(err.detail ? { detail: err.detail } : {})
     });
   }

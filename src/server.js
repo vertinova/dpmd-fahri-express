@@ -186,26 +186,95 @@ app.use(cors({
  * jatahnya sendiri, dan request anonim dari IP itu hanya menghabiskan keranjang
  * anonim. Tokennya diverifikasi (bukan sekadar dibaca) supaya token karangan
  * tidak bisa dipakai untuk membuat keranjang baru tanpa batas.
+ *
+ * TOKEN KEDALUWARSA TETAP DIKUNCI PER AKUN. Dulu token yang lewat masa
+ * berlakunya jatuh ke kunci IP — keranjang anonim sekantor. Pada 2026-10-13
+ * tablet Kepala Dinas (token >7 hari) membuka Core Dashboard Asta Desa saat
+ * keranjang itu sudah habis: setiap request dibalas 429 SEBELUM sempat sampai
+ * ke `auth` yang akan membalas 401, sehingga frontend tidak pernah memicu
+ * /auth/renew dan halaman macet di "Request failed with status code 429".
+ * Tanda tangannya tetap diverifikasi, jadi tidak ada keranjang yang bisa
+ * dikarang tanpa JWT_SECRET; masa berlaku diurus `auth` seperti biasa.
  */
 const kunciRateLimit = (req) => {
+  if (req.__kunciRateLimit) return req.__kunciRateLimit;
+  let kunci = `ip:${req.ip}`;
   const h = req.headers.authorization;
   if (h && h.startsWith('Bearer ')) {
     try {
-      const muatan = jwt.verify(h.slice(7), process.env.JWT_SECRET);
-      if (muatan?.id !== undefined && muatan?.id !== null) return `akun:${muatan.id}`;
+      const muatan = jwt.verify(h.slice(7), process.env.JWT_SECRET, { ignoreExpiration: true });
+      if (muatan?.id !== undefined && muatan?.id !== null) kunci = `akun:${muatan.id}`;
     } catch {
-      // Token kedaluwarsa/rusak: jatuh ke kunci IP di bawah.
+      // Tanda tangan tidak cocok/rusak: jatuh ke kunci IP.
     }
   }
-  return `ip:${req.ip}`;
+  // Disimpan di request: satu request bisa melewati beberapa limiter, dan
+  // jwt.verify tidak perlu diulang di tiap limiter.
+  req.__kunciRateLimit = kunci;
+  return kunci;
+};
+const milikAkun = (req) => kunciRateLimit(req).startsWith('akun:');
+
+/**
+ * Balasan 429 berbentuk JSON + Retry-After.
+ *
+ * Dulu badannya teks polos, sehingga frontend (yang membaca `message` dari
+ * JSON) hanya bisa menampilkan "Request failed with status code 429" — tanpa
+ * penjelasan dan tanpa tahu kapan boleh mencoba lagi.
+ */
+const balas429 = (pesan) => (req, res, _next, options) => {
+  const reset = req.rateLimit?.resetTime instanceof Date ? req.rateLimit.resetTime.getTime() : null;
+  const detik = reset ? Math.max(1, Math.ceil((reset - Date.now()) / 1000)) : Math.ceil(options.windowMs / 1000);
+  res.set('Retry-After', String(detik));
+  res.status(options.statusCode).json({
+    success: false,
+    code: 'RATE_LIMIT',
+    message: `${pesan} Coba lagi dalam ${Math.max(1, Math.ceil(detik / 60))} menit.`,
+    retry_after: detik
+  });
 };
 
 // Rate limiting - Standard API requests
+//
+// Akun yang login mendapat jatah lebih longgar daripada keranjang anonim:
+// identitasnya terverifikasi, dan satu akun pimpinan sering terbuka di
+// beberapa perangkat sekaligus (tablet, laptop, layar rapat) dengan dasbor
+// yang memperbarui dirinya sendiri.
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // 1000 requests per windowMs, per akun (atau per IP bila anonim)
+  max: (req) => (milikAkun(req) ? 3000 : 1000),
   keyGenerator: kunciRateLimit,
-  message: 'Terlalu banyak request, silakan coba lagi beberapa menit lagi.',
+  // Ditangani oleh limiter khusus di bawah — jangan dihitung dua kali.
+  skip: (req) => req.path === '/auth/renew' || (req.path.startsWith('/asta-desa/') && milikAkun(req)),
+  handler: balas429('Terlalu banyak permintaan.'),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// Asta Desa punya keranjang sendiri per akun. Halaman itu memperbarui dirinya
+// tiap 30–60 detik dan dilayani dari cache backend (penyusuran ke ASTA DESA
+// dibagi bersama dan tidak diulang per permintaan), jadi ia tidak boleh ikut
+// kehabisan jatah hanya karena modul lain di perangkat yang sama ramai.
+const astaDesaLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 2000,
+  keyGenerator: kunciRateLimit,
+  skip: (req) => !milikAkun(req),
+  handler: balas429('Terlalu banyak permintaan data Asta Desa dari akun ini.'),
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
+// /auth/renew dipisah dari keranjang umum: inilah jalan keluar sesi yang
+// kedaluwarsa, dan menutupnya dengan 429 membuat sesi tidak bisa pulih sama
+// sekali. Request ini tidak membawa header Authorization (tokennya di body),
+// jadi kuncinya IP — jatahnya cukup untuk sekantor yang tokennya habis
+// bersamaan, tetapi tetap membendung pengulangan liar.
+const renewLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  keyGenerator: (req) => `renew:${req.ip}`,
+  handler: balas429('Terlalu banyak permintaan perpanjangan sesi.'),
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -215,7 +284,7 @@ const bankeuUploadLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 5000, // 5000 uploads per 15 minutes, per akun (atau per IP bila anonim)
   keyGenerator: kunciRateLimit,
-  message: 'Terlalu banyak upload, silakan tunggu beberapa menit.',
+  handler: balas429('Terlalu banyak unggahan.'),
   standardHeaders: true,
   legacyHeaders: false,
 });
@@ -225,9 +294,11 @@ if (process.env.NODE_ENV === 'production') {
   // Apply permissive rate limit to bankeu upload routes
   app.use('/api/desa/bankeu', bankeuUploadLimiter);
   app.use('/api/desa/bankeu-perubahan', bankeuUploadLimiter);
+  app.use('/api/auth/renew', renewLimiter);
+  app.use('/api/asta-desa', astaDesaLimiter);
   // Apply standard rate limit to other API routes
   app.use('/api/', limiter);
-  logger.info('🛡️  Rate limiting enabled (per akun/IP: 1000 req/15min API, 5000 req/15min Bankeu uploads)');
+  logger.info('🛡️  Rate limiting enabled (akun 3000 / anonim 1000 req/15min API, Asta Desa 2000/akun, Bankeu 5000)');
 } else {
   logger.info('⚠️  Rate limiting disabled for development');
 }
