@@ -21,6 +21,10 @@
  */
 
 const axios = require('axios');
+const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
+const readline = require('readline');
 
 const BASE_URL = (process.env.ASTADESA_BASE_URL || 'https://astadesa.rmlabs.id/api/v1').replace(/\/+$/, '');
 const IDENTITY = process.env.ASTADESA_IDENTITY || process.env.ASTADESA_EMAIL || '';
@@ -243,6 +247,173 @@ const requestPublik = async (path, params = {}) => {
 const cache = new Map(); // key -> { value, at }
 const inflight = new Map(); // key -> Promise
 
+// ── Potret penyusuran di disk ────────────────────────────────────────────────
+//
+// MENGAPA ADA. Hasil penyusuran dulu hanya hidup di memori proses. Setiap
+// restart — dan setiap deploy berarti restart — membuangnya, lalu selama
+// penyusuran ulang berjalan (±10–30 menit untuk ratusan ribu baris) halaman
+// Core Dashboard hanya punya angka pokok: desa "0", berkoordinat "0%",
+// petugas dan tren kosong. Terjadi 2026-10-13 tepat setelah dua deploy.
+//
+// Sekarang tiap penyusuran yang selesai juga ditulis ke disk, dan dimuat
+// kembali saat proses menyala. Umurnya tetap umur aslinya: potret yang masih
+// dalam TTL disajikan sebagai segar, yang lewat disajikan sebagai basi sambil
+// penyusuran baru berjalan di latar — persis seperti cache memori.
+//
+// Bentuk berkas: NDJSON. Baris pertama = kunci, waktu, dan seluruh hasil
+// KECUALI `rows`; baris-baris berikutnya = potongan `rows`. Ditulis bertahap
+// dengan jeda ke event loop, supaya ratusan ribu baris tidak membekukan server
+// selama serialisasi, dan tidak pernah menjadi satu string raksasa.
+const DIR_POTRET = process.env.ASTADESA_CACHE_DIR || path.join(__dirname, '../../storage/cache/asta-desa');
+// Potret yang lebih tua dari ini dibuang saja: angkanya terlalu jauh dari
+// keadaan sekarang untuk disajikan, bahkan sebagai data basi.
+const UMUR_POTRET_MAKS_MS = Number(process.env.ASTADESA_UMUR_POTRET_MS || 24 * 60 * 60 * 1000);
+const BARIS_PER_POTONG = 2000;
+
+// Map dan Set tidak punya bentuk JSON; hasil olahan penuh dengan keduanya
+// (ember demografi, peta id→wilayah). Ditandai saat ditulis, dibangun ulang
+// saat dibaca — reviver JSON bekerja dari dalam ke luar, jadi yang bersarang
+// ikut pulih.
+const JENIS = '__astaJenis';
+const pengganti = (_k, v) => {
+  if (v instanceof Map) return { [JENIS]: 'Map', v: Array.from(v.entries()) };
+  if (v instanceof Set) return { [JENIS]: 'Set', v: Array.from(v) };
+  return v;
+};
+const pemulih = (_k, v) => {
+  if (v && typeof v === 'object' && !Array.isArray(v) && Array.isArray(v.v)) {
+    if (v[JENIS] === 'Map') return new Map(v.v);
+    if (v[JENIS] === 'Set') return new Set(v.v);
+  }
+  return v;
+};
+
+const berkasPotret = (kunci) =>
+  path.join(DIR_POTRET, `${crypto.createHash('sha1').update(kunci).digest('hex')}.ndjson`);
+
+const jedaLoop = () => new Promise((r) => setImmediate(r));
+
+// Satu penulisan per kunci. Bila penyusuran berikutnya selesai saat yang
+// sebelumnya masih ditulis, hanya yang TERBARU yang ditulis sesudahnya.
+const penulisan = new Map(); // kunci -> { berjalan: Promise, antre: {hasil, at}|null }
+
+const tulisPotret = async (kunci, hasil, at) => {
+  await fs.promises.mkdir(DIR_POTRET, { recursive: true });
+  const tujuan = berkasPotret(kunci);
+  const sementara = `${tujuan}.${process.pid}.tmp`;
+  const aliran = fs.createWriteStream(sementara, { encoding: 'utf8' });
+  const tulis = (teks) =>
+    new Promise((resolve, reject) => {
+      aliran.write(teks, (err) => (err ? reject(err) : resolve()));
+    });
+  try {
+    const { rows, ...sisa } = hasil;
+    await tulis(`${JSON.stringify({ kunci, at, hasil: sisa }, pengganti)}\n`);
+    const semuaBaris = Array.isArray(rows) ? rows : [];
+    for (let i = 0; i < semuaBaris.length; i += BARIS_PER_POTONG) {
+      await tulis(`${JSON.stringify(semuaBaris.slice(i, i + BARIS_PER_POTONG), pengganti)}\n`);
+      await jedaLoop();
+    }
+    await new Promise((resolve, reject) => aliran.end((err) => (err ? reject(err) : resolve())));
+    // Ganti nama = atomik: pembaca tidak pernah menjumpai berkas setengah jadi.
+    await fs.promises.rename(sementara, tujuan);
+  } catch (err) {
+    aliran.destroy();
+    await fs.promises.unlink(sementara).catch(() => {});
+    throw err;
+  }
+};
+
+const simpanPotret = (kunci, hasil, at) => {
+  const ada = penulisan.get(kunci);
+  if (ada) {
+    ada.antre = { hasil, at };
+    return;
+  }
+  const entri = { antre: null };
+  penulisan.set(kunci, entri);
+  (async () => {
+    let kerja = { hasil, at };
+    while (kerja) {
+      try {
+        await tulisPotret(kunci, kerja.hasil, kerja.at);
+      } catch (err) {
+        console.error(`[asta-desa] potret ${kunci} gagal ditulis:`, err.message);
+      }
+      kerja = entri.antre;
+      entri.antre = null;
+    }
+    penulisan.delete(kunci);
+  })();
+};
+
+const bacaPotret = async (berkas) => {
+  const baris = readline.createInterface({ input: fs.createReadStream(berkas, { encoding: 'utf8' }), crlfDelay: Infinity });
+  let kepala = null;
+  const rows = [];
+  for await (const teks of baris) {
+    if (!teks) continue;
+    if (!kepala) {
+      kepala = JSON.parse(teks, pemulih);
+      // Sudah kedaluwarsa jauh: jangan habiskan waktu membaca sisanya.
+      if (!kepala?.kunci || !Number.isFinite(kepala.at) || Date.now() - kepala.at > UMUR_POTRET_MAKS_MS) {
+        baris.close();
+        return { usang: true };
+      }
+      continue;
+    }
+    const potong = JSON.parse(teks, pemulih);
+    for (let i = 0; i < potong.length; i += 1) rows.push(potong[i]);
+  }
+  if (!kepala) return { usang: true };
+  const value = { ...kepala.hasil, rows };
+  // `daftarGrup` adalah Array.from(grup.values()) yang dibekukan saat
+  // penyusuran — elemen yang SAMA dengan isi `grup`. Setelah JSON keduanya
+  // menjadi salinan terpisah; satukan lagi supaya tetap satu sumber.
+  if (value.olahan?.grup instanceof Map && Array.isArray(value.olahan.daftarGrup)) {
+    value.olahan.daftarGrup = Array.from(value.olahan.grup.values());
+  }
+  return { kunci: kepala.kunci, at: kepala.at, value };
+};
+
+/** Muat semua potret dari disk ke cache. Dipanggil sekali saat modul dimuat. */
+const muatPotret = async () => {
+  let daftar;
+  try {
+    daftar = (await fs.promises.readdir(DIR_POTRET)).filter((f) => f.endsWith('.ndjson'));
+  } catch {
+    return; // Belum pernah ada potret.
+  }
+  for (const nama of daftar) {
+    const berkas = path.join(DIR_POTRET, nama);
+    try {
+      const mulai = Date.now();
+      const p = await bacaPotret(berkas);
+      if (p.usang) {
+        await fs.promises.unlink(berkas).catch(() => {});
+        continue;
+      }
+      // Penyusuran yang selesai selama potret dibaca lebih baru — jangan ditimpa.
+      const sekarang = cache.get(p.kunci);
+      if (!sekarang || sekarang.at < p.at) cache.set(p.kunci, { value: p.value, at: p.at });
+      console.log(
+        `[asta-desa] potret dimuat: ${p.kunci} (${p.value.rows.length} baris, umur ${Math.round(
+          (Date.now() - p.at) / 60000
+        )} mnt, ${Date.now() - mulai} ms)`
+      );
+    } catch (err) {
+      console.error(`[asta-desa] potret ${nama} tidak terbaca:`, err.message);
+      await fs.promises.unlink(berkas).catch(() => {});
+    }
+  }
+};
+
+// Dimulai seketika modul dimuat; `ambilSemua` menunggunya supaya permintaan
+// pertama setelah restart tidak memulai penyusuran yang sebenarnya tidak perlu.
+// Jest/skrip tidak perlu membaca disk: ASTADESA_POTRET=0 mematikannya.
+const potretSiap =
+  process.env.ASTADESA_POTRET === '0' ? Promise.resolve() : muatPotret().catch(() => {});
+
 const buatKunci = (path, params) => {
   const rapi = Object.keys(params || {})
     .filter((k) => params[k] !== undefined && params[k] !== null && params[k] !== '')
@@ -375,6 +546,10 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
   const profil = opts.profil || null;
   const kunci = `ALL${opts.pengguna ? ':PENGGUNA' : ''}${profil ? `:${profil.nama}` : ''} ${buatKunci(path, params)}`;
   const ttl = opts.ttlMs ?? TTL_SUSUR_MS;
+
+  // Tepat setelah restart: tunggu potret dari disk (beberapa detik paling
+  // lama) sebelum memutuskan perlu menyusuri atau tidak.
+  await potretSiap;
 
   const tersimpan = cache.get(kunci);
   const segar = tersimpan && Date.now() - tersimpan.at < ttl;
@@ -556,8 +731,10 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
       halaman_gagal: halamanGagal,
       disusun_pada: new Date().toISOString()
     };
-    cache.set(kunci, { value: hasil, at: Date.now() });
+    const pada = Date.now();
+    cache.set(kunci, { value: hasil, at: pada });
     inflight.delete(kunci);
+    if (process.env.ASTADESA_POTRET !== '0') simpanPotret(kunci, hasil, pada);
     return hasil;
   })().catch((err) => {
     inflight.delete(kunci);
