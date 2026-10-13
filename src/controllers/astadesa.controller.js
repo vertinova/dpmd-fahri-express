@@ -279,6 +279,35 @@ const normalSensus = (row) => {
  */
 const PROFIL_ADMIN = { nama: 'ringkas', ringkas: (row) => normalSensus(row) };
 
+/**
+ * Profil penyusuran `/admin/users` untuk kartu "Petugas mendata".
+ *
+ * Angka resmi, bukan perkiraan dari baris sensus: ASTA DESA menghitung
+ * `sensuses_count` tiap akun di basis datanya sendiri (withCount), jadi
+ * "akun dengan sensuses_count > 0" adalah definisi "Enumerator Aktif" di
+ * panel mereka, dihitung dari sumber yang sama. Hanya ±25 halaman — beberapa
+ * detik, bukan menunggu ratusan ribu baris sensus.
+ *
+ * Tidak ada baris yang disimpan (`ringkas` → null): akun membawa NIK dan
+ * nomor HP, dan yang dibutuhkan di sini hanya dua angka.
+ */
+const PROFIL_PETUGAS = {
+  nama: 'petugas-mendata',
+  ringkas: () => null,
+  olah: {
+    buat: () => ({ akun: 0, mendata: 0 }),
+    tambah: (s, row) => {
+      s.akun += 1;
+      if (Number(row?.sensuses_count) > 0) s.mendata += 1;
+    },
+    selesai: (s) => s
+  }
+};
+
+/** Tanggal kalender WIB (YYYY-MM-DD) `n` hari sebelum hari ini. */
+const tanggalWib = (n = 0) =>
+  new Date(Date.now() - n * 24 * 60 * 60 * 1000).toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' });
+
 /** Hanya tanggalnya (YYYY-MM-DD) dari nilai tanggal apa pun bentuknya. */
 const keHari = (nilai) => {
   if (!nilai) return null;
@@ -592,11 +621,33 @@ exports.getRingkasan = jalankan(async (req, res) => {
   // mentah (per desa, tren harian, jumlah berkoordinat) menyusul pada siklus
   // pembaruan berikutnya, persis seperti yang sudah dijanjikan teks di kaki
   // halaman.
-  const [ringkasanApi, hitunganLangsung, susurMentah] = await Promise.all([
+  //
+  // KARTU ANGKA = ANGKA RESMI ASTA DESA. Selain `/summary` dan hitungan
+  // langsung, dua kartu lagi kini dihitung di basis data mereka, bukan dari
+  // baris yang kita susuri:
+  //   • 30 hari terakhir (+ 30 hari sebelumnya sebagai pembanding) —
+  //     `/admin/sensuses?dari=&sampai=` + per_page=1, dibaca `meta.total`.
+  //     Penyaringnya `whereDate(tanggal_pendataan)`, sama dengan kartu
+  //     "Bulan Ini"/"Minggu Ini" di panel mereka.
+  //   • Petugas mendata — akun dengan sensuses_count > 0 (PROFIL_PETUGAS).
+  // Yang tidak punya hitungan resmi di API mereka (jumlah desa, berkoordinat,
+  // laju harian) tetap dari baris, bertahap selama penyusuran.
+  const [ringkasanApi, hitunganLangsung, susurMentah, hitung30, hitung30Sebelum, susurPetugas] = await Promise.all([
     asta.ambil('/summary', {}, { force }).catch(() => null),
     asta.ambil('/sensuses', { per_page: 1 }, { force, ttlMs: TTL_ANGKA_POKOK }).catch(() => null),
-    asta.ambilSemua('/sensuses', {}, { force, latar: true, sebagianBoleh: true, profil: PROFIL_ADMIN }).catch(() => null)
+    asta.ambilSemua('/sensuses', {}, { force, latar: true, sebagianBoleh: true, profil: PROFIL_ADMIN }).catch(() => null),
+    asta
+      .ambil('/sensuses', { per_page: 1, dari: tanggalWib(29) }, { force, ttlMs: TTL_ANGKA_POKOK })
+      .catch(() => null),
+    asta
+      .ambil('/sensuses', { per_page: 1, dari: tanggalWib(59), sampai: tanggalWib(30) }, { force, ttlMs: TTL_ANGKA_POKOK })
+      .catch(() => null),
+    asta.ambilSemua('/users', {}, { force, latar: true, profil: PROFIL_PETUGAS }).catch(() => null)
   ]);
+
+  const laju30Baru = keAngka(metaDari(hitung30)?.total);
+  const laju30Sebelum = keAngka(metaDari(hitung30Sebelum)?.total);
+  const petugasResmi = susurPetugas?.olahan && susurPetugas.belum_siap !== true ? susurPetugas.olahan : null;
 
   // Disamakan sekali di sini supaya sisa fungsi tidak perlu memeriksa null di
   // setiap tempat: penyusuran bisa gagal (null) atau belum siap (mode latar).
@@ -738,16 +789,37 @@ exports.getRingkasan = jalankan(async (req, res) => {
       total_terbaca: baris.length,
       kembar_terbuang: semua.kembar || 0,
 
-      total_kecamatan: rincianDariBaris
-        ? perKecamatan.size
-        : kecamatanRingkasan.length || (rincianSementara ? perKecamatan.size : null),
-      total_desa: barisAda ? perDesa.size : null,
+      // Resmi lebih dulu: `sensus_per_kecamatan` dari /summary adalah GROUP BY
+      // di basis data ASTA DESA — persis "Kecamatan Tercakup" di panel mereka.
+      // Hitungan dari baris hanya cadangan, dan baris tanpa kecamatan
+      // ("Tidak diketahui") tidak dihitung sebagai kecamatan.
+      total_kecamatan:
+        kecamatanRingkasan.length ||
+        (barisAda ? Array.from(perKecamatan.keys()).filter((k) => k !== 'Tidak diketahui').length : null),
+      // Tidak ada hitungan resmi desa di API ASTA DESA; dari baris, pasangan
+      // kecamatan|desa (nama desa yang sama di dua kecamatan = dua desa).
+      total_desa: barisAda ? Array.from(perDesa.values()).filter((d) => d.desa !== 'Tidak diketahui').length : null,
 
-      // Bukan panjang `petugas_teraktif`: endpoint ringkasan hanya memuat
-      // sepuluh petugas teratas, dan menyajikan 10 sebagai jumlah petugas
-      // se-kabupaten akan salah besar. Selama penyusuran berjalan, ini hitungan
-      // sementara dari baris yang sudah terbaca (`rincian_progres` ada).
-      total_petugas: barisAda ? perPetugas.size : null,
+      // Resmi: akun dengan sensuses_count > 0 (lihat PROFIL_PETUGAS). Selama
+      // penyusuran akun yang singkat itu belum selesai, cadangannya hitungan
+      // dari baris sensus — `total_petugas_resmi` membedakan keduanya.
+      // Bukan panjang `petugas_teraktif`: itu hanya sepuluh teratas.
+      total_petugas: petugasResmi ? petugasResmi.mendata : barisAda ? perPetugas.size : null,
+      total_petugas_resmi: Boolean(petugasResmi),
+
+      // Hitungan resmi 30 hari terakhir dan 30 hari sebelumnya, dari basis data
+      // ASTA DESA (lihat di atas). null bila permintaannya gagal — halaman lalu
+      // jatuh ke perhitungan dari tren harian.
+      laju_30_hari:
+        laju30Baru === null
+          ? null
+          : {
+              baru: laju30Baru,
+              sebelum: laju30Sebelum,
+              selisih: laju30Sebelum ? Math.round(((laju30Baru - laju30Sebelum) / laju30Sebelum) * 100) : null,
+              dari: tanggalWib(29),
+              sampai: tanggalWib(0)
+            },
 
       total_anggota_tercatat: rincianDariBaris
         ? totalAnggota || null
@@ -2515,6 +2587,9 @@ const panaskan = async (force = false) => {
   if (!asta.terkonfigurasi() || sedangMemanaskan) return;
   sedangMemanaskan = true;
   try {
+    // Paling depan karena paling singkat (±25 halaman): kartu "Petugas mendata"
+    // sudah resmi beberapa detik setelah menyala.
+    await susurPemanasan('/users', { profil: PROFIL_PETUGAS }, 'petugas', force);
     await susurPemanasan('/sensuses', { profil: PROFIL_ADMIN }, 'admin', force);
 
     const peta = await susurPemanasan('/sensuses', { pengguna: true, profil: PROFIL_PENGGUNA }, 'pengguna', force);

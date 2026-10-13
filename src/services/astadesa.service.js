@@ -778,7 +778,10 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
     cache.set(kunci, { value: hasil, at: pada });
     inflight.delete(kunci);
     progres.delete(kunci);
-    if (process.env.ASTADESA_POTRET !== '0') simpanPotret(kunci, hasil, pada);
+    // Hanya penyusuran ber-profil yang ditulis ke disk. Tanpa profil, baris
+    // disimpan MENTAH — untuk `/users` itu berarti NIK dan nomor HP petugas
+    // apa adanya — dan itu tidak boleh berpindah dari memori ke berkas.
+    if (process.env.ASTADESA_POTRET !== '0' && profil) simpanPotret(kunci, hasil, pada);
     return hasil;
   })().catch((err) => {
     inflight.delete(kunci);
