@@ -93,6 +93,10 @@ router.get('/summary', summaryController.summary.bind(summaryController));
 router.get('/lainnya-dashboard', summaryController.lainnyaDashboard.bind(summaryController));
 router.get('/pengurus-dashboard', summaryController.pengurusDashboard.bind(summaryController));
 router.get('/statistik-tahunan', summaryController.statistikTahunan.bind(summaryController));
+router.get('/tren-verifikasi-harian', summaryController.trenVerifikasiHarian.bind(summaryController));
+router.get('/capaian-verifikasi/per-desa', summaryController.capaianVerifikasiPerDesa.bind(summaryController));
+router.get('/capaian-verifikasi/aktivitas', summaryController.aktivitasVerifikator.bind(summaryController));
+router.get('/capaian-verifikasi/permasalahan', summaryController.permasalahanDesa.bind(summaryController));
 router.get('/kecamatan/:id', summaryController.byKecamatan.bind(summaryController));
 
 // Desa-specific endpoints
@@ -132,6 +136,10 @@ router.post('/lembaga-lainnya', lembagaLainnyaController.create.bind(lembagaLain
 router.put('/rw/:id', rwController.updateRW.bind(rwController));
 router.put('/rt/:id', rtController.updateRT.bind(rtController));
 router.put('/posyandu/:id', posyanduController.updatePosyandu.bind(posyanduController));
+router.put('/karang-taruna/:id', karangTarunaController.update.bind(karangTarunaController));
+router.put('/lpm/:id', lpmController.update.bind(lpmController));
+router.put('/satlinmas/:id', satlinmasController.update.bind(satlinmasController));
+router.put('/pkk/:id', pkkController.update.bind(pkkController));
 router.delete('/rw/:id', rwController.deleteRW.bind(rwController));
 router.delete('/rt/:id', rtController.deleteRT.bind(rtController));
 router.delete('/posyandu/:id', posyanduController.deletePosyandu.bind(posyanduController));

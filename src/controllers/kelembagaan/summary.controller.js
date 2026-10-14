@@ -5,6 +5,20 @@
 
 const { prisma, validateDesaAccess } = require('./base.controller');
 
+// Lembaga yang dihitung dalam capaian verifikasi (Satlinmas & lembaga lainnya tidak termasuk)
+const VERIFIKASI_TABLES = [
+  { key: 'rw', model: 'rws', label: 'RW' },
+  { key: 'rt', model: 'rts', label: 'RT' },
+  { key: 'posyandu', model: 'posyandus', label: 'Posyandu' },
+  { key: 'karangTaruna', model: 'karang_tarunas', label: 'Karang Taruna' },
+  { key: 'lpm', model: 'lpms', label: 'LPM' },
+  { key: 'pkk', model: 'pkks', label: 'PKK' },
+];
+
+// Kolom TIMESTAMP dibaca mengikuti time_zone sesi MySQL (lokal WIB, server bisa UTC).
+// Lewat UNIX_TIMESTAMP (epoch, bebas zona) + 7 jam supaya tanggalnya selalu WIB.
+const tanggalWib = (kolom) => `DATE(DATE_ADD('1970-01-01', INTERVAL UNIX_TIMESTAMP(${kolom}) + 25200 SECOND))`;
+
 class SummaryController {
   /**
    * Get overall kelembagaan index with kecamatan and desa data
@@ -766,38 +780,6 @@ class SummaryController {
    */
   async getDesaKelembagaanDetail(req, res) {
     try {
-      // Helper: get ketua name for a single entity
-      const getKetuaNama = async (entityId, type, jabatanValues) => {
-        const ketua = await prisma.pengurus.findFirst({
-          where: {
-            pengurusable_id: entityId,
-            pengurusable_type: type,
-            status_jabatan: 'aktif',
-            jabatan: { in: jabatanValues }
-          },
-          select: { nama_lengkap: true }
-        });
-        return ketua?.nama_lengkap || null;
-      };
-
-      // Helper: enrich array of entities with ketua_nama
-      const enrichWithKetua = async (items, type, jabatanValues) => {
-        if (!items || items.length === 0) return items;
-        const ids = items.map(i => i.id);
-        const ketuaList = await prisma.pengurus.findMany({
-          where: {
-            pengurusable_id: { in: ids },
-            pengurusable_type: type,
-            status_jabatan: 'aktif',
-            jabatan: { in: jabatanValues }
-          },
-          select: { pengurusable_id: true, nama_lengkap: true },
-          distinct: ['pengurusable_id']
-        });
-        const map = Object.fromEntries(ketuaList.map(k => [k.pengurusable_id, k.nama_lengkap]));
-        return items.map(item => ({ ...item, ketua_nama: map[item.id] || null }));
-      };
-
       const { id } = req.params;
       const desa = await prisma.desas.findUnique({ 
         where: { id: parseInt(id) },
@@ -847,45 +829,32 @@ class SummaryController {
         })
       ]);
 
-      // Map RW with RT data and provide frontend-compatible field names
-      const rwIds = rws.map(rw => rw.id);
-      const rtIds = rws.flatMap(rw => rw.rts.map(rt => rt.id));
-
-      // Fetch ketua for each RW and RT
-      const allRwRtIds = [...rwIds, ...rtIds];
-      const ketuaList = allRwRtIds.length > 0
+      // Pengurus aktif seluruh lembaga desa ini dalam satu kueri. Frontend menilai ketua,
+      // ketua ganda & jabatan di luar pemetaan memakai JABATAN_MAPPING (jabatanMapping.js).
+      // id lembaga berupa UUID unik lintas tabel, jadi cukup dikelompokkan per pengurusable_id.
+      const lembagaIds = [
+        ...rws.flatMap(rw => [rw.id, ...rw.rts.map(rt => rt.id)]),
+        ...posyandus.map(p => p.id),
+        ...lembagaLainnya.map(l => l.id),
+        ...[karangTaruna, lpm, satlinmas, pkk].filter(Boolean).map(l => l.id),
+      ];
+      const pengurusAktif = lembagaIds.length
         ? await prisma.pengurus.findMany({
-            where: {
-              pengurusable_id: { in: allRwRtIds },
-              pengurusable_type: { in: ['rws', 'rts'] },
-              status_jabatan: 'aktif',
-              jabatan: { in: ['Ketua RW', 'ketua rw', 'KETUA RW', 'Ketua RT', 'ketua rt', 'KETUA RT'] }
-            },
-            select: { pengurusable_id: true, nama_lengkap: true }
+            where: { pengurusable_id: { in: lembagaIds }, status_jabatan: 'aktif' },
+            select: { pengurusable_id: true, jabatan: true, nama_lengkap: true, status_verifikasi: true },
+            orderBy: { nama_lengkap: 'asc' },
           })
         : [];
-      const ketuaMap = Object.fromEntries(ketuaList.map(k => [k.pengurusable_id, k.nama_lengkap]));
-
-      // Count pengurus for each RW and RT (polymorphic: pengurusable_type + pengurusable_id)
-      const [rwPengurusCounts, rtPengurusCounts] = await Promise.all([
-        rwIds.length > 0
-          ? prisma.pengurus.groupBy({
-              by: ['pengurusable_id'],
-              where: { pengurusable_type: 'rws', pengurusable_id: { in: rwIds } },
-              _count: { id: true }
-            })
-          : [],
-        rtIds.length > 0
-          ? prisma.pengurus.groupBy({
-              by: ['pengurusable_id'],
-              where: { pengurusable_type: 'rts', pengurusable_id: { in: rtIds } },
-              _count: { id: true }
-            })
-          : []
-      ]);
-
-      const rwPengMap = Object.fromEntries(rwPengurusCounts.map(r => [r.pengurusable_id, r._count.id]));
-      const rtPengMap = Object.fromEntries(rtPengurusCounts.map(r => [r.pengurusable_id, r._count.id]));
+      const pengurusMap = new Map();
+      pengurusAktif.forEach(p => {
+        if (!pengurusMap.has(p.pengurusable_id)) pengurusMap.set(p.pengurusable_id, []);
+        pengurusMap.get(p.pengurusable_id).push({
+          jabatan: p.jabatan,
+          nama: p.nama_lengkap,
+          status_verifikasi: p.status_verifikasi,
+        });
+      });
+      const denganPengurus = (l) => (l ? { ...l, pengurus: pengurusMap.get(l.id) || [] } : null);
 
       const rwsWithRts = rws.map(rw => ({
         id: rw.id,
@@ -895,14 +864,9 @@ class SummaryController {
         desa_id: rw.desa_id,
         status_kelembagaan: rw.status_kelembagaan,
         status_verifikasi: rw.status_verifikasi,
-        ketua_nama: ketuaMap[rw.id] || null,
         rt_count: rw.rts.length,
-        pengurus_count: rwPengMap[rw.id] || 0,
-        rts: rw.rts.map(rt => ({
-          ...rt,
-          ketua_nama: ketuaMap[rt.id] || null,
-          pengurus_count: rtPengMap[rt.id] || 0,
-        })),
+        pengurus: pengurusMap.get(rw.id) || [],
+        rts: rw.rts.map(denganPengurus),
         created_at: rw.created_at,
         updated_at: rw.updated_at
       }));
@@ -919,12 +883,12 @@ class SummaryController {
           },
           kelembagaan: {
             rw: rwsWithRts,
-            posyandu: await enrichWithKetua(posyandus, 'posyandus', ['Ketua', 'ketua', 'KETUA', 'Ketua Posyandu', 'ketua posyandu']),
-            karang_taruna: karangTaruna ? { ...karangTaruna, ketua_nama: await getKetuaNama(karangTaruna.id, 'karang_taruna', ['Ketua', 'ketua', 'KETUA', 'Ketua Karang Taruna', 'ketua karang taruna']) } : null,
-            lpm: lpm ? { ...lpm, ketua_nama: await getKetuaNama(lpm.id, 'lpm', ['Ketua', 'ketua', 'KETUA', 'Ketua LPM', 'ketua lpm']) } : null,
-            satlinmas: satlinmas ? { ...satlinmas, ketua_nama: await getKetuaNama(satlinmas.id, 'satlinmas', ['Ketua', 'ketua', 'KETUA', 'Ketua Satlinmas', 'ketua satlinmas', 'Komandan', 'komandan', 'KOMANDAN']) } : null,
-            pkk: pkk ? { ...pkk, ketua_nama: await getKetuaNama(pkk.id, 'pkk', ['Ketua', 'ketua', 'KETUA', 'Ketua PKK', 'ketua pkk', 'Ketua TP PKK', 'ketua tp pkk']) } : null,
-            lembaga_lainnya: await enrichWithKetua(lembagaLainnya, 'lembaga-lainnya', ['Ketua', 'ketua', 'KETUA'])
+            posyandu: posyandus.map(denganPengurus),
+            karang_taruna: denganPengurus(karangTaruna),
+            lpm: denganPengurus(lpm),
+            satlinmas: denganPengurus(satlinmas),
+            pkk: denganPengurus(pkk),
+            lembaga_lainnya: lembagaLainnya.map(denganPengurus)
           }
         }
       });
@@ -1082,14 +1046,7 @@ class SummaryController {
    */
   async statistikTahunan(req, res) {
     try {
-      const tables = [
-        { key: 'rw', model: 'rws', label: 'RW' },
-        { key: 'rt', model: 'rts', label: 'RT' },
-        { key: 'posyandu', model: 'posyandus', label: 'Posyandu' },
-        { key: 'karangTaruna', model: 'karang_tarunas', label: 'Karang Taruna' },
-        { key: 'lpm', model: 'lpms', label: 'LPM' },
-        { key: 'pkk', model: 'pkks', label: 'PKK' },
-      ];
+      const tables = VERIFIKASI_TABLES;
 
       const results = await Promise.all(
         tables.map(async (t) => {
@@ -1202,38 +1159,366 @@ class SummaryController {
         ? Math.round((grandTotals.aktif / grandTotals.total) * 100)
         : 0;
 
-      // Rekap per verifikator: lembaga (6 tabel di atas) & pengurus yang saat ini berstatus verified.
-      // Nama diambil dari kolom verifikator_nama; data lama tanpa nama dikelompokkan sebagai null.
-      const lembagaUnion = tables
-        .map(t => `SELECT verifikator_nama FROM ${t.model} WHERE status_verifikasi = 'verified'`)
-        .join(' UNION ALL ');
-      const [lembagaPerVerifikator, pengurusPerVerifikator] = await Promise.all([
-        prisma.$queryRawUnsafe(`SELECT verifikator_nama AS nama, COUNT(*) AS jumlah FROM (${lembagaUnion}) x GROUP BY verifikator_nama`),
-        prisma.$queryRawUnsafe(`SELECT verifikator_nama AS nama, COUNT(*) AS jumlah FROM pengurus WHERE status_verifikasi = 'verified' GROUP BY verifikator_nama`),
-      ]);
-      const verifikatorMap = new Map();
-      const tambah = (rows, field) => rows.forEach(r => {
-        const nama = r.nama || null;
-        if (!verifikatorMap.has(nama)) verifikatorMap.set(nama, { nama, lembaga: 0, pengurus: 0 });
-        verifikatorMap.get(nama)[field] = Number(r.jumlah);
-      });
-      tambah(lembagaPerVerifikator, 'lembaga');
-      tambah(pengurusPerVerifikator, 'pengurus');
-      const verifikator = [...verifikatorMap.values()]
-        .sort((a, b) => (b.lembaga + b.pengurus) - (a.lembaga + a.pengurus));
-
       res.json({
         success: true,
         data: {
           years,
           per_lembaga: perLembaga,
           grand_totals: grandTotals,
-          verifikator,
         }
       });
     } catch (error) {
       console.error('Error in statistikTahunan:', error);
       res.status(500).json({ success: false, message: 'Gagal mengambil statistik tahunan', error: error.message });
+    }
+  }
+
+  /**
+   * Tren verifikasi harian per lembaga (RW, RT, Posyandu, Karang Taruna, LPM, PKK)
+   * GET /api/kelembagaan/tren-verifikasi-harian?hari=30
+   *
+   * Basisnya verified_at lembaga yang saat ini berstatus verified. verified_at ditimpa
+   * tiap perubahan status, jadi lembaga yang kemudian ditolak tidak ikut terhitung.
+   */
+  async trenVerifikasiHarian(req, res) {
+    try {
+      const hari = Math.min(Math.max(parseInt(req.query.hari, 10) || 30, 1), 365);
+      const tables = VERIFIKASI_TABLES;
+
+      // Deret tanggal WIB lengkap (hari tanpa verifikasi tetap tampil sebagai 0)
+      const today = new Date(Date.now() + 7 * 3600 * 1000);
+      const tanggal = [];
+      for (let i = hari - 1; i >= 0; i--) {
+        tanggal.push(new Date(today.getTime() - i * 86400000).toISOString().slice(0, 10));
+      }
+
+      const tglWib = tanggalWib('verified_at');
+      const results = await Promise.all(
+        tables.map(t => prisma.$queryRawUnsafe(
+          `SELECT ${tglWib} AS tanggal, COUNT(*) AS jumlah FROM ${t.model}
+           WHERE status_verifikasi = 'verified' AND verified_at IS NOT NULL
+             AND ${tglWib} >= ?
+           GROUP BY tanggal`,
+          tanggal[0]
+        ))
+      );
+
+      const perLembaga = {};
+      tables.forEach((t, idx) => {
+        const map = new Map(results[idx].map(r => [
+          r.tanggal instanceof Date ? r.tanggal.toISOString().slice(0, 10) : String(r.tanggal).slice(0, 10),
+          Number(r.jumlah),
+        ]));
+        perLembaga[t.key] = { label: t.label, data: tanggal.map(d => map.get(d) || 0) };
+      });
+
+      res.json({ success: true, data: { tanggal, per_lembaga: perLembaga } });
+    } catch (error) {
+      console.error('Error in trenVerifikasiHarian:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil tren verifikasi harian', error: error.message });
+    }
+  }
+
+  /**
+   * Capaian verifikasi per desa, dirinci per lembaga.
+   * GET /api/kelembagaan/capaian-verifikasi/per-desa
+   */
+  async capaianVerifikasiPerDesa(req, res) {
+    try {
+      const [desas, ...perTabel] = await Promise.all([
+        prisma.desas.findMany({
+          select: {
+            id: true,
+            nama: true,
+            status_pemerintahan: true,
+            kecamatans: { select: { id: true, nama: true } },
+          },
+          orderBy: [{ kecamatan_id: 'asc' }, { nama: 'asc' }],
+        }),
+        ...VERIFIKASI_TABLES.map(t => prisma.$queryRawUnsafe(
+          `SELECT desa_id,
+             COUNT(*) AS total,
+             SUM(status_verifikasi = 'verified') AS verified,
+             SUM(status_verifikasi = 'ditolak') AS ditolak
+           FROM ${t.model} GROUP BY desa_id`
+        )),
+      ]);
+
+      const byDesa = new Map(desas.map(d => [String(d.id), {
+        id: String(d.id),
+        nama: d.nama,
+        status_pemerintahan: d.status_pemerintahan,
+        kecamatan_id: d.kecamatans ? String(d.kecamatans.id) : null,
+        kecamatan: d.kecamatans?.nama || null,
+        lembaga: Object.fromEntries(VERIFIKASI_TABLES.map(t => [t.key, { total: 0, verified: 0, ditolak: 0 }])),
+        total: 0,
+        verified: 0,
+        ditolak: 0,
+      }]));
+
+      VERIFIKASI_TABLES.forEach((t, idx) => {
+        perTabel[idx].forEach(r => {
+          const desa = byDesa.get(String(r.desa_id));
+          if (!desa) return;
+          const row = { total: Number(r.total), verified: Number(r.verified || 0), ditolak: Number(r.ditolak || 0) };
+          desa.lembaga[t.key] = row;
+          desa.total += row.total;
+          desa.verified += row.verified;
+          desa.ditolak += row.ditolak;
+        });
+      });
+
+      res.json({
+        success: true,
+        data: {
+          lembaga: VERIFIKASI_TABLES.map(t => ({ key: t.key, label: t.label })),
+          desa: [...byDesa.values()],
+        },
+      });
+    } catch (error) {
+      console.error('Error in capaianVerifikasiPerDesa:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil capaian verifikasi per desa', error: error.message });
+    }
+  }
+
+  /**
+   * Aktivitas verifikator: rekap per verifikator + riwayat verifikasi terbaru.
+   * GET /api/kelembagaan/capaian-verifikasi/aktivitas?hari=30&user_id=&page=1&limit=20
+   * hari=0 berarti seluruh waktu. Sumbernya kelembagaan_activity_logs (verify & verify_pengurus),
+   * jadi lembaga yang diverifikasi ulang tercatat sebagai aktivitas terpisah.
+   */
+  async aktivitasVerifikator(req, res) {
+    try {
+      const hari = Math.min(Math.max(parseInt(req.query.hari, 10) || 0, 0), 365);
+      const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 20, 1), 100);
+      const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
+      const userId = req.query.user_id && /^\d+$/.test(req.query.user_id) ? req.query.user_id : null;
+
+      // Awal hari WIB, (hari - 1) hari yang lalu, dalam detik epoch
+      const DAY = 86400;
+      const sejak = hari > 0
+        ? (Math.floor((Date.now() / 1000 + 7 * 3600) / DAY) - (hari - 1)) * DAY - 7 * 3600
+        : 0;
+
+      const where = `activity_type IN ('verify', 'verify_pengurus') AND UNIX_TIMESTAMP(created_at) >= ?`;
+      const whereLog = `l.activity_type IN ('verify', 'verify_pengurus') AND UNIX_TIMESTAMP(l.created_at) >= ?`
+        + (userId ? ' AND l.user_id = ?' : '');
+      const logParams = userId ? [sejak, userId] : [sejak];
+
+      const [rekap, logs, jumlah] = await Promise.all([
+        prisma.$queryRawUnsafe(
+          `SELECT user_id, MAX(user_name) AS nama, MAX(user_role) AS role,
+             COUNT(*) AS total,
+             SUM(activity_type = 'verify') AS lembaga,
+             SUM(activity_type = 'verify_pengurus') AS pengurus,
+             SUM(action_description LIKE '%menolak verifikasi%') AS ditolak,
+             SUM(action_description LIKE '%membatalkan verifikasi%') AS dibatalkan,
+             COUNT(DISTINCT ${tanggalWib('created_at')}) AS hari_aktif,
+             MAX(UNIX_TIMESTAMP(created_at)) AS terakhir
+           FROM kelembagaan_activity_logs
+           WHERE ${where}
+           GROUP BY user_id
+           ORDER BY total DESC`,
+          sejak
+        ),
+        prisma.$queryRawUnsafe(
+          `SELECT l.id, l.user_id, l.user_name, l.kelembagaan_type, l.kelembagaan_nama, l.activity_type,
+             l.entity_name, l.action_description, UNIX_TIMESTAMP(l.created_at) AS waktu,
+             d.id AS desa_id, d.nama AS desa, k.nama AS kecamatan
+           FROM kelembagaan_activity_logs l
+           LEFT JOIN desas d ON d.id = l.desa_id
+           LEFT JOIN kecamatans k ON k.id = d.kecamatan_id
+           WHERE ${whereLog}
+           ORDER BY l.created_at DESC
+           LIMIT ? OFFSET ?`,
+          ...logParams, limit, (page - 1) * limit
+        ),
+        prisma.$queryRawUnsafe(
+          `SELECT COUNT(*) AS n FROM kelembagaan_activity_logs l WHERE ${whereLog}`,
+          ...logParams
+        ),
+      ]);
+
+      const statusDari = (desc = '') =>
+        desc.includes('menolak verifikasi') ? 'ditolak'
+          : desc.includes('membatalkan verifikasi') ? 'dibatalkan'
+            : 'verified';
+
+      res.json({
+        success: true,
+        data: {
+          hari,
+          verifikator: rekap.map(r => {
+            const total = Number(r.total);
+            const ditolak = Number(r.ditolak || 0);
+            const dibatalkan = Number(r.dibatalkan || 0);
+            return {
+              user_id: String(r.user_id),
+              nama: r.nama,
+              role: r.role,
+              total,
+              lembaga: Number(r.lembaga || 0),
+              pengurus: Number(r.pengurus || 0),
+              verified: total - ditolak - dibatalkan,
+              ditolak,
+              dibatalkan,
+              hari_aktif: Number(r.hari_aktif),
+              terakhir: r.terakhir ? Number(r.terakhir) * 1000 : null,
+            };
+          }),
+          riwayat: logs.map(l => ({
+            id: l.id,
+            user_id: String(l.user_id),
+            user_name: l.user_name,
+            kelembagaan_type: l.kelembagaan_type,
+            kelembagaan_nama: l.kelembagaan_nama,
+            jenis: l.activity_type === 'verify_pengurus' ? 'pengurus' : 'lembaga',
+            entity_name: l.entity_name,
+            status: statusDari(l.action_description),
+            waktu: Number(l.waktu) * 1000,
+            desa_id: l.desa_id ? String(l.desa_id) : null,
+            desa: l.desa,
+            kecamatan: l.kecamatan,
+          })),
+          pagination: { page, limit, total: Number(jumlah[0]?.n || 0) },
+        },
+      });
+    } catch (error) {
+      console.error('Error in aktivitasVerifikator:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil aktivitas verifikator', error: error.message });
+    }
+  }
+
+  /**
+   * Permasalahan data kelembagaan per desa.
+   * GET /api/kelembagaan/capaian-verifikasi/permasalahan
+   *
+   * Yang diperiksa hanya lembaga & pengurus berstatus aktif. Desa yang punya minimal satu
+   * masalah saja yang dikembalikan, beserta rincian per jenis lembaga.
+   */
+  async permasalahanDesa(req, res) {
+    try {
+      // ponytail: "ketua" ditebak dari teks jabatan (isian bebas, mis. "KETUA RT 001");
+      // Ketua Bidang / Ketua Pokja / Wakil Ketua tidak dihitung sebagai ketua lembaga.
+      const kondisiKetua = `(jabatan LIKE 'KETUA%' AND jabatan NOT LIKE 'KETUA BIDANG%' AND jabatan NOT LIKE 'KETUA POKJA%')`;
+
+      const [desas, produkHukum, rwTanpaRt, ...perTabel] = await Promise.all([
+        prisma.desas.findMany({
+          select: { id: true, nama: true, status_pemerintahan: true, kecamatans: { select: { id: true, nama: true } } },
+          orderBy: [{ kecamatan_id: 'asc' }, { nama: 'asc' }],
+        }),
+        prisma.$queryRawUnsafe(
+          `SELECT desa_id, COUNT(*) AS total, SUM(jenis = 'Keputusan Kepala Desa') AS sk_kades
+           FROM produk_hukums GROUP BY desa_id`
+        ),
+        prisma.$queryRawUnsafe(
+          `SELECT r.desa_id, COUNT(*) AS jumlah FROM rws r
+           WHERE r.status_kelembagaan = 'aktif'
+             AND NOT EXISTS (SELECT 1 FROM rts t WHERE t.rw_id = r.id AND t.status_kelembagaan = 'aktif')
+           GROUP BY r.desa_id`
+        ),
+        // pengurusable_type memakai nama tabel lembaga (rws, rts, posyandus, ...)
+        ...VERIFIKASI_TABLES.map(t => prisma.$queryRawUnsafe(
+          `SELECT l.desa_id,
+             COUNT(*) AS aktif,
+             SUM(l.produk_hukum_id IS NULL) AS tanpa_sk,
+             SUM(l.status_verifikasi = 'ditolak') AS ditolak,
+             SUM(p.pengurusable_id IS NULL) AS tanpa_pengurus,
+             SUM(p.pengurusable_id IS NOT NULL AND p.n_ketua = 0) AS tanpa_ketua,
+             SUM(p.n_ketua > 1) AS ketua_ganda,
+             COALESCE(SUM(p.n_pengurus), 0) AS pengurus,
+             COALESCE(SUM(p.n_tanpa_sk), 0) AS pengurus_tanpa_sk
+           FROM ${t.model} l
+           LEFT JOIN (
+             SELECT pengurusable_id,
+               COUNT(*) AS n_pengurus,
+               SUM(${kondisiKetua}) AS n_ketua,
+               SUM(produk_hukum_id IS NULL) AS n_tanpa_sk
+             FROM pengurus
+             WHERE pengurusable_type = '${t.model}' AND status_jabatan = 'aktif'
+             GROUP BY pengurusable_id
+           ) p ON p.pengurusable_id = l.id
+           WHERE l.status_kelembagaan = 'aktif'
+           GROUP BY l.desa_id`
+        )),
+      ]);
+
+      const kosong = () => ({ aktif: 0, tanpa_sk: 0, ditolak: 0, tanpa_pengurus: 0, tanpa_ketua: 0, ketua_ganda: 0, pengurus: 0, pengurus_tanpa_sk: 0 });
+      const byDesa = new Map(desas.map(d => [String(d.id), {
+        id: String(d.id),
+        nama: d.nama,
+        status_pemerintahan: d.status_pemerintahan,
+        kecamatan_id: d.kecamatans ? String(d.kecamatans.id) : null,
+        kecamatan: d.kecamatans?.nama || null,
+        produk_hukum: { total: 0, sk_kades: 0 },
+        rw_tanpa_rt: 0,
+        lembaga: Object.fromEntries(VERIFIKASI_TABLES.map(t => [t.key, kosong()])),
+      }]));
+
+      produkHukum.forEach(r => {
+        const d = byDesa.get(String(r.desa_id));
+        if (d) d.produk_hukum = { total: Number(r.total), sk_kades: Number(r.sk_kades || 0) };
+      });
+      rwTanpaRt.forEach(r => {
+        const d = byDesa.get(String(r.desa_id));
+        if (d) d.rw_tanpa_rt = Number(r.jumlah);
+      });
+      VERIFIKASI_TABLES.forEach((t, idx) => {
+        perTabel[idx].forEach(r => {
+          const d = byDesa.get(String(r.desa_id));
+          if (!d) return;
+          d.lembaga[t.key] = Object.fromEntries(Object.keys(kosong()).map(k => [k, Number(r[k] || 0)]));
+        });
+      });
+
+      // Jumlahkan satu metrik dari semua jenis lembaga; rincian dikirim untuk ditampilkan per lembaga
+      const jumlahkan = (d, metrik) => {
+        const rincian = VERIFIKASI_TABLES
+          .filter(t => d.lembaga[t.key][metrik] > 0)
+          .map(t => ({ key: t.key, label: t.label, jumlah: d.lembaga[t.key][metrik] }));
+        return { jumlah: rincian.reduce((s, r) => s + r.jumlah, 0), rincian };
+      };
+
+      const hasil = [];
+      byDesa.forEach(d => {
+        const masalah = [];
+        const tambah = (kode, jumlah, rincian = []) => jumlah > 0 && masalah.push({ kode, jumlah, rincian });
+        const totalAktif = VERIFIKASI_TABLES.reduce((s, t) => s + d.lembaga[t.key].aktif, 0);
+        const isDesa = d.status_pemerintahan !== 'kelurahan';
+
+        // Produk hukum desa (SK Kepala Desa) tidak berlaku bagi kelurahan
+        if (isDesa && d.produk_hukum.total === 0) tambah('tanpa_produk_hukum', 1);
+        else if (isDesa && d.produk_hukum.sk_kades === 0) tambah('tanpa_sk_kades', 1);
+
+        if (totalAktif === 0) {
+          tambah('tanpa_lembaga', 1);
+        } else {
+          const belumAda = VERIFIKASI_TABLES
+            .filter(t => d.lembaga[t.key].aktif === 0)
+            .map(t => ({ key: t.key, label: t.label, jumlah: 1 }));
+          tambah('belum_ada_lembaga', belumAda.length, belumAda);
+        }
+
+        ['tanpa_sk', 'ditolak', 'tanpa_pengurus', 'tanpa_ketua', 'ketua_ganda', 'pengurus_tanpa_sk'].forEach(metrik => {
+          const { jumlah, rincian } = jumlahkan(d, metrik);
+          tambah(metrik, jumlah, rincian);
+        });
+        tambah('rw_tanpa_rt', d.rw_tanpa_rt);
+
+        if (masalah.length) hasil.push({ ...d, masalah });
+      });
+
+      res.json({
+        success: true,
+        data: {
+          lembaga: VERIFIKASI_TABLES.map(t => ({ key: t.key, label: t.label })),
+          total_desa: desas.length,
+          desa: hasil,
+        },
+      });
+    } catch (error) {
+      console.error('Error in permasalahanDesa:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil permasalahan desa', error: error.message });
     }
   }
 

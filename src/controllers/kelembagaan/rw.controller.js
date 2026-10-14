@@ -536,8 +536,9 @@ class RWController {
    */
   async listRW(req, res) {
     try {
-      const { desaId } = req.query;
-      
+      // Frontend admin mengirim desa_id (getAdminParams); desaId dipertahankan untuk pemanggil lama
+      const desaId = req.query.desa_id || req.query.desaId;
+
       // Build where clause
       const whereClause = {};
       if (desaId) {
