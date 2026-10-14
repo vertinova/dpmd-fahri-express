@@ -167,16 +167,19 @@ function getDesaId(req) {
 }
 
 /**
+ * Peran dinas yang cakupannya lintas desa — desa sasaran ditentukan oleh
+ * parameter desa_id, bukan oleh desa milik akunnya.
+ */
+const ADMIN_LINTAS_DESA_ROLES = ['superadmin', 'pemberdayaan_masyarakat', 'pegawai', 'kepala_bidang', 'ketua_tim', 'kepala_dinas', 'sekretaris_dinas', 'bendahara'];
+
+/**
  * Validate desa access
  * Superadmin and admin can access any desa via desa_id parameter
  */
 function validateDesaAccess(req, res) {
   const user = req.user;
-  
-  // Admin roles that can access any desa via desa_id parameter
-  const adminRoles = ['superadmin', 'pemberdayaan_masyarakat', 'pegawai', 'kepala_bidang', 'ketua_tim', 'kepala_dinas', 'sekretaris_dinas', 'bendahara'];
-  
-  if (adminRoles.includes(user.role)) {
+
+  if (ADMIN_LINTAS_DESA_ROLES.includes(user.role)) {
     const desaId = req.query?.desa_id || req.body?.desa_id || req.desaId || req.user?.desa_id;
     if (!desaId) {
       res.status(403).json({ success: false, message: 'desa_id parameter diperlukan untuk admin' });
@@ -416,6 +419,7 @@ module.exports = {
   logKelembagaanActivity,
   getDesaId,
   validateDesaAccess,
+  ADMIN_LINTAS_DESA_ROLES,
   toUpper,
   createAjukanUlangHandler,
   validateKecamatanScope,

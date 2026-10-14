@@ -4,6 +4,7 @@ const multer = require('multer');
 const router = express.Router();
 const fs = require('fs');
 const { auth, checkRole } = require('../middlewares/auth');
+const { uploadPengurus } = require('../middlewares/upload');
 
 // In-memory multer for Excel import (no disk write)
 const uploadExcelMemory = multer({
@@ -187,6 +188,7 @@ router.put('/pengurus/:id/transfer', pengurusController.transferPengurus.bind(pe
 router.get('/pengurus/:id/bpjs', rtrwComparisonController.getPengurusBpjs.bind(rtrwComparisonController));
 router.get('/pengurus/:id', pengurusController.showPengurus.bind(pengurusController));
 router.get('/pengurus', pengurusController.getPengurusByKelembagaan.bind(pengurusController));
+router.put('/pengurus/:id', uploadPengurus.single('avatar'), pengurusController.updatePengurus.bind(pengurusController));
 router.delete('/pengurus/:id', pengurusController.deletePengurus.bind(pengurusController));
 
 // Admin only: Update pengurus verification status

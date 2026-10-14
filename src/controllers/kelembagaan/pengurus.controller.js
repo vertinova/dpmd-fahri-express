@@ -4,7 +4,7 @@
  * This is polymorphic - can be attached to any kelembagaan type
  */
 
-const { prisma, ACTIVITY_TYPES, ENTITY_TYPES, logKelembagaanActivity, validateDesaAccess, toUpper, validateKecamatanScope } = require('./base.controller');
+const { prisma, ACTIVITY_TYPES, ENTITY_TYPES, logKelembagaanActivity, validateDesaAccess, toUpper, validateKecamatanScope, ADMIN_LINTAS_DESA_ROLES } = require('./base.controller');
 const { v4: uuidv4 } = require('uuid');
 
 /**
@@ -401,20 +401,32 @@ class PengurusController {
 
   /**
    * Update pengurus
-   * PUT /api/desa/pengurus/:id
+   * PUT /api/desa/pengurus/:id — akun desa, terkunci ke desanya sendiri
+   * PUT /api/admin/pengurus/:id — staf dinas, lintas desa
    */
   async updatePengurus(req, res) {
     try {
       const user = req.user;
+
+      const pengurus = await prisma.pengurus.findUnique({
+        where: { id: String(req.params.id) }
+      });
+
+      if (!pengurus) {
+        return res.status(404).json({ success: false, message: 'Pengurus tidak ditemukan' });
+      }
+
+      // Staf dinas menyunting lintas desa lewat halaman bidang, yang URL-nya
+      // tidak membawa desa_id. Cakupannya diambil dari data pengurus itu
+      // sendiri; akun desa tetap divalidasi terhadap desanya.
+      if (ADMIN_LINTAS_DESA_ROLES.includes(user.role) && !req.query?.desa_id && !req.body?.desa_id) {
+        req.desaId = pengurus.desa_id;
+      }
+
       const desaId = validateDesaAccess(req, res);
       if (!desaId) return;
 
-      const existing = await prisma.pengurus.findFirst({
-        where: {
-          id: String(req.params.id),
-          desa_id: desaId
-        }
-      });
+      const existing = String(pengurus.desa_id) === String(desaId) ? pengurus : null;
 
       if (!existing) {
         return res.status(404).json({ success: false, message: 'Pengurus tidak ditemukan' });
