@@ -1,0 +1,3211 @@
+{
+ "kecamatans": [
+  {
+   "kode": "32.01.01",
+   "nama": "Cibinong"
+  },
+  {
+   "kode": "32.01.02",
+   "nama": "Gunung Putri"
+  },
+  {
+   "kode": "32.01.03",
+   "nama": "Citeureup"
+  },
+  {
+   "kode": "32.01.04",
+   "nama": "Sukaraja"
+  },
+  {
+   "kode": "32.01.05",
+   "nama": "Babakan Madang"
+  },
+  {
+   "kode": "32.01.06",
+   "nama": "Jonggol"
+  },
+  {
+   "kode": "32.01.07",
+   "nama": "Cileungsi"
+  },
+  {
+   "kode": "32.01.08",
+   "nama": "Cariu"
+  },
+  {
+   "kode": "32.01.09",
+   "nama": "Sukamakmur"
+  },
+  {
+   "kode": "32.01.10",
+   "nama": "Parung"
+  },
+  {
+   "kode": "32.01.11",
+   "nama": "Gunung Sindur"
+  },
+  {
+   "kode": "32.01.12",
+   "nama": "Kemang"
+  },
+  {
+   "kode": "32.01.13",
+   "nama": "Bojong Gede"
+  },
+  {
+   "kode": "32.01.14",
+   "nama": "Leuwiliang"
+  },
+  {
+   "kode": "32.01.15",
+   "nama": "Ciampea"
+  },
+  {
+   "kode": "32.01.16",
+   "nama": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.17",
+   "nama": "Pamijahan"
+  },
+  {
+   "kode": "32.01.18",
+   "nama": "Rumpin"
+  },
+  {
+   "kode": "32.01.19",
+   "nama": "Jasinga"
+  },
+  {
+   "kode": "32.01.20",
+   "nama": "Parung Panjang"
+  },
+  {
+   "kode": "32.01.21",
+   "nama": "Nanggung"
+  },
+  {
+   "kode": "32.01.22",
+   "nama": "Cigudeg"
+  },
+  {
+   "kode": "32.01.23",
+   "nama": "Tenjo"
+  },
+  {
+   "kode": "32.01.24",
+   "nama": "Ciawi"
+  },
+  {
+   "kode": "32.01.25",
+   "nama": "Cisarua"
+  },
+  {
+   "kode": "32.01.26",
+   "nama": "Megamendung"
+  },
+  {
+   "kode": "32.01.27",
+   "nama": "Caringin"
+  },
+  {
+   "kode": "32.01.28",
+   "nama": "Cijeruk"
+  },
+  {
+   "kode": "32.01.29",
+   "nama": "Ciomas"
+  },
+  {
+   "kode": "32.01.30",
+   "nama": "Dramaga"
+  },
+  {
+   "kode": "32.01.31",
+   "nama": "Tamansari"
+  },
+  {
+   "kode": "32.01.32",
+   "nama": "Klapanunggal"
+  },
+  {
+   "kode": "32.01.33",
+   "nama": "Ciseeng"
+  },
+  {
+   "kode": "32.01.34",
+   "nama": "Ranca Bungur"
+  },
+  {
+   "kode": "32.01.35",
+   "nama": "Sukajaya"
+  },
+  {
+   "kode": "32.01.36",
+   "nama": "Tanjungsari"
+  },
+  {
+   "kode": "32.01.37",
+   "nama": "Tajurhalang"
+  },
+  {
+   "kode": "32.01.38",
+   "nama": "Cigombong"
+  },
+  {
+   "kode": "32.01.39",
+   "nama": "Leuwisadeng"
+  },
+  {
+   "kode": "32.01.40",
+   "nama": "Tenjolaya"
+  }
+ ],
+ "desas": [
+  {
+   "kode": "32.01.01.1001",
+   "nama": "Pondok Rajeg",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.01",
+   "kecamatan": "Cibinong"
+  },
+  {
+   "kode": "32.01.01.1002",
+   "nama": "Karadenan",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.01",
+   "kecamatan": "Cibinong"
+  },
+  {
+   "kode": "32.01.01.1003",
+   "nama": "Harapan Jaya",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.01",
+   "kecamatan": "Cibinong"
+  },
+  {
+   "kode": "32.01.01.1004",
+   "nama": "Nanggewer",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.01",
+   "kecamatan": "Cibinong"
+  },
+  {
+   "kode": "32.01.01.1005",
+   "nama": "Nanggewer Mekar",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.01",
+   "kecamatan": "Cibinong"
+  },
+  {
+   "kode": "32.01.01.1006",
+   "nama": "Cibinong",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.01",
+   "kecamatan": "Cibinong"
+  },
+  {
+   "kode": "32.01.01.1007",
+   "nama": "Pakansari",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.01",
+   "kecamatan": "Cibinong"
+  },
+  {
+   "kode": "32.01.01.1008",
+   "nama": "Tengah",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.01",
+   "kecamatan": "Cibinong"
+  },
+  {
+   "kode": "32.01.01.1009",
+   "nama": "Sukahati",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.01",
+   "kecamatan": "Cibinong"
+  },
+  {
+   "kode": "32.01.01.1010",
+   "nama": "Ciriung",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.01",
+   "kecamatan": "Cibinong"
+  },
+  {
+   "kode": "32.01.01.1011",
+   "nama": "Cirimekar",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.01",
+   "kecamatan": "Cibinong"
+  },
+  {
+   "kode": "32.01.01.1012",
+   "nama": "Pabuaran",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.01",
+   "kecamatan": "Cibinong"
+  },
+  {
+   "kode": "32.01.01.1013",
+   "nama": "Pabuaran Mekar",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.01",
+   "kecamatan": "Cibinong"
+  },
+  {
+   "kode": "32.01.02.2001",
+   "nama": "Wanaherang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.02",
+   "kecamatan": "Gunung Putri"
+  },
+  {
+   "kode": "32.01.02.2002",
+   "nama": "Bojong Kulur",
+   "status": "desa",
+   "kecamatan_kode": "32.01.02",
+   "kecamatan": "Gunung Putri"
+  },
+  {
+   "kode": "32.01.02.2003",
+   "nama": "Ciangsana",
+   "status": "desa",
+   "kecamatan_kode": "32.01.02",
+   "kecamatan": "Gunung Putri"
+  },
+  {
+   "kode": "32.01.02.2004",
+   "nama": "Gunung Putri",
+   "status": "desa",
+   "kecamatan_kode": "32.01.02",
+   "kecamatan": "Gunung Putri"
+  },
+  {
+   "kode": "32.01.02.2005",
+   "nama": "Bojong Nangka",
+   "status": "desa",
+   "kecamatan_kode": "32.01.02",
+   "kecamatan": "Gunung Putri"
+  },
+  {
+   "kode": "32.01.02.2006",
+   "nama": "Tlajung Udik",
+   "status": "desa",
+   "kecamatan_kode": "32.01.02",
+   "kecamatan": "Gunung Putri"
+  },
+  {
+   "kode": "32.01.02.2007",
+   "nama": "Cicadas",
+   "status": "desa",
+   "kecamatan_kode": "32.01.02",
+   "kecamatan": "Gunung Putri"
+  },
+  {
+   "kode": "32.01.02.2008",
+   "nama": "Cikeas Udik",
+   "status": "desa",
+   "kecamatan_kode": "32.01.02",
+   "kecamatan": "Gunung Putri"
+  },
+  {
+   "kode": "32.01.02.2009",
+   "nama": "Nagrak",
+   "status": "desa",
+   "kecamatan_kode": "32.01.02",
+   "kecamatan": "Gunung Putri"
+  },
+  {
+   "kode": "32.01.02.2010",
+   "nama": "Karanggan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.02",
+   "kecamatan": "Gunung Putri"
+  },
+  {
+   "kode": "32.01.03.1006",
+   "nama": "Puspanegara",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.03",
+   "kecamatan": "Citeureup"
+  },
+  {
+   "kode": "32.01.03.1007",
+   "nama": "Karang Asem Barat",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.03",
+   "kecamatan": "Citeureup"
+  },
+  {
+   "kode": "32.01.03.2001",
+   "nama": "Puspasari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.03",
+   "kecamatan": "Citeureup"
+  },
+  {
+   "kode": "32.01.03.2002",
+   "nama": "Citeureup",
+   "status": "desa",
+   "kecamatan_kode": "32.01.03",
+   "kecamatan": "Citeureup"
+  },
+  {
+   "kode": "32.01.03.2003",
+   "nama": "Leuwinutug",
+   "status": "desa",
+   "kecamatan_kode": "32.01.03",
+   "kecamatan": "Citeureup"
+  },
+  {
+   "kode": "32.01.03.2004",
+   "nama": "Tajur",
+   "status": "desa",
+   "kecamatan_kode": "32.01.03",
+   "kecamatan": "Citeureup"
+  },
+  {
+   "kode": "32.01.03.2005",
+   "nama": "Sanja",
+   "status": "desa",
+   "kecamatan_kode": "32.01.03",
+   "kecamatan": "Citeureup"
+  },
+  {
+   "kode": "32.01.03.2008",
+   "nama": "Karang Asem Timur",
+   "status": "desa",
+   "kecamatan_kode": "32.01.03",
+   "kecamatan": "Citeureup"
+  },
+  {
+   "kode": "32.01.03.2009",
+   "nama": "Tarikolot",
+   "status": "desa",
+   "kecamatan_kode": "32.01.03",
+   "kecamatan": "Citeureup"
+  },
+  {
+   "kode": "32.01.03.2010",
+   "nama": "Gunungsari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.03",
+   "kecamatan": "Citeureup"
+  },
+  {
+   "kode": "32.01.03.2011",
+   "nama": "Tangkil",
+   "status": "desa",
+   "kecamatan_kode": "32.01.03",
+   "kecamatan": "Citeureup"
+  },
+  {
+   "kode": "32.01.03.2012",
+   "nama": "Sukahati",
+   "status": "desa",
+   "kecamatan_kode": "32.01.03",
+   "kecamatan": "Citeureup"
+  },
+  {
+   "kode": "32.01.03.2013",
+   "nama": "Hambalang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.03",
+   "kecamatan": "Citeureup"
+  },
+  {
+   "kode": "32.01.03.2014",
+   "nama": "Pasirmukti",
+   "status": "desa",
+   "kecamatan_kode": "32.01.03",
+   "kecamatan": "Citeureup"
+  },
+  {
+   "kode": "32.01.04.2001",
+   "nama": "Gununggeulis",
+   "status": "desa",
+   "kecamatan_kode": "32.01.04",
+   "kecamatan": "Sukaraja"
+  },
+  {
+   "kode": "32.01.04.2002",
+   "nama": "Cilebut Timur",
+   "status": "desa",
+   "kecamatan_kode": "32.01.04",
+   "kecamatan": "Sukaraja"
+  },
+  {
+   "kode": "32.01.04.2003",
+   "nama": "Cilebut Barat",
+   "status": "desa",
+   "kecamatan_kode": "32.01.04",
+   "kecamatan": "Sukaraja"
+  },
+  {
+   "kode": "32.01.04.2004",
+   "nama": "Cibanon",
+   "status": "desa",
+   "kecamatan_kode": "32.01.04",
+   "kecamatan": "Sukaraja"
+  },
+  {
+   "kode": "32.01.04.2005",
+   "nama": "Nagrak",
+   "status": "desa",
+   "kecamatan_kode": "32.01.04",
+   "kecamatan": "Sukaraja"
+  },
+  {
+   "kode": "32.01.04.2006",
+   "nama": "Sukatani",
+   "status": "desa",
+   "kecamatan_kode": "32.01.04",
+   "kecamatan": "Sukaraja"
+  },
+  {
+   "kode": "32.01.04.2007",
+   "nama": "Sukaraja",
+   "status": "desa",
+   "kecamatan_kode": "32.01.04",
+   "kecamatan": "Sukaraja"
+  },
+  {
+   "kode": "32.01.04.2008",
+   "nama": "Cikeas",
+   "status": "desa",
+   "kecamatan_kode": "32.01.04",
+   "kecamatan": "Sukaraja"
+  },
+  {
+   "kode": "32.01.04.2009",
+   "nama": "Pasir Jambu",
+   "status": "desa",
+   "kecamatan_kode": "32.01.04",
+   "kecamatan": "Sukaraja"
+  },
+  {
+   "kode": "32.01.04.2010",
+   "nama": "Cimandala",
+   "status": "desa",
+   "kecamatan_kode": "32.01.04",
+   "kecamatan": "Sukaraja"
+  },
+  {
+   "kode": "32.01.04.2011",
+   "nama": "Cijujung",
+   "status": "desa",
+   "kecamatan_kode": "32.01.04",
+   "kecamatan": "Sukaraja"
+  },
+  {
+   "kode": "32.01.04.2012",
+   "nama": "Cadasngampar",
+   "status": "desa",
+   "kecamatan_kode": "32.01.04",
+   "kecamatan": "Sukaraja"
+  },
+  {
+   "kode": "32.01.04.2013",
+   "nama": "Pasirlaja",
+   "status": "desa",
+   "kecamatan_kode": "32.01.04",
+   "kecamatan": "Sukaraja"
+  },
+  {
+   "kode": "32.01.05.2001",
+   "nama": "Cijayanti",
+   "status": "desa",
+   "kecamatan_kode": "32.01.05",
+   "kecamatan": "Babakan Madang"
+  },
+  {
+   "kode": "32.01.05.2002",
+   "nama": "Sumurbatu",
+   "status": "desa",
+   "kecamatan_kode": "32.01.05",
+   "kecamatan": "Babakan Madang"
+  },
+  {
+   "kode": "32.01.05.2003",
+   "nama": "Sentul",
+   "status": "desa",
+   "kecamatan_kode": "32.01.05",
+   "kecamatan": "Babakan Madang"
+  },
+  {
+   "kode": "32.01.05.2004",
+   "nama": "Karangtengah",
+   "status": "desa",
+   "kecamatan_kode": "32.01.05",
+   "kecamatan": "Babakan Madang"
+  },
+  {
+   "kode": "32.01.05.2005",
+   "nama": "Cipambuan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.05",
+   "kecamatan": "Babakan Madang"
+  },
+  {
+   "kode": "32.01.05.2006",
+   "nama": "Kadumanggu",
+   "status": "desa",
+   "kecamatan_kode": "32.01.05",
+   "kecamatan": "Babakan Madang"
+  },
+  {
+   "kode": "32.01.05.2007",
+   "nama": "Citaringgul",
+   "status": "desa",
+   "kecamatan_kode": "32.01.05",
+   "kecamatan": "Babakan Madang"
+  },
+  {
+   "kode": "32.01.05.2008",
+   "nama": "Babakan Madang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.05",
+   "kecamatan": "Babakan Madang"
+  },
+  {
+   "kode": "32.01.05.2009",
+   "nama": "Bojong Koneng",
+   "status": "desa",
+   "kecamatan_kode": "32.01.05",
+   "kecamatan": "Babakan Madang"
+  },
+  {
+   "kode": "32.01.06.2001",
+   "nama": "Sukamaju",
+   "status": "desa",
+   "kecamatan_kode": "32.01.06",
+   "kecamatan": "Jonggol"
+  },
+  {
+   "kode": "32.01.06.2002",
+   "nama": "Sirnagalih",
+   "status": "desa",
+   "kecamatan_kode": "32.01.06",
+   "kecamatan": "Jonggol"
+  },
+  {
+   "kode": "32.01.06.2003",
+   "nama": "Singajaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.06",
+   "kecamatan": "Jonggol"
+  },
+  {
+   "kode": "32.01.06.2004",
+   "nama": "Sukasirna",
+   "status": "desa",
+   "kecamatan_kode": "32.01.06",
+   "kecamatan": "Jonggol"
+  },
+  {
+   "kode": "32.01.06.2005",
+   "nama": "Sukanegara",
+   "status": "desa",
+   "kecamatan_kode": "32.01.06",
+   "kecamatan": "Jonggol"
+  },
+  {
+   "kode": "32.01.06.2006",
+   "nama": "Sukamanah",
+   "status": "desa",
+   "kecamatan_kode": "32.01.06",
+   "kecamatan": "Jonggol"
+  },
+  {
+   "kode": "32.01.06.2007",
+   "nama": "Weninggalih",
+   "status": "desa",
+   "kecamatan_kode": "32.01.06",
+   "kecamatan": "Jonggol"
+  },
+  {
+   "kode": "32.01.06.2008",
+   "nama": "Cibodas",
+   "status": "desa",
+   "kecamatan_kode": "32.01.06",
+   "kecamatan": "Jonggol"
+  },
+  {
+   "kode": "32.01.06.2009",
+   "nama": "Jonggol",
+   "status": "desa",
+   "kecamatan_kode": "32.01.06",
+   "kecamatan": "Jonggol"
+  },
+  {
+   "kode": "32.01.06.2010",
+   "nama": "Bendungan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.06",
+   "kecamatan": "Jonggol"
+  },
+  {
+   "kode": "32.01.06.2011",
+   "nama": "Singasari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.06",
+   "kecamatan": "Jonggol"
+  },
+  {
+   "kode": "32.01.06.2012",
+   "nama": "Balekambang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.06",
+   "kecamatan": "Jonggol"
+  },
+  {
+   "kode": "32.01.06.2013",
+   "nama": "Sukajaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.06",
+   "kecamatan": "Jonggol"
+  },
+  {
+   "kode": "32.01.06.2014",
+   "nama": "Sukagalih",
+   "status": "desa",
+   "kecamatan_kode": "32.01.06",
+   "kecamatan": "Jonggol"
+  },
+  {
+   "kode": "32.01.07.2001",
+   "nama": "Pasirangin",
+   "status": "desa",
+   "kecamatan_kode": "32.01.07",
+   "kecamatan": "Cileungsi"
+  },
+  {
+   "kode": "32.01.07.2002",
+   "nama": "Mekarsari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.07",
+   "kecamatan": "Cileungsi"
+  },
+  {
+   "kode": "32.01.07.2003",
+   "nama": "Mampir",
+   "status": "desa",
+   "kecamatan_kode": "32.01.07",
+   "kecamatan": "Cileungsi"
+  },
+  {
+   "kode": "32.01.07.2004",
+   "nama": "Dayeuh",
+   "status": "desa",
+   "kecamatan_kode": "32.01.07",
+   "kecamatan": "Cileungsi"
+  },
+  {
+   "kode": "32.01.07.2005",
+   "nama": "Gandoang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.07",
+   "kecamatan": "Cileungsi"
+  },
+  {
+   "kode": "32.01.07.2006",
+   "nama": "Jatisari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.07",
+   "kecamatan": "Cileungsi"
+  },
+  {
+   "kode": "32.01.07.2007",
+   "nama": "Cileungsi Kidul",
+   "status": "desa",
+   "kecamatan_kode": "32.01.07",
+   "kecamatan": "Cileungsi"
+  },
+  {
+   "kode": "32.01.07.2008",
+   "nama": "Cipeucang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.07",
+   "kecamatan": "Cileungsi"
+  },
+  {
+   "kode": "32.01.07.2009",
+   "nama": "Situsari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.07",
+   "kecamatan": "Cileungsi"
+  },
+  {
+   "kode": "32.01.07.2010",
+   "nama": "Cipenjo",
+   "status": "desa",
+   "kecamatan_kode": "32.01.07",
+   "kecamatan": "Cileungsi"
+  },
+  {
+   "kode": "32.01.07.2011",
+   "nama": "Limusnunggal",
+   "status": "desa",
+   "kecamatan_kode": "32.01.07",
+   "kecamatan": "Cileungsi"
+  },
+  {
+   "kode": "32.01.07.2012",
+   "nama": "Cileungsi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.07",
+   "kecamatan": "Cileungsi"
+  },
+  {
+   "kode": "32.01.08.2001",
+   "nama": "Karyamekar",
+   "status": "desa",
+   "kecamatan_kode": "32.01.08",
+   "kecamatan": "Cariu"
+  },
+  {
+   "kode": "32.01.08.2002",
+   "nama": "Babakanraden",
+   "status": "desa",
+   "kecamatan_kode": "32.01.08",
+   "kecamatan": "Cariu"
+  },
+  {
+   "kode": "32.01.08.2003",
+   "nama": "Cikutamahi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.08",
+   "kecamatan": "Cariu"
+  },
+  {
+   "kode": "32.01.08.2004",
+   "nama": "Kutamekar",
+   "status": "desa",
+   "kecamatan_kode": "32.01.08",
+   "kecamatan": "Cariu"
+  },
+  {
+   "kode": "32.01.08.2005",
+   "nama": "Cariu",
+   "status": "desa",
+   "kecamatan_kode": "32.01.08",
+   "kecamatan": "Cariu"
+  },
+  {
+   "kode": "32.01.08.2006",
+   "nama": "Mekarwangi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.08",
+   "kecamatan": "Cariu"
+  },
+  {
+   "kode": "32.01.08.2007",
+   "nama": "Bantarkuning",
+   "status": "desa",
+   "kecamatan_kode": "32.01.08",
+   "kecamatan": "Cariu"
+  },
+  {
+   "kode": "32.01.08.2008",
+   "nama": "Sukajadi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.08",
+   "kecamatan": "Cariu"
+  },
+  {
+   "kode": "32.01.08.2009",
+   "nama": "Tegalpanjang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.08",
+   "kecamatan": "Cariu"
+  },
+  {
+   "kode": "32.01.08.2010",
+   "nama": "Cibatutiga",
+   "status": "desa",
+   "kecamatan_kode": "32.01.08",
+   "kecamatan": "Cariu"
+  },
+  {
+   "kode": "32.01.09.2001",
+   "nama": "Wargajaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.09",
+   "kecamatan": "Sukamakmur"
+  },
+  {
+   "kode": "32.01.09.2002",
+   "nama": "Pabuaran",
+   "status": "desa",
+   "kecamatan_kode": "32.01.09",
+   "kecamatan": "Sukamakmur"
+  },
+  {
+   "kode": "32.01.09.2003",
+   "nama": "Sukadamai",
+   "status": "desa",
+   "kecamatan_kode": "32.01.09",
+   "kecamatan": "Sukamakmur"
+  },
+  {
+   "kode": "32.01.09.2004",
+   "nama": "Sukawangi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.09",
+   "kecamatan": "Sukamakmur"
+  },
+  {
+   "kode": "32.01.09.2005",
+   "nama": "Cibadak",
+   "status": "desa",
+   "kecamatan_kode": "32.01.09",
+   "kecamatan": "Sukamakmur"
+  },
+  {
+   "kode": "32.01.09.2006",
+   "nama": "Sukaresmi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.09",
+   "kecamatan": "Sukamakmur"
+  },
+  {
+   "kode": "32.01.09.2007",
+   "nama": "Sukamulya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.09",
+   "kecamatan": "Sukamakmur"
+  },
+  {
+   "kode": "32.01.09.2008",
+   "nama": "Sukaharja",
+   "status": "desa",
+   "kecamatan_kode": "32.01.09",
+   "kecamatan": "Sukamakmur"
+  },
+  {
+   "kode": "32.01.09.2009",
+   "nama": "Sirnajaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.09",
+   "kecamatan": "Sukamakmur"
+  },
+  {
+   "kode": "32.01.09.2010",
+   "nama": "Sukamakmur",
+   "status": "desa",
+   "kecamatan_kode": "32.01.09",
+   "kecamatan": "Sukamakmur"
+  },
+  {
+   "kode": "32.01.10.2001",
+   "nama": "Parung",
+   "status": "desa",
+   "kecamatan_kode": "32.01.10",
+   "kecamatan": "Parung"
+  },
+  {
+   "kode": "32.01.10.2002",
+   "nama": "Iwul",
+   "status": "desa",
+   "kecamatan_kode": "32.01.10",
+   "kecamatan": "Parung"
+  },
+  {
+   "kode": "32.01.10.2003",
+   "nama": "Bojongsempu",
+   "status": "desa",
+   "kecamatan_kode": "32.01.10",
+   "kecamatan": "Parung"
+  },
+  {
+   "kode": "32.01.10.2004",
+   "nama": "Waru",
+   "status": "desa",
+   "kecamatan_kode": "32.01.10",
+   "kecamatan": "Parung"
+  },
+  {
+   "kode": "32.01.10.2005",
+   "nama": "Cogreg",
+   "status": "desa",
+   "kecamatan_kode": "32.01.10",
+   "kecamatan": "Parung"
+  },
+  {
+   "kode": "32.01.10.2006",
+   "nama": "Pamegarsari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.10",
+   "kecamatan": "Parung"
+  },
+  {
+   "kode": "32.01.10.2007",
+   "nama": "Warujaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.10",
+   "kecamatan": "Parung"
+  },
+  {
+   "kode": "32.01.10.2008",
+   "nama": "Bojongindah",
+   "status": "desa",
+   "kecamatan_kode": "32.01.10",
+   "kecamatan": "Parung"
+  },
+  {
+   "kode": "32.01.10.2009",
+   "nama": "Jabonmekar",
+   "status": "desa",
+   "kecamatan_kode": "32.01.10",
+   "kecamatan": "Parung"
+  },
+  {
+   "kode": "32.01.11.2001",
+   "nama": "Cidokom",
+   "status": "desa",
+   "kecamatan_kode": "32.01.11",
+   "kecamatan": "Gunung Sindur"
+  },
+  {
+   "kode": "32.01.11.2002",
+   "nama": "Padurenan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.11",
+   "kecamatan": "Gunung Sindur"
+  },
+  {
+   "kode": "32.01.11.2003",
+   "nama": "Pengasinan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.11",
+   "kecamatan": "Gunung Sindur"
+  },
+  {
+   "kode": "32.01.11.2004",
+   "nama": "Curug",
+   "status": "desa",
+   "kecamatan_kode": "32.01.11",
+   "kecamatan": "Gunung Sindur"
+  },
+  {
+   "kode": "32.01.11.2005",
+   "nama": "Gunungsindur",
+   "status": "desa",
+   "kecamatan_kode": "32.01.11",
+   "kecamatan": "Gunung Sindur"
+  },
+  {
+   "kode": "32.01.11.2006",
+   "nama": "Jampang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.11",
+   "kecamatan": "Gunung Sindur"
+  },
+  {
+   "kode": "32.01.11.2007",
+   "nama": "Cibadung",
+   "status": "desa",
+   "kecamatan_kode": "32.01.11",
+   "kecamatan": "Gunung Sindur"
+  },
+  {
+   "kode": "32.01.11.2008",
+   "nama": "Cibinong",
+   "status": "desa",
+   "kecamatan_kode": "32.01.11",
+   "kecamatan": "Gunung Sindur"
+  },
+  {
+   "kode": "32.01.11.2009",
+   "nama": "Rawakalong",
+   "status": "desa",
+   "kecamatan_kode": "32.01.11",
+   "kecamatan": "Gunung Sindur"
+  },
+  {
+   "kode": "32.01.11.2010",
+   "nama": "Pabuaran",
+   "status": "desa",
+   "kecamatan_kode": "32.01.11",
+   "kecamatan": "Gunung Sindur"
+  },
+  {
+   "kode": "32.01.12.1006",
+   "nama": "Atang Senjaya",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.12",
+   "kecamatan": "Kemang"
+  },
+  {
+   "kode": "32.01.12.2001",
+   "nama": "Bojong",
+   "status": "desa",
+   "kecamatan_kode": "32.01.12",
+   "kecamatan": "Kemang"
+  },
+  {
+   "kode": "32.01.12.2002",
+   "nama": "Parakanjaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.12",
+   "kecamatan": "Kemang"
+  },
+  {
+   "kode": "32.01.12.2003",
+   "nama": "Kemang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.12",
+   "kecamatan": "Kemang"
+  },
+  {
+   "kode": "32.01.12.2004",
+   "nama": "Pabuaran",
+   "status": "desa",
+   "kecamatan_kode": "32.01.12",
+   "kecamatan": "Kemang"
+  },
+  {
+   "kode": "32.01.12.2005",
+   "nama": "Semplak Barat",
+   "status": "desa",
+   "kecamatan_kode": "32.01.12",
+   "kecamatan": "Kemang"
+  },
+  {
+   "kode": "32.01.12.2007",
+   "nama": "Jampang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.12",
+   "kecamatan": "Kemang"
+  },
+  {
+   "kode": "32.01.12.2008",
+   "nama": "Pondok Udik",
+   "status": "desa",
+   "kecamatan_kode": "32.01.12",
+   "kecamatan": "Kemang"
+  },
+  {
+   "kode": "32.01.12.2009",
+   "nama": "Tegal",
+   "status": "desa",
+   "kecamatan_kode": "32.01.12",
+   "kecamatan": "Kemang"
+  },
+  {
+   "kode": "32.01.13.1007",
+   "nama": "Pabuaran",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.13",
+   "kecamatan": "Bojong Gede"
+  },
+  {
+   "kode": "32.01.13.2001",
+   "nama": "Bojongbaru",
+   "status": "desa",
+   "kecamatan_kode": "32.01.13",
+   "kecamatan": "Bojong Gede"
+  },
+  {
+   "kode": "32.01.13.2002",
+   "nama": "Cimanggis",
+   "status": "desa",
+   "kecamatan_kode": "32.01.13",
+   "kecamatan": "Bojong Gede"
+  },
+  {
+   "kode": "32.01.13.2003",
+   "nama": "Susukan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.13",
+   "kecamatan": "Bojong Gede"
+  },
+  {
+   "kode": "32.01.13.2004",
+   "nama": "Ragajaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.13",
+   "kecamatan": "Bojong Gede"
+  },
+  {
+   "kode": "32.01.13.2005",
+   "nama": "Kedungwaringin",
+   "status": "desa",
+   "kecamatan_kode": "32.01.13",
+   "kecamatan": "Bojong Gede"
+  },
+  {
+   "kode": "32.01.13.2006",
+   "nama": "Waringinjaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.13",
+   "kecamatan": "Bojong Gede"
+  },
+  {
+   "kode": "32.01.13.2008",
+   "nama": "Rawapanjang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.13",
+   "kecamatan": "Bojong Gede"
+  },
+  {
+   "kode": "32.01.13.2009",
+   "nama": "Bojonggede",
+   "status": "desa",
+   "kecamatan_kode": "32.01.13",
+   "kecamatan": "Bojong Gede"
+  },
+  {
+   "kode": "32.01.14.2001",
+   "nama": "Leuwiliang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.14",
+   "kecamatan": "Leuwiliang"
+  },
+  {
+   "kode": "32.01.14.2002",
+   "nama": "Purasari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.14",
+   "kecamatan": "Leuwiliang"
+  },
+  {
+   "kode": "32.01.14.2003",
+   "nama": "Karyasari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.14",
+   "kecamatan": "Leuwiliang"
+  },
+  {
+   "kode": "32.01.14.2004",
+   "nama": "Pabangbon",
+   "status": "desa",
+   "kecamatan_kode": "32.01.14",
+   "kecamatan": "Leuwiliang"
+  },
+  {
+   "kode": "32.01.14.2005",
+   "nama": "Karacak",
+   "status": "desa",
+   "kecamatan_kode": "32.01.14",
+   "kecamatan": "Leuwiliang"
+  },
+  {
+   "kode": "32.01.14.2006",
+   "nama": "Barengkok",
+   "status": "desa",
+   "kecamatan_kode": "32.01.14",
+   "kecamatan": "Leuwiliang"
+  },
+  {
+   "kode": "32.01.14.2007",
+   "nama": "Leuwimekar",
+   "status": "desa",
+   "kecamatan_kode": "32.01.14",
+   "kecamatan": "Leuwiliang"
+  },
+  {
+   "kode": "32.01.14.2008",
+   "nama": "Puraseda",
+   "status": "desa",
+   "kecamatan_kode": "32.01.14",
+   "kecamatan": "Leuwiliang"
+  },
+  {
+   "kode": "32.01.14.2009",
+   "nama": "Cibeber I",
+   "status": "desa",
+   "kecamatan_kode": "32.01.14",
+   "kecamatan": "Leuwiliang"
+  },
+  {
+   "kode": "32.01.14.2010",
+   "nama": "Cibeber II",
+   "status": "desa",
+   "kecamatan_kode": "32.01.14",
+   "kecamatan": "Leuwiliang"
+  },
+  {
+   "kode": "32.01.14.2011",
+   "nama": "Karehkel",
+   "status": "desa",
+   "kecamatan_kode": "32.01.14",
+   "kecamatan": "Leuwiliang"
+  },
+  {
+   "kode": "32.01.15.2001",
+   "nama": "Ciampea",
+   "status": "desa",
+   "kecamatan_kode": "32.01.15",
+   "kecamatan": "Ciampea"
+  },
+  {
+   "kode": "32.01.15.2002",
+   "nama": "Cinangka",
+   "status": "desa",
+   "kecamatan_kode": "32.01.15",
+   "kecamatan": "Ciampea"
+  },
+  {
+   "kode": "32.01.15.2003",
+   "nama": "Cihideungudik",
+   "status": "desa",
+   "kecamatan_kode": "32.01.15",
+   "kecamatan": "Ciampea"
+  },
+  {
+   "kode": "32.01.15.2004",
+   "nama": "Bojongjengkol",
+   "status": "desa",
+   "kecamatan_kode": "32.01.15",
+   "kecamatan": "Ciampea"
+  },
+  {
+   "kode": "32.01.15.2005",
+   "nama": "Tegalwaru",
+   "status": "desa",
+   "kecamatan_kode": "32.01.15",
+   "kecamatan": "Ciampea"
+  },
+  {
+   "kode": "32.01.15.2006",
+   "nama": "Cibuntu",
+   "status": "desa",
+   "kecamatan_kode": "32.01.15",
+   "kecamatan": "Ciampea"
+  },
+  {
+   "kode": "32.01.15.2007",
+   "nama": "Cicadas",
+   "status": "desa",
+   "kecamatan_kode": "32.01.15",
+   "kecamatan": "Ciampea"
+  },
+  {
+   "kode": "32.01.15.2008",
+   "nama": "Cibadak",
+   "status": "desa",
+   "kecamatan_kode": "32.01.15",
+   "kecamatan": "Ciampea"
+  },
+  {
+   "kode": "32.01.15.2009",
+   "nama": "Bojongrangkas",
+   "status": "desa",
+   "kecamatan_kode": "32.01.15",
+   "kecamatan": "Ciampea"
+  },
+  {
+   "kode": "32.01.15.2010",
+   "nama": "Cihideunghilir",
+   "status": "desa",
+   "kecamatan_kode": "32.01.15",
+   "kecamatan": "Ciampea"
+  },
+  {
+   "kode": "32.01.15.2011",
+   "nama": "Cibanteng",
+   "status": "desa",
+   "kecamatan_kode": "32.01.15",
+   "kecamatan": "Ciampea"
+  },
+  {
+   "kode": "32.01.15.2012",
+   "nama": "Benteng",
+   "status": "desa",
+   "kecamatan_kode": "32.01.15",
+   "kecamatan": "Ciampea"
+  },
+  {
+   "kode": "32.01.15.2013",
+   "nama": "Ciampea Udik",
+   "status": "desa",
+   "kecamatan_kode": "32.01.15",
+   "kecamatan": "Ciampea"
+  },
+  {
+   "kode": "32.01.16.2001",
+   "nama": "Situ Udik",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.16.2002",
+   "nama": "Situ Ilir",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.16.2003",
+   "nama": "Cemplang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.16.2004",
+   "nama": "Cibatok I",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.16.2005",
+   "nama": "Ciaruteun Udik",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.16.2006",
+   "nama": "Leuweungkolot",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.16.2007",
+   "nama": "Cimanggu I",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.16.2008",
+   "nama": "Cimanggu II",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.16.2009",
+   "nama": "Dukuh",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.16.2010",
+   "nama": "Cijujung",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.16.2011",
+   "nama": "Ciaruteun Ilir",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.16.2012",
+   "nama": "Cibatok II",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.16.2013",
+   "nama": "Sukamaju",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.16.2014",
+   "nama": "Galuga",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.16.2015",
+   "nama": "Girimulya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.16",
+   "kecamatan": "Cibungbulang"
+  },
+  {
+   "kode": "32.01.17.2001",
+   "nama": "Purwabakti",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.17.2002",
+   "nama": "Cibunian",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.17.2003",
+   "nama": "Cibitungwetan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.17.2004",
+   "nama": "Gunungmenyan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.17.2005",
+   "nama": "Gunungbunder II",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.17.2006",
+   "nama": "Pasarean",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.17.2007",
+   "nama": "Cimayang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.17.2008",
+   "nama": "Pamijahan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.17.2009",
+   "nama": "Cibening",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.17.2010",
+   "nama": "Gunungbunder I",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.17.2011",
+   "nama": "Cibitung Kulon",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.17.2012",
+   "nama": "Gunung Picung",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.17.2013",
+   "nama": "Ciasihan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.17.2014",
+   "nama": "Gunungsari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.17.2015",
+   "nama": "Ciasmara",
+   "status": "desa",
+   "kecamatan_kode": "32.01.17",
+   "kecamatan": "Pamijahan"
+  },
+  {
+   "kode": "32.01.18.2001",
+   "nama": "Rumpin",
+   "status": "desa",
+   "kecamatan_kode": "32.01.18",
+   "kecamatan": "Rumpin"
+  },
+  {
+   "kode": "32.01.18.2002",
+   "nama": "Leuwibatu",
+   "status": "desa",
+   "kecamatan_kode": "32.01.18",
+   "kecamatan": "Rumpin"
+  },
+  {
+   "kode": "32.01.18.2003",
+   "nama": "Cidokom",
+   "status": "desa",
+   "kecamatan_kode": "32.01.18",
+   "kecamatan": "Rumpin"
+  },
+  {
+   "kode": "32.01.18.2004",
+   "nama": "Gobang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.18",
+   "kecamatan": "Rumpin"
+  },
+  {
+   "kode": "32.01.18.2005",
+   "nama": "Cibodas",
+   "status": "desa",
+   "kecamatan_kode": "32.01.18",
+   "kecamatan": "Rumpin"
+  },
+  {
+   "kode": "32.01.18.2006",
+   "nama": "Rabak",
+   "status": "desa",
+   "kecamatan_kode": "32.01.18",
+   "kecamatan": "Rumpin"
+  },
+  {
+   "kode": "32.01.18.2007",
+   "nama": "Kampungsawah",
+   "status": "desa",
+   "kecamatan_kode": "32.01.18",
+   "kecamatan": "Rumpin"
+  },
+  {
+   "kode": "32.01.18.2008",
+   "nama": "Cipinang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.18",
+   "kecamatan": "Rumpin"
+  },
+  {
+   "kode": "32.01.18.2009",
+   "nama": "Sukasari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.18",
+   "kecamatan": "Rumpin"
+  },
+  {
+   "kode": "32.01.18.2010",
+   "nama": "Tamansari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.18",
+   "kecamatan": "Rumpin"
+  },
+  {
+   "kode": "32.01.18.2011",
+   "nama": "Kertajaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.18",
+   "kecamatan": "Rumpin"
+  },
+  {
+   "kode": "32.01.18.2012",
+   "nama": "Sukamulya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.18",
+   "kecamatan": "Rumpin"
+  },
+  {
+   "kode": "32.01.18.2013",
+   "nama": "Mekarsari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.18",
+   "kecamatan": "Rumpin"
+  },
+  {
+   "kode": "32.01.18.2014",
+   "nama": "Mekarjaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.18",
+   "kecamatan": "Rumpin"
+  },
+  {
+   "kode": "32.01.19.2001",
+   "nama": "Curug",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2002",
+   "nama": "Pangradin",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2003",
+   "nama": "Kalongsawah",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2004",
+   "nama": "Sipak",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2005",
+   "nama": "Jasinga",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2006",
+   "nama": "Koleang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2007",
+   "nama": "Cikopomayak",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2008",
+   "nama": "Setu",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2009",
+   "nama": "Barengkok",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2010",
+   "nama": "Bagoang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2011",
+   "nama": "Pangaur",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2012",
+   "nama": "Pamagersari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2013",
+   "nama": "Jugala Jaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2014",
+   "nama": "Tegalwangi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2015",
+   "nama": "Neglasari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.19.2016",
+   "nama": "Wirajaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.19",
+   "kecamatan": "Jasinga"
+  },
+  {
+   "kode": "32.01.20.2001",
+   "nama": "Jagabaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.20",
+   "kecamatan": "Parung Panjang"
+  },
+  {
+   "kode": "32.01.20.2002",
+   "nama": "Gorowong",
+   "status": "desa",
+   "kecamatan_kode": "32.01.20",
+   "kecamatan": "Parung Panjang"
+  },
+  {
+   "kode": "32.01.20.2003",
+   "nama": "Dago",
+   "status": "desa",
+   "kecamatan_kode": "32.01.20",
+   "kecamatan": "Parung Panjang"
+  },
+  {
+   "kode": "32.01.20.2004",
+   "nama": "Pingku",
+   "status": "desa",
+   "kecamatan_kode": "32.01.20",
+   "kecamatan": "Parung Panjang"
+  },
+  {
+   "kode": "32.01.20.2005",
+   "nama": "Cikuda",
+   "status": "desa",
+   "kecamatan_kode": "32.01.20",
+   "kecamatan": "Parung Panjang"
+  },
+  {
+   "kode": "32.01.20.2006",
+   "nama": "Parungpanjang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.20",
+   "kecamatan": "Parung Panjang"
+  },
+  {
+   "kode": "32.01.20.2007",
+   "nama": "Lumpang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.20",
+   "kecamatan": "Parung Panjang"
+  },
+  {
+   "kode": "32.01.20.2008",
+   "nama": "Cibunar",
+   "status": "desa",
+   "kecamatan_kode": "32.01.20",
+   "kecamatan": "Parung Panjang"
+  },
+  {
+   "kode": "32.01.20.2009",
+   "nama": "Jagabita",
+   "status": "desa",
+   "kecamatan_kode": "32.01.20",
+   "kecamatan": "Parung Panjang"
+  },
+  {
+   "kode": "32.01.20.2010",
+   "nama": "Gintungcilejet",
+   "status": "desa",
+   "kecamatan_kode": "32.01.20",
+   "kecamatan": "Parung Panjang"
+  },
+  {
+   "kode": "32.01.20.2011",
+   "nama": "Kabasiran",
+   "status": "desa",
+   "kecamatan_kode": "32.01.20",
+   "kecamatan": "Parung Panjang"
+  },
+  {
+   "kode": "32.01.21.2001",
+   "nama": "Malasari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.21",
+   "kecamatan": "Nanggung"
+  },
+  {
+   "kode": "32.01.21.2002",
+   "nama": "Curugbitung",
+   "status": "desa",
+   "kecamatan_kode": "32.01.21",
+   "kecamatan": "Nanggung"
+  },
+  {
+   "kode": "32.01.21.2003",
+   "nama": "Cisarua",
+   "status": "desa",
+   "kecamatan_kode": "32.01.21",
+   "kecamatan": "Nanggung"
+  },
+  {
+   "kode": "32.01.21.2004",
+   "nama": "Bantarkaret",
+   "status": "desa",
+   "kecamatan_kode": "32.01.21",
+   "kecamatan": "Nanggung"
+  },
+  {
+   "kode": "32.01.21.2005",
+   "nama": "Hambaro",
+   "status": "desa",
+   "kecamatan_kode": "32.01.21",
+   "kecamatan": "Nanggung"
+  },
+  {
+   "kode": "32.01.21.2006",
+   "nama": "Kalongliud",
+   "status": "desa",
+   "kecamatan_kode": "32.01.21",
+   "kecamatan": "Nanggung"
+  },
+  {
+   "kode": "32.01.21.2007",
+   "nama": "Nanggung",
+   "status": "desa",
+   "kecamatan_kode": "32.01.21",
+   "kecamatan": "Nanggung"
+  },
+  {
+   "kode": "32.01.21.2008",
+   "nama": "Parakanmuncang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.21",
+   "kecamatan": "Nanggung"
+  },
+  {
+   "kode": "32.01.21.2009",
+   "nama": "Pangkaljaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.21",
+   "kecamatan": "Nanggung"
+  },
+  {
+   "kode": "32.01.21.2010",
+   "nama": "Sukaluyu",
+   "status": "desa",
+   "kecamatan_kode": "32.01.21",
+   "kecamatan": "Nanggung"
+  },
+  {
+   "kode": "32.01.21.2011",
+   "nama": "Batu Tulis",
+   "status": "desa",
+   "kecamatan_kode": "32.01.21",
+   "kecamatan": "Nanggung"
+  },
+  {
+   "kode": "32.01.22.2001",
+   "nama": "Sukamaju",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.22.2002",
+   "nama": "Cigudeg",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.22.2003",
+   "nama": "Bunar",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.22.2004",
+   "nama": "Banyuresmi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.22.2005",
+   "nama": "Cintamanik",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.22.2006",
+   "nama": "Argapura",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.22.2007",
+   "nama": "Bangunjaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.22.2008",
+   "nama": "Rengasjajar",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.22.2009",
+   "nama": "Batujajar",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.22.2010",
+   "nama": "Wargajaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.22.2011",
+   "nama": "Sukaraksa",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.22.2012",
+   "nama": "Banyuwangi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.22.2013",
+   "nama": "Banyuasih",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.22.2014",
+   "nama": "Mekarjaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.22.2015",
+   "nama": "Tegallega",
+   "status": "desa",
+   "kecamatan_kode": "32.01.22",
+   "kecamatan": "Cigudeg"
+  },
+  {
+   "kode": "32.01.23.2001",
+   "nama": "Tapos",
+   "status": "desa",
+   "kecamatan_kode": "32.01.23",
+   "kecamatan": "Tenjo"
+  },
+  {
+   "kode": "32.01.23.2002",
+   "nama": "Ciomas",
+   "status": "desa",
+   "kecamatan_kode": "32.01.23",
+   "kecamatan": "Tenjo"
+  },
+  {
+   "kode": "32.01.23.2003",
+   "nama": "Batok",
+   "status": "desa",
+   "kecamatan_kode": "32.01.23",
+   "kecamatan": "Tenjo"
+  },
+  {
+   "kode": "32.01.23.2004",
+   "nama": "Babakan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.23",
+   "kecamatan": "Tenjo"
+  },
+  {
+   "kode": "32.01.23.2005",
+   "nama": "Tenjo",
+   "status": "desa",
+   "kecamatan_kode": "32.01.23",
+   "kecamatan": "Tenjo"
+  },
+  {
+   "kode": "32.01.23.2006",
+   "nama": "Cilaku",
+   "status": "desa",
+   "kecamatan_kode": "32.01.23",
+   "kecamatan": "Tenjo"
+  },
+  {
+   "kode": "32.01.23.2007",
+   "nama": "Singabraja",
+   "status": "desa",
+   "kecamatan_kode": "32.01.23",
+   "kecamatan": "Tenjo"
+  },
+  {
+   "kode": "32.01.23.2008",
+   "nama": "Singabangsa",
+   "status": "desa",
+   "kecamatan_kode": "32.01.23",
+   "kecamatan": "Tenjo"
+  },
+  {
+   "kode": "32.01.23.2009",
+   "nama": "Bojong",
+   "status": "desa",
+   "kecamatan_kode": "32.01.23",
+   "kecamatan": "Tenjo"
+  },
+  {
+   "kode": "32.01.24.2001",
+   "nama": "Cileungsi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.24",
+   "kecamatan": "Ciawi"
+  },
+  {
+   "kode": "32.01.24.2002",
+   "nama": "Citapen",
+   "status": "desa",
+   "kecamatan_kode": "32.01.24",
+   "kecamatan": "Ciawi"
+  },
+  {
+   "kode": "32.01.24.2003",
+   "nama": "Cibedug",
+   "status": "desa",
+   "kecamatan_kode": "32.01.24",
+   "kecamatan": "Ciawi"
+  },
+  {
+   "kode": "32.01.24.2004",
+   "nama": "Jambuluwuk",
+   "status": "desa",
+   "kecamatan_kode": "32.01.24",
+   "kecamatan": "Ciawi"
+  },
+  {
+   "kode": "32.01.24.2005",
+   "nama": "Banjarsari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.24",
+   "kecamatan": "Ciawi"
+  },
+  {
+   "kode": "32.01.24.2006",
+   "nama": "Teluk Pinang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.24",
+   "kecamatan": "Ciawi"
+  },
+  {
+   "kode": "32.01.24.2007",
+   "nama": "Banjar Waru",
+   "status": "desa",
+   "kecamatan_kode": "32.01.24",
+   "kecamatan": "Ciawi"
+  },
+  {
+   "kode": "32.01.24.2008",
+   "nama": "Bendungan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.24",
+   "kecamatan": "Ciawi"
+  },
+  {
+   "kode": "32.01.24.2009",
+   "nama": "Pandan Sari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.24",
+   "kecamatan": "Ciawi"
+  },
+  {
+   "kode": "32.01.24.2010",
+   "nama": "Bojong Murni",
+   "status": "desa",
+   "kecamatan_kode": "32.01.24",
+   "kecamatan": "Ciawi"
+  },
+  {
+   "kode": "32.01.24.2011",
+   "nama": "Banjar Wangi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.24",
+   "kecamatan": "Ciawi"
+  },
+  {
+   "kode": "32.01.24.2012",
+   "nama": "Ciawi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.24",
+   "kecamatan": "Ciawi"
+  },
+  {
+   "kode": "32.01.24.2013",
+   "nama": "Bitungsari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.24",
+   "kecamatan": "Ciawi"
+  },
+  {
+   "kode": "32.01.25.1010",
+   "nama": "Cisarua",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.25",
+   "kecamatan": "Cisarua"
+  },
+  {
+   "kode": "32.01.25.2001",
+   "nama": "Batulayang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.25",
+   "kecamatan": "Cisarua"
+  },
+  {
+   "kode": "32.01.25.2002",
+   "nama": "Jogjogan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.25",
+   "kecamatan": "Cisarua"
+  },
+  {
+   "kode": "32.01.25.2003",
+   "nama": "Cibeureum",
+   "status": "desa",
+   "kecamatan_kode": "32.01.25",
+   "kecamatan": "Cisarua"
+  },
+  {
+   "kode": "32.01.25.2004",
+   "nama": "Cilember",
+   "status": "desa",
+   "kecamatan_kode": "32.01.25",
+   "kecamatan": "Cisarua"
+  },
+  {
+   "kode": "32.01.25.2005",
+   "nama": "Citeko",
+   "status": "desa",
+   "kecamatan_kode": "32.01.25",
+   "kecamatan": "Cisarua"
+  },
+  {
+   "kode": "32.01.25.2006",
+   "nama": "Tugu Selatan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.25",
+   "kecamatan": "Cisarua"
+  },
+  {
+   "kode": "32.01.25.2007",
+   "nama": "Leuwimalang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.25",
+   "kecamatan": "Cisarua"
+  },
+  {
+   "kode": "32.01.25.2008",
+   "nama": "Kopo",
+   "status": "desa",
+   "kecamatan_kode": "32.01.25",
+   "kecamatan": "Cisarua"
+  },
+  {
+   "kode": "32.01.25.2009",
+   "nama": "Tugu Utara",
+   "status": "desa",
+   "kecamatan_kode": "32.01.25",
+   "kecamatan": "Cisarua"
+  },
+  {
+   "kode": "32.01.26.2001",
+   "nama": "Sukamaju",
+   "status": "desa",
+   "kecamatan_kode": "32.01.26",
+   "kecamatan": "Megamendung"
+  },
+  {
+   "kode": "32.01.26.2002",
+   "nama": "Kuta",
+   "status": "desa",
+   "kecamatan_kode": "32.01.26",
+   "kecamatan": "Megamendung"
+  },
+  {
+   "kode": "32.01.26.2003",
+   "nama": "Gadog",
+   "status": "desa",
+   "kecamatan_kode": "32.01.26",
+   "kecamatan": "Megamendung"
+  },
+  {
+   "kode": "32.01.26.2004",
+   "nama": "Sukakarya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.26",
+   "kecamatan": "Megamendung"
+  },
+  {
+   "kode": "32.01.26.2005",
+   "nama": "Megamendung",
+   "status": "desa",
+   "kecamatan_kode": "32.01.26",
+   "kecamatan": "Megamendung"
+  },
+  {
+   "kode": "32.01.26.2006",
+   "nama": "Cipayung",
+   "status": "desa",
+   "kecamatan_kode": "32.01.26",
+   "kecamatan": "Megamendung"
+  },
+  {
+   "kode": "32.01.26.2007",
+   "nama": "Sukamanah",
+   "status": "desa",
+   "kecamatan_kode": "32.01.26",
+   "kecamatan": "Megamendung"
+  },
+  {
+   "kode": "32.01.26.2008",
+   "nama": "Sukagalih",
+   "status": "desa",
+   "kecamatan_kode": "32.01.26",
+   "kecamatan": "Megamendung"
+  },
+  {
+   "kode": "32.01.26.2009",
+   "nama": "Cipayung Girang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.26",
+   "kecamatan": "Megamendung"
+  },
+  {
+   "kode": "32.01.26.2010",
+   "nama": "Sukamahi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.26",
+   "kecamatan": "Megamendung"
+  },
+  {
+   "kode": "32.01.26.2011",
+   "nama": "Sukaresmi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.26",
+   "kecamatan": "Megamendung"
+  },
+  {
+   "kode": "32.01.26.2012",
+   "nama": "Pasir Angin",
+   "status": "desa",
+   "kecamatan_kode": "32.01.26",
+   "kecamatan": "Megamendung"
+  },
+  {
+   "kode": "32.01.27.2001",
+   "nama": "Pasir Muncang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.27",
+   "kecamatan": "Caringin"
+  },
+  {
+   "kode": "32.01.27.2002",
+   "nama": "Cimande Hilir",
+   "status": "desa",
+   "kecamatan_kode": "32.01.27",
+   "kecamatan": "Caringin"
+  },
+  {
+   "kode": "32.01.27.2003",
+   "nama": "Ciderum",
+   "status": "desa",
+   "kecamatan_kode": "32.01.27",
+   "kecamatan": "Caringin"
+  },
+  {
+   "kode": "32.01.27.2004",
+   "nama": "Caringin",
+   "status": "desa",
+   "kecamatan_kode": "32.01.27",
+   "kecamatan": "Caringin"
+  },
+  {
+   "kode": "32.01.27.2005",
+   "nama": "Ciherang Pondok",
+   "status": "desa",
+   "kecamatan_kode": "32.01.27",
+   "kecamatan": "Caringin"
+  },
+  {
+   "kode": "32.01.27.2006",
+   "nama": "Cinagara",
+   "status": "desa",
+   "kecamatan_kode": "32.01.27",
+   "kecamatan": "Caringin"
+  },
+  {
+   "kode": "32.01.27.2007",
+   "nama": "Cimande",
+   "status": "desa",
+   "kecamatan_kode": "32.01.27",
+   "kecamatan": "Caringin"
+  },
+  {
+   "kode": "32.01.27.2008",
+   "nama": "Pancawati",
+   "status": "desa",
+   "kecamatan_kode": "32.01.27",
+   "kecamatan": "Caringin"
+  },
+  {
+   "kode": "32.01.27.2009",
+   "nama": "Muara Jaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.27",
+   "kecamatan": "Caringin"
+  },
+  {
+   "kode": "32.01.27.2010",
+   "nama": "Pasir Buncir",
+   "status": "desa",
+   "kecamatan_kode": "32.01.27",
+   "kecamatan": "Caringin"
+  },
+  {
+   "kode": "32.01.27.2011",
+   "nama": "Lemah Duhur",
+   "status": "desa",
+   "kecamatan_kode": "32.01.27",
+   "kecamatan": "Caringin"
+  },
+  {
+   "kode": "32.01.27.2012",
+   "nama": "Tangkil",
+   "status": "desa",
+   "kecamatan_kode": "32.01.27",
+   "kecamatan": "Caringin"
+  },
+  {
+   "kode": "32.01.28.2001",
+   "nama": "Cijeruk",
+   "status": "desa",
+   "kecamatan_kode": "32.01.28",
+   "kecamatan": "Cijeruk"
+  },
+  {
+   "kode": "32.01.28.2002",
+   "nama": "Cipelang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.28",
+   "kecamatan": "Cijeruk"
+  },
+  {
+   "kode": "32.01.28.2003",
+   "nama": "Warung Menteng",
+   "status": "desa",
+   "kecamatan_kode": "32.01.28",
+   "kecamatan": "Cijeruk"
+  },
+  {
+   "kode": "32.01.28.2004",
+   "nama": "Tajur Halang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.28",
+   "kecamatan": "Cijeruk"
+  },
+  {
+   "kode": "32.01.28.2005",
+   "nama": "Cipicung",
+   "status": "desa",
+   "kecamatan_kode": "32.01.28",
+   "kecamatan": "Cijeruk"
+  },
+  {
+   "kode": "32.01.28.2006",
+   "nama": "Cibalung",
+   "status": "desa",
+   "kecamatan_kode": "32.01.28",
+   "kecamatan": "Cijeruk"
+  },
+  {
+   "kode": "32.01.28.2007",
+   "nama": "Sukaharja",
+   "status": "desa",
+   "kecamatan_kode": "32.01.28",
+   "kecamatan": "Cijeruk"
+  },
+  {
+   "kode": "32.01.28.2008",
+   "nama": "Palasari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.28",
+   "kecamatan": "Cijeruk"
+  },
+  {
+   "kode": "32.01.28.2009",
+   "nama": "Tanjungsari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.28",
+   "kecamatan": "Cijeruk"
+  },
+  {
+   "kode": "32.01.29.1003",
+   "nama": "Padasuka",
+   "status": "kelurahan",
+   "kecamatan_kode": "32.01.29",
+   "kecamatan": "Ciomas"
+  },
+  {
+   "kode": "32.01.29.2001",
+   "nama": "Mekarjaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.29",
+   "kecamatan": "Ciomas"
+  },
+  {
+   "kode": "32.01.29.2002",
+   "nama": "Sukaharja",
+   "status": "desa",
+   "kecamatan_kode": "32.01.29",
+   "kecamatan": "Ciomas"
+  },
+  {
+   "kode": "32.01.29.2004",
+   "nama": "Parakan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.29",
+   "kecamatan": "Ciomas"
+  },
+  {
+   "kode": "32.01.29.2005",
+   "nama": "Ciomas",
+   "status": "desa",
+   "kecamatan_kode": "32.01.29",
+   "kecamatan": "Ciomas"
+  },
+  {
+   "kode": "32.01.29.2006",
+   "nama": "Pagelaran",
+   "status": "desa",
+   "kecamatan_kode": "32.01.29",
+   "kecamatan": "Ciomas"
+  },
+  {
+   "kode": "32.01.29.2007",
+   "nama": "Sukamakmur",
+   "status": "desa",
+   "kecamatan_kode": "32.01.29",
+   "kecamatan": "Ciomas"
+  },
+  {
+   "kode": "32.01.29.2008",
+   "nama": "Ciapus",
+   "status": "desa",
+   "kecamatan_kode": "32.01.29",
+   "kecamatan": "Ciomas"
+  },
+  {
+   "kode": "32.01.29.2009",
+   "nama": "Kota Batu",
+   "status": "desa",
+   "kecamatan_kode": "32.01.29",
+   "kecamatan": "Ciomas"
+  },
+  {
+   "kode": "32.01.29.2010",
+   "nama": "Laladon",
+   "status": "desa",
+   "kecamatan_kode": "32.01.29",
+   "kecamatan": "Ciomas"
+  },
+  {
+   "kode": "32.01.29.2011",
+   "nama": "Ciomas Rahayu",
+   "status": "desa",
+   "kecamatan_kode": "32.01.29",
+   "kecamatan": "Ciomas"
+  },
+  {
+   "kode": "32.01.30.2001",
+   "nama": "Sukadamai",
+   "status": "desa",
+   "kecamatan_kode": "32.01.30",
+   "kecamatan": "Dramaga"
+  },
+  {
+   "kode": "32.01.30.2002",
+   "nama": "Ciherang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.30",
+   "kecamatan": "Dramaga"
+  },
+  {
+   "kode": "32.01.30.2003",
+   "nama": "Sinarsari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.30",
+   "kecamatan": "Dramaga"
+  },
+  {
+   "kode": "32.01.30.2004",
+   "nama": "Sukawening",
+   "status": "desa",
+   "kecamatan_kode": "32.01.30",
+   "kecamatan": "Dramaga"
+  },
+  {
+   "kode": "32.01.30.2005",
+   "nama": "Petir",
+   "status": "desa",
+   "kecamatan_kode": "32.01.30",
+   "kecamatan": "Dramaga"
+  },
+  {
+   "kode": "32.01.30.2006",
+   "nama": "Purwasari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.30",
+   "kecamatan": "Dramaga"
+  },
+  {
+   "kode": "32.01.30.2007",
+   "nama": "Cikarawang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.30",
+   "kecamatan": "Dramaga"
+  },
+  {
+   "kode": "32.01.30.2008",
+   "nama": "Babakan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.30",
+   "kecamatan": "Dramaga"
+  },
+  {
+   "kode": "32.01.30.2009",
+   "nama": "Dramaga",
+   "status": "desa",
+   "kecamatan_kode": "32.01.30",
+   "kecamatan": "Dramaga"
+  },
+  {
+   "kode": "32.01.30.2010",
+   "nama": "Neglasari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.30",
+   "kecamatan": "Dramaga"
+  },
+  {
+   "kode": "32.01.31.2001",
+   "nama": "Sukamantri",
+   "status": "desa",
+   "kecamatan_kode": "32.01.31",
+   "kecamatan": "Tamansari"
+  },
+  {
+   "kode": "32.01.31.2002",
+   "nama": "Sirnagalih",
+   "status": "desa",
+   "kecamatan_kode": "32.01.31",
+   "kecamatan": "Tamansari"
+  },
+  {
+   "kode": "32.01.31.2003",
+   "nama": "Pasireurih",
+   "status": "desa",
+   "kecamatan_kode": "32.01.31",
+   "kecamatan": "Tamansari"
+  },
+  {
+   "kode": "32.01.31.2004",
+   "nama": "Tamansari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.31",
+   "kecamatan": "Tamansari"
+  },
+  {
+   "kode": "32.01.31.2005",
+   "nama": "Sukaluyu",
+   "status": "desa",
+   "kecamatan_kode": "32.01.31",
+   "kecamatan": "Tamansari"
+  },
+  {
+   "kode": "32.01.31.2006",
+   "nama": "Sukaresmi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.31",
+   "kecamatan": "Tamansari"
+  },
+  {
+   "kode": "32.01.31.2007",
+   "nama": "Sukajaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.31",
+   "kecamatan": "Tamansari"
+  },
+  {
+   "kode": "32.01.31.2008",
+   "nama": "Sukajadi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.31",
+   "kecamatan": "Tamansari"
+  },
+  {
+   "kode": "32.01.32.2001",
+   "nama": "Klapanunggal",
+   "status": "desa",
+   "kecamatan_kode": "32.01.32",
+   "kecamatan": "Klapanunggal"
+  },
+  {
+   "kode": "32.01.32.2002",
+   "nama": "Bojong",
+   "status": "desa",
+   "kecamatan_kode": "32.01.32",
+   "kecamatan": "Klapanunggal"
+  },
+  {
+   "kode": "32.01.32.2003",
+   "nama": "Nambo",
+   "status": "desa",
+   "kecamatan_kode": "32.01.32",
+   "kecamatan": "Klapanunggal"
+  },
+  {
+   "kode": "32.01.32.2004",
+   "nama": "Lulut",
+   "status": "desa",
+   "kecamatan_kode": "32.01.32",
+   "kecamatan": "Klapanunggal"
+  },
+  {
+   "kode": "32.01.32.2005",
+   "nama": "Cikahuripan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.32",
+   "kecamatan": "Klapanunggal"
+  },
+  {
+   "kode": "32.01.32.2006",
+   "nama": "Kembang Kuning",
+   "status": "desa",
+   "kecamatan_kode": "32.01.32",
+   "kecamatan": "Klapanunggal"
+  },
+  {
+   "kode": "32.01.32.2007",
+   "nama": "Bantar Jati",
+   "status": "desa",
+   "kecamatan_kode": "32.01.32",
+   "kecamatan": "Klapanunggal"
+  },
+  {
+   "kode": "32.01.32.2008",
+   "nama": "Leuwikaret",
+   "status": "desa",
+   "kecamatan_kode": "32.01.32",
+   "kecamatan": "Klapanunggal"
+  },
+  {
+   "kode": "32.01.32.2009",
+   "nama": "Ligarmukti",
+   "status": "desa",
+   "kecamatan_kode": "32.01.32",
+   "kecamatan": "Klapanunggal"
+  },
+  {
+   "kode": "32.01.33.2001",
+   "nama": "Putat Nutug",
+   "status": "desa",
+   "kecamatan_kode": "32.01.33",
+   "kecamatan": "Ciseeng"
+  },
+  {
+   "kode": "32.01.33.2002",
+   "nama": "Ciseeng",
+   "status": "desa",
+   "kecamatan_kode": "32.01.33",
+   "kecamatan": "Ciseeng"
+  },
+  {
+   "kode": "32.01.33.2003",
+   "nama": "Parigi Mekar",
+   "status": "desa",
+   "kecamatan_kode": "32.01.33",
+   "kecamatan": "Ciseeng"
+  },
+  {
+   "kode": "32.01.33.2004",
+   "nama": "Cibentang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.33",
+   "kecamatan": "Ciseeng"
+  },
+  {
+   "kode": "32.01.33.2005",
+   "nama": "Cibeuteung Udik",
+   "status": "desa",
+   "kecamatan_kode": "32.01.33",
+   "kecamatan": "Ciseeng"
+  },
+  {
+   "kode": "32.01.33.2006",
+   "nama": "Karihkil",
+   "status": "desa",
+   "kecamatan_kode": "32.01.33",
+   "kecamatan": "Ciseeng"
+  },
+  {
+   "kode": "32.01.33.2007",
+   "nama": "Babakan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.33",
+   "kecamatan": "Ciseeng"
+  },
+  {
+   "kode": "32.01.33.2008",
+   "nama": "Cihowe",
+   "status": "desa",
+   "kecamatan_kode": "32.01.33",
+   "kecamatan": "Ciseeng"
+  },
+  {
+   "kode": "32.01.33.2009",
+   "nama": "Cibeuteung Muara",
+   "status": "desa",
+   "kecamatan_kode": "32.01.33",
+   "kecamatan": "Ciseeng"
+  },
+  {
+   "kode": "32.01.33.2010",
+   "nama": "Kuripan",
+   "status": "desa",
+   "kecamatan_kode": "32.01.33",
+   "kecamatan": "Ciseeng"
+  },
+  {
+   "kode": "32.01.34.2001",
+   "nama": "Bantarjaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.34",
+   "kecamatan": "Ranca Bungur"
+  },
+  {
+   "kode": "32.01.34.2002",
+   "nama": "Bantarsari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.34",
+   "kecamatan": "Ranca Bungur"
+  },
+  {
+   "kode": "32.01.34.2003",
+   "nama": "Pasirgaok",
+   "status": "desa",
+   "kecamatan_kode": "32.01.34",
+   "kecamatan": "Ranca Bungur"
+  },
+  {
+   "kode": "32.01.34.2004",
+   "nama": "Rancabungur",
+   "status": "desa",
+   "kecamatan_kode": "32.01.34",
+   "kecamatan": "Ranca Bungur"
+  },
+  {
+   "kode": "32.01.34.2005",
+   "nama": "Mekarsari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.34",
+   "kecamatan": "Ranca Bungur"
+  },
+  {
+   "kode": "32.01.34.2006",
+   "nama": "Candali",
+   "status": "desa",
+   "kecamatan_kode": "32.01.34",
+   "kecamatan": "Ranca Bungur"
+  },
+  {
+   "kode": "32.01.34.2007",
+   "nama": "Cimulang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.34",
+   "kecamatan": "Ranca Bungur"
+  },
+  {
+   "kode": "32.01.35.2001",
+   "nama": "Cisarua",
+   "status": "desa",
+   "kecamatan_kode": "32.01.35",
+   "kecamatan": "Sukajaya"
+  },
+  {
+   "kode": "32.01.35.2002",
+   "nama": "Kiarasari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.35",
+   "kecamatan": "Sukajaya"
+  },
+  {
+   "kode": "32.01.35.2003",
+   "nama": "Sukajaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.35",
+   "kecamatan": "Sukajaya"
+  },
+  {
+   "kode": "32.01.35.2004",
+   "nama": "Sipayung",
+   "status": "desa",
+   "kecamatan_kode": "32.01.35",
+   "kecamatan": "Sukajaya"
+  },
+  {
+   "kode": "32.01.35.2005",
+   "nama": "Cileuksa",
+   "status": "desa",
+   "kecamatan_kode": "32.01.35",
+   "kecamatan": "Sukajaya"
+  },
+  {
+   "kode": "32.01.35.2006",
+   "nama": "Kiarapandak",
+   "status": "desa",
+   "kecamatan_kode": "32.01.35",
+   "kecamatan": "Sukajaya"
+  },
+  {
+   "kode": "32.01.35.2007",
+   "nama": "Harkatjaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.35",
+   "kecamatan": "Sukajaya"
+  },
+  {
+   "kode": "32.01.35.2008",
+   "nama": "Sukamulih",
+   "status": "desa",
+   "kecamatan_kode": "32.01.35",
+   "kecamatan": "Sukajaya"
+  },
+  {
+   "kode": "32.01.35.2009",
+   "nama": "Pasir Madang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.35",
+   "kecamatan": "Sukajaya"
+  },
+  {
+   "kode": "32.01.35.2010",
+   "nama": "Urug",
+   "status": "desa",
+   "kecamatan_kode": "32.01.35",
+   "kecamatan": "Sukajaya"
+  },
+  {
+   "kode": "32.01.35.2011",
+   "nama": "Jayaraharja",
+   "status": "desa",
+   "kecamatan_kode": "32.01.35",
+   "kecamatan": "Sukajaya"
+  },
+  {
+   "kode": "32.01.36.2001",
+   "nama": "Tanjungsari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.36",
+   "kecamatan": "Tanjungsari"
+  },
+  {
+   "kode": "32.01.36.2002",
+   "nama": "Selawangi",
+   "status": "desa",
+   "kecamatan_kode": "32.01.36",
+   "kecamatan": "Tanjungsari"
+  },
+  {
+   "kode": "32.01.36.2003",
+   "nama": "Tanjungrasa",
+   "status": "desa",
+   "kecamatan_kode": "32.01.36",
+   "kecamatan": "Tanjungsari"
+  },
+  {
+   "kode": "32.01.36.2004",
+   "nama": "Antajaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.36",
+   "kecamatan": "Tanjungsari"
+  },
+  {
+   "kode": "32.01.36.2005",
+   "nama": "Pasir Tanjung",
+   "status": "desa",
+   "kecamatan_kode": "32.01.36",
+   "kecamatan": "Tanjungsari"
+  },
+  {
+   "kode": "32.01.36.2006",
+   "nama": "Cibadak",
+   "status": "desa",
+   "kecamatan_kode": "32.01.36",
+   "kecamatan": "Tanjungsari"
+  },
+  {
+   "kode": "32.01.36.2007",
+   "nama": "Sukarasa",
+   "status": "desa",
+   "kecamatan_kode": "32.01.36",
+   "kecamatan": "Tanjungsari"
+  },
+  {
+   "kode": "32.01.36.2008",
+   "nama": "Sirnasari",
+   "status": "desa",
+   "kecamatan_kode": "32.01.36",
+   "kecamatan": "Tanjungsari"
+  },
+  {
+   "kode": "32.01.36.2009",
+   "nama": "Buanajaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.36",
+   "kecamatan": "Tanjungsari"
+  },
+  {
+   "kode": "32.01.36.2010",
+   "nama": "Sirnarasa",
+   "status": "desa",
+   "kecamatan_kode": "32.01.36",
+   "kecamatan": "Tanjungsari"
+  },
+  {
+   "kode": "32.01.37.2001",
+   "nama": "Tajurhalang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.37",
+   "kecamatan": "Tajurhalang"
+  },
+  {
+   "kode": "32.01.37.2002",
+   "nama": "Citayam",
+   "status": "desa",
+   "kecamatan_kode": "32.01.37",
+   "kecamatan": "Tajurhalang"
+  },
+  {
+   "kode": "32.01.37.2003",
+   "nama": "Sasak Panjang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.37",
+   "kecamatan": "Tajurhalang"
+  },
+  {
+   "kode": "32.01.37.2004",
+   "nama": "Nanggerang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.37",
+   "kecamatan": "Tajurhalang"
+  },
+  {
+   "kode": "32.01.37.2005",
+   "nama": "Sukmajaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.37",
+   "kecamatan": "Tajurhalang"
+  },
+  {
+   "kode": "32.01.37.2006",
+   "nama": "Tonjong",
+   "status": "desa",
+   "kecamatan_kode": "32.01.37",
+   "kecamatan": "Tajurhalang"
+  },
+  {
+   "kode": "32.01.37.2007",
+   "nama": "Kalisuren",
+   "status": "desa",
+   "kecamatan_kode": "32.01.37",
+   "kecamatan": "Tajurhalang"
+  },
+  {
+   "kode": "32.01.38.2001",
+   "nama": "Cigombong",
+   "status": "desa",
+   "kecamatan_kode": "32.01.38",
+   "kecamatan": "Cigombong"
+  },
+  {
+   "kode": "32.01.38.2002",
+   "nama": "Watesjaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.38",
+   "kecamatan": "Cigombong"
+  },
+  {
+   "kode": "32.01.38.2003",
+   "nama": "Ciburuy",
+   "status": "desa",
+   "kecamatan_kode": "32.01.38",
+   "kecamatan": "Cigombong"
+  },
+  {
+   "kode": "32.01.38.2004",
+   "nama": "Srogol",
+   "status": "desa",
+   "kecamatan_kode": "32.01.38",
+   "kecamatan": "Cigombong"
+  },
+  {
+   "kode": "32.01.38.2005",
+   "nama": "Cisalada",
+   "status": "desa",
+   "kecamatan_kode": "32.01.38",
+   "kecamatan": "Cigombong"
+  },
+  {
+   "kode": "32.01.38.2006",
+   "nama": "Tugujaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.38",
+   "kecamatan": "Cigombong"
+  },
+  {
+   "kode": "32.01.38.2007",
+   "nama": "Pasirjaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.38",
+   "kecamatan": "Cigombong"
+  },
+  {
+   "kode": "32.01.38.2008",
+   "nama": "Ciburayut",
+   "status": "desa",
+   "kecamatan_kode": "32.01.38",
+   "kecamatan": "Cigombong"
+  },
+  {
+   "kode": "32.01.38.2009",
+   "nama": "Ciadeg",
+   "status": "desa",
+   "kecamatan_kode": "32.01.38",
+   "kecamatan": "Cigombong"
+  },
+  {
+   "kode": "32.01.39.2001",
+   "nama": "Leuwisadeng",
+   "status": "desa",
+   "kecamatan_kode": "32.01.39",
+   "kecamatan": "Leuwisadeng"
+  },
+  {
+   "kode": "32.01.39.2002",
+   "nama": "Babakan Sadeng",
+   "status": "desa",
+   "kecamatan_kode": "32.01.39",
+   "kecamatan": "Leuwisadeng"
+  },
+  {
+   "kode": "32.01.39.2003",
+   "nama": "Sadeng Kolot",
+   "status": "desa",
+   "kecamatan_kode": "32.01.39",
+   "kecamatan": "Leuwisadeng"
+  },
+  {
+   "kode": "32.01.39.2004",
+   "nama": "Wangunjaya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.39",
+   "kecamatan": "Leuwisadeng"
+  },
+  {
+   "kode": "32.01.39.2005",
+   "nama": "Kalong I",
+   "status": "desa",
+   "kecamatan_kode": "32.01.39",
+   "kecamatan": "Leuwisadeng"
+  },
+  {
+   "kode": "32.01.39.2006",
+   "nama": "Kalong II",
+   "status": "desa",
+   "kecamatan_kode": "32.01.39",
+   "kecamatan": "Leuwisadeng"
+  },
+  {
+   "kode": "32.01.39.2007",
+   "nama": "Sadeng",
+   "status": "desa",
+   "kecamatan_kode": "32.01.39",
+   "kecamatan": "Leuwisadeng"
+  },
+  {
+   "kode": "32.01.39.2008",
+   "nama": "Sibanteng",
+   "status": "desa",
+   "kecamatan_kode": "32.01.39",
+   "kecamatan": "Leuwisadeng"
+  },
+  {
+   "kode": "32.01.40.2001",
+   "nama": "Tapos I",
+   "status": "desa",
+   "kecamatan_kode": "32.01.40",
+   "kecamatan": "Tenjolaya"
+  },
+  {
+   "kode": "32.01.40.2002",
+   "nama": "Tapos II",
+   "status": "desa",
+   "kecamatan_kode": "32.01.40",
+   "kecamatan": "Tenjolaya"
+  },
+  {
+   "kode": "32.01.40.2003",
+   "nama": "Cibitung Tengah",
+   "status": "desa",
+   "kecamatan_kode": "32.01.40",
+   "kecamatan": "Tenjolaya"
+  },
+  {
+   "kode": "32.01.40.2004",
+   "nama": "Situdaun",
+   "status": "desa",
+   "kecamatan_kode": "32.01.40",
+   "kecamatan": "Tenjolaya"
+  },
+  {
+   "kode": "32.01.40.2005",
+   "nama": "Cinangneng",
+   "status": "desa",
+   "kecamatan_kode": "32.01.40",
+   "kecamatan": "Tenjolaya"
+  },
+  {
+   "kode": "32.01.40.2006",
+   "nama": "Gunung Malang",
+   "status": "desa",
+   "kecamatan_kode": "32.01.40",
+   "kecamatan": "Tenjolaya"
+  },
+  {
+   "kode": "32.01.40.2007",
+   "nama": "Gunung Mulya",
+   "status": "desa",
+   "kecamatan_kode": "32.01.40",
+   "kecamatan": "Tenjolaya"
+  }
+ ]
+}
