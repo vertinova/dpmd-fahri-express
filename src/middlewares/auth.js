@@ -378,6 +378,12 @@ const KODE_DINAS_PELIHAT = ['BPKAD', 'INSPEKTORAT'];
 // Harus sama dengan KODE_DINAS_LIHAT_SEMUA di front-end (utils/dinasPelihat.js).
 const KODE_DINAS_LIHAT_SEMUA_PERUBAHAN = ['DLH', 'DLHK'];
 
+// Kode dinas yang akun `dinas_terkait`-nya boleh MELIHAT halaman Asta Desa
+// (Core Dashboard) lewat /api/asta-desa — hanya rute baca, tanpa `force` dan
+// tanpa /segarkan. Verifikator dinas tersebut TIDAK ikut. Harus sama dengan
+// KODE_DINAS_LIHAT_ASTA_DESA di front-end (utils/dinasPelihat.js).
+const KODE_DINAS_LIHAT_ASTA_DESA = ['BAPPERIDA'];
+
 // Cache kecil id dinas -> kode_dinas supaya tidak query master_dinas tiap request.
 const dinasKodeCache = new Map();
 const getKodeDinas = async (dinasId) => {
@@ -397,6 +403,12 @@ const getKodeDinas = async (dinasId) => {
 const isDinasPelihatAccount = async (user) => {
   if (!user || !user.dinas_id) return false;
   return KODE_DINAS_PELIHAT.includes(await getKodeDinas(user.dinas_id));
+};
+
+// Apakah user ini akun dinas yang boleh melihat Asta Desa (mis. BAPPERIDA)?
+const isDinasLihatAstaDesa = async (user) => {
+  if (!user || user.role !== 'dinas_terkait' || !user.dinas_id) return false;
+  return KODE_DINAS_LIHAT_ASTA_DESA.includes(await getKodeDinas(user.dinas_id));
 };
 
 // Cakupan data Bankeu Perubahan yang boleh dilihat akun ini lewat
@@ -460,4 +472,4 @@ const requireSuperadmin = (req, res, next) => {
   next();
 };
 
-module.exports = { auth, checkRole, checkAbsensiAdmin, generateToken, authorizeDinas, authorizeDinasPelihat, denyDinasPelihat, requireSuperadmin, invalidateRoleCache };
+module.exports = { auth, checkRole, checkAbsensiAdmin, generateToken, authorizeDinas, authorizeDinasPelihat, denyDinasPelihat, isDinasLihatAstaDesa, requireSuperadmin, invalidateRoleCache };

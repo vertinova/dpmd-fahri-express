@@ -371,7 +371,9 @@ const jalankan = (handler) => async (req, res) => {
   }
 };
 
-const paksa = (req) => req.query.force === '1' || req.query.force === 'true';
+// Akun dinas pelihat (req.astaDesaLihatSaja) selalu dilayani dari cache.
+const paksa = (req) =>
+  !req.astaDesaLihatSaja && (req.query.force === '1' || req.query.force === 'true');
 
 /**
  * Berapa halaman paling banyak ditarik saat menyusul baris terbaru.
