@@ -214,6 +214,116 @@ async function getLatestBerita(limit = 4) {
  * Get dashboard summary for specific desa
  * GET /api/desa/dashboard/summary
  */
+// Lembaga yang verifikasinya ditolak Bidang PMD. Semua tabel lembaga punya
+// bentuk kolom yang sama (status_verifikasi, catatan_verifikasi, verified_at,
+// verifikator_nama), jadi cukup satu definisi per jenis.
+//
+// `labelField` dipakai karena RT/RW diberi nama lewat `nomor`, bukan `nama`.
+// `href` menunjuk ke halaman modul desa yang bersangkutan supaya peringatannya
+// bisa langsung ditindaklanjuti, bukan sekadar pemberitahuan.
+const LEMBAGA_DITOLAK = [
+  { model: 'rws', jenis: 'RW', labelField: 'nomor', labelPrefix: 'RW ', href: '/desa/kelembagaan/rw' },
+  // RT tidak punya halaman daftar sendiri — diakses lewat RW, sama seperti
+  // navigasi di KelembagaanDesaPage. Slug '/kelembagaan/rt' tidak ada.
+  { model: 'rts', jenis: 'RT', labelField: 'nomor', labelPrefix: 'RT ', href: '/desa/kelembagaan/rw' },
+  { model: 'posyandus', jenis: 'Posyandu', labelField: 'nama', href: '/desa/kelembagaan/posyandu' },
+  { model: 'karang_tarunas', jenis: 'Karang Taruna', labelField: 'nama', href: '/desa/kelembagaan/karang-taruna' },
+  { model: 'lpms', jenis: 'LPM', labelField: 'nama', href: '/desa/kelembagaan/lpm' },
+  { model: 'pkks', jenis: 'PKK', labelField: 'nama', href: '/desa/kelembagaan/pkk' },
+  { model: 'satlinmas', jenis: 'Satlinmas', labelField: 'nama', href: '/desa/kelembagaan/satlinmas' },
+  { model: 'lembaga_lainnyas', jenis: 'Lembaga Lainnya', labelField: 'nama', href: '/desa/kelembagaan/lembaga-lainnya' },
+];
+
+const toIso = (value) => (value ? new Date(value).toISOString() : null);
+
+/**
+ * Kumpulkan lembaga + pengurus yang ditolak untuk satu desa.
+ *
+ * Lembaga nonaktif sengaja dilewati: sudah tidak dipakai desa, jadi menagih
+ * perbaikannya hanya jadi gangguan. Ini mengikuti ringkasan verifikasi yang
+ * sudah ada di summary.controller.js yang juga menyaring status_kelembagaan.
+ */
+async function getVerifikasiDitolak(desaId) {
+  const lembagaQueries = LEMBAGA_DITOLAK.map((cfg) =>
+    prisma[cfg.model].findMany({
+      where: { desa_id: desaId, status_verifikasi: 'ditolak', status_kelembagaan: 'aktif' },
+      select: {
+        id: true,
+        [cfg.labelField]: true,
+        catatan_verifikasi: true,
+        verifikator_nama: true,
+        verified_at: true,
+      },
+      orderBy: { verified_at: 'desc' },
+    }).catch(() => [])
+  );
+
+  const pengurusQuery = prisma.pengurus.findMany({
+    where: { desa_id: desaId, status_verifikasi: 'ditolak' },
+    select: {
+      id: true,
+      nama_lengkap: true,
+      jabatan: true,
+      pengurusable_type: true,
+      catatan_verifikasi: true,
+      verifikator_nama: true,
+      verified_at: true,
+    },
+    orderBy: { verified_at: 'desc' },
+  }).catch(() => []);
+
+  const [pengurusRows, ...lembagaRows] = await Promise.all([pengurusQuery, ...lembagaQueries]);
+
+  const items = [];
+
+  lembagaRows.forEach((rows, index) => {
+    const cfg = LEMBAGA_DITOLAK[index];
+    rows.forEach((row) => {
+      items.push({
+        kategori: 'lembaga',
+        jenis: cfg.jenis,
+        id: String(row.id),
+        label: `${cfg.labelPrefix || ''}${row[cfg.labelField] || '-'}`.trim(),
+        keterangan: null,
+        catatan: row.catatan_verifikasi || null,
+        verifikator: row.verifikator_nama || null,
+        ditolakPada: toIso(row.verified_at),
+        href: cfg.href,
+      });
+    });
+  });
+
+  pengurusRows.forEach((row) => {
+    const asal = LEMBAGA_DITOLAK.find((cfg) => cfg.model === row.pengurusable_type);
+    items.push({
+      kategori: 'pengurus',
+      jenis: 'Pengurus',
+      id: String(row.id),
+      label: row.nama_lengkap || '-',
+      keterangan: [row.jabatan, asal?.jenis].filter(Boolean).join(' · ') || null,
+      catatan: row.catatan_verifikasi || null,
+      verifikator: row.verifikator_nama || null,
+      ditolakPada: toIso(row.verified_at),
+      href: `/desa/pengurus/${row.id}`,
+    });
+  });
+
+  // Terbaru di atas; yang tanpa tanggal ditaruh paling akhir.
+  items.sort((a, b) => {
+    if (a.ditolakPada && b.ditolakPada) return b.ditolakPada.localeCompare(a.ditolakPada);
+    if (a.ditolakPada) return -1;
+    if (b.ditolakPada) return 1;
+    return a.label.localeCompare(b.label);
+  });
+
+  return {
+    total: items.length,
+    totalLembaga: items.filter((i) => i.kategori === 'lembaga').length,
+    totalPengurus: items.filter((i) => i.kategori === 'pengurus').length,
+    items,
+  };
+}
+
 async function getDesaDashboardSummary(req, res) {
   try {
     const desaId = validateDesaAccess(req, res);
@@ -491,7 +601,10 @@ async function getDesaDashboardSummary(req, res) {
       financialData.dd.total +
       financialData.bankeu.total;
 
-    // 7. Prepare response
+    // 7. Hasil verifikasi yang ditolak — jadi peringatan di dashboard desa.
+    const verifikasiDitolak = await getVerifikasiDitolak(desaId);
+
+    // 8. Prepare response
     res.json({
       success: true,
       data: {
@@ -549,6 +662,7 @@ async function getDesaDashboardSummary(req, res) {
                         (satlinmas ? 1 : 0) + 
                         (pkk ? 1 : 0)
         },
+        verifikasi_ditolak: verifikasiDitolak,
         bankeu: bankeuSummary,
         keuangan: {
           add: financialData.add,
