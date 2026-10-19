@@ -34,12 +34,40 @@ const filterJenis = (jenis) => {
  * Penyaring daftar aparatur — dipakai mode tabel maupun mode per wilayah,
  * supaya dua mode tidak pernah menampilkan populasi yang berbeda.
  */
-const bangunWhere = ({ search, kecamatan_id, desa_id, jabatan, jenis, jenis_kelamin, status, pendidikan }) => {
+// Rentang usia sama persis dengan pengelompokan di getStats, supaya klik
+// batang "25-34" membuka orang yang sama dengan yang dihitung batangnya.
+const RENTANG_USIA = { '< 25': [0, 24], '25-34': [25, 34], '35-44': [35, 44], '45-54': [45, 54], '55+': [55, 200] };
+const tahunLalu = (tahun) => {
+	const d = new Date();
+	d.setFullYear(d.getFullYear() - tahun);
+	return d;
+};
+
+const bangunWhere = ({
+	search, kecamatan_id, desa_id, jabatan, jenis, jenis_kelamin, status, pendidikan,
+	usia, verifikasi, jabatan_in,
+}) => {
 	const where = {};
 
-	// Dibungkus AND supaya tidak bertabrakan dengan `where.OR` milik pencarian.
+	// Semua syarat tambahan dikumpulkan di AND supaya tidak bertabrakan dengan
+	// `where.OR` milik pencarian.
+	const dan = [];
 	const whereJenis = filterJenis(jenis);
-	if (whereJenis) where.AND = [whereJenis];
+	if (whereJenis) dan.push(whereJenis);
+
+	if (usia && RENTANG_USIA[usia]) {
+		const [min, max] = RENTANG_USIA[usia];
+		dan.push({ tanggal_lahir: { gt: tahunLalu(max + 1), lte: tahunLalu(min) } });
+	}
+
+	if (verifikasi === 'terverifikasi' || verifikasi === 'ditolak') dan.push({ status_verifikasi: verifikasi });
+	else if (verifikasi === 'belum') dan.push({ status_verifikasi: null });
+
+	// Daftar ejaan mentah hasil penerjemahan jabatan baku (lihat
+	// ejaanJabatanBaku) — kartu "KEPALA URUSAN KEUANGAN" juga memuat "KAUR KEUANGAN".
+	if (Array.isArray(jabatan_in)) dan.push({ jabatan: { in: jabatan_in } });
+
+	if (dan.length) where.AND = dan;
 
 	if (search) {
 		where.OR = [
@@ -77,14 +105,32 @@ const bangunWhere = ({ search, kecamatan_id, desa_id, jabatan, jenis, jenis_kela
 			.split(',')
 			.map((v) => v.trim())
 			.filter(Boolean);
-		if (nilai.length === 1) {
-			where.pendidikan_terakhir = nilai[0];
-		} else if (nilai.length > 1) {
-			where.pendidikan_terakhir = { in: nilai };
+		// "Tidak Diketahui" di statistik adalah label untuk kolom kosong.
+		const kosong = nilai.includes('Tidak Diketahui');
+		const isi = nilai.filter((v) => v !== 'Tidak Diketahui');
+		if (kosong) {
+			(where.AND = where.AND || []).push({
+				OR: [{ pendidikan_terakhir: { in: isi } }, { pendidikan_terakhir: null }, { pendidikan_terakhir: '' }],
+			});
+		} else if (isi.length === 1) {
+			where.pendidikan_terakhir = isi[0];
+		} else if (isi.length > 1) {
+			where.pendidikan_terakhir = { in: isi };
 		}
 	}
 
 	return where;
+};
+
+/**
+ * Jabatan baku (label kartu Komposisi Jabatan) → seluruh ejaan mentah yang
+ * dibakukan ke label itu. Dihitung dari data, bukan tabel tetap, jadi ejaan
+ * baru yang masuk ikut terbawa.
+ */
+const ejaanJabatanBaku = async (label, jenis) => {
+	const target = String(label || '').trim().toUpperCase();
+	const grup = await prisma.aparatur_desa.groupBy({ by: ['jabatan'], where: filterJenis(jenis) || {} });
+	return grup.map((g) => g.jabatan).filter((j) => bakuJabatan(j) === target);
 };
 
 /**
@@ -99,7 +145,8 @@ const getAllAparaturDesa = async (req, res) => {
 		const limitNum = Math.min(100, Math.max(1, parseInt(limit) || 20));
 		const skip = (pageNum - 1) * limitNum;
 
-		const where = bangunWhere(req.query);
+		const jabatan_in = req.query.jabatan_baku ? await ejaanJabatanBaku(req.query.jabatan_baku, req.query.jenis) : undefined;
+		const where = bangunWhere({ ...req.query, jabatan_in });
 
 		const [data, totalItems] = await Promise.all([
 			prisma.aparatur_desa.findMany({
