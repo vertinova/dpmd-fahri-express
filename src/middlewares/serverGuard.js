@@ -30,7 +30,11 @@ const gerbang = (req, res, next) => {
   try {
     const ip = security.bersihkanIp(req.ip);
     const b = security.isBlocked(ip);
-    if (b && !security.diWhitelist(ip)) {
+    // Pengguna yang sudah login (token sah) tidak ikut dikunci: blokir IP
+    // ditujukan ke pemindai & penyerang anonim. Tanpa pengecualian ini satu
+    // IP bersama (NAT kantor, Wi-Fi desa) mengunci semua pegawai di belakangnya
+    // — termasuk superadmin yang seharusnya membuka blokir itu.
+    if (b && !security.diWhitelist(ip) && !tokenSah(req)) {
       const kini = Date.now();
       // Catat paling sering sekali per menit per IP — IP yang diblokir biasanya
       // justru sedang membanjiri server.
@@ -59,7 +63,13 @@ const gerbang = (req, res, next) => {
           bytes: Number(res.getHeader('content-length')) || 0,
           ip,
         });
-        security.onResponse({ ip, status, method: req.method, path: req.originalUrl, userAgent: req.headers['user-agent'] });
+        // 403 izin fitur, 404, dan 429 rate limit bersama dari pengguna yang
+        // login itu pemakaian biasa, bukan serangan — tidak dihitung ke skor.
+        // Token baru diperiksa untuk status yang memang dihitung.
+        const dihitung = [401, 403, 404, 429].includes(status);
+        if (dihitung && !tokenSah(req)) {
+          security.onResponse({ ip, status, method: req.method, path: req.originalUrl, userAgent: req.headers['user-agent'] });
+        }
       } catch { /* pencatatan tidak boleh mengganggu */ }
     });
   } catch (error) {

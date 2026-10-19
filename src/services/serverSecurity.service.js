@@ -23,6 +23,7 @@ const logger = require('../utils/logger');
 const store = require('./serverStore.service');
 const alerts = require('./serverAlerts.service');
 const {
+  IP_TEPERCAYA,
   EVENT_TYPES,
   SEVERITY_SCORE,
   DETECTION_RULES,
@@ -55,7 +56,9 @@ const ipPrivat = (ip) => {
 };
 
 const diWhitelist = (ip) => {
-  const daftar = store.getConfigSync().security.whitelist || [];
+  // IP tepercaya bawaan selalu ikut — menghapus whitelist dari UI tidak boleh
+  // mengunci kantor sendiri (lihat IP_TEPERCAYA di config/serverManagement.js).
+  const daftar = [...IP_TEPERCAYA, ...(store.getConfigSync().security.whitelist || [])];
   const i = bersihkanIp(ip);
   return daftar.some((w) => {
     const pola = String(w).trim();

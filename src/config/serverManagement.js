@@ -57,6 +57,26 @@ const DEFAULT_CONFIG = {
   monitors: [],
 };
 
+/**
+ * IP tepercaya bawaan — tidak pernah diblokir, dan sengaja TIDAK ikut
+ * `security.whitelist` yang bisa disunting dari UI.
+ *
+ * 103.51.103.197 adalah NAT kantor DPMD: seluruh pegawai keluar lewat satu IP.
+ * Satu kantor yang salah ketik sandi belasan kali dan berbagi satu jatah rate
+ * limit terbaca persis seperti brute force. Pada 2026-10-19 auto-block
+ * mengunci seisi kantor (464 request ditolak dalam 4 menit), termasuk
+ * superadmin yang hendak membuka blokirnya sendiri.
+ *
+ * Tambahan lewat env SERVER_GUARD_TRUSTED_IPS (dipisah koma, boleh pola `*`).
+ */
+const IP_TEPERCAYA = [
+  '103.51.103.197',
+  ...String(process.env.SERVER_GUARD_TRUSTED_IPS || '')
+    .split(',')
+    .map((ip) => ip.trim())
+    .filter(Boolean),
+];
+
 /** Bobot skor ancaman per tingkat keparahan. */
 const SEVERITY_SCORE = { low: 1, medium: 3, high: 8, critical: 15 };
 
@@ -173,6 +193,7 @@ module.exports = {
   CONFIG_KEY,
   BACKEND_ROOT,
   DEFAULT_CONFIG,
+  IP_TEPERCAYA,
   SEVERITY_SCORE,
   EVENT_TYPES,
   DETECTION_RULES,
