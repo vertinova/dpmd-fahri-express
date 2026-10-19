@@ -12,6 +12,12 @@ const loginRateLimiter = rateLimit({
   standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
   legacyHeaders: false,
   skipSuccessfulRequests: true, // Jangan hitung request yang berhasil (status 2xx)
+  // Di mesin pengembang pembatas ini hanya menghalangi: salah ketik sandi
+  // atau skrip uji (scripts/uji-perangkat-desa.js) yang login berulang
+  // mengunci diri sendiri 5 menit. Sengaja sakelar eksplisit, BUKAN
+  // NODE_ENV: berkas .env di server produksi bertuliskan development
+  // (pm2 yang menimpanya jadi production) — terlalu rapuh untuk gerbang login.
+  skip: () => process.env.LOGIN_RATE_LIMIT === 'off',
   keyGenerator: (req) => {
     // Gunakan IP address sebagai key
     return req.ip || req.connection.remoteAddress || 'unknown';
