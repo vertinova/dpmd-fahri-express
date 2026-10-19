@@ -522,17 +522,8 @@ class PosyanduController {
         return res.status(404).json({ success: false, message: 'Posyandu tidak ditemukan' });
       }
 
-      const data = {
-        id: posyandu.id,
-        nama: posyandu.nama,
-        alamat: posyandu.alamat,
-        status_kelembagaan: posyandu.status_kelembagaan,
-        status_verifikasi: posyandu.status_verifikasi,
-        desa_id: posyandu.desa_id,
-        desa: posyandu.desas,
-        created_at: posyandu.created_at,
-        updated_at: posyandu.updated_at
-      };
+      // Kirim seluruh kolom — lihat catatan di showRT.
+      const data = { ...posyandu, desa: posyandu.desas };
 
       res.json({ success: true, data });
     } catch (error) {

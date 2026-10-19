@@ -540,19 +540,9 @@ class RTController {
         return res.status(404).json({ success: false, message: 'RT tidak ditemukan' });
       }
 
-      const data = {
-        id: rt.id,
-        nomor: rt.nomor,
-        rw_id: rt.rw_id,
-        rw: rt.rws,
-        alamat: rt.alamat,
-        status_kelembagaan: rt.status_kelembagaan,
-        status_verifikasi: rt.status_verifikasi,
-        desa_id: rt.desa_id,
-        desa: rt.desas,
-        created_at: rt.created_at,
-        updated_at: rt.updated_at
-      };
+      // Kirim seluruh kolom (produk_hukum_id, jumlah_jiwa, dst.) — daftar kolom pilihan
+      // sebelumnya membuat SK tampil "Belum terhubung" dan ikut terhapus saat disunting.
+      const data = { ...rt, rw: rt.rws, desa: rt.desas };
 
       res.json({ success: true, data });
     } catch (error) {
