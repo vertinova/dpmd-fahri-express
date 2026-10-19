@@ -95,6 +95,15 @@ const MODUL_AKUN_DESA = {
     slug_fitur: 'kerjasama',
     keys: ['kerjasama-desa'],
   },
+  // Pemdes — dibuka dari halaman Perangkat Desa / BPD. Tanpa modul ini akun yang
+  // dibuat dari sana ikut membawa Profil Desa dan Produk Hukum, dan "desa ini
+  // sudah punya operator?" terjawab ya oleh operator produk hukum.
+  'aparatur-desa': {
+    slug: 'aparatur-desa',
+    label: 'Perangkat Desa',
+    slug_fitur: 'aparatur',
+    keys: ['aparatur-desa'],
+  },
 };
 
 /** Modul dari slug yang dikirim frontend. null = halaman akun desa penuh (perilaku lama). */

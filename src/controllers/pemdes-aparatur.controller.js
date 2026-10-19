@@ -227,25 +227,47 @@ const getGrouped = async (req, res) => {
 		});
 
 		const kecamatans = new Map();
-		for (const row of rows) {
-			const desa = row.desas;
-			const kec = desa?.kecamatans;
-			// Aparatur tanpa desa/kecamatan tidak punya tempat di pohon wilayah.
-			if (!desa || !kec) continue;
-
+		const tempatDesa = (desa, kec) => {
 			const idKec = String(kec.id);
 			let kecamatan = kecamatans.get(idKec);
 			if (!kecamatan) {
 				kecamatan = { id: idKec, nama: kec.nama, total: 0, desa: new Map() };
 				kecamatans.set(idKec, kecamatan);
 			}
-
 			const idDesa = String(desa.id);
 			let entriDesa = kecamatan.desa.get(idDesa);
 			if (!entriDesa) {
-				entriDesa = { id: idDesa, nama: desa.nama, total: 0, aparatur: [] };
+				entriDesa = { id: idDesa, nama: desa.nama, total: 0, aktif: 0, terverifikasi: 0, aparatur: [] };
 				kecamatan.desa.set(idDesa, entriDesa);
 			}
+			return { kecamatan, entriDesa };
+		};
+
+		// Tanpa penyaring isi, seluruh desa ikut tampil — termasuk yang belum
+		// punya satu aparatur pun. Justru itu yang dicari bidang: desa mana
+		// yang harus ditagih atau diisikan. Kelurahan tidak ikut; perangkatnya
+		// bukan aparatur desa.
+		const { search, jabatan, jenis_kelamin, status, pendidikan, kecamatan_id, desa_id } = req.query;
+		if (!search && !jabatan && !jenis_kelamin && !status && !pendidikan) {
+			const semuaDesa = await prisma.desas.findMany({
+				where: {
+					status_pemerintahan: 'desa',
+					...(desa_id ? { id: BigInt(desa_id) } : kecamatan_id ? { kecamatan_id: BigInt(kecamatan_id) } : {}),
+				},
+				select: { id: true, nama: true, kecamatans: { select: { id: true, nama: true } } },
+			});
+			for (const desa of semuaDesa) if (desa.kecamatans) tempatDesa(desa, desa.kecamatans);
+		}
+
+		for (const row of rows) {
+			const desa = row.desas;
+			const kec = desa?.kecamatans;
+			// Aparatur tanpa desa/kecamatan tidak punya tempat di pohon wilayah.
+			if (!desa || !kec) continue;
+
+			const { kecamatan, entriDesa } = tempatDesa(desa, kec);
+			if (row.status === 'Aktif') entriDesa.aktif += 1;
+			if (row.status_verifikasi === 'terverifikasi') entriDesa.terverifikasi += 1;
 
 			const { urutan, nomor } = peringkatJabatan(row.jabatan || '');
 			entriDesa.aparatur.push({
@@ -266,9 +288,14 @@ const getGrouped = async (req, res) => {
 
 		const perNama = (a, b) => a.nama.localeCompare(b.nama, 'id');
 		const data = [...kecamatans.values()]
-			.map((kecamatan) => ({
+			.map((kecamatan) => {
+				const daftarDesa = [...kecamatan.desa.values()];
+				return {
 				...kecamatan,
-				desa: [...kecamatan.desa.values()]
+				desa_terisi: daftarDesa.filter((desa) => desa.total > 0).length,
+				aktif: daftarDesa.reduce((jumlah, desa) => jumlah + desa.aktif, 0),
+				terverifikasi: daftarDesa.reduce((jumlah, desa) => jumlah + desa.terverifikasi, 0),
+				desa: daftarDesa
 					.map((desa) => ({
 						...desa,
 						// Yang aktif dulu — seluruh susunan jabatan dari kepala desa ke
@@ -284,7 +311,8 @@ const getGrouped = async (req, res) => {
 						),
 					}))
 					.sort(perNama),
-			}))
+				};
+			})
 			.sort(perNama);
 
 		res.json({

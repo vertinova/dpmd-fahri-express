@@ -16,6 +16,21 @@ const RESET_VERIFIKASI = {
 };
 
 /**
+ * Desa tujuan dan penulis sebuah simpanan.
+ *
+ * Akun desa selalu menulis ke desanya sendiri. Bidang Pemdes juga memakai
+ * create/update di bawah ini — supaya unggah berkas, normalisasi enum, dan
+ * catatan riwayatnya tidak bercabang dua — tapi menulis ATAS NAMA desa yang
+ * dipilihnya. `req.atasNamaDesa` hanya dipasang oleh rute pemdes setelah
+ * desanya diperiksa (lihat routes/pemdes-aparatur.routes.js); akun desa tidak
+ * punya jalan untuk mengisinya.
+ */
+const konteksTulis = (req) =>
+	req.atasNamaDesa
+		? { desaId: req.atasNamaDesa.desaId, oleh: 'Bidang Pemdes', olehBidang: true }
+		: { desaId: req.user.desa_id, oleh: 'desa', olehBidang: false };
+
+/**
  * Get all aparatur desa for logged in user's desa
  */
 const getAllAparaturDesa = async (req, res) => {
@@ -143,7 +158,7 @@ const getAparaturDesaById = async (req, res) => {
  */
 const createAparaturDesa = async (req, res) => {
 	try {
-		const { desa_id } = req.user;
+		const { desaId: desa_id, oleh } = konteksTulis(req);
 
 		// Normalize empty strings to null for nullable fields
 		const data = { ...req.body };
@@ -258,7 +273,7 @@ const createAparaturDesa = async (req, res) => {
 		await catatLogAparatur({
 			aparaturId: aparatur.id,
 			aksi: AKSI.dibuat,
-			keterangan: 'Data ditambahkan oleh desa',
+			keterangan: `Data ditambahkan oleh ${oleh}`,
 			user: req.user,
 		});
 
@@ -283,7 +298,7 @@ const createAparaturDesa = async (req, res) => {
 const updateAparaturDesa = async (req, res) => {
 	try {
 		const { id } = req.params;
-		const { desa_id } = req.user;
+		const { desaId: desa_id, oleh, olehBidang } = konteksTulis(req);
 
 		// Check if aparatur exists and belongs to user's desa
 		const existing = await prisma.aparatur_desa.findFirst({
@@ -402,7 +417,9 @@ const updateAparaturDesa = async (req, res) => {
 				file_kk: data.file_kk || existing.file_kk,
 				file_akta_kelahiran: data.file_akta_kelahiran || existing.file_akta_kelahiran,
 				file_ijazah_terakhir: data.file_ijazah_terakhir || existing.file_ijazah_terakhir,
-				...RESET_VERIFIKASI,
+				// Suntingan bidang tidak menggugurkan keputusannya sendiri — yang
+				// memeriksa dan yang membetulkan berada di pihak yang sama.
+				...(olehBidang ? {} : RESET_VERIFIKASI),
 			},
 			include: {
 				desas: {
@@ -426,7 +443,7 @@ const updateAparaturDesa = async (req, res) => {
 		await catatLogAparatur({
 			aparaturId: id,
 			aksi: AKSI.diubah,
-			keterangan: 'Data diperbarui oleh desa',
+			keterangan: `Data diperbarui oleh ${oleh}`,
 			user: req.user,
 		});
 
