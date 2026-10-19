@@ -1,5 +1,16 @@
 const prisma = require('../config/prisma');
 const { AKSI, catatLogAparatur, ambilLogAparatur } = require('../utils/aparaturLog');
+const { Prisma } = require('@prisma/client');
+const {
+	ITEM_VERIFIKASI,
+	KUNCI_ITEM,
+	buatNipd,
+	itemBerlaku,
+	ringkasVerifikasi,
+	catatanUntukDesa,
+	kodeJabatan,
+	kodeWilayah,
+} = require('../utils/aparaturNipd');
 
 // Tabel aparatur_desa tidak punya kolom pembeda perangkat desa vs BPD —
 // satu-satunya penanda ada di teks jabatan. Aturannya ditulis sekali di sini
@@ -98,10 +109,12 @@ const getAllAparaturDesa = async (req, res) => {
 						select: {
 							id: true,
 							nama: true,
+							kode: true,
 							kecamatans: {
 								select: {
 									id: true,
 									nama: true,
+									kode: true,
 								},
 							},
 						},
@@ -220,7 +233,8 @@ const getGrouped = async (req, res) => {
 					select: {
 						id: true,
 						nama: true,
-						kecamatans: { select: { id: true, nama: true } },
+						kode: true,
+						kecamatans: { select: { id: true, nama: true, kode: true } },
 					},
 				},
 			},
@@ -231,13 +245,13 @@ const getGrouped = async (req, res) => {
 			const idKec = String(kec.id);
 			let kecamatan = kecamatans.get(idKec);
 			if (!kecamatan) {
-				kecamatan = { id: idKec, nama: kec.nama, total: 0, desa: new Map() };
+				kecamatan = { id: idKec, nama: kec.nama, kode: kec.kode || null, total: 0, desa: new Map() };
 				kecamatans.set(idKec, kecamatan);
 			}
 			const idDesa = String(desa.id);
 			let entriDesa = kecamatan.desa.get(idDesa);
 			if (!entriDesa) {
-				entriDesa = { id: idDesa, nama: desa.nama, total: 0, aktif: 0, terverifikasi: 0, aparatur: [] };
+				entriDesa = { id: idDesa, nama: desa.nama, kode: desa.kode || null, total: 0, aktif: 0, terverifikasi: 0, aparatur: [] };
 				kecamatan.desa.set(idDesa, entriDesa);
 			}
 			return { kecamatan, entriDesa };
@@ -254,7 +268,7 @@ const getGrouped = async (req, res) => {
 					status_pemerintahan: 'desa',
 					...(desa_id ? { id: BigInt(desa_id) } : kecamatan_id ? { kecamatan_id: BigInt(kecamatan_id) } : {}),
 				},
-				select: { id: true, nama: true, kecamatans: { select: { id: true, nama: true } } },
+				select: { id: true, nama: true, kode: true, kecamatans: { select: { id: true, nama: true, kode: true } } },
 			});
 			for (const desa of semuaDesa) if (desa.kecamatans) tempatDesa(desa, desa.kecamatans);
 		}
@@ -507,10 +521,12 @@ const getAparaturDesaById = async (req, res) => {
 					select: {
 						id: true,
 						nama: true,
+						kode: true,
 						kecamatans: {
 							select: {
 								id: true,
 								nama: true,
+								kode: true,
 							},
 						},
 					},
@@ -547,9 +563,29 @@ const getAparaturDesaById = async (req, res) => {
 
 		const riwayat = await ambilLogAparatur(id);
 
+		// Aturan verifikasi & NIPD dikirim dari sini supaya frontend tidak
+		// menyalin daftar item atau tabel kode jabatan sendiri.
+		const jab = kodeJabatan(aparatur.jabatan);
+		const pratinjauNipd = buatNipd(aparatur, aparatur.desas?.kode);
+		const item_verifikasi = itemBerlaku(aparatur).map(({ key, label, jenis, wajib, ada, keterangan }) => ({
+			key, label, jenis, wajib, ada, keterangan: keterangan || null,
+		}));
+
 		res.json({
 			success: true,
-			data: { ...aparatur, dpmd_verified_nama, riwayat },
+			data: {
+				...aparatur,
+				dpmd_verified_nama,
+				riwayat,
+				item_verifikasi,
+				kode_lokasi: kodeWilayah(aparatur.desas?.kode),
+				nipd_info: {
+					berhak: jab.berhak,
+					kode_jabatan: jab.kode,
+					// Alasan NIPD belum bisa diterbitkan walau datanya valid nanti.
+					kendala: jab.berhak ? pratinjauNipd.alasan || null : null,
+				},
+			},
 		});
 	} catch (error) {
 		console.error('Error fetching aparatur desa detail:', error);
@@ -566,7 +602,6 @@ const getAparaturDesaById = async (req, res) => {
 const KOLOM_TEKS = [
 	'nama_lengkap',
 	'jabatan',
-	'nipd',
 	'niap',
 	'tempat_lahir',
 	'jenis_kelamin',
@@ -657,62 +692,148 @@ const updateAparaturDesa = async (req, res) => {
 };
 
 /**
- * Keputusan verifikasi oleh Bidang Pemerintahan Desa: setujui, tolak, atau
- * batalkan keputusan sebelumnya. Keterangan wajib saat menolak — itulah yang
- * dibaca desa untuk tahu apa yang harus dibetulkan.
+ * Verifikasi per item oleh Bidang Pemerintahan Desa.
+ *
+ * Body:
+ *   { items: { <key>: { status: 'sesuai'|'tidak_sesuai'|null, catatan } }, catatan }
+ *     → keputusan per kelompok data & per berkas (ITEM_VERIFIKASI). Yang
+ *       dikirim digabung dengan keputusan sebelumnya; status ringkas dihitung
+ *       ulang dari seluruh item.
+ *   { status: 'batal' } → hapus seluruh keputusan (dan NIPD).
+ *   { status: 'terverifikasi'|'ditolak', catatan } → bentuk lama; diterjemahkan
+ *       jadi "semua item berlaku" sesuai / tidak sesuai.
+ *
+ * Saat ringkasnya menjadi 'terverifikasi', NIPD 20 digit diterbitkan untuk
+ * jabatan yang berhak (utils/aparaturNipd.js). Selain itu NIPD dikosongkan.
  */
-const STATUS_VERIFIKASI = ['terverifikasi', 'ditolak', 'batal'];
+const STATUS_ITEM = ['sesuai', 'tidak_sesuai'];
 
 const verifikasiAparaturDesa = async (req, res) => {
 	try {
 		const { id } = req.params;
-		const ada = await prisma.aparatur_desa.findUnique({ where: { id }, select: { id: true } });
-		if (!ada) {
+		const aparatur = await prisma.aparatur_desa.findUnique({
+			where: { id },
+			include: { desas: { select: { kode: true } } },
+		});
+		if (!aparatur) {
 			return res.status(404).json({ success: false, message: 'Data aparatur desa tidak ditemukan' });
 		}
 
-		const status = String(req.body?.status || '').trim();
-		if (!STATUS_VERIFIKASI.includes(status)) {
-			return res.status(400).json({
-				success: false,
-				message: `Status verifikasi harus salah satu dari: ${STATUS_VERIFIKASI.join(', ')}`,
+		const statusLama = String(req.body?.status || '').trim();
+		const catatanUmum = req.body?.catatan ? String(req.body.catatan).trim() : null;
+
+		// ── Batalkan seluruh keputusan ───────────────────────────────────────
+		if (statusLama === 'batal') {
+			const hasil = await prisma.aparatur_desa.update({
+				where: { id },
+				data: {
+					status_verifikasi: null,
+					dpmd_verified_at: null,
+					dpmd_verified_by: null,
+					catatan_verifikasi: null,
+					verifikasi_item: Prisma.DbNull,
+					nipd: null,
+					updated_at: new Date(),
+				},
 			});
+			await catatLogAparatur({ aparaturId: id, aksi: AKSI.verifikasi_dibatalkan, keterangan: null, user: req.user });
+			return res.json({ success: true, message: 'Keputusan verifikasi dibatalkan', data: hasil });
 		}
 
-		const catatan = req.body?.catatan ? String(req.body.catatan).trim() : null;
-		if (status === 'ditolak' && !catatan) {
-			return res.status(400).json({
-				success: false,
-				message: 'Keterangan wajib diisi saat menolak verifikasi',
-			});
+		// ── Kumpulkan keputusan per item ─────────────────────────────────────
+		const sebelumnya = aparatur.verifikasi_item && typeof aparatur.verifikasi_item === 'object' ? aparatur.verifikasi_item : {};
+		const keputusan = { ...sebelumnya };
+		const cap = { oleh: req.user?.name || null, pada: new Date().toISOString() };
+
+		let kiriman = req.body?.items;
+		if (!kiriman && ['terverifikasi', 'ditolak'].includes(statusLama)) {
+			// Bentuk lama: satu keputusan untuk semua item yang berlaku.
+			if (statusLama === 'ditolak' && !catatanUmum) {
+				return res.status(400).json({ success: false, message: 'Keterangan wajib diisi saat menolak verifikasi' });
+			}
+			kiriman = Object.fromEntries(
+				itemBerlaku(aparatur)
+					.filter((item) => item.ada)
+					.map((item) => [item.key, { status: statusLama === 'terverifikasi' ? 'sesuai' : 'tidak_sesuai', catatan: catatanUmum }])
+			);
+		}
+		if (!kiriman || typeof kiriman !== 'object') {
+			return res.status(400).json({ success: false, message: 'Kirim keputusan per item (items) atau status "batal"' });
 		}
 
-		const dibatalkan = status === 'batal';
-		const aparatur = await prisma.aparatur_desa.update({
+		for (const [key, nilai] of Object.entries(kiriman)) {
+			if (!KUNCI_ITEM.has(key)) continue;
+			const status = nilai?.status || null;
+			if (status === null) {
+				delete keputusan[key];
+				continue;
+			}
+			if (!STATUS_ITEM.includes(status)) {
+				return res.status(400).json({ success: false, message: `Status item "${key}" harus sesuai / tidak_sesuai` });
+			}
+			const catatan = nilai?.catatan ? String(nilai.catatan).trim().slice(0, 500) : null;
+			if (status === 'tidak_sesuai' && !catatan) {
+				const label = ITEM_VERIFIKASI.find((item) => item.key === key)?.label || key;
+				return res.status(400).json({ success: false, message: `Tulis alasan untuk "${label}" yang tidak sesuai` });
+			}
+			keputusan[key] = { status, catatan, ...cap };
+		}
+
+		// ── Hitung status ringkas & NIPD ─────────────────────────────────────
+		const ringkas = ringkasVerifikasi(aparatur, keputusan);
+		let nipd = null;
+		let peringatan = null;
+		if (ringkas === 'terverifikasi') {
+			const hasilNipd = buatNipd(aparatur, aparatur.desas?.kode);
+			nipd = hasilNipd.nipd;
+			peringatan = hasilNipd.alasan || null;
+			if (nipd) {
+				const kembar = await prisma.aparatur_desa.findFirst({
+					where: { nipd, id: { not: id } },
+					select: { nama_lengkap: true, status: true },
+				});
+				if (kembar) {
+					return res.status(409).json({
+						success: false,
+						message: `NIPD ${nipd} sudah dipakai ${kembar.nama_lengkap} (${kembar.status === 'Aktif' ? 'aktif' : 'nonaktif'}). Periksa apakah ini orang yang sama atau jabatannya tertukar.`,
+					});
+				}
+			}
+		}
+
+		const diputuskan = ringkas !== null;
+		const hasil = await prisma.aparatur_desa.update({
 			where: { id },
 			data: {
-				status_verifikasi: dibatalkan ? null : status,
-				dpmd_verified_at: dibatalkan ? null : new Date(),
-				dpmd_verified_by: dibatalkan ? null : BigInt(req.user.id),
-				catatan_verifikasi: dibatalkan ? null : catatan,
+				verifikasi_item: keputusan,
+				status_verifikasi: ringkas,
+				dpmd_verified_at: diputuskan ? new Date() : null,
+				dpmd_verified_by: diputuskan ? BigInt(req.user.id) : null,
+				catatan_verifikasi: ringkas === 'ditolak' ? catatanUntukDesa(aparatur, keputusan, catatanUmum) : catatanUmum,
+				nipd,
 				updated_at: new Date(),
 			},
 		});
 
-		const pesan = {
-			terverifikasi: 'Data aparatur desa terverifikasi',
-			ditolak: 'Verifikasi ditolak',
-			batal: 'Keputusan verifikasi dibatalkan',
+		const PESAN = {
+			terverifikasi: nipd ? `Data valid — NIPD ${nipd} diterbitkan` : 'Data valid dan terverifikasi',
+			ditolak: 'Ada item yang tidak sesuai — desa diminta membetulkan',
 		};
+		if (diputuskan) {
+			await catatLogAparatur({
+				aparaturId: id,
+				aksi: ringkas,
+				keterangan: ringkas === 'terverifikasi' ? (nipd ? `NIPD ${nipd}` : peringatan) : hasil.catatan_verifikasi,
+				user: req.user,
+			});
+		}
 
-		await catatLogAparatur({
-			aparaturId: id,
-			aksi: dibatalkan ? AKSI.verifikasi_dibatalkan : status,
-			keterangan: catatan,
-			user: req.user,
+		res.json({
+			success: true,
+			message: diputuskan ? PESAN[ringkas] : 'Keputusan item disimpan — masih ada item yang belum diperiksa',
+			peringatan,
+			data: hasil,
 		});
-
-		res.json({ success: true, message: pesan[status], data: aparatur });
 	} catch (error) {
 		console.error('Error verifying aparatur desa:', error);
 		res.status(500).json({

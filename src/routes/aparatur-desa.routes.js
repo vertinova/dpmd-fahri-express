@@ -31,7 +31,8 @@ router.post('/', uploadAparaturDesa.fields([
   { name: 'file_ktp', maxCount: 1 },
   { name: 'file_kk', maxCount: 1 },
   { name: 'file_akta_kelahiran', maxCount: 1 },
-  { name: 'file_ijazah_terakhir', maxCount: 1 }
+  { name: 'file_ijazah_terakhir', maxCount: 1 },
+  { name: 'file_sk_terakhir', maxCount: 1 }
 ]), aparaturDesaController.createAparaturDesa);
 
 // POST /api/desa/aparatur-desa/:id - Update aparatur desa (using POST for form-data compatibility)
@@ -42,7 +43,8 @@ router.post('/:id', uploadAparaturDesa.fields([
   { name: 'file_ktp', maxCount: 1 },
   { name: 'file_kk', maxCount: 1 },
   { name: 'file_akta_kelahiran', maxCount: 1 },
-  { name: 'file_ijazah_terakhir', maxCount: 1 }
+  { name: 'file_ijazah_terakhir', maxCount: 1 },
+  { name: 'file_sk_terakhir', maxCount: 1 }
 ]), aparaturDesaController.updateAparaturDesa);
 
 // DELETE /api/desa/aparatur-desa/:id - Delete aparatur desa

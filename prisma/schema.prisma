@@ -107,6 +107,8 @@ model aparatur_desa {
   file_kk                    String?                     @db.VarChar(255)
   file_akta_kelahiran        String?                     @db.VarChar(255)
   file_ijazah_terakhir       String?                     @db.VarChar(255)
+  /// SK jabatan terakhir — dasar verifikasi jabatan & penerbitan NIPD.
+  file_sk_terakhir           String?                     @db.VarChar(255)
   /// Keputusan verifikasi oleh Bidang Pemerintahan Desa: 'terverifikasi' atau
   /// 'ditolak' (NULL = belum diperiksa). `dpmd_verified_at` adalah waktu
   /// keputusan, berlaku untuk kedua hasil, dan `catatan_verifikasi` adalah
@@ -117,6 +119,9 @@ model aparatur_desa {
   dpmd_verified_at           DateTime?                   @db.Timestamp(0)
   dpmd_verified_by           BigInt?                     @db.UnsignedBigInt
   catatan_verifikasi         String?                     @db.Text
+  /// Keputusan per kelompok data & per berkas: { item: { status, catatan, oleh, pada } }.
+  /// Lihat utils/aparaturNipd.js → ITEM_VERIFIKASI.
+  verifikasi_item            Json?
   created_at                 DateTime?                   @db.Timestamp(0)
   updated_at                 DateTime?                   @db.Timestamp(0)
   desas                      desas                       @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "aparatur_desa_desa_id_foreign")

@@ -4,15 +4,20 @@ const path = require('path');
 const fs = require('fs').promises;
 const { keAparaturDesa, bandingkanDenganAparatur } = require('../config/dapurDesa');
 const { AKSI, catatLogAparatur } = require('../utils/aparaturLog');
+const { Prisma } = require('@prisma/client');
+const { buatNipd } = require('../utils/aparaturNipd');
 
 // Data berubah = keputusan verifikasi Bidang Pemdes gugur. Kalau tidak,
 // baris yang sudah dibetulkan desa akan tetap berstatus "ditolak" —
 // dan yang sudah disetujui tetap "terverifikasi" padahal isinya lain.
+// NIPD ikut gugur: ia hanya sah untuk data yang dinyatakan valid.
 const RESET_VERIFIKASI = {
 	status_verifikasi: null,
 	dpmd_verified_at: null,
 	dpmd_verified_by: null,
 	catatan_verifikasi: null,
+	verifikasi_item: Prisma.DbNull,
+	nipd: null,
 };
 
 /**
@@ -210,6 +215,7 @@ const createAparaturDesa = async (req, res) => {
 			'file_kk',
 			'file_akta_kelahiran',
 			'file_ijazah_terakhir',
+			'file_sk_terakhir',
 		];
 
 		for (const field of fileFields) {
@@ -226,7 +232,7 @@ const createAparaturDesa = async (req, res) => {
 				desa_id: parseInt(desa_id),
 				nama_lengkap: data.nama_lengkap,
 				jabatan: data.jabatan,
-				nipd: data.nipd,
+				// NIPD tidak diterima dari isian: diterbitkan sistem saat verifikasi (utils/aparaturNipd.js).
 				niap: data.niap,
 				tempat_lahir: data.tempat_lahir,
 				tanggal_lahir: data.tanggal_lahir,
@@ -250,6 +256,7 @@ const createAparaturDesa = async (req, res) => {
 				file_kk: data.file_kk,
 				file_akta_kelahiran: data.file_akta_kelahiran,
 				file_ijazah_terakhir: data.file_ijazah_terakhir,
+				file_sk_terakhir: data.file_sk_terakhir,
 			},
 			include: {
 				desas: {
@@ -365,6 +372,7 @@ const updateAparaturDesa = async (req, res) => {
 			'file_kk',
 			'file_akta_kelahiran',
 			'file_ijazah_terakhir',
+			'file_sk_terakhir',
 		];
 
 		for (const field of fileFields) {
@@ -388,12 +396,11 @@ const updateAparaturDesa = async (req, res) => {
 			}
 		}
 
-		const aparatur = await prisma.aparatur_desa.update({
+		let aparatur = await prisma.aparatur_desa.update({
 			where: { id },
 			data: {
 				nama_lengkap: data.nama_lengkap,
 				jabatan: data.jabatan,
-				nipd: data.nipd,
 				niap: data.niap,
 				tempat_lahir: data.tempat_lahir,
 				tanggal_lahir: data.tanggal_lahir,
@@ -417,6 +424,7 @@ const updateAparaturDesa = async (req, res) => {
 				file_kk: data.file_kk || existing.file_kk,
 				file_akta_kelahiran: data.file_akta_kelahiran || existing.file_akta_kelahiran,
 				file_ijazah_terakhir: data.file_ijazah_terakhir || existing.file_ijazah_terakhir,
+				file_sk_terakhir: data.file_sk_terakhir || existing.file_sk_terakhir,
 				// Suntingan bidang tidak menggugurkan keputusannya sendiri — yang
 				// memeriksa dan yang membetulkan berada di pihak yang sama.
 				...(olehBidang ? {} : RESET_VERIFIKASI),
@@ -426,6 +434,7 @@ const updateAparaturDesa = async (req, res) => {
 					select: {
 						id: true,
 						nama: true,
+						kode: true,
 					},
 				},
 				produk_hukums: {
@@ -439,6 +448,19 @@ const updateAparaturDesa = async (req, res) => {
 				},
 			},
 		});
+
+		// Bidang membetulkan data yang sudah valid (mis. tanggal lahir atau
+		// jabatan): NIPD diterbitkan ulang supaya tetap sesuai isinya.
+		if (olehBidang && aparatur.status_verifikasi === 'terverifikasi') {
+			const { nipd } = buatNipd(aparatur, aparatur.desas?.kode);
+			if (nipd !== aparatur.nipd) {
+				aparatur = await prisma.aparatur_desa.update({
+					where: { id },
+					data: { nipd },
+					include: { desas: { select: { id: true, nama: true, kode: true } }, produk_hukums: { select: { id: true, uuid: true, judul: true, nomor: true, tahun: true } } },
+				});
+			}
+		}
 
 		await catatLogAparatur({
 			aparaturId: id,
@@ -494,6 +516,7 @@ const deleteAparaturDesa = async (req, res) => {
 			'file_kk',
 			'file_akta_kelahiran',
 			'file_ijazah_terakhir',
+			'file_sk_terakhir',
 		];
 
 		for (const field of fileFields) {
@@ -567,6 +590,10 @@ const KOLOM_STAGING = {
 const getRekonsiliasiDapurDesa = async (req, res) => {
 	try {
 		const desaId = BigInt(String(req.user.desa_id));
+
+		// Sisa yang belum terputus (mis. impor ulang) diselesaikan dulu, jadi
+		// panel desa tidak pernah lagi meminta operator memilih.
+		await rekonsiliasiOtomatis(desaId);
 
 		const [konflik, baru, ringkasanMentah] = await Promise.all([
 			prisma.aparatur_dapur_desa.findMany({
@@ -806,7 +833,56 @@ const tambahSemuaBaruDapurDesa = async (req, res) => {
 	}
 };
 
+/**
+ * Rekonsiliasi otomatis — operator desa tidak lagi diminta memilih.
+ *
+ * Aturannya (keputusan Bidang Pemdes, 2026-10-19):
+ *   konflik → orang ada di data desa DAN di arsip: data desa yang dipakai,
+ *             arsip ditandai tidak dipakai. Isian desa tidak disentuh.
+ *   baru    → orang hanya ada di arsip: arsip yang dipakai, ditambahkan.
+ * Desa yang hanya punya salah satu sumber sudah tercakup: yang tidak punya
+ * data desa sama sekali disuntik saat impor (status `otomatis`).
+ *
+ * Idempoten — hanya menyentuh baris berstatus konflik/baru. `desaId` null =
+ * seluruh kabupaten (dijalankan sekali saat backend menyala).
+ */
+const rekonsiliasiOtomatis = async (desaId = null) => {
+	const lingkup = desaId ? { desa_id: BigInt(String(desaId)) } : {};
+	const kini = new Date();
+
+	const konflik = await prisma.aparatur_dapur_desa.updateMany({
+		where: { ...lingkup, status_rekonsiliasi: 'konflik' },
+		data: { status_rekonsiliasi: 'ditolak', keputusan: 'desa', diputuskan_pada: kini, updated_at: kini },
+	});
+
+	const baru = await prisma.aparatur_dapur_desa.findMany({
+		where: { ...lingkup, status_rekonsiliasi: 'baru', desa_id: { not: null } },
+	});
+	let ditambah = 0;
+	for (const baris of baru) {
+		try {
+			const hasil = await terapkanArsipKeAparatur(baris, baris.desa_id, null, null);
+			await prisma.aparatur_dapur_desa.update({
+				where: { dapur_id: baris.dapur_id },
+				data: {
+					status_rekonsiliasi: 'selesai',
+					keputusan: 'dapur',
+					aparatur_desa_id: hasil.id,
+					diputuskan_pada: new Date(),
+					updated_at: new Date(),
+				},
+			});
+			ditambah++;
+		} catch (err) {
+			console.error(`[rekonsiliasi] gagal menambah ${baris.nama} (dapur ${baris.dapur_id}):`, err.message);
+		}
+	}
+
+	return { konflik_pakai_desa: konflik.count, baru_ditambah: ditambah };
+};
+
 module.exports = {
+	rekonsiliasiOtomatis,
 	getAllAparaturDesa,
 	getAparaturDesaById,
 	createAparaturDesa,

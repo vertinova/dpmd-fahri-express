@@ -685,6 +685,14 @@ function startServer() {
       logger.error('🖥️  Server monitor gagal dijalankan —', err.message);
     }
 
+    // Rekonsiliasi arsip Dapur Desa otomatis (data desa menang bila ada di
+    // keduanya). Idempoten; ditunda supaya tidak berebut dengan pemanasan lain.
+    setTimeout(() => {
+      require('./controllers/aparatur-desa.controller').rekonsiliasiOtomatis()
+        .then((hasil) => logger.info(`🧾 Rekonsiliasi Dapur Desa otomatis: ${JSON.stringify(hasil)}`))
+        .catch((err) => logger.error('🧾 Rekonsiliasi Dapur Desa gagal —', err.message));
+    }, 30000).unref();
+
     // Siapkan penyusuran ASTA DESA di latar supaya halaman Core Dashboard tidak
     // pernah menunggu penyusuran ribuan halaman saat dibuka.
     try {

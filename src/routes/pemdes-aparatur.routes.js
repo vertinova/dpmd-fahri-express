@@ -45,6 +45,7 @@ const berkasAparatur = uploadAparaturDesa.fields(
     'file_kk',
     'file_akta_kelahiran',
     'file_ijazah_terakhir',
+    'file_sk_terakhir',
   ].map((name) => ({ name, maxCount: 1 }))
 );
 
