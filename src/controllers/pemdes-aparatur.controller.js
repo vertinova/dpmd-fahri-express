@@ -934,9 +934,48 @@ const getStats = async (req, res) => {
 			.sort((a, b) => a.urutan - b.urutan || a.nomor - b.nomor || a.name.localeCompare(b.name, 'id'))
 			.map(({ name, value }) => ({ name, value }));
 
+		// Capaian verifikasi — total dan per kecamatan, seperti kelembagaan.
+		// Dikelompokkan per desa dulu (sekali query), lalu dipetakan ke
+		// kecamatannya; jumlah desa ±400 sehingga peta kecilnya murah.
+		const perDesaStatus = await prisma.aparatur_desa.groupBy({
+			by: ['desa_id', 'status_verifikasi'],
+			where,
+			_count: { _all: true },
+		});
+		const desaIds = [...new Set(perDesaStatus.map((g) => g.desa_id))];
+		const desaKec = desaIds.length
+			? await prisma.desas.findMany({
+					where: { id: { in: desaIds } },
+					select: { id: true, kecamatans: { select: { id: true, nama: true, kode: true } } },
+			  })
+			: [];
+		const kecDariDesa = new Map(desaKec.map((d) => [String(d.id), d.kecamatans]));
+		const verifikasi = { terverifikasi: 0, ditolak: 0, belum: 0 };
+		const perKec = new Map();
+		for (const g of perDesaStatus) {
+			const n = g._count._all;
+			const kunci = g.status_verifikasi === 'terverifikasi' ? 'terverifikasi' : g.status_verifikasi === 'ditolak' ? 'ditolak' : 'belum';
+			verifikasi[kunci] += n;
+			const kec = kecDariDesa.get(String(g.desa_id));
+			if (!kec) continue;
+			const baris = perKec.get(String(kec.id)) || { id: String(kec.id), nama: kec.nama, kode: kec.kode, total: 0, terverifikasi: 0, ditolak: 0, belum: 0 };
+			baris.total += n;
+			baris[kunci] += n;
+			perKec.set(String(kec.id), baris);
+		}
+		const verifikasi_per_kecamatan = [...perKec.values()].sort(
+			(a, b) => b.terverifikasi / (b.total || 1) - a.terverifikasi / (a.total || 1) || a.nama.localeCompare(b.nama, 'id')
+		);
+
 		res.json({
 			success: true,
 			data: {
+				verifikasi: {
+					...verifikasi,
+					total: totalAparatur,
+					persen: totalAparatur ? Math.round((verifikasi.terverifikasi / totalAparatur) * 1000) / 10 : 0,
+				},
+				verifikasi_per_kecamatan,
 				total: totalAparatur,
 				aktif: totalAktif,
 				tidak_aktif: totalAparatur - totalAktif,
