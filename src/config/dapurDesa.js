@@ -158,6 +158,8 @@ const keAparaturDesa = (baris, desaId, { id } = {}) => ({
   jabatan: baris.jabatan || '-',
   tempat_lahir: '-',
   tanggal_lahir: taksirTanggalLahir(baris.usia),
+  // Penanda taksiran: NIPD ditahan sampai tanggal ini dikoreksi (utils/aparaturNipd.js).
+  tanggal_lahir_taksiran: true,
   jenis_kelamin: petakanJenisKelamin(baris.jenis_kelamin),
   pendidikan_terakhir: baris.pendidikan || '-',
   agama: baris.agama || '-',

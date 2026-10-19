@@ -17,18 +17,38 @@
 
 const KODE_KABUPATEN = '01';
 
-// Kode jabatan tetap. Pola dicocokkan pada teks jabatan yang sudah dibakukan
-// (huruf besar, spasi tunggal); dua gaya penulisan di data — "KAUR KEUANGAN"
-// dan "Kepala Urusan Keuangan" — ditampung pola yang sama.
-const KODE_JABATAN_TETAP = [
-	{ kode: '001', label: 'Sekretaris Desa', pola: /^(SEKRETARIS DESA|SEKDES)$/ },
-	{ kode: '002', label: 'Kasi Pemerintahan', pola: /^(KASI|KEPALA SEKSI) PEMERINTAHAN$/ },
-	{ kode: '003', label: 'Kasi Pelayanan', pola: /^(KASI|KEPALA SEKSI) PELAYANAN$/ },
-	{ kode: '004', label: 'Kasi Kesejahteraan', pola: /^(KASI|KEPALA SEKSI) (KESEJAHTERAAN( RAKYAT)?|KESRA)$/ },
-	{ kode: '005', label: 'Kaur Umum', pola: /^(KAUR|KEPALA URUSAN) (UMUM|TATA USAHA|TU)\b/ },
-	{ kode: '006', label: 'Kaur Keuangan', pola: /^(KAUR|KEPALA URUSAN) KEUANGAN$/ },
-	{ kode: '007', label: 'Kaur Perencanaan', pola: /^(KAUR|KEPALA URUSAN) PERENCANAAN$/ },
+// Kode jabatan tetap. Kasi & Kaur dikenali dari URUSAN yang disebut, bukan
+// dari ejaan utuh — dua gaya penulisan di data ("KAUR KEUANGAN" dan "Kepala
+// Urusan Keuangan") ditampung sekaligus. "TU" dan "Umum" adalah satu urusan,
+// jadi "Kaur Umum dan TU" tetap tunggal.
+const URUSAN_KASI = [
+	{ kode: '002', label: 'Kasi Pemerintahan', pola: /PEMERINTAHAN/ },
+	{ kode: '003', label: 'Kasi Pelayanan', pola: /PELAYANAN/ },
+	{ kode: '004', label: 'Kasi Kesejahteraan', pola: /KESEJAHTERAAN|KESRA/ },
 ];
+const URUSAN_KAUR = [
+	{ kode: '005', label: 'Kaur Umum', pola: /UMUM|TATA USAHA|\bTU\b/ },
+	{ kode: '006', label: 'Kaur Keuangan', pola: /KEUANGAN/ },
+	{ kode: '007', label: 'Kaur Perencanaan', pola: /PERENCANAAN/ },
+];
+
+/**
+ * Kode Kasi/Kaur dari urusannya. Jabatan gabungan (dua urusan atau lebih,
+ * mis. "Kaur Umum dan Perencanaan") DITAHAN: keputusan Bidang Pemdes
+ * 2026-10-19 — desa harus memilih salah satu, sistem tidak menebak.
+ */
+const kodeUrusan = (teks, daftar, sebutan) => {
+	const cocok = daftar.filter((u) => u.pola.test(teks));
+	if (cocok.length === 1) return { kode: cocok[0].kode, berhak: true };
+	if (cocok.length > 1) {
+		return {
+			kode: null,
+			berhak: true,
+			alasan: `Jabatan gabungan (${cocok.map((u) => u.label).join(' + ')}) — desa harus memilih salah satu ${sebutan}`,
+		};
+	}
+	return { kode: null, berhak: true, alasan: `Urusan pada jabatan ${sebutan} tidak dikenali` };
+};
 
 const ROMAWI = { I: 1, V: 5, X: 10, L: 50 };
 const dariRomawi = (teks) => {
@@ -53,8 +73,9 @@ const kodeJabatan = (jabatan) => {
 	if (!teks || /\bBPD\b|BADAN PERMUSYAWARATAN|\bSTAF\b|\bSTAFF\b/.test(teks)) return { kode: null, berhak: false };
 	if (/^(KEPALA DESA|KADES)$/.test(teks)) return { kode: null, berhak: false };
 
-	const tetap = KODE_JABATAN_TETAP.find((item) => item.pola.test(teks));
-	if (tetap) return { kode: tetap.kode, berhak: true };
+	if (/^(SEKRETARIS DESA|SEKDES)$/.test(teks)) return { kode: '001', berhak: true };
+	if (/^(KASI|KEPALA SEKSI)\b/.test(teks)) return kodeUrusan(teks, URUSAN_KASI, 'Kasi');
+	if (/^(KAUR|KEPALA URUSAN)\b/.test(teks)) return kodeUrusan(teks, URUSAN_KAUR, 'Kaur');
 
 	const kadus = teks.match(/^(KADUS|KEPALA DUSUN)(?: ([IVXL]+|\d+))?$/);
 	if (kadus) {
@@ -80,10 +101,18 @@ const kodeWilayah = (kodeDesa) => {
  * jabatannya memang tidak ber-NIPD, atau { nipd: null, alasan } bila
  * seharusnya ber-NIPD tapi datanya belum memungkinkan.
  */
-const buatNipd = ({ tanggal_lahir, jenis_kelamin, jabatan }, kodeDesa) => {
+const buatNipd = ({ tanggal_lahir, jenis_kelamin, jabatan, tanggal_lahir_taksiran }, kodeDesa) => {
 	const jab = kodeJabatan(jabatan);
 	if (!jab.berhak) return { nipd: null };
 	if (!jab.kode) return { nipd: null, alasan: jab.alasan };
+
+	// Arsip Dapur Desa tidak menyimpan tanggal lahir; impornya menaksir
+	// 1 Januari (tahun berjalan − usia). NIPD yang memuat tanggal taksiran itu
+	// salah di 8 digit pertamanya, jadi ditahan sampai tanggalnya dikoreksi
+	// atau dikonfirmasi sesuai KTP.
+	if (tanggal_lahir_taksiran) {
+		return { nipd: null, alasan: 'Tanggal lahir masih taksiran arsip Dapur Desa — koreksi sesuai KTP atau konfirmasi bila memang benar' };
+	}
 
 	const wilayah = kodeWilayah(kodeDesa);
 	if (!wilayah) return { nipd: null, alasan: `Kode wilayah desa tidak dikenali (${kodeDesa || 'kosong'})` };

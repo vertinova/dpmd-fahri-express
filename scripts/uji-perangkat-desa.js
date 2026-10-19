@@ -210,6 +210,51 @@ const jalankan = async () => {
 		cek(r.isi?.data?.status_verifikasi === 'terverifikasi' && r.isi?.data?.nipd === null, `${jabatan} terverifikasi tanpa NIPD`, r.isi?.data);
 	}
 
+	// 9b ────────────────────────────────────────────────────────────────────
+	langkah('Jabatan gabungan ditahan');
+	const tg = await tambah(desaId, { nama_lengkap: `${PENANDA} Kaur Gabungan`, jabatan: 'Kaur Umum dan Perencanaan', tanggal_lahir: '1982-08-17' });
+	if (cek(tg.status === 201, 'Kaur Umum dan Perencanaan tersimpan')) {
+		const d = await detail(tg.isi.data.id);
+		cek(d.nipd_info?.berhak === true && /gabungan/i.test(d.nipd_info?.kendala || ''), 'berhak, tapi ditahan sebagai jabatan gabungan', d.nipd_info);
+		r = await verifikasi(tg.isi.data.id, semuaSesuai(d));
+		cek(r.isi?.data?.status_verifikasi === 'terverifikasi' && r.isi?.data?.nipd === null, 'valid tapi NIPD tidak terbit', r.isi?.data?.nipd);
+		cek(/gabungan/i.test(r.isi?.peringatan || ''), 'pemeriksa diberi tahu alasannya', r.isi?.peringatan);
+	}
+
+	// 9c ────────────────────────────────────────────────────────────────────
+	langkah('Tanggal lahir taksiran Dapur Desa ditahan');
+	const tt = await tambah(desaId, { nama_lengkap: `${PENANDA} Kadus Taksiran`, jabatan: 'Kadus IV', tanggal_lahir: '1979-01-01', jenis_kelamin: 'Laki-laki' });
+	if (cek(tt.status === 201, 'Kadus IV tersimpan')) {
+		const idT = tt.isi.data.id;
+		// Meniru hasil impor arsip: tanggal 1 Januari yang ditaksir dari usia.
+		await prisma.aparatur_desa.update({ where: { id: idT }, data: { tanggal_lahir_taksiran: true } });
+		let d = await detail(idT);
+		cek(/taksiran/i.test(d.nipd_info?.kendala || ''), 'kendala NIPD: tanggal lahir taksiran', d.nipd_info);
+		r = await verifikasi(idT, semuaSesuai(d));
+		cek(r.isi?.data?.status_verifikasi === 'terverifikasi' && r.isi?.data?.nipd === null, 'valid tapi NIPD ditahan', r.isi?.data?.nipd);
+
+		r = await panggil('PUT', `/pemdes/aparatur-desa/${idT}`, { json: { konfirmasi_tanggal_lahir: true } });
+		const harapT = '19790101' + '01' + kodeKec + kodeDesa + '1' + '011';
+		cek(r.isi?.data?.tanggal_lahir_taksiran === false, 'konfirmasi "Sesuai KTP" memadamkan penanda');
+		cek(r.isi?.data?.nipd === harapT, `NIPD langsung terbit: ${harapT}`, r.isi?.data?.nipd);
+
+		// Jalur kedua: tanggal dikoreksi lewat sunting → penanda padam sendiri.
+		await prisma.aparatur_desa.update({ where: { id: idT }, data: { tanggal_lahir_taksiran: true, nipd: null } });
+		const fd = new FormData();
+		fd.append('tanggal_lahir', '1979-06-21');
+		r = await panggil('POST', `/pemdes/aparatur-desa/${idT}/lengkap`, { form: fd });
+		cek(r.isi?.data?.tanggal_lahir_taksiran === false, 'tanggal dikoreksi → penanda padam');
+		cek(String(r.isi?.data?.nipd || '').startsWith('19790621'), 'NIPD terbit dengan tanggal yang dikoreksi', r.isi?.data?.nipd);
+
+		// Menyimpan ulang TANPA mengubah tanggal tidak boleh memadamkan penanda.
+		await prisma.aparatur_desa.update({ where: { id: idT }, data: { tanggal_lahir_taksiran: true } });
+		const fdSama = new FormData();
+		fdSama.append('tanggal_lahir', '1979-06-21');
+		fdSama.append('agama', 'Islam');
+		r = await panggil('POST', `/pemdes/aparatur-desa/${idT}/lengkap`, { form: fdSama });
+		cek(r.isi?.data?.tanggal_lahir_taksiran === true, 'simpan ulang dengan tanggal sama → penanda tetap menyala');
+	}
+
 	// 10 ────────────────────────────────────────────────────────────────────
 	langkah('Batalkan verifikasi');
 	r = await verifikasi(id1, { status: 'batal' });

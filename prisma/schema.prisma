@@ -83,6 +83,8 @@ model aparatur_desa {
   niap                       String?                     @db.VarChar(255)
   tempat_lahir               String                      @db.VarChar(255)
   tanggal_lahir              DateTime                    @db.Date
+  /// Tanggal lahir masih taksiran impor Dapur Desa (1 Januari) — NIPD ditahan.
+  tanggal_lahir_taksiran     Boolean                     @default(false)
   jenis_kelamin              aparatur_desa_jenis_kelamin
   pendidikan_terakhir        String                      @db.VarChar(255)
   agama                      String                      @db.VarChar(255)

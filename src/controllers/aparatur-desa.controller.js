@@ -20,6 +20,13 @@ const RESET_VERIFIKASI = {
 	nipd: null,
 };
 
+/** Tanggal (DATE) yang dikirim berbeda dari yang tersimpan? Dibandingkan per hari UTC. */
+const tanggalBerubah = (baru, lama) => {
+	if (!baru) return false;
+	const hari = (d) => (d ? new Date(d).toISOString().slice(0, 10) : null);
+	return hari(baru) !== hari(lama);
+};
+
 /**
  * Desa tujuan dan penulis sebuah simpanan.
  *
@@ -404,6 +411,8 @@ const updateAparaturDesa = async (req, res) => {
 				niap: data.niap,
 				tempat_lahir: data.tempat_lahir,
 				tanggal_lahir: data.tanggal_lahir,
+				// Tanggal lahir yang benar-benar berubah = sudah dikoreksi, bukan taksiran lagi.
+				...(tanggalBerubah(data.tanggal_lahir, existing.tanggal_lahir) ? { tanggal_lahir_taksiran: false } : {}),
 				jenis_kelamin: data.jenis_kelamin,
 				pendidikan_terakhir: data.pendidikan_terakhir,
 				agama: data.agama,
@@ -686,7 +695,9 @@ const terapkanArsipKeAparatur = async (baris, desaId, aparaturId, user = null) =
 	const data = keAparaturDesa(baris, desaId, { id: aparaturId || undefined });
 
 	if (aparaturId) {
-		const { id, desa_id, tempat_lahir, tanggal_lahir, ...bolehDitimpa } = data;
+		// Tanggal lahir desa tidak ditimpa — penandanya pun tidak, kalau tidak
+		// tanggal asli isian desa ikut tertandai sebagai taksiran.
+		const { id, desa_id, tempat_lahir, tanggal_lahir, tanggal_lahir_taksiran, ...bolehDitimpa } = data;
 
 		// Pas foto hasil unggahan desa tidak boleh tertimpa foto arsip. Foto arsip
 		// hanya mengisi kalau kolomnya memang masih kosong.
@@ -882,6 +893,7 @@ const rekonsiliasiOtomatis = async (desaId = null) => {
 };
 
 module.exports = {
+	tanggalBerubah,
 	rekonsiliasiOtomatis,
 	getAllAparaturDesa,
 	getAparaturDesaById,

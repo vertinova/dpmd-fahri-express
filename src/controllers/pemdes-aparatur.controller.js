@@ -1,6 +1,7 @@
 const prisma = require('../config/prisma');
 const { AKSI, catatLogAparatur, ambilLogAparatur } = require('../utils/aparaturLog');
 const { Prisma } = require('@prisma/client');
+const { tanggalBerubah } = require('./aparatur-desa.controller');
 const {
 	ITEM_VERIFIKASI,
 	KUNCI_ITEM,
@@ -671,12 +672,16 @@ const KOLOM_WAJIB = ['nama_lengkap', 'jabatan', 'tempat_lahir', 'tanggal_lahir',
 const updateAparaturDesa = async (req, res) => {
 	try {
 		const { id } = req.params;
-		const ada = await prisma.aparatur_desa.findUnique({ where: { id }, select: { id: true } });
+		const ada = await prisma.aparatur_desa.findUnique({ where: { id }, include: { desas: { select: { kode: true } } } });
 		if (!ada) {
 			return res.status(404).json({ success: false, message: 'Data aparatur desa tidak ditemukan' });
 		}
 
 		const data = {};
+		// Bidang menyatakan tanggal lahir yang tersimpan memang sesuai KTP
+		// (mis. orang yang betul lahir 1 Januari) — penanda taksiran padam.
+		const konfirmasiTanggal = req.body?.konfirmasi_tanggal_lahir === true;
+		if (konfirmasiTanggal) data.tanggal_lahir_taksiran = false;
 		for (const kolom of KOLOM_TEKS) {
 			if (!(kolom in req.body)) continue;
 			const nilai = req.body[kolom];
@@ -708,14 +713,25 @@ const updateAparaturDesa = async (req, res) => {
 			return res.status(400).json({ success: false, message: 'Tidak ada perubahan yang dikirim' });
 		}
 
+		// Tanggal lahir yang benar-benar berubah sudah dikoreksi, bukan taksiran.
+		if ('tanggal_lahir' in data && tanggalBerubah(data.tanggal_lahir, ada.tanggal_lahir)) data.tanggal_lahir_taksiran = false;
+
 		data.updated_at = new Date();
-		const aparatur = await prisma.aparatur_desa.update({ where: { id }, data });
+		let aparatur = await prisma.aparatur_desa.update({ where: { id }, data });
+
+		// Data yang sudah valid: NIPD dihitung ulang dari isi terbaru (tanggal
+		// lahir, jabatan, jenis kelamin, atau penanda taksiran bisa berubah).
+		if (aparatur.status_verifikasi === 'terverifikasi') {
+			const { nipd } = buatNipd(aparatur, ada.desas?.kode);
+			if (nipd !== aparatur.nipd) aparatur = await prisma.aparatur_desa.update({ where: { id }, data: { nipd } });
+		}
 
 		// Perubahan status punya kalimatnya sendiri: itu kejadian yang dicari
 		// orang saat membaca riwayat, bukan sekadar "kolom status ikut berubah".
-		const kolomBerubah = Object.keys(data).filter((kolom) => kolom !== 'updated_at');
-		const keteranganLog =
-			'status' in data
+		const kolomBerubah = Object.keys(data).filter((kolom) => !['updated_at', 'tanggal_lahir_taksiran'].includes(kolom));
+		const keteranganLog = konfirmasiTanggal && kolomBerubah.length === 0
+			? `Tanggal lahir dikonfirmasi sesuai KTP oleh Bidang Pemdes${aparatur.nipd ? ` — NIPD ${aparatur.nipd}` : ''}`
+			: 'status' in data
 				? `Status diubah menjadi ${data.status === 'Tidak_Aktif' ? 'Tidak Aktif' : 'Aktif'}` +
 				  (data.keterangan ? ` — ${data.keterangan}` : '')
 				: `Data diperbarui oleh Bidang Pemdes (${kolomBerubah.join(', ')})`;
