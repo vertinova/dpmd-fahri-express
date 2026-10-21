@@ -6,6 +6,21 @@ const { keAparaturDesa, bandingkanDenganAparatur, cariPenghalangArsip } = requir
 const { AKSI, catatLogAparatur } = require('../utils/aparaturLog');
 const { Prisma } = require('@prisma/client');
 const { buatNipd } = require('../utils/aparaturNipd');
+const { periksaKolomSpam, alasanSpam } = require('../utils/teksSpam');
+
+/**
+ * Tolak isian yang berisi iklan (lihat utils/teksSpam.js). Berkas yang sudah
+ * telanjur ditulis multer ikut dibuang supaya tidak tertinggal tanpa pemilik.
+ * Mengembalikan true bila permintaan sudah dijawab.
+ */
+const tolakBilaSpam = async (req, res, data) => {
+	const pesan = periksaKolomSpam(data);
+	if (!pesan) return false;
+	const berkas = Object.values(req.files || {}).flat();
+	await Promise.all(berkas.map((b) => fs.unlink(b.path).catch(() => {})));
+	res.status(400).json({ success: false, message: pesan });
+	return true;
+};
 
 // Data berubah = keputusan verifikasi Bidang Pemdes gugur. Kalau tidak,
 // baris yang sudah dibetulkan desa akan tetap berstatus "ditolak" —
@@ -192,6 +207,8 @@ const createAparaturDesa = async (req, res) => {
 			}
 		});
 
+		if (await tolakBilaSpam(req, res, data)) return;
+
 		// Convert date strings to Date objects
 		if (data.tanggal_lahir) {
 			data.tanggal_lahir = new Date(data.tanggal_lahir);
@@ -348,6 +365,8 @@ const updateAparaturDesa = async (req, res) => {
 				data[field] = null;
 			}
 		});
+
+		if (await tolakBilaSpam(req, res, data)) return;
 
 		// Convert date strings to Date objects
 		if (data.tanggal_lahir) {
@@ -744,7 +763,8 @@ const tambahkanArsipBaru = async (baris, desaId, user = null) => {
 		where: { desa_id: BigInt(String(desaId)) },
 		select: { id: true, nama_lengkap: true, jabatan: true, status: true },
 	});
-	const penghalang = cariPenghalangArsip(baris, daftar);
+	// Nama berisi iklan pinjol/travel bukan orang — arsip lama memuat beberapa.
+	const penghalang = alasanSpam(baris.nama) || alasanSpam(baris.jabatan) ? { alasan: 'spam' } : cariPenghalangArsip(baris, daftar);
 	const kini = new Date();
 	const oleh = user ? { diputuskan_oleh: BigInt(String(user.id)) } : {};
 

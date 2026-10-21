@@ -16,6 +16,9 @@ router.get('/', controller.getAllAparaturDesa);
 // GET /api/pemdes/aparatur-desa/stats - Get aparatur desa statistics
 router.get('/stats', controller.getStats);
 
+// GET /api/pemdes/aparatur-desa/ekspor - Semua baris sesuai penyaring tabel (Excel/PDF)
+router.get('/ekspor', controller.getEkspor);
+
 // GET /api/pemdes/aparatur-desa/grouped - Kecamatan → Desa, urut jabatan
 router.get('/grouped', controller.getGrouped);
 

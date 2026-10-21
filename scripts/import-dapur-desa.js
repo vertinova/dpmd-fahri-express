@@ -27,6 +27,7 @@
 const fs = require('fs');
 const path = require('path');
 const prisma = require('../src/config/prisma');
+const { alasanSpam } = require('../src/utils/teksSpam');
 const {
   keBarisStaging,
   keAparaturDesa,
@@ -74,14 +75,17 @@ async function main() {
   const mentah = bacaArsip(DIR);
   console.log(`   ${mentah.length} record ditemukan.`);
 
-  // Buang record sampah: tanpa nama atau tanpa id (arsip memuat beberapa entri spam).
-  let baris = mentah.map(keBarisStaging).filter((b) => b.dapur_id && b.nama);
+  // Buang record sampah: tanpa nama/id, atau nama/jabatan berisi iklan
+  // (arsip memuat nama aparatur yang ditimpa iklan CS pinjol & travel).
+  let baris = mentah
+    .map(keBarisStaging)
+    .filter((b) => b.dapur_id && b.nama && !alasanSpam(b.nama) && !alasanSpam(b.jabatan));
   const dibuang = mentah.length - baris.length;
   if (FILTER_DESA) {
     baris = baris.filter((b) => b.kode_desa === String(FILTER_DESA).replace(/\D/g, ''));
     console.log(`   Difilter ke desa ${FILTER_DESA}: ${baris.length} record.`);
   }
-  console.log(`   ${baris.length} record dipakai${dibuang ? `, ${dibuang} dibuang (tanpa nama/id)` : ''}.\n`);
+  console.log(`   ${baris.length} record dipakai${dibuang ? `, ${dibuang} dibuang (tanpa nama/id atau berisi iklan)` : ''}.\n`);
 
   // Peta kode desa (tanpa titik) → desas.id
   const desas = await prisma.desas.findMany({ select: { id: true, kode: true, nama: true } });

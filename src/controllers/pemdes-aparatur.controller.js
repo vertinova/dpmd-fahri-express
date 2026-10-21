@@ -12,6 +12,7 @@ const {
 	kodeJabatan,
 	kodeWilayah,
 } = require('../utils/aparaturNipd');
+const { periksaKolomSpam } = require('../utils/teksSpam');
 
 // Tabel aparatur_desa tidak punya kolom pembeda perangkat desa vs BPD —
 // satu-satunya penanda ada di teks jabatan. Aturannya ditulis sekali di sini
@@ -701,6 +702,9 @@ const updateAparaturDesa = async (req, res) => {
 			data[kolom] = tanggal;
 		}
 
+		const spam = periksaKolomSpam(data);
+		if (spam) return res.status(400).json({ success: false, message: spam });
+
 		const kosong = KOLOM_WAJIB.filter((kolom) => kolom in data && !data[kolom]);
 		if (kosong.length) {
 			return res.status(400).json({
@@ -910,12 +914,160 @@ const verifikasiAparaturDesa = async (req, res) => {
 /**
  * Get statistics for aparatur desa (for dashboard)
  */
+const FILTER_STATISTIK = ['jenis', 'kecamatan_id', 'desa_id', 'status', 'jenis_kelamin'];
+
+/**
+ * Cakupan pengisian per desa: berapa desa yang sudah/belum menginput, dan
+ * siapa yang memimpin tiap desa. 416 desa harus terbagi habis menjadi
+ * definitif + PJ + kosong + ganda; tanpa ini kartu "KEPALA DESA 414" dan
+ * "PJ KEPALA DESA 3" tampak tidak cocok dengan jumlah desa.
+ * Kelurahan tidak punya aparatur desa, jadi tidak dihitung.
+ */
+const hitungCakupanDesa = async (saring) => {
+	const wilayah = saring.desa_id
+		? { id: BigInt(String(saring.desa_id)) }
+		: saring.kecamatan_id
+			? { kecamatan_id: BigInt(String(saring.kecamatan_id)) }
+			: {};
+	const [daftarDesa, perDesa, pimpinan] = await Promise.all([
+		prisma.desas.findMany({
+			where: { status_pemerintahan: 'desa', ...wilayah },
+			select: { id: true, nama: true, kecamatans: { select: { nama: true } } },
+		}),
+		prisma.aparatur_desa.groupBy({ by: ['desa_id'], where: filterJenis(saring.jenis) || {}, _count: { _all: true } }),
+		prisma.aparatur_desa.findMany({
+			where: { status: 'Aktif', jabatan: { contains: 'kepala desa' } },
+			select: { desa_id: true, nama_lengkap: true, jabatan: true },
+		}),
+	]);
+
+	const terisi = new Set(perDesa.map((g) => String(g.desa_id)));
+	const pimpinanPerDesa = new Map();
+	for (const p of pimpinan) {
+		const label = bakuJabatan(p.jabatan);
+		if (label !== 'KEPALA DESA' && label !== 'PJ KEPALA DESA') continue;
+		const kunci = String(p.desa_id);
+		(pimpinanPerDesa.get(kunci) || pimpinanPerDesa.set(kunci, []).get(kunci)).push({ nama: p.nama_lengkap.trim(), pj: label === 'PJ KEPALA DESA' });
+	}
+
+	const ringkas = { definitif: 0, pj: 0, kosong: 0, ganda: 0 };
+	const belumInput = [];
+	const perluDicek = [];
+	for (const d of daftarDesa) {
+		const baris = { kecamatan: d.kecamatans?.nama || '-', desa: d.nama };
+		if (!terisi.has(String(d.id))) belumInput.push(baris);
+		const daftar = pimpinanPerDesa.get(String(d.id)) || [];
+		if (daftar.length === 0) {
+			ringkas.kosong++;
+			perluDicek.push({ ...baris, keadaan: 'Tanpa kepala desa / PJ aktif', nama: '-' });
+		} else if (daftar.length > 1) {
+			ringkas.ganda++;
+			perluDicek.push({ ...baris, keadaan: `${daftar.length} pimpinan aktif`, nama: daftar.map((p) => p.nama).join('; ') });
+		} else if (daftar[0].pj) {
+			ringkas.pj++;
+			perluDicek.push({ ...baris, keadaan: 'Dipimpin PJ', nama: daftar[0].nama });
+		} else {
+			ringkas.definitif++;
+		}
+	}
+	const urut = (a, b) => a.kecamatan.localeCompare(b.kecamatan, 'id') || a.desa.localeCompare(b.desa, 'id');
+
+	return {
+		total_desa: daftarDesa.length,
+		sudah_input: daftarDesa.length - belumInput.length,
+		belum_input: belumInput.length,
+		desa_belum_input: belumInput.sort(urut),
+		pimpinan: ringkas,
+		pimpinan_perlu_dicek: perluDicek.sort(urut),
+	};
+};
+
+/**
+ * Seluruh baris yang cocok dengan penyaring tabel, tanpa halaman — bahan
+ * ekspor Excel/PDF. Penyaringnya sama persis dengan daftar (bangunWhere),
+ * jadi berkasnya selalu berisi apa yang sedang dilihat di tabel.
+ * GET /api/pemdes/aparatur-desa/ekspor
+ */
+const BATAS_EKSPOR = 20000;
+const getEkspor = async (req, res) => {
+	try {
+		const jabatan_in = req.query.jabatan_baku ? await ejaanJabatanBaku(req.query.jabatan_baku, req.query.jenis) : undefined;
+		const where = bangunWhere({ ...req.query, jabatan_in });
+		const baris = await prisma.aparatur_desa.findMany({
+			where,
+			select: {
+				nama_lengkap: true,
+				jabatan: true,
+				nipd: true,
+				niap: true,
+				jenis_kelamin: true,
+				tempat_lahir: true,
+				tanggal_lahir: true,
+				pendidikan_terakhir: true,
+				agama: true,
+				pangkat_golongan: true,
+				nomor_sk_pengangkatan: true,
+				tanggal_pengangkatan: true,
+				status: true,
+				status_verifikasi: true,
+				desas: { select: { nama: true, kode: true, kecamatans: { select: { nama: true } } } },
+			},
+			orderBy: [{ desas: { kecamatans: { nama: 'asc' } } }, { desas: { nama: 'asc' } }],
+			take: BATAS_EKSPOR + 1,
+		});
+		if (baris.length > BATAS_EKSPOR) {
+			return res.status(413).json({ success: false, message: `Hasil saringan melebihi ${BATAS_EKSPOR} baris — persempit penyaringnya.` });
+		}
+
+		// Di dalam satu desa diurut sesuai susunan jabatan, sama dengan tampilan per wilayah.
+		const data = baris
+			.map((r) => ({ r, ...peringkatJabatan(r.jabatan || '') }))
+			.sort((a, b) => 0
+				|| (a.r.desas?.kecamatans?.nama || '').localeCompare(b.r.desas?.kecamatans?.nama || '', 'id')
+				|| (a.r.desas?.nama || '').localeCompare(b.r.desas?.nama || '', 'id')
+				|| (a.r.status === 'Aktif' ? 0 : 1) - (b.r.status === 'Aktif' ? 0 : 1)
+				|| a.urutan - b.urutan || a.nomor - b.nomor
+				|| a.r.nama_lengkap.localeCompare(b.r.nama_lengkap, 'id'))
+			.map(({ r }) => ({
+				kecamatan: r.desas?.kecamatans?.nama || '',
+				desa: r.desas?.nama || '',
+				kode_desa: r.desas?.kode || '',
+				nama_lengkap: r.nama_lengkap,
+				jabatan: r.jabatan,
+				nipd: r.nipd,
+				niap: r.niap,
+				jenis_kelamin: r.jenis_kelamin === 'Perempuan' ? 'Perempuan' : 'Laki-laki',
+				tempat_lahir: r.tempat_lahir,
+				tanggal_lahir: r.tanggal_lahir,
+				pendidikan_terakhir: r.pendidikan_terakhir,
+				agama: r.agama,
+				pangkat_golongan: r.pangkat_golongan,
+				nomor_sk_pengangkatan: r.nomor_sk_pengangkatan,
+				tanggal_pengangkatan: r.tanggal_pengangkatan,
+				status: r.status === 'Aktif' ? 'Aktif' : 'Tidak Aktif',
+				status_verifikasi: r.status_verifikasi || 'belum',
+			}));
+
+		res.json({ success: true, data, total: data.length });
+	} catch (error) {
+		console.error('Error mengekspor aparatur desa:', error);
+		res.status(500).json({ success: false, message: 'Gagal menyiapkan data ekspor', error: error.message });
+	}
+};
+
 const getStats = async (req, res) => {
 	try {
 		// Kartu angka harus memakai penyaringan yang sama dengan tabelnya, kalau
 		// tidak halaman BPD akan memamerkan total se-kabupaten.
-		const where = filterJenis(req.query.jenis) || {};
-		const dengan = (extra) => ({ ...where, ...extra });
+		// Ringkasan bisa dipersempit ke satu kecamatan/desa, status, atau jenis
+		// kelamin. Hanya penyaring ini yang diterima — sisanya milik tabel.
+		const saring = Object.fromEntries(
+			FILTER_STATISTIK.filter((kunci) => req.query[kunci]).map((kunci) => [kunci, req.query[kunci]])
+		);
+		const where = bangunWhere(saring);
+		// AND, bukan spread: penyaring status dari pengguna tidak boleh tertimpa
+		// syarat kartu "aktif" (dan sebaliknya).
+		const dengan = (extra) => ({ AND: [where, extra] });
 
 		const [
 			totalAparatur,
@@ -926,6 +1078,7 @@ const getStats = async (req, res) => {
 			allAparatur,
 			pendidikanGroups,
 			jabatanGroups,
+			cakupan_desa,
 		] = await Promise.all([
 			prisma.aparatur_desa.count({ where }),
 			prisma.aparatur_desa.count({ where: dengan({ status: 'Aktif' }) }),
@@ -951,6 +1104,7 @@ const getStats = async (req, res) => {
 				where,
 				_count: { _all: true },
 			}),
+			hitungCakupanDesa(saring),
 		]);
 
 		// Age range calculation
@@ -1048,6 +1202,7 @@ const getStats = async (req, res) => {
 				laki_laki: totalLakiLaki,
 				perempuan: totalPerempuan,
 				desa_count: totalDesaDenganAparatur,
+				cakupan_desa,
 				total_pemdes: totalPemdes,
 				total_bpd: totalBPD,
 				rentang_usia,
@@ -1069,6 +1224,7 @@ module.exports = {
 	getAllAparaturDesa,
 	getAparaturDesaById,
 	getStats,
+	getEkspor,
 	getGrouped,
 	getRiwayatTerbaru,
 	getNotifikasi,
