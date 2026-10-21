@@ -947,10 +947,9 @@ const getStats = async (req, res) => {
 				orderBy: { _count: { pendidikan_terakhir: 'desc' } },
 			}),
 			prisma.aparatur_desa.groupBy({
-				by: ['jabatan'],
+				by: ['jabatan', 'status'],
 				where,
 				_count: { _all: true },
-				orderBy: { _count: { jabatan: 'desc' } },
 			}),
 		]);
 
@@ -986,6 +985,10 @@ const getStats = async (req, res) => {
 				totalPemdes += g._count._all;
 			}
 
+			// Komposisi jabatan = siapa yang menjabat sekarang. Kepala desa yang
+			// sudah diberhentikan tetap tersimpan sebagai riwayat, tapi kalau ikut
+			// dihitung kartu "KEPALA DESA" bisa melampaui jumlah desa.
+			if (g.status !== 'Aktif') continue;
 			const label = bakuJabatan(g.jabatan);
 			perJabatan.set(label, (perJabatan.get(label) || 0) + g._count._all);
 		}

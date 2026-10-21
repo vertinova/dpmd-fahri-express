@@ -2,7 +2,7 @@ const prisma = require('../config/prisma');
 const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs').promises;
-const { keAparaturDesa, bandingkanDenganAparatur } = require('../config/dapurDesa');
+const { keAparaturDesa, bandingkanDenganAparatur, cariPenghalangArsip } = require('../config/dapurDesa');
 const { AKSI, catatLogAparatur } = require('../utils/aparaturLog');
 const { Prisma } = require('@prisma/client');
 const { buatNipd } = require('../utils/aparaturNipd');
@@ -733,6 +733,53 @@ const terapkanArsipKeAparatur = async (baris, desaId, aparaturId, user = null) =
 };
 
 /**
+ * Tambahkan satu baris arsip berstatus `baru` — kecuali desa SEKARANG sudah
+ * memilikinya. Status `baru` ditetapkan saat impor (2026-07-27); sejak itu desa
+ * terus mengisi sendiri, jadi tanpa dicocokkan ulang orang yang sama masuk dua
+ * kali dan desa bisa punya dua kepala desa aktif (terjadi 2026-10-19).
+ * Mengembalikan true bila ditambahkan, false bila arsip dinyatakan tidak dipakai.
+ */
+const tambahkanArsipBaru = async (baris, desaId, user = null) => {
+	const daftar = await prisma.aparatur_desa.findMany({
+		where: { desa_id: BigInt(String(desaId)) },
+		select: { id: true, nama_lengkap: true, jabatan: true, status: true },
+	});
+	const penghalang = cariPenghalangArsip(baris, daftar);
+	const kini = new Date();
+	const oleh = user ? { diputuskan_oleh: BigInt(String(user.id)) } : {};
+
+	if (penghalang) {
+		await prisma.aparatur_dapur_desa.update({
+			where: { dapur_id: baris.dapur_id },
+			data: {
+				status_rekonsiliasi: 'ditolak',
+				keputusan: 'desa',
+				// Hanya ditautkan bila memang orang yang sama; pemegang kursi lain bukan pasangannya.
+				aparatur_desa_id: penghalang.alasan === 'nama' ? penghalang.aparatur.id : null,
+				...oleh,
+				diputuskan_pada: kini,
+				updated_at: kini,
+			},
+		});
+		return false;
+	}
+
+	const hasil = await terapkanArsipKeAparatur(baris, desaId, null, user);
+	await prisma.aparatur_dapur_desa.update({
+		where: { dapur_id: baris.dapur_id },
+		data: {
+			status_rekonsiliasi: 'selesai',
+			keputusan: 'dapur',
+			aparatur_desa_id: hasil.id,
+			...oleh,
+			diputuskan_pada: kini,
+			updated_at: kini,
+		},
+	});
+	return true;
+};
+
+/**
  * Tetapkan data mana yang dipakai untuk satu baris arsip.
  * POST /api/desa/aparatur-desa/dapur-desa/:dapurId/putuskan  { keputusan: 'dapur' | 'desa' }
  */
@@ -807,22 +854,12 @@ const tambahSemuaBaruDapurDesa = async (req, res) => {
 		});
 
 		let ditambah = 0;
+		let dilewati = 0;
 		const gagal = [];
 		for (const baris of daftar) {
 			try {
-				const hasil = await terapkanArsipKeAparatur(baris, desaId, null, req.user);
-				await prisma.aparatur_dapur_desa.update({
-					where: { dapur_id: baris.dapur_id },
-					data: {
-						status_rekonsiliasi: 'selesai',
-						keputusan: 'dapur',
-						aparatur_desa_id: hasil.id,
-						diputuskan_oleh: BigInt(String(req.user.id)),
-						diputuskan_pada: new Date(),
-						updated_at: new Date(),
-					},
-				});
-				ditambah++;
+				if (await tambahkanArsipBaru(baris, desaId, req.user)) ditambah++;
+				else dilewati++;
 			} catch (err) {
 				gagal.push({ nama: baris.nama, pesan: err.message });
 			}
@@ -830,8 +867,11 @@ const tambahSemuaBaruDapurDesa = async (req, res) => {
 
 		res.json({
 			success: true,
-			message: `${ditambah} data ditambahkan dari arsip Dapur Desa`,
+			message:
+				`${ditambah} data ditambahkan dari arsip Dapur Desa` +
+				(dilewati ? `, ${dilewati} dilewati karena orang/jabatannya sudah ada di data desa` : ''),
 			ditambah,
+			dilewati,
 			gagal: gagal.length ? gagal : undefined,
 		});
 	} catch (error) {
@@ -870,26 +910,17 @@ const rekonsiliasiOtomatis = async (desaId = null) => {
 		where: { ...lingkup, status_rekonsiliasi: 'baru', desa_id: { not: null } },
 	});
 	let ditambah = 0;
+	let dilewati = 0;
 	for (const baris of baru) {
 		try {
-			const hasil = await terapkanArsipKeAparatur(baris, baris.desa_id, null, null);
-			await prisma.aparatur_dapur_desa.update({
-				where: { dapur_id: baris.dapur_id },
-				data: {
-					status_rekonsiliasi: 'selesai',
-					keputusan: 'dapur',
-					aparatur_desa_id: hasil.id,
-					diputuskan_pada: new Date(),
-					updated_at: new Date(),
-				},
-			});
-			ditambah++;
+			if (await tambahkanArsipBaru(baris, baris.desa_id)) ditambah++;
+			else dilewati++;
 		} catch (err) {
 			console.error(`[rekonsiliasi] gagal menambah ${baris.nama} (dapur ${baris.dapur_id}):`, err.message);
 		}
 	}
 
-	return { konflik_pakai_desa: konflik.count, baru_ditambah: ditambah };
+	return { konflik_pakai_desa: konflik.count, baru_ditambah: ditambah, baru_sudah_ada: dilewati };
 };
 
 module.exports = {

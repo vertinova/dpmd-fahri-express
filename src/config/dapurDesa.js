@@ -232,6 +232,50 @@ const jabatanBanding = (nilai) => {
   return t;
 };
 
+/**
+ * Kunci nama yang tahan beda spasi dan gelar: "DUL MUIS" = "DULMUIS",
+ * "IWAN SETIAWAN,S.IP" = "IWAN SETIAWAN". Gelar ditulis di belakang koma, jadi
+ * bagian itu dibuang; titik dihapus (bukan dijadikan spasi) supaya "S.Pd.I"
+ * menjadi satu token "SPDI" yang dikenali sebagai gelar.
+ */
+const kunciNama = (nama) =>
+  namaInti(teks(nama).split(',')[0].replace(/\./g, '')).replace(/\s+/g, '');
+
+/**
+ * Jabatan yang hanya diduduki satu orang per desa, dalam bentuk baku — dipakai
+ * untuk mencegah arsip menambah kepala desa kedua (atau sekdes kedua, dst).
+ * Kepala dusun hanya dihitung bila bernomor; "KADUS" tanpa nomor bisa banyak.
+ * Mengembalikan null untuk jabatan yang boleh diisi banyak orang.
+ */
+const kursiJabatan = (nilai) => {
+  let t = jabatanBanding(nilai)
+    .replace(/^PJ\.? /, '')
+    .replace(/^KEPALA URUSAN (UMUM DAN TU|TATA USAHA DAN UMUM)$/, 'KEPALA URUSAN TATA USAHA & UMUM')
+    .replace(/^KEPALA SEKSI KESEJAHTERAAN RAKYAT$/, 'KEPALA SEKSI KESEJAHTERAAN');
+  if (/^(KEPALA DESA|SEKRETARIS DESA)$/.test(t)) return t;
+  if (/^KEPALA (URUSAN|SEKSI) \S/.test(t)) return t;
+  if (/^KEPALA DUSUN [IVX]+$/.test(t)) return t;
+  if (/^(KETUA|WAKIL KETUA|SEKRETARIS) BPD$/.test(t)) return t;
+  return null;
+};
+
+/**
+ * Cari record desa yang membuat satu baris arsip TIDAK boleh ditambahkan:
+ * orangnya sudah ada (nama sama setelah gelar & spasi dibuang), atau kursi
+ * jabatannya sudah diduduki aparatur aktif. Aturan Bidang Pemdes: bila ada di
+ * keduanya, data desa yang dipakai.
+ */
+const cariPenghalangArsip = (baris, daftarAparatur) => {
+  const kunci = kunciNama(baris.nama);
+  const sama = kunci && daftarAparatur.find((a) => kunciNama(a.nama_lengkap) === kunci);
+  if (sama) return { aparatur: sama, alasan: 'nama' };
+
+  const kursi = kursiJabatan(baris.jabatan);
+  const duduk = kursi && daftarAparatur.find((a) => a.status === 'Aktif' && kursiJabatan(a.jabatan) === kursi);
+  if (duduk) return { aparatur: duduk, alasan: 'kursi' };
+  return null;
+};
+
 const tanggalBanding = (nilai) => {
   if (!nilai) return '';
   const d = nilai instanceof Date ? nilai : new Date(nilai);
@@ -319,6 +363,9 @@ module.exports = {
   tahunLulus,
   teksBanding,
   bandingkanDenganAparatur,
+  cariPenghalangArsip,
+  kursiJabatan,
+  kunciNama,
   normalisasiNama,
   namaInti,
   normalisasiKodeDesa,
