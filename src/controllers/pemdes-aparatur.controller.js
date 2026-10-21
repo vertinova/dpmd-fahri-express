@@ -45,6 +45,15 @@ const tahunLalu = (tahun) => {
 	return d;
 };
 
+// Penyaring pilihan ganda dikirim dipisah koma ("12,15"). Satu nilai tetap
+// sah, jadi tautan lama dan pop-up grafik tidak perlu diubah.
+const daftarNilai = (nilai) =>
+	(Array.isArray(nilai) ? nilai : String(nilai ?? '').split(','))
+		.map((v) => String(v).trim())
+		.filter(Boolean);
+const satuAtauBanyak = (daftar) => (daftar.length === 1 ? daftar[0] : { in: daftar });
+const daftarId = (nilai) => daftarNilai(nilai).map((v) => parseInt(v, 10)).filter(Number.isFinite);
+
 const bangunWhere = ({
 	search, kecamatan_id, desa_id, jabatan, jenis, jenis_kelamin, status, pendidikan,
 	usia, verifikasi, jabatan_in,
@@ -78,11 +87,13 @@ const bangunWhere = ({
 		];
 	}
 
-	if (desa_id) {
-		where.desa_id = parseInt(desa_id);
-	} else if (kecamatan_id) {
+	const idDesa = daftarId(desa_id);
+	const idKecamatan = daftarId(kecamatan_id);
+	if (idDesa.length) {
+		where.desa_id = satuAtauBanyak(idDesa);
+	} else if (idKecamatan.length) {
 		where.desas = {
-			kecamatan_id: parseInt(kecamatan_id),
+			kecamatan_id: satuAtauBanyak(idKecamatan),
 		};
 	}
 
@@ -90,12 +101,12 @@ const bangunWhere = ({
 		where.jabatan = { contains: jabatan };
 	}
 
-	if (jenis_kelamin) {
-		where.jenis_kelamin = jenis_kelamin;
+	if (daftarNilai(jenis_kelamin).length) {
+		where.jenis_kelamin = satuAtauBanyak(daftarNilai(jenis_kelamin));
 	}
 
-	if (status) {
-		where.status = status;
+	if (daftarNilai(status).length) {
+		where.status = satuAtauBanyak(daftarNilai(status));
 	}
 
 	// Kolomnya VarChar bebas dan isinya berasal dari dua sumber data dengan
@@ -129,10 +140,11 @@ const bangunWhere = ({
  * dibakukan ke label itu. Dihitung dari data, bukan tabel tetap, jadi ejaan
  * baru yang masuk ikut terbawa.
  */
-const ejaanJabatanBaku = async (label, jenis) => {
-	const target = String(label || '').trim().toUpperCase();
+const ejaanJabatanBaku = async (labelGabungan, jenis) => {
+	// Boleh beberapa label sekaligus, dipisah koma (pilihan ganda).
+	const target = new Set(daftarNilai(labelGabungan).map((label) => label.toUpperCase()));
 	const grup = await prisma.aparatur_desa.groupBy({ by: ['jabatan'], where: filterJenis(jenis) || {} });
-	return grup.map((g) => g.jabatan).filter((j) => bakuJabatan(j) === target);
+	return grup.map((g) => g.jabatan).filter((j) => target.has(bakuJabatan(j)));
 };
 
 /**
@@ -924,10 +936,10 @@ const FILTER_STATISTIK = ['jenis', 'kecamatan_id', 'desa_id', 'status', 'jenis_k
  * Kelurahan tidak punya aparatur desa, jadi tidak dihitung.
  */
 const hitungCakupanDesa = async (saring, where) => {
-	const wilayah = saring.desa_id
-		? { id: BigInt(String(saring.desa_id)) }
-		: saring.kecamatan_id
-			? { kecamatan_id: BigInt(String(saring.kecamatan_id)) }
+	const wilayah = daftarId(saring.desa_id).length
+		? { id: { in: daftarId(saring.desa_id).map(BigInt) } }
+		: daftarId(saring.kecamatan_id).length
+			? { kecamatan_id: { in: daftarId(saring.kecamatan_id).map(BigInt) } }
 			: {};
 	const [daftarDesa, perDesa, pimpinan] = await Promise.all([
 		prisma.desas.findMany({
