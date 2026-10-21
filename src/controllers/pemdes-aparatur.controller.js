@@ -914,7 +914,7 @@ const verifikasiAparaturDesa = async (req, res) => {
 /**
  * Get statistics for aparatur desa (for dashboard)
  */
-const FILTER_STATISTIK = ['jenis', 'kecamatan_id', 'desa_id', 'status', 'jenis_kelamin'];
+const FILTER_STATISTIK = ['jenis', 'kecamatan_id', 'desa_id', 'status', 'jenis_kelamin', 'jabatan_baku'];
 
 /**
  * Cakupan pengisian per desa: berapa desa yang sudah/belum menginput, dan
@@ -923,7 +923,7 @@ const FILTER_STATISTIK = ['jenis', 'kecamatan_id', 'desa_id', 'status', 'jenis_k
  * "PJ KEPALA DESA 3" tampak tidak cocok dengan jumlah desa.
  * Kelurahan tidak punya aparatur desa, jadi tidak dihitung.
  */
-const hitungCakupanDesa = async (saring) => {
+const hitungCakupanDesa = async (saring, where) => {
 	const wilayah = saring.desa_id
 		? { id: BigInt(String(saring.desa_id)) }
 		: saring.kecamatan_id
@@ -934,7 +934,9 @@ const hitungCakupanDesa = async (saring) => {
 			where: { status_pemerintahan: 'desa', ...wilayah },
 			select: { id: true, nama: true, kecamatans: { select: { nama: true } } },
 		}),
-		prisma.aparatur_desa.groupBy({ by: ['desa_id'], where: filterJenis(saring.jenis) || {}, _count: { _all: true } }),
+		// "Sudah input" mengikuti seluruh penyaring: dengan jabatan SEKRETARIS DESA
+		// terpilih, yang belum input = desa yang belum punya sekdes.
+		prisma.aparatur_desa.groupBy({ by: ['desa_id'], where, _count: { _all: true } }),
 		prisma.aparatur_desa.findMany({
 			where: { status: 'Aktif', jabatan: { contains: 'kepala desa' } },
 			select: { desa_id: true, nama_lengkap: true, jabatan: true },
@@ -1064,7 +1066,9 @@ const getStats = async (req, res) => {
 		const saring = Object.fromEntries(
 			FILTER_STATISTIK.filter((kunci) => req.query[kunci]).map((kunci) => [kunci, req.query[kunci]])
 		);
-		const where = bangunWhere(saring);
+		// Jabatan baku → seluruh ejaan mentahnya, sama seperti penyaring tabel.
+		const jabatan_in = saring.jabatan_baku ? await ejaanJabatanBaku(saring.jabatan_baku, saring.jenis) : undefined;
+		const where = bangunWhere({ ...saring, jabatan_in });
 		// AND, bukan spread: penyaring status dari pengguna tidak boleh tertimpa
 		// syarat kartu "aktif" (dan sebaliknya).
 		const dengan = (extra) => ({ AND: [where, extra] });
@@ -1104,7 +1108,7 @@ const getStats = async (req, res) => {
 				where,
 				_count: { _all: true },
 			}),
-			hitungCakupanDesa(saring),
+			hitungCakupanDesa(saring, where),
 		]);
 
 		// Age range calculation
