@@ -196,12 +196,23 @@ class BumdesController {
       // dari input — inilah yang dulu membuat desa_id kosong di seluruh baris.
       const desaRef = await prisma.desas.findUnique({
         where: { id: BigInt(targetDesaId) },
-        select: { id: true, kode: true, nama: true, kecamatans: { select: { nama: true } } }
+        select: {
+          id: true, kode: true, nama: true, status_pemerintahan: true,
+          kecamatans: { select: { nama: true } }
+        }
       });
       if (!desaRef) {
         return res.status(404).json({
           success: false,
           message: 'Desa tidak ditemukan'
+        });
+      }
+      // Kelurahan tidak punya BUM Desa. Satu baris kelurahan pernah lolos dan
+      // membuat jumlah BUMDes jadi 417 dari 416 desa.
+      if (desaRef.status_pemerintahan !== 'desa') {
+        return res.status(400).json({
+          success: false,
+          message: 'Kelurahan tidak dapat memiliki BUM Desa'
         });
       }
       dataTersaring.desa_id = Number(desaRef.id);

@@ -188,9 +188,12 @@ const main = async () => {
   }
 
   // Peta desa: kode tanpa titik -> {id, kode asli, nama desa, nama kecamatan}
+  // Hanya DESA. Kelurahan tidak punya BUM Desa; kalau ikut dipetakan, baris
+  // kelurahan di sheet masuk sebagai BUMDes ke-417 (Kel. Cibinong, 2026-10-23).
   const [desas] = await conn.query(
     `SELECT d.id, d.kode, d.nama AS nama_desa, k.nama AS nama_kecamatan
-     FROM desas d JOIN kecamatans k ON k.id = d.kecamatan_id`
+     FROM desas d JOIN kecamatans k ON k.id = d.kecamatan_id
+     WHERE d.status_pemerintahan = 'desa'`
   );
   const petaDesa = new Map(
     desas.map((d) => [String(d.kode).replace(/\./g, ''), d])
@@ -336,7 +339,7 @@ const main = async () => {
     console.log('          (kolom itu diisi NULL; perbaiki di sheet lalu jalankan ulang)');
   }
   if (tanpaDesa.length) {
-    console.log(`\nkode desa tak dikenal: ${tanpaDesa.length}`);
+    console.log(`\nkode desa tak dikenal / kelurahan (dilewati): ${tanpaDesa.length}`);
     tanpaDesa.slice(0, 20).forEach((t) => console.log(`   ${t.kode}  ${t.nama}`));
   }
 
