@@ -3537,3 +3537,127 @@ model device_checkers {
   @@index([department], map: "idx_device_checkers_department")
   @@index([created_at], map: "idx_device_checkers_created_at")
 }
+
+// -----------------------------------------------------------------------------
+// SMART CCTV � modul pengawasan kamera terpadu super app.
+// Sumber kebenaran kamera & peristiwa deteksi (wajah, jatuh) berpindah ke
+// sini dari dashboard Laravel; layanan AI (Facial-recognition-cctv) dan
+// go2rtc tetap menjadi pelaku teknis di baliknya.
+// -----------------------------------------------------------------------------
+
+enum cctv_camera_status {
+  active
+  inactive
+  maintenance
+  offline
+}
+
+enum cctv_event_type {
+  known
+  unknown
+  fall
+  fall_warning
+  immobility
+  other
+}
+
+enum cctv_event_severity {
+  info
+  warning
+  critical
+}
+
+enum cctv_event_status {
+  active
+  acknowledged
+  resolved
+}
+
+/// Satu unit kamera. Kredensial RTSP disimpan terenkripsi (lihat utils/cctvSecret)
+/// dan hanya diurai mentah saat dilayani ke layanan AI / go2rtc.
+model cctv_cameras {
+  id                     BigInt             @id @default(autoincrement()) @db.UnsignedBigInt
+  name                   String             @db.VarChar(255)
+  lokasi                 String?            @db.VarChar(255)
+  rtsp_url               String             @db.VarChar(500)
+  rtsp_url_main          String?            @db.VarChar(500)
+  rtsp_url_sub           String?            @db.VarChar(500)
+  username               String?            @db.VarChar(100)
+  password_enc           String?            @db.VarChar(500)
+  desa_id                BigInt?            @db.UnsignedBigInt
+  kecamatan_id           BigInt?            @db.UnsignedBigInt
+  status                 cctv_camera_status @default(inactive)
+  recognition_enabled    Boolean            @default(true)
+  fall_detection_enabled Boolean            @default(true)
+  go2rtc_src             String?            @unique @db.VarChar(100)
+  last_online_at         DateTime?          @db.Timestamp(0)
+  created_by             BigInt?            @db.UnsignedBigInt
+  created_at             DateTime?          @default(now()) @db.Timestamp(0)
+  updated_at             DateTime?          @default(now()) @db.Timestamp(0)
+  events                 cctv_events[]
+
+  @@index([status], map: "idx_cctv_cameras_status")
+  @@index([desa_id], map: "idx_cctv_cameras_desa")
+  @@index([kecamatan_id], map: "idx_cctv_cameras_kecamatan")
+}
+
+/// Wajah yang dikenali layanan AI: hasil impor data lama maupun enrollment baru
+/// dari super app. Dipasok ke layanan AI lewat endpoint kompatibel "face-embeddings".
+model cctv_faces {
+  id           BigInt                 @id @default(autoincrement()) @db.UnsignedBigInt
+  nama         String                 @db.VarChar(255)
+  kode_pegawai String?                @db.VarChar(50)
+  departemen   String?                @db.VarChar(255)
+  foto_path    String?                @db.VarChar(500)
+  created_by   BigInt?                @db.UnsignedBigInt
+  created_at   DateTime?              @default(now()) @db.Timestamp(0)
+  updated_at   DateTime?              @default(now()) @db.Timestamp(0)
+  embeddings   cctv_face_embeddings[]
+  events       cctv_events[]
+
+  @@index([nama], map: "idx_cctv_faces_nama")
+  @@index([kode_pegawai], map: "idx_cctv_faces_kode")
+}
+
+/// Satu foto embedding milik satu wajah (mirip employee_photos di dashboard lama).
+model cctv_face_embeddings {
+  id         BigInt     @id @default(autoincrement()) @db.UnsignedBigInt
+  face_id    BigInt     @db.UnsignedBigInt
+  image_path String     @db.VarChar(500)
+  embedding  Json
+  created_at DateTime?  @default(now()) @db.Timestamp(0)
+  face       cctv_faces @relation(fields: [face_id], references: [id], onDelete: Cascade, map: "fk_cctv_face_embeddings_face")
+
+  @@index([face_id], map: "idx_cctv_face_embeddings_face")
+}
+
+/// Satu peristiwa deteksi (wajah dikenal/tidak dikenal, jatuh, dsb).
+/// Idempoten pada event_uuid: kiriman ulang dari layanan AI tidak menggandakan data.
+model cctv_events {
+  id              BigInt              @id @default(autoincrement()) @db.UnsignedBigInt
+  event_uuid      String              @unique @db.VarChar(64)
+  camera_id       BigInt              @db.UnsignedBigInt
+  type            cctv_event_type
+  severity        cctv_event_severity @default(info)
+  face_id         BigInt?             @db.UnsignedBigInt
+  nama            String?             @db.VarChar(255)
+  similarity      Float?
+  confidence      Float?
+  bbox            Json?
+  track_id        String?             @db.VarChar(100)
+  snapshot_path   String?             @db.VarChar(500)
+  status          cctv_event_status   @default(active)
+  metadata        Json?
+  acknowledged_by BigInt?             @db.UnsignedBigInt
+  acknowledged_at DateTime?           @db.Timestamp(0)
+  occurred_at     DateTime            @db.Timestamp(0)
+  created_at      DateTime?           @default(now()) @db.Timestamp(0)
+  camera          cctv_cameras        @relation(fields: [camera_id], references: [id], onDelete: Cascade, map: "fk_cctv_events_camera")
+  face            cctv_faces?         @relation(fields: [face_id], references: [id], onDelete: SetNull, map: "fk_cctv_events_face")
+
+  @@index([camera_id, occurred_at], map: "idx_cctv_events_camera_time")
+  @@index([occurred_at], map: "idx_cctv_events_time")
+  @@index([status], map: "idx_cctv_events_status")
+  @@index([type], map: "idx_cctv_events_type")
+  @@index([severity], map: "idx_cctv_events_severity")
+}

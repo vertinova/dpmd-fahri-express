@@ -243,6 +243,11 @@ function initSocketServer(httpServer) {
     }
   });
 
+  // Smart CCTV: staf yang terautentikasi join room `cctv` untuk menerima
+  // broadcast peristiwa deteksi (cctv_alert). Handler terpisah agar modul CCTV
+  // tidak bercampur dengan signaling meeting.
+  require('./cctv.socket').initCctvSocket(io);
+
   // Handle connections  // Handle connections
   io.on('connection', (socket) => {
     console.log(`[Socket] User connected: ${socket.user.name} (${socket.id})`);

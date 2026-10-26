@@ -728,6 +728,22 @@ const uploadArsipBarang = multer({
   }
 });
 
+// SMART CCTV — ingest peristiwa & foto wajah.
+// MemoryStorage: snapshot langsung ditulis ke storage cctv oleh layanan,
+// foto wajah di-ekstrak embedding-nya di memori — berkas mentah tidak perlu
+// melewati disk dua kali.
+const uploadCctvEvent = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: imageFilter,
+  limits: { fileSize: 6 * 1024 * 1024 }
+});
+
+const uploadCctvFoto = multer({
+  storage: multer.memoryStorage(),
+  fileFilter: imageFilter,
+  limits: { fileSize: 8 * 1024 * 1024 }
+});
+
 module.exports = {
   uploadBumdes,
   uploadMusdesus,
@@ -743,6 +759,8 @@ module.exports = {
   uploadInformasi,
   uploadArsipBarang,
   bankeuProposal: uploadBankeuProposal.single('file'),
+  uploadCctvEvent,
+  uploadCctvFoto,
   bankeuPerubahanProposal: uploadBankeuPerubahanProposal.single('file'),
   bankeuPerubahanSurat: uploadBankeuPerubahanSurat.single('file'),
   bankeuPerubahanLpj: uploadBankeuPerubahanLpj.array('files', 10),
