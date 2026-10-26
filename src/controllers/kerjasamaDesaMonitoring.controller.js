@@ -117,7 +117,7 @@ class KerjasamaDesaMonitoringController {
    *
    * Cakupan Perdes sengaja TIDAK ikut penyaring tahun/jenis/bidang: ia mengukur
    * kesiapan legalitas desa, yang tidak punya tahun dan tidak berubah karena
-   * seseorang memilih "Antar Desa" di dropdown.
+   * seseorang memilih "Antar Desa" di dropdown. Penyaring kecamatan ikut.
    */
   async statistik(req, res, next) {
     try {
@@ -167,10 +167,19 @@ class KerjasamaDesaMonitoringController {
 
       // Cakupan legalitas: hanya DESA. Kelurahan tidak menerbitkan Peraturan
       // Desa, jadi memasukkannya ke penyebut membuat cakupan mustahil 100%.
+      // Penyaring kecamatan IKUT dipakai (tahun/jenis/bidang tidak): daftar
+      // "desa yang belum" di balik kartu ini juga disaring per kecamatan, dan
+      // kartu yang menulis angka se-kabupaten di atas daftar satu kecamatan
+      // membuat keduanya tampak saling membantah.
+      const kecamatanId = req.query.kecamatan_id ? parseId(req.query.kecamatan_id) : null;
+      const lingkupDesa = {
+        status_pemerintahan: 'desa',
+        ...(kecamatanId ? { kecamatan_id: kecamatanId } : {}),
+      };
       const [totalDesa, sudahLegalitas] = await Promise.all([
-        prisma.desas.count({ where: { status_pemerintahan: 'desa' } }),
+        prisma.desas.count({ where: lingkupDesa }),
         prisma.kerjasama_desa_legalitas.count({
-          where: { produk_hukum_id: { not: null }, desas: { status_pemerintahan: 'desa' } },
+          where: { produk_hukum_id: { not: null }, desas: lingkupDesa },
         }),
       ]);
 

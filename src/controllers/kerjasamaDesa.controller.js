@@ -31,6 +31,7 @@ const {
   BIDANG_KEYS,
   JENIS_KEYS,
   PADANAN_PERDES_KERJASAMA,
+  SEMUA_FIELD_DOKUMEN,
   dokumenUntukJenis,
   dokumenLengkap,
   katalog,
@@ -40,6 +41,11 @@ const FOLDER_DOKUMEN = path.join(__dirname, '../../storage/uploads/kerjasama_des
 const FOLDER_PRODUK_HUKUM = path.join(__dirname, '../../storage/produk_hukum');
 
 const LOG_MODULE = 'kerjasama_desa';
+
+// Penanda baris produk_hukums yang lahir dari modul ini. Dipakai untuk memutuskan
+// apakah "Ganti Perdes" boleh menimpa baris lama: hanya baris buatan modul ini
+// yang ditimpa; Perdes yang diunggah lewat menu Produk Hukum milik modul itu.
+const SUMBER_PERDES = 'Diunggah desa lewat modul Kerja Sama Desa';
 
 const badRequest = (res, message) => res.status(422).json({ success: false, message });
 const notFound = (res, message) => res.status(404).json({ success: false, message });
@@ -258,11 +264,13 @@ class KerjasamaDesaController {
       let produkHukumId = null;
       const produkHukumMentah = teks(req.body.produk_hukum_id);
       if (produkHukumMentah) {
+        // Sama dengan saringan getPerdesTersedia: hanya PERDES, supaya Perkades
+        // atau SK Kades tidak bisa masuk lewat permintaan yang dirakit tangan.
         const milik = await prisma.produk_hukums.findFirst({
-          where: { id: produkHukumMentah, desa_id: desaId },
+          where: { id: produkHukumMentah, desa_id: desaId, singkatan_jenis: 'PERDES' },
           select: { id: true },
         });
-        if (!milik) return badRequest(res, 'Produk hukum tidak ditemukan pada desa ini');
+        if (!milik) return badRequest(res, 'Perdes tidak ditemukan pada desa ini');
         produkHukumId = milik.id;
       }
 
@@ -342,55 +350,93 @@ class KerjasamaDesaController {
         return badRequest(res, 'Tanggal penetapan wajib diisi dan harus tanggal yang sah');
       }
 
-      const desa = await prisma.desas.findUnique({ where: { id: desaId }, select: { nama: true } });
+      const [desa, lama] = await Promise.all([
+        prisma.desas.findUnique({ where: { id: desaId }, select: { nama: true } }),
+        prisma.kerjasama_desa_legalitas.findUnique({
+          where: { desa_id: desaId },
+          select: { produk_hukums: { select: { id: true, file: true, sumber: true } } },
+        }),
+      ]);
 
-      const id = uuidv4();
+      // "Ganti" menimpa baris produk hukum yang dulu dibuat modul ini, bukan
+      // menambah baris baru — tanpa ini setiap penggantian meninggalkan satu
+      // "Perdes tentang Kerja Sama Desa" lagi yang masih berstatus berlaku di
+      // menu Produk Hukum. Perdes yang ditautkan dari menu Produk Hukum tidak
+      // disentuh: ia milik modul itu, dan cukup dilepas tautannya.
+      const timpa = lama?.produk_hukums?.sumber === SUMBER_PERDES ? lama.produk_hukums : null;
+
       const sekarang = new Date();
+      const isian = {
+        judul: (teks(req.body.judul) || PADANAN_PERDES_KERJASAMA.judul()).slice(0, 255),
+        nomor: nomor.slice(0, 255),
+        tahun,
+        tanggal_penetapan: tanggal,
+        status_peraturan: 'berlaku',
+        file: req.file.filename,
+        updated_at: sekarang,
+      };
 
-      const produkHukum = await prisma.produk_hukums.create({
-        data: {
-          id,
-          uuid: id,
-          desa_id: desaId,
-          judul: (teks(req.body.judul) || PADANAN_PERDES_KERJASAMA.judul()).slice(0, 255),
-          nomor: nomor.slice(0, 255),
-          tahun,
-          jenis: PADANAN_PERDES_KERJASAMA.jenis,
-          singkatan_jenis: PADANAN_PERDES_KERJASAMA.singkatan_jenis,
-          // Tempat penetapan diambil dari basis data, bukan kiriman klien: kolom
-          // ini muncul di dokumen resmi dan akun desa tidak berkepentingan
-          // menuliskannya sebagai desa lain.
-          tempat_penetapan: (desa?.nama || 'Kabupaten Bogor').slice(0, 255),
-          tanggal_penetapan: tanggal,
-          status_peraturan: 'berlaku',
-          sumber: 'Diunggah desa lewat modul Kerja Sama Desa',
-          subjek: PADANAN_PERDES_KERJASAMA.subjek,
-          file: req.file.filename,
-          created_at: sekarang,
-          updated_at: sekarang,
-        },
+      // Satu transaksi: produk hukum tanpa legalitas (atau sebaliknya) berarti
+      // baris yang menunjuk berkas yang sudah dibersihkan oleh `bersihkan()`.
+      const { legalitas, produkHukumId } = await prisma.$transaction(async (tx) => {
+        let produkHukumId;
+        if (timpa) {
+          await tx.produk_hukums.update({ where: { id: timpa.id }, data: isian });
+          produkHukumId = timpa.id;
+        } else {
+          produkHukumId = uuidv4();
+          await tx.produk_hukums.create({
+            data: {
+              id: produkHukumId,
+              uuid: produkHukumId,
+              desa_id: desaId,
+              ...isian,
+              jenis: PADANAN_PERDES_KERJASAMA.jenis,
+              singkatan_jenis: PADANAN_PERDES_KERJASAMA.singkatan_jenis,
+              // Tempat penetapan diambil dari basis data, bukan kiriman klien: kolom
+              // ini muncul di dokumen resmi dan akun desa tidak berkepentingan
+              // menuliskannya sebagai desa lain.
+              tempat_penetapan: (desa?.nama || 'Kabupaten Bogor').slice(0, 255),
+              sumber: SUMBER_PERDES,
+              subjek: PADANAN_PERDES_KERJASAMA.subjek,
+              created_at: sekarang,
+            },
+          });
+        }
+
+        const legalitas = await tx.kerjasama_desa_legalitas.upsert({
+          where: { desa_id: desaId },
+          update: {
+            nomor_perdes: nomor.slice(0, 100),
+            tahun_perdes: tahun,
+            produk_hukum_id: produkHukumId,
+            updated_at: sekarang,
+          },
+          create: {
+            desa_id: desaId,
+            nomor_perdes: nomor.slice(0, 100),
+            tahun_perdes: tahun,
+            produk_hukum_id: produkHukumId,
+            created_by: BigInt(String(req.user.id)),
+            created_at: sekarang,
+            updated_at: sekarang,
+          },
+          include: { produk_hukums: RELASI_PRODUK_HUKUM },
+        });
+
+        return { legalitas, produkHukumId };
       });
 
-      const legalitas = await prisma.kerjasama_desa_legalitas.upsert({
-        where: { desa_id: desaId },
-        update: { nomor_perdes: nomor.slice(0, 100), tahun_perdes: tahun, produk_hukum_id: id, updated_at: sekarang },
-        create: {
-          desa_id: desaId,
-          nomor_perdes: nomor.slice(0, 100),
-          tahun_perdes: tahun,
-          produk_hukum_id: id,
-          created_by: BigInt(String(req.user.id)),
-          created_at: sekarang,
-          updated_at: sekarang,
-        },
-        include: { produk_hukums: RELASI_PRODUK_HUKUM },
-      });
+      // Berkas lama dibuang setelah transaksi berhasil, bukan sebelumnya.
+      if (timpa?.file && timpa.file !== req.file.filename) {
+        await fs.unlink(path.join(FOLDER_PRODUK_HUKUM, timpa.file)).catch(() => {});
+      }
 
-      logger.info(`✅ Perdes kerja sama desa ${desaId} diunggah: ${produkHukum.id}`);
+      logger.info(`✅ Perdes kerja sama desa ${desaId} ${timpa ? 'diganti' : 'diunggah'}: ${produkHukumId}`);
       catat(req, {
-        action: 'create',
-        description: `${req.user.name || req.user.email} mengunggah Perdes kerja sama desa (${nomor} Tahun ${tahun})`,
-        newValue: { produk_hukum_id: id, nomor, tahun },
+        action: timpa ? 'update' : 'create',
+        description: `${req.user.name || req.user.email} ${timpa ? 'mengganti' : 'mengunggah'} Perdes kerja sama desa (${nomor} Tahun ${tahun})`,
+        newValue: { produk_hukum_id: produkHukumId, nomor, tahun },
       });
 
       res.status(201).json({
@@ -528,10 +574,13 @@ class KerjasamaDesaController {
       // dilepas dari baris supaya entri KDPK tidak menyimpan SK BKD yang tidak
       // pernah relevan — dan kelengkapannya tidak terhitung dari berkas yang salah.
       const data = { ...nilai, updated_at: new Date() };
+      const berkasDilepas = [];
       if (lama.jenis !== nilai.jenis) {
         const dipakai = dokumenUntukJenis(nilai.jenis).map((d) => d.field);
-        ['file_permakades', 'file_sk_bkd', 'file_pks_mou'].forEach((field) => {
-          if (!dipakai.includes(field)) data[field] = null;
+        SEMUA_FIELD_DOKUMEN.forEach((field) => {
+          if (dipakai.includes(field)) return;
+          data[field] = null;
+          if (lama[field]) berkasDilepas.push(lama[field]);
         });
       }
 
@@ -540,6 +589,12 @@ class KerjasamaDesaController {
         data,
         select: PILIH_ENTRI,
       });
+
+      // Berkas yang tautannya dilepas ikut dibuang, sama seperti saat entri
+      // dihapus — tidak ada lagi baris yang bisa membukanya.
+      await Promise.all(
+        berkasDilepas.map((berkas) => fs.unlink(path.join(FOLDER_DOKUMEN, berkas)).catch(() => {})),
+      );
 
       catat(req, {
         action: 'update',
@@ -566,7 +621,7 @@ class KerjasamaDesaController {
       // Berkasnya ikut dibersihkan — baris hilang tapi PDF-nya tinggal berarti
       // folder unggahan tumbuh terus tanpa ada yang bisa membukanya lagi.
       await Promise.all(
-        ['file_permakades', 'file_sk_bkd', 'file_pks_mou']
+        SEMUA_FIELD_DOKUMEN
           .map((field) => entri[field])
           .filter(Boolean)
           .map((berkas) => fs.unlink(path.join(FOLDER_DOKUMEN, berkas)).catch(() => {})),
