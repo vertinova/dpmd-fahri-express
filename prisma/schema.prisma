@@ -2131,8 +2131,9 @@ model users {
   plain_password                                                 String?                              @db.VarChar(255)
   role                                                           String                               @default("desa") @db.VarChar(50)
   kecamatan_id                                                   Int?                                 @db.UnsignedInt
+  operator_kecamatan                                             Boolean                              @default(false)
   desa_id                                                        BigInt?                              @db.UnsignedBigInt
-  jabatan_desa                                                   String?                              @db.VarChar(100)
+  jabatan_desa                                                 String?                              @db.VarChar(100)
   no_hp                                                          String?                              @db.VarChar(20)
   bidang_id                                                      Int?                                 @db.UnsignedInt
   dinas_id                                                       Int?                                 @db.UnsignedInt
@@ -2180,6 +2181,7 @@ model users {
   conversations_as_two                                           conversations[]                      @relation("conv_participant_two")
   desa_bankeu_surat                                              desa_bankeu_surat[]
   desa_user_permissions                                          desa_user_permissions[]
+  kecamatan_user_permissions                                     kecamatan_user_permissions[]
   disposisi_disposisi_dari_user_idTousers                        disposisi[]                          @relation("disposisi_dari_user_idTousers")
   disposisi_disposisi_ke_user_idTousers                          disposisi[]                          @relation("disposisi_ke_user_idTousers")
   informasi                                                      informasi[]
@@ -2230,6 +2232,18 @@ model desa_user_permissions {
 
   @@unique([user_id, permission_key], map: "desa_user_permissions_unique")
   @@index([user_id], map: "desa_user_permissions_user_id_index")
+}
+
+model kecamatan_user_permissions {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id        BigInt    @db.UnsignedBigInt
+  permission_key String    @db.VarChar(50)
+  created_by     BigInt?   @db.UnsignedBigInt
+  created_at     DateTime? @default(now()) @db.Timestamp(0)
+  users          users     @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_kecamatan_user_permissions_user")
+
+  @@unique([user_id, permission_key], map: "kecamatan_user_permissions_unique")
+  @@index([user_id], map: "kecamatan_user_permissions_user_id_index")
 }
 
 model verifikator_akses_desa {

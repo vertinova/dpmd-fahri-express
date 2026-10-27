@@ -94,9 +94,12 @@ router.put('/users/:id', bidangAkunDesaController.updateUser);
 router.put('/users/:id/permissions', bidangAkunDesaController.updatePermissions);
 router.patch('/users/:id/status', bidangAkunDesaController.setStatus);
 
-// Akun kecamatan — satu per kecamatan, dibuat superadmin. Staf bidang hanya
-// boleh melihat sandi dan menyetel ulang; tidak ada rute tambah/ubah/hapus.
+// Akun kecamatan. Akun UTAMA (satu per kecamatan, dibuat superadmin): staf
+// bidang hanya boleh melihat sandi dan menyetel ulang. Akun OPERATOR kecamatan:
+// staf bidang boleh membuatkan atau memberi akses, terbatas fitur bidangnya.
 router.get('/kecamatan', bidangAkunDesaController.getAkunKecamatan);
+router.post('/kecamatan/operator/:id/beri-akses', bidangAkunDesaController.beriAksesOperatorKecamatan);
+router.post('/kecamatan/:kecamatanId/operator', bidangAkunDesaController.createOperatorKecamatan);
 router.get('/kecamatan/:id/sandi', bidangAkunDesaController.lihatSandiKecamatan);
 router.post('/kecamatan/:id/reset-sandi', bidangAkunDesaController.resetSandiKecamatan);
 

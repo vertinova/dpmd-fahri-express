@@ -29,6 +29,12 @@ const {
 const { DESA_PERMISSIONS } = require('../config/desaPermissions');
 const { normalizePhone } = require('../config/desaProfile');
 const { SANDI_DEFAULT } = require('../config/sandiDefault');
+const {
+  BATAS_OPERATOR_KECAMATAN,
+  KECAMATAN_PERMISSION_LINTAS_BIDANG,
+  kecamatanKeysUntukModul,
+} = require('../config/kecamatanPermissions');
+const { invalidateKecamatanAkses } = require('../middlewares/kecamatanPermission');
 const { periksaTemplate, susunEmail, TEMPLATE_BAWAAN, TOKEN_TEMPLATE } = require('../config/templateAkunDesa');
 const { invalidateDesaPermissions } = require('../middlewares/desaPermission');
 const ActivityLogger = require('../utils/activityLogger');
@@ -200,8 +206,16 @@ const urutAkunKecamatan = (a, b) =>
   (b.last_active_at?.getTime?.() || 0) - (a.last_active_at?.getTime?.() || 0) ||
   (a.created_at?.getTime?.() || 0) - (b.created_at?.getTime?.() || 0);
 
-/** Ambil akun kecamatan beserta hash & plain_password-nya — hanya role kecamatan. */
-const findAkunKecamatan = async (id) => {
+const izinKecamatan = (u) => (u.kecamatan_user_permissions || []).map((p) => p.permission_key);
+
+/**
+ * Ambil akun kecamatan beserta hash & plain_password-nya.
+ *
+ * Akun UTAMA selalu boleh (lihat & reset sandi). OPERATOR hanya bila ia
+ * memegang fitur kecamatan milik bidang yang sedang membuka halaman ini —
+ * operator Kelembagaan bukan urusan staf Bankeu.
+ */
+const findAkunKecamatan = async (id, modulSlug = null) => {
   let userId;
   try {
     userId = BigInt(String(id));
@@ -210,10 +224,19 @@ const findAkunKecamatan = async (id) => {
   }
   const user = await prisma.users.findUnique({
     where: { id: userId },
-    select: { ...AKUN_KECAMATAN_SELECT, plain_password: true, role: true },
+    select: {
+      ...AKUN_KECAMATAN_SELECT,
+      plain_password: true,
+      role: true,
+      operator_kecamatan: true,
+      jabatan_desa: true,
+      kecamatan_user_permissions: { select: { permission_key: true } },
+    },
   });
   if (!user || user.role !== ROLE_KECAMATAN) return null;
-  return user;
+  if (!user.operator_kecamatan) return user;
+  const fiturBidang = kecamatanKeysUntukModul(modulSlug);
+  return izinKecamatan(user).some((k) => fiturBidang.includes(k)) ? user : null;
 };
 
 const parseBigId = (nilai) => {
@@ -1246,22 +1269,30 @@ class BidangAkunDesaController {
   /**
    * ── Akun kecamatan ──────────────────────────────────────────────────────────
    *
-   * Satu kecamatan = satu akun, dipakai bersama oleh seluruh bidang (verifikasi
-   * Bankeu, kelembagaan, BUMDes, aparatur). Karena itu staf bidang di sini
-   * TIDAK bisa membuat, mengubah, atau menonaktifkan akun kecamatan — hanya
-   * melihat sandinya dan menyetel ulang sandinya. Akun baru tetap urusan
-   * superadmin, supaya satu kecamatan tidak berakhir dengan beberapa akun
-   * yang dibuat bidang berbeda.
+   * Akun UTAMA: satu per kecamatan, dibuat superadmin, dipakai bersama seluruh
+   * bidang. Staf bidang hanya boleh melihat dan menyetel ulang sandinya — tidak
+   * membuat, mengubah, atau menonaktifkannya.
+   *
+   * Akun OPERATOR kecamatan: dibuat akun utama untuk petugasnya, dan staf bidang
+   * pun boleh membuatkannya — tapi hanya dengan fitur kecamatan milik bidangnya
+   * (lihat KECAMATAN_KEYS_PER_MODUL). Operator yang sudah ada dan belum memegang
+   * fitur bidang ini bisa diberi akses; fitur bidang lain tidak pernah disentuh.
    */
 
-  /** GET /kecamatan — seluruh kecamatan beserta akunnya (tanpa sandi). */
+  /** GET /kecamatan — seluruh kecamatan beserta akun utama & operatornya (tanpa sandi). */
   async getAkunKecamatan(req, res) {
     try {
+      const fiturBidang = kecamatanKeysUntukModul(req.modulAkunDesa);
       const [kecamatans, akun] = await Promise.all([
         prisma.kecamatans.findMany({ select: { id: true, nama: true }, orderBy: { nama: 'asc' } }),
         prisma.users.findMany({
           where: { role: ROLE_KECAMATAN, kecamatan_id: { not: null } },
-          select: AKUN_KECAMATAN_SELECT,
+          select: {
+            ...AKUN_KECAMATAN_SELECT,
+            operator_kecamatan: true,
+            jabatan_desa: true,
+            kecamatan_user_permissions: { select: { permission_key: true } },
+          },
         }),
       ]);
 
@@ -1273,19 +1304,37 @@ class BidangAkunDesaController {
         return cache.get(kunci);
       };
 
-      const perKecamatan = new Map();
+      const utamaPer = new Map();
+      const operatorPer = new Map();
       akun.forEach((u) => {
+        const peta = u.operator_kecamatan ? operatorPer : utamaPer;
         const kunci = String(u.kecamatan_id);
-        if (!perKecamatan.has(kunci)) perKecamatan.set(kunci, []);
-        perKecamatan.get(kunci).push(u);
+        if (!peta.has(kunci)) peta.set(kunci, []);
+        peta.get(kunci).push(u);
       });
 
       const data = [];
       for (const k of kecamatans) {
-        // Bila ternyata ada lebih dari satu akun, yang ditampilkan akun aktif
+        // Bila ternyata ada lebih dari satu akun utama, yang ditampilkan akun aktif
         // yang paling baru dipakai; sisanya hanya dihitung sebagai peringatan.
-        const daftar = (perKecamatan.get(String(k.id)) || []).sort(urutAkunKecamatan);
+        const daftar = (utamaPer.get(String(k.id)) || []).sort(urutAkunKecamatan);
         const utama = daftar[0] || null;
+
+        const operator = [];
+        for (const u of (operatorPer.get(String(k.id)) || []).sort(urutAkunKecamatan)) {
+          const izin = izinKecamatan(u);
+          const pegang = izin.some((key) => fiturBidang.includes(key));
+          operator.push({
+            ...serializeAkunKecamatan(u),
+            jabatan: u.jabatan_desa || null,
+            permissions: izin,
+            pegang_fitur_bidang: pegang,
+            // Status sandi hanya untuk operator urusan bidang ini — yang lain
+            // memang tidak bisa dilihat/disetel ulang dari sini.
+            sandi_default: pegang ? await masihDefault(u.password) : null,
+          });
+        }
+
         data.push({
           kecamatan: { id: String(k.id), nama: k.nama },
           akun: utama
@@ -1295,13 +1344,167 @@ class BidangAkunDesaController {
               }
             : null,
           akun_lain: daftar.length > 1 ? daftar.length - 1 : 0,
+          operator,
+          jumlah_operator: operator.length,
         });
       }
 
-      res.json({ success: true, data });
+      res.json({
+        success: true,
+        data,
+        meta: {
+          // Kosong = bidang/modul ini tidak punya fitur di halaman kecamatan.
+          fitur_kecamatan: fiturBidang,
+          batas_operator: BATAS_OPERATOR_KECAMATAN,
+        },
+      });
     } catch (error) {
       logger.error('Gagal memuat akun kecamatan:', error);
       res.status(500).json({ success: false, message: 'Gagal memuat akun kecamatan' });
+    }
+  }
+
+  /**
+   * POST /kecamatan/:kecamatanId/operator — staf bidang membuatkan operator
+   * kecamatan. Fiturnya DIPAKSA mengikuti modul bidang (+ Pesan); isian
+   * permissions dari klien diabaikan sama sekali.
+   */
+  async createOperatorKecamatan(req, res) {
+    try {
+      const fiturBidang = kecamatanKeysUntukModul(req.modulAkunDesa);
+      if (fiturBidang.length === 0) {
+        return badRequest(res, 'Fitur ini tidak ada di halaman kecamatan, jadi tidak perlu operator kecamatan.');
+      }
+
+      let kecamatanId;
+      try {
+        kecamatanId = BigInt(String(req.params.kecamatanId));
+      } catch {
+        return badRequest(res, 'Kecamatan tidak valid');
+      }
+      const kecamatan = await prisma.kecamatans.findUnique({ where: { id: kecamatanId }, select: { id: true, nama: true } });
+      if (!kecamatan) return notFound(res, 'Kecamatan tidak ditemukan');
+
+      const name = String(req.body.name || '').trim();
+      const email = String(req.body.email || '').trim().toLowerCase();
+      const password = String(req.body.password || '');
+      const jabatan = String(req.body.jabatan || '').trim();
+      const noHpMentah = String(req.body.no_hp || '').trim();
+      const noHp = noHpMentah ? normalizePhone(noHpMentah) : null;
+
+      if (!name) return badRequest(res, 'Nama wajib diisi');
+      if (!email) return badRequest(res, 'Email wajib diisi');
+      if (!EMAIL_REGEX.test(email)) return badRequest(res, 'Format email tidak valid');
+      if (password.length < MIN_PASSWORD_LENGTH) return badRequest(res, `Sandi minimal ${MIN_PASSWORD_LENGTH} karakter`);
+      if (noHpMentah && !noHp) return badRequest(res, 'Nomor HP tidak valid. Contoh: 081234567890');
+
+      const idKec = Number(kecamatan.id);
+      const jumlah = await prisma.users.count({
+        where: { role: ROLE_KECAMATAN, operator_kecamatan: true, kecamatan_id: idKec },
+      });
+      if (jumlah >= BATAS_OPERATOR_KECAMATAN) {
+        return badRequest(res, `Kecamatan ini sudah punya ${BATAS_OPERATOR_KECAMATAN} akun operator. Beri akses ke operator yang ada saja.`);
+      }
+
+      const existing = await prisma.users.findUnique({ where: { email }, select: { id: true } });
+      if (existing) return badRequest(res, 'Email sudah digunakan akun lain');
+
+      const keys = [...new Set([...fiturBidang, ...KECAMATAN_PERMISSION_LINTAS_BIDANG])];
+      const pembuatId = BigInt(String(req.user.id));
+      const created = await prisma.users.create({
+        data: {
+          name,
+          email,
+          password: await bcrypt.hash(password, 10),
+          plain_password: password,
+          role: ROLE_KECAMATAN,
+          kecamatan_id: idKec,
+          operator_kecamatan: true,
+          jabatan_desa: jabatan || null,
+          no_hp: noHp,
+          is_active: true,
+          created_at: new Date(),
+          updated_at: new Date(),
+          kecamatan_user_permissions: {
+            create: keys.map((key) => ({ permission_key: key, created_by: pembuatId })),
+          },
+        },
+        select: { id: true, name: true, email: true },
+      });
+
+      logAksi(req, {
+        action: 'create',
+        target: created,
+        description: `${req.user.name} (DPMD) membuat akun operator Kec. ${kecamatan.nama} "${name}" (${email}) dengan hak akses: ${keys.join(', ')}`,
+        newValue: { kecamatan: kecamatan.nama, name, email, jabatan: jabatan || null, permissions: keys },
+      });
+
+      res.status(201).json({
+        success: true,
+        message: 'Akun operator kecamatan berhasil dibuat',
+        data: { id: String(created.id), name: created.name, email: created.email, permissions: keys },
+      });
+    } catch (error) {
+      logger.error('Gagal membuat operator kecamatan oleh bidang:', error);
+      res.status(500).json({ success: false, message: 'Gagal membuat akun operator kecamatan' });
+    }
+  }
+
+  /**
+   * POST /kecamatan/operator/:id/beri-akses — tambahkan fitur bidang ini ke
+   * operator kecamatan yang sudah ada. Hanya MENAMBAH: fitur lain milik
+   * operator itu dibiarkan, karena staf bidang tidak melihatnya.
+   */
+  async beriAksesOperatorKecamatan(req, res) {
+    try {
+      const fiturBidang = kecamatanKeysUntukModul(req.modulAkunDesa);
+      if (fiturBidang.length === 0) {
+        return badRequest(res, 'Fitur ini tidak ada di halaman kecamatan.');
+      }
+
+      let userId;
+      try {
+        userId = BigInt(String(req.params.id));
+      } catch {
+        return notFound(res, 'Operator kecamatan tidak ditemukan');
+      }
+      const target = await prisma.users.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          operator_kecamatan: true,
+          kecamatan_user_permissions: { select: { permission_key: true } },
+        },
+      });
+      if (!target || target.role !== ROLE_KECAMATAN || !target.operator_kecamatan) {
+        return notFound(res, 'Operator kecamatan tidak ditemukan');
+      }
+
+      const sebelum = izinKecamatan(target);
+      const tambahan = [...fiturBidang, ...KECAMATAN_PERMISSION_LINTAS_BIDANG].filter((k) => !sebelum.includes(k));
+      if (tambahan.length > 0) {
+        await prisma.kecamatan_user_permissions.createMany({
+          data: tambahan.map((key) => ({ user_id: target.id, permission_key: key, created_by: BigInt(String(req.user.id)) })),
+          skipDuplicates: true,
+        });
+        invalidateKecamatanAkses(target.id);
+      }
+
+      logAksi(req, {
+        action: 'update',
+        target,
+        description: `${req.user.name} (DPMD) memberi akses [${tambahan.join(', ') || 'tidak ada yang baru'}] ke operator kecamatan "${target.name}" (${target.email})`,
+        oldValue: { permissions: sebelum },
+        newValue: { permissions: [...sebelum, ...tambahan] },
+      });
+
+      res.json({ success: true, message: 'Akses diberikan', data: { permissions: [...sebelum, ...tambahan] } });
+    } catch (error) {
+      logger.error('Gagal memberi akses operator kecamatan:', error);
+      res.status(500).json({ success: false, message: 'Gagal memberi akses' });
     }
   }
 
@@ -1315,7 +1518,7 @@ class BidangAkunDesaController {
    */
   async lihatSandiKecamatan(req, res) {
     try {
-      const target = await findAkunKecamatan(req.params.id);
+      const target = await findAkunKecamatan(req.params.id, req.modulAkunDesa);
       if (!target) return notFound(res, 'Akun kecamatan tidak ditemukan');
 
       const plain = target.plain_password ? String(target.plain_password) : '';
@@ -1324,7 +1527,7 @@ class BidangAkunDesaController {
       logAksi(req, {
         action: 'view',
         target,
-        description: `${req.user.name} (DPMD) melihat sandi akun kecamatan "${target.name}" (${target.email})`,
+        description: `${req.user.name} (DPMD) melihat sandi akun ${target.operator_kecamatan ? 'operator ' : ''}kecamatan "${target.name}" (${target.email})`,
       });
 
       res.json({
@@ -1349,7 +1552,7 @@ class BidangAkunDesaController {
    */
   async resetSandiKecamatan(req, res) {
     try {
-      const target = await findAkunKecamatan(req.params.id);
+      const target = await findAkunKecamatan(req.params.id, req.modulAkunDesa);
       if (!target) return notFound(res, 'Akun kecamatan tidak ditemukan');
 
       await prisma.users.update({
@@ -1364,7 +1567,7 @@ class BidangAkunDesaController {
       logAksi(req, {
         action: 'update',
         target,
-        description: `${req.user.name} (DPMD) menyetel ulang sandi akun kecamatan "${target.name}" (${target.email}) ke sandi default`,
+        description: `${req.user.name} (DPMD) menyetel ulang sandi akun ${target.operator_kecamatan ? 'operator ' : ''}kecamatan "${target.name}" (${target.email}) ke sandi default`,
         newValue: { password_reset: true },
       });
 

@@ -43,6 +43,27 @@ const loadDesaPermissions = async (userId, role) => {
 };
 
 /**
+ * Status akun kecamatan untuk frontend: akun utama atau operator, dan bila
+ * operator, fitur apa saja yang boleh dibukanya. Akun utama (dan role lain)
+ * mendapat daftar kosong — frontend membaca `operator_kecamatan` dulu.
+ */
+const loadKecamatanAkses = async (user) => {
+  if (String(user.role || '').trim().toLowerCase() !== 'kecamatan' || !user.operator_kecamatan) {
+    return { operator_kecamatan: false, kecamatan_permissions: [] };
+  }
+  try {
+    const rows = await prisma.kecamatan_user_permissions.findMany({
+      where: { user_id: BigInt(String(user.id)) },
+      select: { permission_key: true }
+    });
+    return { operator_kecamatan: true, kecamatan_permissions: rows.map((row) => row.permission_key) };
+  } catch (error) {
+    logger.error(`Gagal memuat hak akses operator kecamatan ${user.id}:`, error.message);
+    return { operator_kecamatan: true, kecamatan_permissions: [] };
+  }
+};
+
+/**
  * Lampirkan identitas dinas (BPKAD, DLH, dst.) ke payload user.
  *
  * Front-end membedakan akun dinas "pelihat" (BPKAD/Inspektorat) dari verifikator
@@ -105,6 +126,8 @@ const login = async (req, res) => {
         jabatan_desa: true,
         no_hp: true,
         kecamatan_id: true,
+        operator_kecamatan: true,
+        is_active: true,
         bidang_id: true,
         dinas_id: true,
         pegawai_id: true,
@@ -149,6 +172,18 @@ const login = async (req, res) => {
       return res.status(401).json({
         success: false,
         message: 'Invalid credentials'
+      });
+    }
+
+    // Operator kecamatan yang dinonaktifkan akun utamanya tidak boleh masuk lagi.
+    // Sengaja hanya operator kecamatan: is_active pada role lain belum pernah
+    // ditegakkan saat login, dan mengubahnya di sini bisa mengunci akun lama.
+    if (user.role === 'kecamatan' && user.operator_kecamatan && user.is_active === false) {
+      logger.warn(`Login ditolak: operator kecamatan nonaktif - ${email}`);
+      return res.status(403).json({
+        success: false,
+        code: 'OPERATOR_KECAMATAN_NONAKTIF',
+        message: 'Akun operator Anda sudah dinonaktifkan. Hubungi akun utama kecamatan.'
       });
     }
 
@@ -232,6 +267,8 @@ const login = async (req, res) => {
       must_change_password: await isUsingDefaultPassword(user.password),
       // Fitur halaman desa yang boleh dibuka akun ini (diatur Admin Desa).
       desa_permissions: await loadDesaPermissions(user.id, user.role),
+      // Akun utama kecamatan atau operator, beserta fitur operatornya.
+      ...(await loadKecamatanAkses(user)),
       jabatan_desa: user.jabatan_desa || null,
       no_hp: user.no_hp || null,
       // Admin Desa wajib melengkapi identitas dulu sebelum boleh beraktivitas.
@@ -413,6 +450,8 @@ const verifyToken = async (req, res) => {
         jabatan_desa: true,
         no_hp: true,
         kecamatan_id: true,
+        operator_kecamatan: true,
+        is_active: true,
         bidang_id: true,
         dinas_id: true,
         pegawai_id: true,
@@ -476,6 +515,8 @@ const verifyToken = async (req, res) => {
       must_change_password: await isUsingDefaultPassword(user.password),
       // Fitur halaman desa yang boleh dibuka akun ini (diatur Admin Desa).
       desa_permissions: await loadDesaPermissions(user.id, user.role),
+      // Akun utama kecamatan atau operator, beserta fitur operatornya.
+      ...(await loadKecamatanAkses(user)),
       jabatan_desa: user.jabatan_desa || null,
       no_hp: user.no_hp || null,
       // Admin Desa wajib melengkapi identitas dulu sebelum boleh beraktivitas.
@@ -587,6 +628,8 @@ const getProfile = async (req, res) => {
         jabatan_desa: true,
         no_hp: true,
         kecamatan_id: true,
+        operator_kecamatan: true,
+        is_active: true,
         bidang_id: true,
         dinas_id: true,
         pegawai_id: true,
@@ -650,6 +693,8 @@ const getProfile = async (req, res) => {
       must_change_password: await isUsingDefaultPassword(user.password),
       // Fitur halaman desa yang boleh dibuka akun ini (diatur Admin Desa).
       desa_permissions: await loadDesaPermissions(user.id, user.role),
+      // Akun utama kecamatan atau operator, beserta fitur operatornya.
+      ...(await loadKecamatanAkses(user)),
       jabatan_desa: user.jabatan_desa || null,
       no_hp: user.no_hp || null,
       // Admin Desa wajib melengkapi identitas dulu sebelum boleh beraktivitas.

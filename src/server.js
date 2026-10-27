@@ -30,6 +30,8 @@ const { sequelize } = require('./models');
 
 const logger = require('./utils/logger');
 const errorHandler = require('./middlewares/errorHandler');
+// Operator kecamatan: fitur dibatasi per hak akses di titik mount (lihat middleware-nya).
+const { gerbangOperatorKecamatan } = require('./middlewares/kecamatanPermission');
 const schedulerService = require('./services/scheduler.service');
 
 // Ensure required directories exist
@@ -458,6 +460,7 @@ app.use('/api/public', publicRoutes); // Public endpoints (no auth)
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes); // User management routes
 app.use('/api/desa-admin', require('./routes/desaAdmin.routes')); // Manajemen akun oleh Admin Desa
+app.use('/api/kecamatan-admin', require('./routes/kecamatanAdmin.routes')); // Akun utama kecamatan mengelola akun operatornya
 app.use('/api/superadmin/backup', require('./routes/backup.routes')); // Unduh cadangan database & berkas
 app.use('/api/superadmin/server', require('./routes/serverManagement.routes')); // Manajemen Server (pemantauan, storage, keamanan)
 app.use('/api/roles', require('./routes/role.routes')); // Role management routes
@@ -510,14 +513,14 @@ app.use('/api/profil-desa', profilDesaRoutes); // Profil Desa routes
 app.use('/api/desa/produk-hukum', produkHukumRoutes); // Produk Hukum routes (desa alias)
 app.use('/api/desa/bankeu', bankeuProposalRoutes); // Bankeu proposal routes for desa
 app.use('/api/desa/bankeu/surat', desaBankeuSuratRoutes); // Surat pengantar & permohonan (desa-level)
-app.use('/api/kecamatan/bankeu/surat', kecamatanBankeuSuratRoutes); // Kecamatan review surat desa
-app.use('/api/kecamatan/bankeu', bankeuVerificationRoutes); // Bankeu verification routes for kecamatan
+app.use('/api/kecamatan/bankeu/surat', gerbangOperatorKecamatan('bankeu'), kecamatanBankeuSuratRoutes); // Kecamatan review surat desa
+app.use('/api/kecamatan/bankeu', gerbangOperatorKecamatan('bankeu'), bankeuVerificationRoutes); // Bankeu verification routes for kecamatan
 app.use('/api/dinas/bankeu', dinasVerificationRoutes); // Bankeu verification routes for dinas terkait
 app.use('/api/dpmd/bankeu', dpmdVerificationRoutes); // Bankeu verification routes for DPMD/SPKED
 // Bankeu Perubahan 2026 - independent feature (Desa -> Kecamatan -> DPMD, skip Dinas)
 app.use('/api/desa/bankeu-perubahan', bankeuPerubahanProposalRoutes);
-app.use('/api/kecamatan/bankeu-perubahan', bankeuPerubahanVerificationRoutes);
-app.use('/api/kecamatan/bankeu-perubahan', bankeuPerubahanConfigRoutes); // Config & tim verifikasi
+app.use('/api/kecamatan/bankeu-perubahan', gerbangOperatorKecamatan('bankeu-perubahan'), bankeuPerubahanVerificationRoutes);
+app.use('/api/kecamatan/bankeu-perubahan', gerbangOperatorKecamatan('bankeu-perubahan'), bankeuPerubahanConfigRoutes); // Config & tim verifikasi
 app.use('/api/dpmd/bankeu-perubahan', bankeuPerubahanDpmdRoutes);
 app.use('/api/dinas/bankeu-perubahan', dinasBankeuPerubahanRoutes); // Arsip & statistik read-only untuk Dinas/OPD (mis. DLH)
 app.use('/api/dinas-pelihat/bankeu-perubahan', dinasPelihatBankeuPerubahanRoutes); // Arsip read-only utk dinas pelihat: BPKAD & Inspektorat (tanpa aksi)
@@ -526,9 +529,9 @@ app.use('/api/dpmd/bankeu-perubahan-lpj', dpmdBankeuPerubahanLpjRoutes);
 app.use('/api/public/bankeu-perubahan', bankeuPerubahanPublicRoutes);
 
 // Bankeu Perubahan: validate tim & quisioner kelengkapan untuk Berita Acara
-app.use('/api/bankeu-perubahan/berita-acara', bankeuPerubahanBeritaAcaraRoutes);
+app.use('/api/bankeu-perubahan/berita-acara', gerbangOperatorKecamatan('bankeu-perubahan'), bankeuPerubahanBeritaAcaraRoutes);
 // Bankeu Perubahan: quisioner verifikasi
-app.use('/api/bankeu-perubahan/questionnaire', bankeuPerubahanQuestionnaireRoutes);
+app.use('/api/bankeu-perubahan/questionnaire', gerbangOperatorKecamatan('bankeu-perubahan'), bankeuPerubahanQuestionnaireRoutes);
 app.use('/api/desa/bankeu-lpj', bankeuLpjRoutes); // Bankeu LPJ upload routes for desa
 app.use('/api/dpmd/bankeu-lpj', dpmdBankeuLpjRoutes); // Bankeu LPJ monitoring routes for DPMD/SPKED
 
@@ -542,12 +545,18 @@ app.use('/api/dinas', require('./routes/dinasConfig.routes')); // Dinas configur
 app.use('/api/dinas', dinasVerifikatorRoutes); // Dinas verifikator management
 app.use('/api/dinas/verifikator', verifikatorAksesDesaRoutes); // Verifikator akses desa management
 app.use('/api/verifikator/profile', require('./routes/verifikatorProfile.routes')); // Verifikator profile & TTD
-app.use('/api/kecamatan/bumdes', require('./routes/kecamatanBumdes.routes')); // BUMDes di wilayah kecamatan (lihat saja)
-app.use('/api/kecamatan/aparatur-desa', require('./routes/kecamatanAparatur.routes')); // Aparatur desa di wilayah kecamatan (lihat saja)
+app.use('/api/kecamatan/bumdes', gerbangOperatorKecamatan('bumdes'), require('./routes/kecamatanBumdes.routes')); // BUMDes di wilayah kecamatan (lihat saja)
+app.use('/api/kecamatan/aparatur-desa', gerbangOperatorKecamatan('aparatur-desa'), require('./routes/kecamatanAparatur.routes')); // Aparatur desa di wilayah kecamatan (lihat saja)
+// Tim verifikasi Bankeu dipasang di /api/kecamatan/:kecamatanId/bankeu/... — dijaga
+// per segmen numerik supaya prefiks /api/kecamatan yang luas tidak ikut terkunci.
+// (Regex di app.use tidak cocok di Express 4.21 — sudah diuji, jangan dikembalikan.)
+const gerbangTimBankeu = gerbangOperatorKecamatan('bankeu');
+app.use('/api/kecamatan/:kecamatanId/bankeu', (req, res, next) =>
+  (/^\d+$/.test(req.params.kecamatanId) ? gerbangTimBankeu(req, res, next) : next()));
 app.use('/api/kecamatan', require('./routes/kecamatanBankeuTimConfig.routes')); // Kecamatan tim verifikasi config
-app.use('/api/kecamatan/kelembagaan', require('./routes/kecamatanKelembagaan.routes')); // Kecamatan kelembagaan verification
-app.use('/api/bankeu/questionnaire', require('./routes/bankeuQuestionnaire.routes')); // Verification questionnaire
-app.use('/api/berita-acara', beritaAcaraRoutes); // Berita Acara routes
+app.use('/api/kecamatan/kelembagaan', gerbangOperatorKecamatan('kelembagaan'), require('./routes/kecamatanKelembagaan.routes')); // Kecamatan kelembagaan verification
+app.use('/api/bankeu/questionnaire', gerbangOperatorKecamatan('bankeu'), require('./routes/bankeuQuestionnaire.routes')); // Verification questionnaire
+app.use('/api/berita-acara', gerbangOperatorKecamatan('bankeu'), beritaAcaraRoutes); // Berita Acara routes
 app.use('/api/contoh-proposal', require('./routes/contohProposal.routes')); // Example proposal files
 app.use('/api/hero-gallery', heroGalleryRoutes);
 app.use('/api/kepala-dinas', kepalaDinasRoutes); // Kepala Dinas dashboard
@@ -571,7 +580,7 @@ app.use('/api/formulir', require('./routes/formulir.routes'));
 // potongan); /putar/:id memakai tautan bertanda tangan. Videonya di private/.
 app.use('/api/video-desa', require('./routes/videoDesa.routes'));
 app.use('/api/activity-logs', require('./routes/activityLog.routes')); // Global Activity Logs (Superadmin)
-app.use('/api/kelembagaan', kelembagaanRoutes); // Kelembagaan routes (admin/global)
+app.use('/api/kelembagaan', gerbangOperatorKecamatan('kelembagaan'), kelembagaanRoutes); // Kelembagaan routes (admin/global)
 app.use('/api/kelembagaan/activity-logs', require('./routes/kelembagaanActivityLogs.routes')); // Activity logs
 app.use('/api/activity-logs', require('./routes/activityLogs.routes')); // General activity logs (bankeu, etc.)
 app.use('/api/admin', kelembagaanRoutes); // Admin alias for kelembagaan
@@ -615,7 +624,7 @@ app.use('/api/video-meetings', require('./routes/videoMeeting.routes'));
 app.use('/api/chatbot', chatbotRoutes);
 
 // Messaging / Chat routes
-app.use('/api/messaging', require('./routes/messaging.routes'));
+app.use('/api/messaging', gerbangOperatorKecamatan('pesan'), require('./routes/messaging.routes'));
 
 // Anggaran Bidang routes
 app.use('/api/anggaran', anggaranRoutes);
