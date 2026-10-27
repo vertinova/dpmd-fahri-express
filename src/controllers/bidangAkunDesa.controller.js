@@ -173,6 +173,49 @@ const findAkunDesa = async (id) => {
   return user;
 };
 
+const ROLE_KECAMATAN = 'kecamatan';
+
+const AKUN_KECAMATAN_SELECT = {
+  id: true,
+  name: true,
+  email: true,
+  kecamatan_id: true,
+  is_active: true,
+  last_active_at: true,
+  created_at: true,
+  password: true,
+};
+
+const serializeAkunKecamatan = (u) => ({
+  id: String(u.id),
+  name: u.name,
+  email: u.email,
+  is_active: u.is_active,
+  last_active_at: u.last_active_at || null,
+});
+
+/** Aktif dulu, lalu yang paling baru dipakai, lalu yang paling lama dibuat. */
+const urutAkunKecamatan = (a, b) =>
+  Number(b.is_active) - Number(a.is_active) ||
+  (b.last_active_at?.getTime?.() || 0) - (a.last_active_at?.getTime?.() || 0) ||
+  (a.created_at?.getTime?.() || 0) - (b.created_at?.getTime?.() || 0);
+
+/** Ambil akun kecamatan beserta hash & plain_password-nya — hanya role kecamatan. */
+const findAkunKecamatan = async (id) => {
+  let userId;
+  try {
+    userId = BigInt(String(id));
+  } catch {
+    return null;
+  }
+  const user = await prisma.users.findUnique({
+    where: { id: userId },
+    select: { ...AKUN_KECAMATAN_SELECT, plain_password: true, role: true },
+  });
+  if (!user || user.role !== ROLE_KECAMATAN) return null;
+  return user;
+};
+
 const parseBigId = (nilai) => {
   try {
     const id = BigInt(String(nilai));
@@ -397,7 +440,7 @@ class BidangAkunDesaController {
         success: true,
         data: {
           bidang,
-          // null saat halaman dibuka penuh (PMD, Pemdes). Frontend memakainya
+          // null bila permintaan tanpa modul (cakupan bidang penuh). Frontend memakainya
           // untuk judul dan untuk nilai bawaan template email massal.
           modul: modul
             ? { slug: modul.slug, label: modul.label, slug_fitur: modul.slug_fitur }
@@ -1197,6 +1240,142 @@ class BidangAkunDesaController {
     } catch (error) {
       logger.error('Gagal mengubah status akun desa:', error);
       res.status(500).json({ success: false, message: 'Gagal mengubah status akun' });
+    }
+  }
+
+  /**
+   * ── Akun kecamatan ──────────────────────────────────────────────────────────
+   *
+   * Satu kecamatan = satu akun, dipakai bersama oleh seluruh bidang (verifikasi
+   * Bankeu, kelembagaan, BUMDes, aparatur). Karena itu staf bidang di sini
+   * TIDAK bisa membuat, mengubah, atau menonaktifkan akun kecamatan — hanya
+   * melihat sandinya dan menyetel ulang sandinya. Akun baru tetap urusan
+   * superadmin, supaya satu kecamatan tidak berakhir dengan beberapa akun
+   * yang dibuat bidang berbeda.
+   */
+
+  /** GET /kecamatan — seluruh kecamatan beserta akunnya (tanpa sandi). */
+  async getAkunKecamatan(req, res) {
+    try {
+      const [kecamatans, akun] = await Promise.all([
+        prisma.kecamatans.findMany({ select: { id: true, nama: true }, orderBy: { nama: 'asc' } }),
+        prisma.users.findMany({
+          where: { role: ROLE_KECAMATAN, kecamatan_id: { not: null } },
+          select: AKUN_KECAMATAN_SELECT,
+        }),
+      ]);
+
+      const cache = new Map();
+      const masihDefault = (hash) => {
+        const kunci = String(hash || '');
+        if (!kunci) return Promise.resolve(false);
+        if (!cache.has(kunci)) cache.set(kunci, bcrypt.compare(SANDI_DEFAULT, kunci).catch(() => false));
+        return cache.get(kunci);
+      };
+
+      const perKecamatan = new Map();
+      akun.forEach((u) => {
+        const kunci = String(u.kecamatan_id);
+        if (!perKecamatan.has(kunci)) perKecamatan.set(kunci, []);
+        perKecamatan.get(kunci).push(u);
+      });
+
+      const data = [];
+      for (const k of kecamatans) {
+        // Bila ternyata ada lebih dari satu akun, yang ditampilkan akun aktif
+        // yang paling baru dipakai; sisanya hanya dihitung sebagai peringatan.
+        const daftar = (perKecamatan.get(String(k.id)) || []).sort(urutAkunKecamatan);
+        const utama = daftar[0] || null;
+        data.push({
+          kecamatan: { id: String(k.id), nama: k.nama },
+          akun: utama
+            ? {
+                ...serializeAkunKecamatan(utama),
+                sandi_default: await masihDefault(utama.password),
+              }
+            : null,
+          akun_lain: daftar.length > 1 ? daftar.length - 1 : 0,
+        });
+      }
+
+      res.json({ success: true, data });
+    } catch (error) {
+      logger.error('Gagal memuat akun kecamatan:', error);
+      res.status(500).json({ success: false, message: 'Gagal memuat akun kecamatan' });
+    }
+  }
+
+  /**
+   * GET /kecamatan/:id/sandi — sandi akun kecamatan yang sedang berlaku.
+   *
+   * Diambil dari plain_password, tapi HANYA bila isinya cocok dengan hash
+   * sebenarnya: kolom itu bisa basi kalau sandi pernah diganti lewat jalur yang
+   * tidak ikut mengisinya. Lebih baik menjawab "tidak tersimpan" daripada
+   * menyerahkan sandi yang salah ke kecamatan. Setiap kali dilihat dicatat.
+   */
+  async lihatSandiKecamatan(req, res) {
+    try {
+      const target = await findAkunKecamatan(req.params.id);
+      if (!target) return notFound(res, 'Akun kecamatan tidak ditemukan');
+
+      const plain = target.plain_password ? String(target.plain_password) : '';
+      const cocok = plain ? await bcrypt.compare(plain, target.password).catch(() => false) : false;
+
+      logAksi(req, {
+        action: 'view',
+        target,
+        description: `${req.user.name} (DPMD) melihat sandi akun kecamatan "${target.name}" (${target.email})`,
+      });
+
+      res.json({
+        success: true,
+        data: {
+          sandi: cocok ? plain : null,
+          sandi_default: cocok && plain === SANDI_DEFAULT,
+        },
+      });
+    } catch (error) {
+      logger.error('Gagal melihat sandi akun kecamatan:', error);
+      res.status(500).json({ success: false, message: 'Gagal memuat sandi akun kecamatan' });
+    }
+  }
+
+  /**
+   * POST /kecamatan/:id/reset-sandi — kembalikan ke sandi default.
+   *
+   * Sengaja tidak menerima sandi pilihan staf: sandi default memicu layar wajib
+   * ganti sandi saat kecamatan login berikutnya, jadi sandi yang dibacakan
+   * lewat telepon hanya berlaku sekali.
+   */
+  async resetSandiKecamatan(req, res) {
+    try {
+      const target = await findAkunKecamatan(req.params.id);
+      if (!target) return notFound(res, 'Akun kecamatan tidak ditemukan');
+
+      await prisma.users.update({
+        where: { id: target.id },
+        data: {
+          password: await bcrypt.hash(SANDI_DEFAULT, 10),
+          plain_password: SANDI_DEFAULT,
+          updated_at: new Date(),
+        },
+      });
+
+      logAksi(req, {
+        action: 'update',
+        target,
+        description: `${req.user.name} (DPMD) menyetel ulang sandi akun kecamatan "${target.name}" (${target.email}) ke sandi default`,
+        newValue: { password_reset: true },
+      });
+
+      res.json({
+        success: true,
+        message: 'Sandi akun kecamatan dikembalikan ke sandi default',
+        data: { sandi: SANDI_DEFAULT },
+      });
+    } catch (error) {
+      logger.error('Gagal menyetel ulang sandi akun kecamatan:', error);
+      res.status(500).json({ success: false, message: 'Gagal menyetel ulang sandi akun kecamatan' });
     }
   }
 }

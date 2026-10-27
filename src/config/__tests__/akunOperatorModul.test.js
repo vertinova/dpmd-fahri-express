@@ -41,6 +41,12 @@ describe('penyempitan wewenang per modul', () => {
     expect(getCorePermissionKeys(spked, 'bumdes')).toEqual(['bumdes']);
   });
 
+  it('modul kelembagaan menyisakan kelembagaan saja, dan hanya untuk PMD', () => {
+    expect(getAllowedPermissionKeys(pmd, 'kelembagaan').sort()).toEqual(['kelembagaan', 'pesan']);
+    expect(getCorePermissionKeys(pmd, 'kelembagaan')).toEqual(['kelembagaan']);
+    expect(canManageDesaAccounts(spked, 'kelembagaan')).toBe(false);
+  });
+
   it('modul tidak pernah memberi fitur yang bukan milik bidang', () => {
     // PMD hanya memegang kelembagaan; membuka modul bankeu tidak boleh
     // memberinya bankeu, dan gerbang rute harus menolaknya.

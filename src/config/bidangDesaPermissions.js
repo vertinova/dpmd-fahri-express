@@ -104,6 +104,15 @@ const MODUL_AKUN_DESA = {
     slug_fitur: 'aparatur',
     keys: ['aparatur-desa'],
   },
+  // PMD — halaman Akun Operator Desa milik PMD. Kelembagaan satu-satunya fitur
+  // bidang itu, tapi tanpa modul halaman tersebut tidak mendapat Ekspor dan
+  // Generate massal yang hanya tersedia untuk halaman terikat satu fitur.
+  kelembagaan: {
+    slug: 'kelembagaan',
+    label: 'Kelembagaan',
+    slug_fitur: 'kelembagaan',
+    keys: ['kelembagaan'],
+  },
 };
 
 /** Modul dari slug yang dikirim frontend. null = halaman akun desa penuh (perilaku lama). */
