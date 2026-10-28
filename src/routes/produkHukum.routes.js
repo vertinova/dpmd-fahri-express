@@ -53,14 +53,6 @@ router.get('/:id', (req, res) => produkHukumController.show(req, res));
 router.put('/:id', auth, uploadProdukHukum.single('file'), (req, res) => produkHukumController.update(req, res));
 
 /**
- * @route   DELETE /api/produk-hukum/:id
- * @desc    Delete produk hukum and associated file
- * @access  Private (Desa)
- * @params  id - UUID of produk hukum
- */
-router.delete('/:id', auth, (req, res) => produkHukumController.destroy(req, res));
-
-/**
  * @route   PUT /api/produk-hukum/:id/status
  * @desc    Update status_peraturan (berlaku/dicabut)
  * @access  Private (Desa)

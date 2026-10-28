@@ -10,6 +10,25 @@ const { v4: uuidv4 } = require('uuid');
 const path = require('path');
 const fs = require('fs').promises;
 
+const KELEMBAGAAN_TABLES = ['rts', 'rws', 'posyandus', 'karang_tarunas', 'lpms', 'pkks', 'satlinmas', 'lembaga_lainnyas', 'pengurus'];
+
+/**
+ * Jumlah data terverifikasi yang memakai produk hukum ini sebagai dasar.
+ * PDF-nya tidak boleh diganti selama > 0, karena itulah dokumen
+ * yang diperiksa verifikator.
+ */
+async function countVerifiedUsages(produkHukumId) {
+  const counts = await Promise.all([
+    ...KELEMBAGAAN_TABLES.map((t) => prisma[t].count({
+      where: { produk_hukum_id: produkHukumId, status_verifikasi: 'verified' }
+    })),
+    prisma.aparatur_desa.count({
+      where: { produk_hukum_id: produkHukumId, status_verifikasi: 'terverifikasi' }
+    })
+  ]);
+  return counts.reduce((a, b) => a + b, 0);
+}
+
 class ProdukHukumController {
   /**
    * Get all produk hukum for authenticated user's desa
@@ -390,6 +409,15 @@ class ProdukHukumController {
           });
         }
 
+        const verifiedCount = await countVerifiedUsages(id);
+        if (verifiedCount > 0) {
+          await fs.unlink(req.file.path);
+          return res.status(422).json({
+            success: false,
+            message: `File PDF tidak dapat diganti karena produk hukum ini menjadi dasar ${verifiedCount} data kelembagaan/pengurus yang sudah terverifikasi. Unggah produk hukum baru (SK perubahan) lalu kaitkan ulang.`
+          });
+        }
+
         // Delete old file
         if (produkHukum.file) {
           const oldFilePath = path.join(__dirname, '../../storage/produk_hukum', produkHukum.file);
@@ -447,70 +475,6 @@ class ProdukHukumController {
       return res.status(500).json({
         success: false,
         message: 'Produk Hukum gagal diupdate',
-        error: error.message
-      });
-    }
-  }
-
-  /**
-   * Delete produk hukum
-   */
-  async destroy(req, res) {
-    try {
-      const { id } = req.params;
-
-      const produkHukum = await prisma.produk_hukums.findUnique({
-        where: { id }
-      });
-
-      if (!produkHukum) {
-        return res.status(404).json({
-          success: false,
-          message: 'Produk Hukum tidak ditemukan'
-        });
-      }
-
-      // Delete file
-      if (produkHukum.file) {
-        const filePath = path.join(__dirname, '../../storage/produk_hukum', produkHukum.file);
-        try {
-          await fs.unlink(filePath);
-        } catch (error) {
-          console.error('Error deleting file:', error);
-        }
-      }
-
-      // Delete from database
-      await prisma.produk_hukums.delete({
-        where: { id }
-      });
-
-      // Log activity
-      await ActivityLogger.log({
-        userId: req.user.id,
-        userName: req.user.nama || req.user.email,
-        userRole: req.user.role,
-        bidangId: 6, // Pemdes
-        module: 'produk_hukum',
-        action: 'delete',
-        entityType: 'produk_hukum',
-        entityId: null,
-        entityName: produkHukum.judul,
-        description: `${req.user.nama || req.user.email} menghapus produk hukum: ${produkHukum.judul}`,
-        oldValue: { judul: produkHukum.judul, nomor: produkHukum.nomor },
-        ipAddress: ActivityLogger.getIpFromRequest(req),
-        userAgent: ActivityLogger.getUserAgentFromRequest(req)
-      });
-
-      return res.json({
-        success: true,
-        message: 'Produk Hukum berhasil dihapus'
-      });
-    } catch (error) {
-      console.error('Error in destroy:', error);
-      return res.status(500).json({
-        success: false,
-        message: 'Produk Hukum gagal dihapus',
         error: error.message
       });
     }
