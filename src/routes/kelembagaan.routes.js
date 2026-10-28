@@ -95,6 +95,7 @@ router.get('/pengurus-dashboard', summaryController.pengurusDashboard.bind(summa
 router.get('/statistik-tahunan', summaryController.statistikTahunan.bind(summaryController));
 router.get('/tren-verifikasi-harian', summaryController.trenVerifikasiHarian.bind(summaryController));
 router.get('/capaian-verifikasi/per-desa', summaryController.capaianVerifikasiPerDesa.bind(summaryController));
+router.get('/capaian-verifikasi/data-masuk', summaryController.capaianDataMasuk.bind(summaryController));
 router.get('/capaian-verifikasi/aktivitas', summaryController.aktivitasVerifikator.bind(summaryController));
 router.get('/capaian-verifikasi/permasalahan', summaryController.permasalahanDesa.bind(summaryController));
 router.get('/kecamatan/:id', summaryController.byKecamatan.bind(summaryController));

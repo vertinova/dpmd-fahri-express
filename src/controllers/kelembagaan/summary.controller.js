@@ -1241,7 +1241,7 @@ class SummaryController {
              COUNT(*) AS total,
              SUM(status_verifikasi = 'verified') AS verified,
              SUM(status_verifikasi = 'ditolak') AS ditolak
-           FROM ${t.model} GROUP BY desa_id`
+           FROM ${t.model} WHERE status_kelembagaan = 'aktif' GROUP BY desa_id`
         )),
       ]);
 
@@ -1279,6 +1279,120 @@ class SummaryController {
     } catch (error) {
       console.error('Error in capaianVerifikasiPerDesa:', error);
       res.status(500).json({ success: false, message: 'Gagal mengambil capaian verifikasi per desa', error: error.message });
+    }
+  }
+
+  /**
+   * Capaian data masuk: pertumbuhan lembaga aktif & pengurus aktif dari desa, harian (kumulatif),
+   * plus tanggal tiap desa pertama kali punya lembaga dan pengurus.
+   * GET /api/kelembagaan/capaian-verifikasi/data-masuk
+   *
+   * Lembaga tanpa created_at (RW hasil migrasi awal) dianggap sudah ada sejak hari pertama grafik.
+   * Desa dihitung "masuk" pada tanggal terakhir di antara lembaga pertama dan pengurus pertamanya.
+   */
+  async capaianDataMasuk(req, res) {
+    try {
+      const tglWib = tanggalWib('created_at');
+      const tglWibP = tanggalWib('p.created_at');
+      const [desas, ...perTabel] = await Promise.all([
+        prisma.desas.findMany({
+          select: { id: true, nama: true, status_pemerintahan: true, kecamatans: { select: { id: true, nama: true } } },
+          orderBy: [{ kecamatan_id: 'asc' }, { nama: 'asc' }],
+        }),
+        ...VERIFIKASI_TABLES.flatMap(t => [
+          prisma.$queryRawUnsafe(
+            `SELECT desa_id, ${tglWib} AS tanggal, COUNT(*) AS jumlah FROM ${t.model}
+             WHERE status_kelembagaan = 'aktif' GROUP BY desa_id, tanggal`
+          ),
+          prisma.$queryRawUnsafe(
+            `SELECT p.desa_id, ${tglWibP} AS tanggal, COUNT(*) AS jumlah FROM pengurus p
+             JOIN ${t.model} l ON l.id = p.pengurusable_id AND l.status_kelembagaan = 'aktif'
+             WHERE p.pengurusable_type = '${t.model}' AND p.status_jabatan = 'aktif'
+             GROUP BY p.desa_id, tanggal`
+          ),
+        ]),
+      ]);
+
+      const iso = (v) => (v == null ? null : v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
+      const byDesa = new Map(desas.map(d => [String(d.id), {
+        id: String(d.id),
+        nama: d.nama,
+        status_pemerintahan: d.status_pemerintahan,
+        kecamatan_id: d.kecamatans ? String(d.kecamatans.id) : null,
+        kecamatan: d.kecamatans?.nama || null,
+        lembaga: 0,
+        pengurus: 0,
+        lembaga_pertama: null,
+        pengurus_pertama: null,
+        tanggal_masuk: null,
+      }]));
+
+      // Penambahan harian (null = tanpa tanggal, masuk ke titik awal)
+      const tambahLembaga = new Map();
+      const tambahPengurus = new Map();
+      let awal = null;
+      const catat = (rows, jenis) => rows.forEach(r => {
+        const desa = byDesa.get(String(r.desa_id));
+        if (!desa) return;
+        const tgl = iso(r.tanggal);
+        const n = Number(r.jumlah);
+        const peta = jenis === 'lembaga' ? tambahLembaga : tambahPengurus;
+        peta.set(tgl, (peta.get(tgl) || 0) + n);
+        desa[jenis] += n;
+        const kunci = `${jenis}_pertama`;
+        // '' mewakili "sejak awal" supaya selalu lebih kecil dari tanggal mana pun
+        const t = tgl || '';
+        if (desa[kunci] === null || t < desa[kunci]) desa[kunci] = t;
+        if (tgl && (!awal || tgl < awal)) awal = tgl;
+      });
+      VERIFIKASI_TABLES.forEach((_, idx) => {
+        catat(perTabel[idx * 2], 'lembaga');
+        catat(perTabel[idx * 2 + 1], 'pengurus');
+      });
+
+      const tambahDesa = new Map();
+      byDesa.forEach(d => {
+        if (d.lembaga_pertama === null || d.pengurus_pertama === null) return;
+        const masuk = d.lembaga_pertama > d.pengurus_pertama ? d.lembaga_pertama : d.pengurus_pertama;
+        d.tanggal_masuk = masuk || awal;
+        tambahDesa.set(d.tanggal_masuk, (tambahDesa.get(d.tanggal_masuk) || 0) + 1);
+        if (d.lembaga_pertama === '') d.lembaga_pertama = awal;
+        if (d.pengurus_pertama === '') d.pengurus_pertama = awal;
+      });
+
+      // Deret tanggal WIB lengkap dari data pertama sampai hari ini, nilai kumulatif
+      const hariIni = new Date(Date.now() + 7 * 3600 * 1000).toISOString().slice(0, 10);
+      const tanggal = [];
+      const lembaga = [];
+      const pengurus = [];
+      const desaMasuk = [];
+      let l = tambahLembaga.get(null) || 0;
+      let p = tambahPengurus.get(null) || 0;
+      let d = 0;
+      for (let t = awal || hariIni; t <= hariIni; t = new Date(new Date(`${t}T00:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10)) {
+        l += tambahLembaga.get(t) || 0;
+        p += tambahPengurus.get(t) || 0;
+        d += tambahDesa.get(t) || 0;
+        tanggal.push(t);
+        lembaga.push(l);
+        pengurus.push(p);
+        desaMasuk.push(d);
+      }
+
+      res.json({
+        success: true,
+        data: {
+          tanggal,
+          lembaga,
+          pengurus,
+          desa_masuk: desaMasuk,
+          lembaga_tanpa_tanggal: tambahLembaga.get(null) || 0,
+          desa: [...byDesa.values()],
+        },
+      });
+    } catch (error) {
+      console.error('Error in capaianDataMasuk:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil capaian data masuk', error: error.message });
     }
   }
 
