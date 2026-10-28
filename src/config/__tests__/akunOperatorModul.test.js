@@ -21,6 +21,7 @@ const { periksaTemplate, susunEmail, TEMPLATE_BAWAAN } = require('../templateAku
 
 const spked = { role: 'pegawai', bidang_id: 3 };
 const pmd = { role: 'pegawai', bidang_id: 5 };
+const pemdes = { role: 'pegawai', bidang_id: 6 };
 const sekretariat = { role: 'pegawai', bidang_id: 2 };
 const superadmin = { role: 'superadmin' };
 
@@ -41,10 +42,23 @@ describe('penyempitan wewenang per modul', () => {
     expect(getCorePermissionKeys(spked, 'bumdes')).toEqual(['bumdes']);
   });
 
-  it('modul kelembagaan menyisakan kelembagaan saja, dan hanya untuk PMD', () => {
-    expect(getAllowedPermissionKeys(pmd, 'kelembagaan').sort()).toEqual(['kelembagaan', 'pesan']);
-    expect(getCorePermissionKeys(pmd, 'kelembagaan')).toEqual(['kelembagaan']);
+  it('modul kelembagaan memberi kelembagaan + produk hukum, dan hanya untuk PMD', () => {
+    expect(getAllowedPermissionKeys(pmd, 'kelembagaan').sort()).toEqual([
+      'kelembagaan',
+      'pesan',
+      'produk-hukum',
+    ]);
     expect(canManageDesaAccounts(spked, 'kelembagaan')).toBe(false);
+    expect(canManageDesaAccounts(pemdes, 'kelembagaan')).toBe(false);
+  });
+
+  it('produk hukum PMD bukan fitur inti: operator produk hukum Pemdes bukan operator kelembagaan', () => {
+    expect(getCorePermissionKeys(pmd, 'kelembagaan')).toEqual(['kelembagaan']);
+    expect(getCorePermissionKeys(pmd)).toEqual(['kelembagaan']);
+    expect(getAllowedPermissionKeys(pmd)).toEqual(expect.arrayContaining(['produk-hukum']));
+    expect(getCorePermissionKeys(superadmin, 'kelembagaan')).toEqual(['kelembagaan']);
+    // Bagi Pemdes, produk hukum tetap fitur inti.
+    expect(getCorePermissionKeys(pemdes)).toEqual(expect.arrayContaining(['produk-hukum']));
   });
 
   it('modul tidak pernah memberi fitur yang bukan milik bidang', () => {
@@ -72,6 +86,16 @@ describe('penyimpanan hak akses saat modul dibuka', () => {
     // (dari PMD) tidak boleh kehilangan keduanya karena disimpan dari tab Bankeu.
     const sesudah = mergePermissions(['bumdes', 'kelembagaan'], ['bankeu'], spked, 'bankeu');
     expect(sesudah.sort()).toEqual(['bankeu', 'bumdes', 'kelembagaan']);
+  });
+
+  it('PMD mencabut produk hukum tanpa menyentuh fitur bidang lain', () => {
+    const sesudah = mergePermissions(
+      ['kelembagaan', 'produk-hukum', 'bankeu'],
+      ['kelembagaan'],
+      pmd,
+      'kelembagaan',
+    );
+    expect(sesudah.sort()).toEqual(['bankeu', 'kelembagaan']);
   });
 
   it('kiriman fitur di luar modul diabaikan', () => {

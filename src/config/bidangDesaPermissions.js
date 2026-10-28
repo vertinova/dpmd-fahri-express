@@ -61,6 +61,21 @@ const PERMISSION_PER_BIDANG = {
 };
 
 /**
+ * bidang_id → fitur PENDUKUNG: boleh diberikan bidang itu, tapi bukan wewenang
+ * intinya dan karena itu tidak ikut menjawab "desa ini sudah punya operator
+ * untuk urusan saya?".
+ *
+ * PMD memberi `produk-hukum` karena operator kelembagaan butuh mengunggah SK
+ * pengurus RT/RW/LPM/dll. ke Produk Hukum sebelum bisa menautkannya. Yang
+ * memverifikasi produk hukum tetap Pemdes; kalau `produk-hukum` dimasukkan ke
+ * fitur inti PMD, operator produk hukum bikinan Pemdes akan terbaca sebagai
+ * operator kelembagaan dan pencegahan akun ganda PMD salah sasaran.
+ */
+const PERMISSION_PENDUKUNG_PER_BIDANG = {
+  5: ['produk-hukum'],
+};
+
+/**
  * Modul halaman bidang yang punya pintu "Akun Operator" sendiri.
  *
  * Satu bidang bisa berwenang atas beberapa fitur desa sekaligus (SPKED memegang
@@ -105,13 +120,16 @@ const MODUL_AKUN_DESA = {
     keys: ['aparatur-desa'],
   },
   // PMD — halaman Akun Operator Desa milik PMD. Kelembagaan satu-satunya fitur
-  // bidang itu, tapi tanpa modul halaman tersebut tidak mendapat Ekspor dan
+  // inti bidang itu, tapi tanpa modul halaman tersebut tidak mendapat Ekspor dan
   // Generate massal yang hanya tersedia untuk halaman terikat satu fitur.
+  // `pendukung` ikut diberikan tapi tidak dihitung sebagai fitur inti modul
+  // (lihat PERMISSION_PENDUKUNG_PER_BIDANG); tetap diiriskan dengan wewenang bidang.
   kelembagaan: {
     slug: 'kelembagaan',
     label: 'Kelembagaan',
     slug_fitur: 'kelembagaan',
     keys: ['kelembagaan'],
+    pendukung: ['produk-hukum'],
   },
 };
 
@@ -137,38 +155,49 @@ const parseBidangId = (nilai) => {
 };
 
 /**
+ * Wewenang satu akun staf, dipisah menjadi fitur inti dan fitur pendukung.
+ * null berarti akun itu tidak berwenang mengelola akun desa sama sekali.
+ */
+const hitungWewenang = (user, modulSlug = null) => {
+  if (!user) return null;
+
+  const lintasPeran = PERAN_LINTAS_BIDANG.includes(normalkanPeran(user.role));
+  const bidangId = lintasPeran ? null : parseBidangId(user.bidang_id);
+
+  const inti = lintasPeran
+    ? DESA_PERMISSION_KEYS.filter((key) => !PERMISSION_LINTAS_BIDANG.includes(key))
+    : bidangId === null
+      ? null
+      : PERMISSION_PER_BIDANG[bidangId] || null;
+
+  // Bidang tanpa fitur desa (Sekretariat) tidak dapat pintu masuk lewat
+  // permission lintas bidang maupun pendukung — kalau tidak, ia bisa membuat
+  // akun desa berisi "pesan" saja, yang bukan wewenangnya.
+  if (!inti || inti.length === 0) return null;
+
+  const pendukung = lintasPeran ? [] : PERMISSION_PENDUKUNG_PER_BIDANG[bidangId] || [];
+
+  const modul = resolveModul(modulSlug);
+  if (!modul) return { inti, pendukung };
+
+  // IRISAN, bukan penggantian: modul hanya boleh mempersempit. Bidang yang
+  // tidak memegang fitur inti modul ini berakhir tanpa wewenang, dan
+  // canManageDesaAccounts() menolaknya di gerbang rute.
+  const intiModul = inti.filter((key) => modul.keys.includes(key));
+  if (intiModul.length === 0) return null;
+  const bolehDiberikan = [...inti, ...pendukung];
+  const pendukungModul = (modul.pendukung || []).filter((key) => bolehDiberikan.includes(key));
+  return { inti: intiModul, pendukung: pendukungModul };
+};
+
+/**
  * Hak akses yang boleh diberikan/dicabut oleh satu akun staf.
  * Array kosong berarti akun itu tidak berwenang mengelola akun desa sama sekali.
  */
 const getAllowedPermissionKeys = (user, modulSlug = null) => {
-  if (!user) return [];
-
-  const milikBidang = PERAN_LINTAS_BIDANG.includes(normalkanPeran(user.role))
-    ? DESA_PERMISSION_KEYS.filter((key) => !PERMISSION_LINTAS_BIDANG.includes(key))
-    : (() => {
-        const bidangId = parseBidangId(user.bidang_id);
-        if (bidangId === null) return null;
-        return PERMISSION_PER_BIDANG[bidangId] || null;
-      })();
-
-  if (!milikBidang) return [];
-
-  // Bidang tanpa fitur desa (Sekretariat) tidak dapat pintu masuk lewat
-  // permission lintas bidang — kalau tidak, ia bisa membuat akun desa
-  // berisi "pesan" saja, yang bukan wewenangnya.
-  if (milikBidang.length === 0) return [];
-
-  const modul = resolveModul(modulSlug);
-  if (modul) {
-    // IRISAN, bukan penggantian: modul hanya boleh mempersempit. Bidang yang
-    // tidak memegang fitur modul ini berakhir dengan array kosong, dan
-    // canManageDesaAccounts() menolaknya di gerbang rute.
-    const inti = milikBidang.filter((key) => modul.keys.includes(key));
-    if (inti.length === 0) return [];
-    return [...new Set([...inti, ...PERMISSION_LINTAS_BIDANG])];
-  }
-
-  return [...new Set([...milikBidang, ...PERMISSION_LINTAS_BIDANG])];
+  const wewenang = hitungWewenang(user, modulSlug);
+  if (!wewenang) return [];
+  return [...new Set([...wewenang.inti, ...wewenang.pendukung, ...PERMISSION_LINTAS_BIDANG])];
 };
 
 /**
@@ -187,13 +216,16 @@ const canManageDesaAccounts = (user, modulSlug = null) =>
  * setiap akun desa yang kebetulan punya `pesan` akan terbaca sebagai operator
  * kelembagaan — dan seluruh pencegahan akun ganda jadi salah sasaran.
  *
+ * Fitur pendukung (Produk Hukum untuk PMD) dikeluarkan dengan alasan yang
+ * sama: operator produk hukum bikinan Pemdes bukan operator kelembagaan.
+ *
  * Untuk peran lintas bidang (superadmin, pimpinan dinas) hasilnya seluruh
  * katalog minus fitur bersama: mereka memang tidak mewakili satu bidang.
  */
-const getCorePermissionKeys = (user, modulSlug = null) =>
-  getAllowedPermissionKeys(user, modulSlug).filter(
-    (key) => !PERMISSION_LINTAS_BIDANG.includes(key),
-  );
+const getCorePermissionKeys = (user, modulSlug = null) => {
+  const wewenang = hitungWewenang(user, modulSlug);
+  return wewenang ? [...wewenang.inti] : [];
+};
 
 /** Katalog (key + label + deskripsi) yang ditampilkan ke staf, sudah tersaring. */
 const getPermissionCatalog = (user, modulSlug = null) => {
@@ -234,6 +266,7 @@ module.exports = {
   MODUL_AKUN_DESA,
   resolveModul,
   PERMISSION_PER_BIDANG,
+  PERMISSION_PENDUKUNG_PER_BIDANG,
   PERMISSION_LINTAS_BIDANG,
   PERAN_LINTAS_BIDANG,
   getAllowedPermissionKeys,
