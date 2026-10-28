@@ -56,6 +56,9 @@ router.get('/sensus/ekspor', controller.getSensusEkspor);
 router.get('/pengguna', controller.getPengguna);
 router.get('/layer', controller.getLayer);
 router.get('/pesan', controller.getPesan);
+// Capaian target KK (persen terhadap target desa, per hari) — sama dengan kartu
+// "Capaian Target KK" di dasbor super admin ASTA DESA.
+router.get('/target-kk', controller.getTargetKk);
 
 // Penunjang halaman Peta Sebaran (WebGIS). Meneruskan endpoint PUBLIK ASTA DESA,
 // tetapi tetap berada di balik auth + peran internal DPMD seperti rute lain di

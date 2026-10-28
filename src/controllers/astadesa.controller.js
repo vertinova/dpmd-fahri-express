@@ -2299,6 +2299,25 @@ exports.getLayer = jalankan(async (req, res) => {
   res.json({ success: true, data: Array.isArray(body?.data) ? body.data : [] });
 });
 
+/**
+ * GET /api/asta-desa/target-kk — capaian target KK tahun berjalan.
+ *
+ * Diteruskan apa adanya dari `/admin/target-kk` ASTA DESA: ringkasan (persen,
+ * tambahan hari ini, sisa, kejar per hari), deret capaian harian, rekap per
+ * kecamatan dan per desa. Angka itu sama persis dengan kartu "Capaian Target
+ * KK" di dasbor super admin mereka, karena dihitung di sana — kita tidak
+ * menghitung ulang dari baris yang disusuri.
+ *
+ * TTL satu menit seperti angka pokok: yang dipantau justru laju HARI INI, dan
+ * di sisi ASTA DESA endpoint ini sudah di-cache 60 detik, jadi lebih lama dari
+ * itu hanya membuat angkanya tertinggal tanpa menghemat apa pun.
+ */
+exports.getTargetKk = jalankan(async (req, res) => {
+  const hari = Math.min(90, Math.max(7, Number(req.query.hari) || 30));
+  const body = await asta.ambil('/target-kk', { hari }, { force: paksa(req), ttlMs: TTL_ANGKA_POKOK });
+  res.json({ success: true, data: body?.data ?? null });
+});
+
 /** GET /api/asta-desa/pesan — riwayat pesan (berpaginasi). */
 exports.getPesan = jalankan(async (req, res) => {
   const params = {
