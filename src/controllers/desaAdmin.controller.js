@@ -11,6 +11,7 @@ const logger = require('../utils/logger');
 const { DESA_PERMISSIONS, sanitizePermissionKeys } = require('../config/desaPermissions');
 const { normalizePhone } = require('../config/desaProfile');
 const { invalidateDesaPermissions } = require('../middlewares/desaPermission');
+const { invalidateRoleCache } = require('../middlewares/auth');
 const ActivityLogger = require('../utils/activityLogger');
 
 // Modul untuk jejak audit di tabel activity_logs.
@@ -356,6 +357,7 @@ class DesaAdminController {
       });
 
       invalidateDesaPermissions(target.id);
+      invalidateRoleCache(target.id);
       logger.info(`✅ Admin Desa ${req.user.email} memperbarui akun ${target.email}`);
 
       const changes = [];
@@ -446,6 +448,7 @@ class DesaAdminController {
     }
   }
 
+  /** Route DELETE dipertahankan, tapi isinya menonaktifkan akun (lihat komentar di bawah). */
   async deleteUser(req, res) {
     try {
       const desaId = getScopeDesaId(req);
@@ -458,33 +461,29 @@ class DesaAdminController {
         return res.status(404).json({ success: false, message: 'Akun tidak ditemukan di desa Anda' });
       }
 
-      await prisma.users.delete({ where: { id: target.id } });
+      // Sengaja tidak menghapus baris users: FK log aktivitas (dan proposal/LPJ
+      // bankeu) ke users memakai ON DELETE CASCADE, jadi hapus akun berarti
+      // ikut menghapus seluruh jejak kerjanya. Akun cukup dinonaktifkan.
+      await prisma.users.update({
+        where: { id: target.id },
+        data: { is_active: false, updated_at: new Date() },
+      });
       invalidateDesaPermissions(target.id);
-      logger.info(`🗑️ Admin Desa ${req.user.email} menghapus akun ${target.email}`);
+      invalidateRoleCache(target.id);
+      logger.info(`⛔ Admin Desa ${req.user.email} menonaktifkan akun ${target.email}`);
 
       logDesaAdminAction(req, {
-        action: 'delete',
+        action: 'update',
         target,
-        description: `${req.user.name} menghapus akun desa "${target.name}" (${target.email})`,
-        oldValue: {
-          name: target.name,
-          email: target.email,
-          jabatan_desa: target.jabatan_desa,
-          permissions: (target.desa_user_permissions || []).map((p) => p.permission_key),
-        },
+        description: `${req.user.name} menonaktifkan akun desa "${target.name}" (${target.email})`,
+        oldValue: { is_active: target.is_active },
+        newValue: { is_active: false },
       });
 
-      res.json({ success: true, message: 'Akun berhasil dihapus' });
+      res.json({ success: true, message: 'Akun berhasil dinonaktifkan' });
     } catch (error) {
-      // FK dari modul lain (mis. proposal yang pernah dibuat akun ini) menahan penghapusan.
-      if (error.code === 'P2003') {
-        return res.status(409).json({
-          success: false,
-          message: 'Akun tidak bisa dihapus karena masih terhubung dengan data lain. Nonaktifkan akun saja.',
-        });
-      }
-      logger.error('Gagal menghapus akun desa:', error);
-      res.status(500).json({ success: false, message: 'Gagal menghapus akun', error: error.message });
+      logger.error('Gagal menonaktifkan akun desa:', error);
+      res.status(500).json({ success: false, message: 'Gagal menonaktifkan akun', error: error.message });
     }
   }
 }

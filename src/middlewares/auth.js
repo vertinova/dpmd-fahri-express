@@ -31,23 +31,33 @@ const updateLastActive = (userId) => {
 // desa -> admin_desa) akan terus dilayani memakai role lama sampai dia logout
 // sendiri — dan dia tidak punya alasan untuk logout karena tidak ada error.
 const ROLE_CACHE_TTL_MS = 60 * 1000;
-const roleCache = new Map(); // userId(string) -> { role, expiresAt }
+const roleCache = new Map(); // userId(string) -> { role, isActive, expiresAt }
 
-const getCurrentRole = async (userId) => {
+const getCurrentStatus = async (userId) => {
   const key = String(userId);
   const cached = roleCache.get(key);
-  if (cached && cached.expiresAt > Date.now()) return cached.role;
+  if (cached && cached.expiresAt > Date.now()) return cached;
 
   const user = await prisma.users.findUnique({
     where: { id: BigInt(key) },
-    select: { role: true }
+    select: { role: true, is_active: true }
   });
-  const role = user ? user.role : null;
-  roleCache.set(key, { role, expiresAt: Date.now() + ROLE_CACHE_TTL_MS });
-  return role;
+  const status = {
+    role: user ? user.role : null,
+    isActive: user ? user.is_active !== false : true,
+    expiresAt: Date.now() + ROLE_CACHE_TTL_MS
+  };
+  roleCache.set(key, status);
+  return status;
 };
 
-/** Dipanggil saat role user diubah agar token lamanya langsung ditolak. */
+/** Pesan untuk akun nonaktif, menyebut siapa yang bisa mengaktifkannya kembali. */
+const pesanAkunNonaktif = (role) =>
+  role === 'desa'
+    ? 'Akun Anda sudah dinonaktifkan oleh Admin Desa. Hubungi Admin Desa bila ini keliru.'
+    : 'Akun Anda sudah dinonaktifkan. Hubungi admin pengelola akun bila ini keliru.';
+
+/** Dipanggil saat role user diubah atau akun dinonaktifkan agar token lamanya langsung ditolak. */
 const invalidateRoleCache = (userId) => {
   if (userId === undefined || userId === null) return;
   roleCache.delete(String(userId));
@@ -107,7 +117,16 @@ const auth = async (req, res, next) => {
     // pengecekan gagal (mis. database sedang bermasalah), request tetap diteruskan
     // agar tidak menjatuhkan seluruh aplikasi.
     try {
-      const currentRole = await getCurrentRole(req.user.id);
+      const { role: currentRole, isActive } = await getCurrentStatus(req.user.id);
+      // Akun yang dinonaktifkan (pengganti hapus akun) langsung diputus sesinya.
+      if (!isActive) {
+        logger.warn(`⛔ Akun nonaktif ${req.user.email} (${currentRole}) diputus sesinya`);
+        return res.status(401).json({
+          success: false,
+          code: 'AKUN_NONAKTIF',
+          message: pesanAkunNonaktif(currentRole)
+        });
+      }
       if (currentRole !== null && String(currentRole) !== String(req.user.role)) {
         logger.warn(`🔄 Role berubah untuk user ${req.user.id}: token "${req.user.role}" vs database "${currentRole}" — minta login ulang`);
         return res.status(401).json({
@@ -472,4 +491,4 @@ const requireSuperadmin = (req, res, next) => {
   next();
 };
 
-module.exports = { auth, checkRole, checkAbsensiAdmin, generateToken, authorizeDinas, authorizeDinasPelihat, denyDinasPelihat, isDinasLihatAstaDesa, requireSuperadmin, invalidateRoleCache };
+module.exports = { auth, checkRole, checkAbsensiAdmin, generateToken, authorizeDinas, authorizeDinasPelihat, denyDinasPelihat, isDinasLihatAstaDesa, requireSuperadmin, invalidateRoleCache, pesanAkunNonaktif };

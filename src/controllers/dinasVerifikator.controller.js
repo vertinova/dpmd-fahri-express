@@ -2,6 +2,7 @@ const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const bcrypt = require('bcrypt');
 const logger = require('../utils/logger');
+const { invalidateRoleCache } = require('../middlewares/auth');
 
 /**
  * Get all verifikator for a dinas
@@ -236,6 +237,7 @@ exports.toggleVerifikatorStatus = async (req, res) => {
       where: { id: userId },
       data: { is_active: newStatus }
     });
+    invalidateRoleCache(userId);
 
     logger.info(`Verifikator status toggled: ID ${verifikatorId} to ${newStatus}`);
 
@@ -346,27 +348,30 @@ exports.deleteVerifikator = async (req, res) => {
 
     const userId = verifikator[0].user_id;
 
-    // Delete verifikator record (will cascade to user if needed)
-    await prisma.$executeRaw`
-      DELETE FROM dinas_verifikator WHERE id = ${verifikatorIdInt}
-    `;
+    // Sengaja dinonaktifkan, bukan dihapus: FK log aktivitas & data lain ke
+    // users memakai ON DELETE CASCADE, jadi hapus akun ikut menghapus jejaknya.
+    await prisma.$transaction([
+      prisma.$executeRaw`
+        UPDATE dinas_verifikator SET is_active = false WHERE id = ${verifikatorIdInt}
+      `,
+      prisma.users.update({
+        where: { id: userId },
+        data: { is_active: false }
+      })
+    ]);
+    invalidateRoleCache(userId);
 
-    // Delete user account
-    await prisma.users.delete({
-      where: { id: userId }
-    });
-
-    logger.info(`Verifikator deleted: ID ${verifikatorId}, User ID ${userId}`);
+    logger.info(`Verifikator dinonaktifkan: ID ${verifikatorId}, User ID ${userId}`);
 
     res.json({
       success: true,
-      message: 'Verifikator berhasil dihapus'
+      message: 'Verifikator berhasil dinonaktifkan'
     });
   } catch (error) {
-    logger.error('Error deleting verifikator:', error);
+    logger.error('Error deactivating verifikator:', error);
     res.status(500).json({
       success: false,
-      message: 'Gagal menghapus verifikator',
+      message: 'Gagal menonaktifkan verifikator',
       error: error.message
     });
   }

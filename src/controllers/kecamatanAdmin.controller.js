@@ -22,6 +22,7 @@ const {
 } = require('../config/kecamatanPermissions');
 const { normalizePhone } = require('../config/desaProfile');
 const { invalidateKecamatanAkses } = require('../middlewares/kecamatanPermission');
+const { invalidateRoleCache } = require('../middlewares/auth');
 const ActivityLogger = require('../utils/activityLogger');
 
 const LOG_MODULE = 'manajemen_akun_kecamatan';
@@ -285,6 +286,7 @@ class KecamatanAdminController {
       });
 
       invalidateKecamatanAkses(target.id);
+      invalidateRoleCache(target.id);
 
       const perubahan = [];
       if (data.name) perubahan.push('nama');
@@ -334,27 +336,27 @@ class KecamatanAdminController {
       const target = await findOperator(req.params.id, kecamatanId);
       if (!target) return notFound(res);
 
-      await prisma.users.delete({ where: { id: target.id } });
+      // Sengaja dinonaktifkan, bukan dihapus: FK log aktivitas & data bankeu ke
+      // users memakai ON DELETE CASCADE, jadi hapus akun ikut menghapus jejaknya.
+      await prisma.users.update({
+        where: { id: target.id },
+        data: { is_active: false, updated_at: new Date() },
+      });
       invalidateKecamatanAkses(target.id);
+      invalidateRoleCache(target.id);
 
       logAksi(req, {
-        action: 'delete',
+        action: 'update',
         target,
-        description: `${req.user.name} menghapus akun operator kecamatan "${target.name}" (${target.email})`,
-        oldValue: { name: target.name, email: target.email, jabatan: target.jabatan_desa, permissions: izinDari(target) },
+        description: `${req.user.name} menonaktifkan akun operator kecamatan "${target.name}" (${target.email})`,
+        oldValue: { is_active: target.is_active },
+        newValue: { is_active: false },
       });
 
-      res.json({ success: true, message: 'Akun operator berhasil dihapus' });
+      res.json({ success: true, message: 'Akun operator berhasil dinonaktifkan' });
     } catch (error) {
-      // Operator yang sudah pernah memverifikasi meninggalkan jejak di tabel lain.
-      if (error.code === 'P2003') {
-        return res.status(409).json({
-          success: false,
-          message: 'Akun ini sudah pernah dipakai bekerja dan masih terhubung dengan data lain. Nonaktifkan saja.',
-        });
-      }
-      logger.error('Gagal menghapus akun operator kecamatan:', error);
-      res.status(500).json({ success: false, message: 'Gagal menghapus akun operator' });
+      logger.error('Gagal menonaktifkan akun operator kecamatan:', error);
+      res.status(500).json({ success: false, message: 'Gagal menonaktifkan akun operator' });
     }
   }
 }

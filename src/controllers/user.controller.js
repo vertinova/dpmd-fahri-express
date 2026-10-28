@@ -754,7 +754,11 @@ class UserController {
         // request berikutnya langsung ditolak dan dia dipaksa login ulang.
         invalidateRoleCache(userId);
       }
-      if (is_active !== undefined) updateData.is_active = is_active;
+      if (is_active !== undefined) {
+        updateData.is_active = is_active;
+        // Supaya sesi akun yang dinonaktifkan langsung diputus middleware auth.
+        invalidateRoleCache(userId);
+      }
       if (kecamatan_id !== undefined) updateData.kecamatan_id = kecamatan_id ? parseInt(kecamatan_id) : null;
       
       // Safe BigInt conversion
@@ -926,15 +930,20 @@ class UserController {
   }
 
   /**
-   * Delete user
+   * Nonaktifkan user (route DELETE dipertahankan).
+   *
+   * Sengaja tidak menghapus baris users: 28 tabel (log aktivitas, log
+   * kelembagaan, proposal/LPJ bankeu, riwayat login, chat, dst.) ber-FK
+   * ON DELETE CASCADE ke users, jadi hapus akun = hapus seluruh jejak kerjanya.
+   * Akun nonaktif ditolak saat login dan sesinya diputus di middleware auth.
    */
   async deleteUser(req, res) {
     try {
-      const { id } = req.params;
+      const bigId = BigInt(String(req.params.id));
 
-      // Check if user exists
       const existingUser = await prisma.users.findUnique({
-        where: { id: BigInt(String(id)) }
+        where: { id: bigId },
+        select: { id: true, name: true, email: true, role: true, is_active: true }
       });
 
       if (!existingUser) {
@@ -944,67 +953,58 @@ class UserController {
         });
       }
 
-      // Prevent deleting superadmin if it's the last one
+      if (String(req.user.id) === String(bigId)) {
+        return res.status(400).json({
+          success: false,
+          message: 'Tidak bisa menonaktifkan akun Anda sendiri'
+        });
+      }
+
       if (existingUser.role === 'superadmin') {
-        const superadminCount = await prisma.users.count({
-          where: { role: 'superadmin' }
+        const superadminAktif = await prisma.users.count({
+          where: { role: 'superadmin', is_active: true }
         });
 
-        if (superadminCount <= 1) {
+        if (superadminAktif <= 1) {
           return res.status(400).json({
             success: false,
-            message: 'Cannot delete the last superadmin user'
+            message: 'Tidak bisa menonaktifkan superadmin aktif terakhir'
           });
         }
       }
 
-      // Delete related records first to avoid foreign key constraint errors
-      const bigId = BigInt(String(id));
-
-      // 1. Delete disposisi where user is sender (dari_user_id)
-      await prisma.disposisi.deleteMany({
-        where: { dari_user_id: bigId }
+      await prisma.users.update({
+        where: { id: bigId },
+        data: { is_active: false, updated_at: new Date() }
       });
+      invalidateRoleCache(bigId);
+      invalidateDesaPermissions(bigId);
 
-      // 2. Delete disposisi where user is receiver (ke_user_id)
-      await prisma.disposisi.deleteMany({
-        where: { ke_user_id: bigId }
-      });
-
-      // 3. Delete surat_masuk created by user
-      await prisma.surat_masuk.deleteMany({
-        where: { created_by: bigId }
-      });
-
-      // 4. Delete activity logs
-      await prisma.activity_logs.deleteMany({
-        where: { user_id: bigId }
-      });
-
-      // 5. Delete lampiran_surat
-      await prisma.lampiran_surat.deleteMany({
-        where: { uploaded_by: bigId }
-      });
-
-      // 6. Delete push subscriptions
-      await prisma.push_subscriptions.deleteMany({
-        where: { user_id: bigId }
-      });
-
-      // Finally, delete the user
-      await prisma.users.delete({
-        where: { id: bigId }
-      });
+      ActivityLogger.log({
+        userId: BigInt(String(req.user.id)),
+        userName: req.user.name,
+        userRole: req.user.role,
+        module: 'manajemen_user',
+        action: 'update',
+        entityType: 'users',
+        entityId: bigId,
+        entityName: existingUser.name,
+        description: `${req.user.name} menonaktifkan akun "${existingUser.name}" (${existingUser.email})`,
+        oldValue: { is_active: existingUser.is_active },
+        newValue: { is_active: false },
+        ipAddress: ActivityLogger.getIpFromRequest(req),
+        userAgent: ActivityLogger.getUserAgentFromRequest(req),
+      }).catch(() => {});
 
       res.json({
         success: true,
-        message: 'User and all related records deleted successfully'
+        message: 'Akun berhasil dinonaktifkan'
       });
     } catch (error) {
-      console.error('Error deleting user:', error);
+      console.error('Error deactivating user:', error);
       res.status(500).json({
         success: false,
-        message: 'Failed to delete user',
+        message: 'Gagal menonaktifkan akun',
         error: error.message
       });
     }

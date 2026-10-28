@@ -1,6 +1,6 @@
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const { generateToken, invalidateRoleCache } = require('../middlewares/auth');
+const { generateToken, invalidateRoleCache, pesanAkunNonaktif } = require('../middlewares/auth');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const { validateDesaProfile, mustCompleteDesaProfile } = require('../config/desaProfile');
@@ -176,14 +176,23 @@ const login = async (req, res) => {
     }
 
     // Operator kecamatan yang dinonaktifkan akun utamanya tidak boleh masuk lagi.
-    // Sengaja hanya operator kecamatan: is_active pada role lain belum pernah
-    // ditegakkan saat login, dan mengubahnya di sini bisa mengunci akun lama.
     if (user.role === 'kecamatan' && user.operator_kecamatan && user.is_active === false) {
       logger.warn(`Login ditolak: operator kecamatan nonaktif - ${email}`);
       return res.status(403).json({
         success: false,
         code: 'OPERATOR_KECAMATAN_NONAKTIF',
         message: 'Akun operator Anda sudah dinonaktifkan. Hubungi akun utama kecamatan.'
+      });
+    }
+
+    // Hapus akun di semua jalur diganti menonaktifkan (supaya log aktivitasnya
+    // tidak ikut terhapus CASCADE), jadi akun nonaktif apa pun tidak boleh masuk.
+    if (user.is_active === false) {
+      logger.warn(`Login ditolak: akun nonaktif - ${email} (${user.role})`);
+      return res.status(403).json({
+        success: false,
+        code: 'AKUN_NONAKTIF',
+        message: pesanAkunNonaktif(user.role)
       });
     }
 
