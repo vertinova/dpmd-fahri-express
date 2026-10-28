@@ -4,6 +4,7 @@
  */
 
 const { prisma, validateDesaAccess } = require('./base.controller');
+const { rekapJenjang } = require('../../utils/jenjangPendidikan');
 
 // Lembaga yang dihitung dalam capaian verifikasi (Satlinmas & lembaga lainnya tidak termasuk)
 const VERIFIKASI_TABLES = [
@@ -1691,11 +1692,19 @@ class SummaryController {
    */
   async pengurusDashboard(req, res) {
     try {
-      const { kecamatan_id, desa_id, pengurusable_type, search, verification_scope, jabatan, page, per_page, export_all } = req.query;
+      const {
+        kecamatan_id, desa_id, pengurusable_type, search, verification_scope, jabatan,
+        page, per_page, export_all, status_jabatan, tahun, jenis_kelamin, summary_only,
+      } = req.query;
       const requestedScope = String(verification_scope || 'verified').toLowerCase();
       const verificationScope = ['verified', 'unverified', 'ditolak', 'all'].includes(requestedScope)
         ? requestedScope
         : 'verified';
+      const requestedJabatanScope = String(status_jabatan || 'aktif').toLowerCase();
+      const jabatanScope = ['aktif', 'nonaktif', 'selesai', 'tidak_aktif', 'all'].includes(requestedJabatanScope)
+        ? requestedJabatanScope
+        : 'aktif';
+      const isSummaryOnly = summary_only === '1' || summary_only === 'true';
       const typeAliases = {
         rw: ['rw', 'rws'],
         rws: ['rw', 'rws'],
@@ -1714,8 +1723,31 @@ class SummaryController {
         lembaga_lainnyas: ['lembaga-lainnya', 'lembaga_lainnyas'],
       };
 
-      // Build where clause
-      const where = { status_jabatan: 'aktif' };
+      // Build where clause. status_jabatan is a scope, not a constant: the dashboard can
+      // show pengurus aktif (default), yang sudah tidak aktif, atau keduanya.
+      const where = {};
+      if (jabatanScope === 'aktif') where.status_jabatan = 'aktif';
+      else if (jabatanScope === 'selesai') where.status_jabatan = 'selesai';
+      else if (jabatanScope === 'nonaktif') where.status_jabatan = 'nonaktif';
+      else if (jabatanScope === 'tidak_aktif') where.status_jabatan = { in: ['selesai', 'nonaktif'] };
+      // 'all' tidak memfilter status jabatan sama sekali.
+
+      const parsedTahun = Number.parseInt(tahun, 10);
+      const tahunFilter = Number.isInteger(parsedTahun) ? parsedTahun : null;
+      if (tahunFilter) {
+        where.created_at = {
+          gte: new Date(tahunFilter, 0, 1, 0, 0, 0),
+          lt: new Date(tahunFilter + 1, 0, 1, 0, 0, 0),
+        };
+      }
+
+      const genderFilter = String(jenis_kelamin || '').trim();
+      if (genderFilter === 'Laki_laki' || genderFilter === 'Perempuan') {
+        where.jenis_kelamin = genderFilter;
+      } else if (genderFilter === 'unknown') {
+        where.jenis_kelamin = null;
+      }
+
       if (desa_id) where.desa_id = BigInt(desa_id);
       if (pengurusable_type) {
         const normalizedType = String(pengurusable_type).trim();
@@ -1757,6 +1789,44 @@ class SummaryController {
         },
         orderBy: [{ created_at: 'desc' }]
       });
+
+      // Hitung sebaran status jabatan dengan filter yang sama persis, minus scope status
+      // jabatan itu sendiri - supaya kartu "Tidak Aktif" tetap menampilkan angka penuh
+      // walaupun dashboard sedang menampilkan pengurus aktif saja.
+      const statusJabatanWhere = { ...where };
+      delete statusJabatanWhere.status_jabatan;
+      const statusJabatanCounts = { aktif: 0, selesai: 0, nonaktif: 0, tidak_diketahui: 0 };
+      try {
+        const statusGroups = await prisma.pengurus.groupBy({
+          by: ['status_jabatan'],
+          where: statusJabatanWhere,
+          _count: { _all: true },
+        });
+        statusGroups.forEach((group) => {
+          const key = group.status_jabatan || 'tidak_diketahui';
+          statusJabatanCounts[key] = (statusJabatanCounts[key] || 0) + group._count._all;
+        });
+      } catch (err) {
+        console.error('Gagal menghitung sebaran status jabatan:', err.message);
+      }
+      statusJabatanCounts.tidak_aktif = statusJabatanCounts.selesai + statusJabatanCounts.nonaktif;
+      statusJabatanCounts.total = statusJabatanCounts.aktif
+        + statusJabatanCounts.tidak_aktif
+        + statusJabatanCounts.tidak_diketahui;
+
+      // Daftar tahun yang tersedia untuk dropdown filter.
+      let availableYears = [];
+      try {
+        const yearRows = await prisma.$queryRaw`
+          SELECT DISTINCT YEAR(created_at) AS tahun
+          FROM pengurus
+          WHERE created_at IS NOT NULL
+          ORDER BY tahun DESC
+        `;
+        availableYears = yearRows.map((row) => Number(row.tahun)).filter(Boolean);
+      } catch (err) {
+        console.error('Gagal mengambil daftar tahun pengurus:', err.message);
+      }
 
       // Sort by kecamatan kode + desa kode + lembaga nomor for export
       if (export_all === '1' || export_all === 'true') {
@@ -1802,12 +1872,9 @@ class SummaryController {
         else genderStats.unknown++;
       });
 
-      // Education distribution
-      const educationStats = {};
-      scopedPengurus.forEach(p => {
-        const edu = p.pendidikan || 'Tidak Diketahui';
-        educationStats[edu] = (educationStats[edu] || 0) + 1;
-      });
+      // Education distribution. Ejaan setara ("SD/MI" vs "SD", "S1/D4" vs "S1")
+      // digabung jadi satu jenjang, lihat utils/jenjangPendidikan.js.
+      const educationStats = rekapJenjang(scopedPengurus, (p) => p.pendidikan);
 
       // Religion distribution
       const agamaStats = {};
@@ -1895,7 +1962,7 @@ class SummaryController {
 
       // Lookup lembaga nomor/nama (always needed for table display)
       const lembagaMap = {};
-      {
+      if (!isSummaryOnly) {
         // Collect IDs by type
         const idsByType = {};
         scopedPengurus.forEach(p => {
@@ -1949,7 +2016,7 @@ class SummaryController {
 
       // Batch fetch produk_hukum (only for export)
       let produkHukumMap = {};
-      if (isExport) {
+      if (isExport && !isSummaryOnly) {
         const phIds = [...new Set(scopedPengurus.filter(p => p.produk_hukum_id).map(p => p.produk_hukum_id))];
         if (phIds.length) {
           try {
@@ -1962,7 +2029,7 @@ class SummaryController {
         }
       }
 
-        const serializedPengurus = scopedPengurus.map(p => {
+        const serializedPengurus = isSummaryOnly ? [] : scopedPengurus.map(p => {
         const base = {
         id: p.id,
         nama_lengkap: p.nama_lengkap,
@@ -1976,6 +2043,7 @@ class SummaryController {
         pengurusable_type: p.pengurusable_type,
         pengurusable_id: p.pengurusable_id,
         status_verifikasi: p.status_verifikasi,
+        status_jabatan: p.status_jabatan,
         lembaga_label: lembagaMap[p.pengurusable_id] || null,
         desa_id: p.desa_id ? Number(p.desa_id) : null,
         desa_nama: p.desas?.nama || '',
@@ -2037,6 +2105,10 @@ class SummaryController {
           pendingVerificationCount: unverifiedPengurus.length,
           rejectedVerificationCount: rejectedPengurus.length,
           scope: verificationScope,
+          jabatanScope,
+          statusJabatanCounts,
+          availableYears,
+          tahun: tahunFilter,
           matchingCounts: {
             all: allPengurus.length,
             verified: verifiedPengurus.length,
