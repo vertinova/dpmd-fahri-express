@@ -501,6 +501,8 @@ class PengurusController {
       if (tanggal_mulai_jabatan !== undefined) updateData.tanggal_mulai_jabatan = tglMulaiUbah;
       if (tanggal_akhir_jabatan !== undefined) updateData.tanggal_akhir_jabatan = tglAkhirUbah;
       if (status_jabatan !== undefined) updateData.status_jabatan = status_jabatan;
+      // Pengurus tidak aktif kembali "belum verifikasi" (lihat dashboard pengurus).
+      if (status_jabatan !== undefined && status_jabatan !== 'aktif') updateData.status_verifikasi = 'unverified';
       if (produk_hukum_id !== undefined) updateData.produk_hukum_id = produk_hukum_id || null;
       if (nama_bank !== undefined) updateData.nama_bank = nama_bank || null;
       if (nomor_rekening !== undefined) updateData.nomor_rekening = nomor_rekening || null;
@@ -600,6 +602,8 @@ class PengurusController {
       }
 
       const updateData = { status_jabatan };
+      // Pengurus tidak aktif kembali "belum verifikasi" (lihat dashboard pengurus).
+      if (status_jabatan !== 'aktif') updateData.status_verifikasi = 'unverified';
       if (tanggal_akhir_jabatan) {
         try {
           updateData.tanggal_akhir_jabatan = parseTanggal(tanggal_akhir_jabatan, 'Tanggal akhir jabatan');
@@ -1534,6 +1538,8 @@ async function processImportRow(prisma, row, desaCache, lembagaCache, uuidv4) {
     status_verifikasi: lowerEnum(row.status_verifikasi_pengurus, ['verified', 'unverified']) || 'unverified',
     produk_hukum_id: textVal(row.produk_hukum_id_pengurus) || null,
   };
+  // Pengurus tidak aktif kembali "belum verifikasi" (lihat dashboard pengurus).
+  if (data.status_jabatan !== 'aktif') data.status_verifikasi = 'unverified';
 
   if (!existing) {
     await prisma.pengurus.create({ data: { id: uuidv4(), ...data, imported: true } });

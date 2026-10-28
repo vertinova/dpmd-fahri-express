@@ -407,7 +407,8 @@ async function nonaktifkanPengurusLembaga(pengurusableType, lembagaId, client = 
       pengurusable_id: String(lembagaId),
       status_jabatan: 'aktif',
     },
-    data: { status_jabatan: 'nonaktif' },
+    // Pengurus tidak aktif kembali "belum verifikasi" (lihat dashboard pengurus).
+    data: { status_jabatan: 'nonaktif', status_verifikasi: 'unverified' },
   });
   return count;
 }

@@ -1734,11 +1734,9 @@ class SummaryController {
 
       const parsedTahun = Number.parseInt(tahun, 10);
       const tahunFilter = Number.isInteger(parsedTahun) ? parsedTahun : null;
+      // "Sejak tahun": pengurus yang diinput mulai 1 Januari tahun terpilih s/d sekarang.
       if (tahunFilter) {
-        where.created_at = {
-          gte: new Date(tahunFilter, 0, 1, 0, 0, 0),
-          lt: new Date(tahunFilter + 1, 0, 1, 0, 0, 0),
-        };
+        where.created_at = { gte: new Date(tahunFilter, 0, 1, 0, 0, 0) };
       }
 
       const genderFilter = String(jenis_kelamin || '').trim();
@@ -1796,15 +1794,25 @@ class SummaryController {
       const statusJabatanWhere = { ...where };
       delete statusJabatanWhere.status_jabatan;
       const statusJabatanCounts = { aktif: 0, selesai: 0, nonaktif: 0, tidak_diketahui: 0 };
+      // Angka kartu statistik dashboard: tidak bergantung pada tab yang sedang dipilih.
+      // Terverifikasi/Belum/Ditolak dihitung dari pengurus aktif; pengurus selesai/nonaktif
+      // masuk kartu Tidak Aktif saja, jadi tidak ada yang terhitung dua kali.
+      const cardCounts = { total: 0, verified: 0, unverified: 0, ditolak: 0, tidak_aktif: 0 };
       try {
         const statusGroups = await prisma.pengurus.groupBy({
-          by: ['status_jabatan'],
+          by: ['status_jabatan', 'status_verifikasi'],
           where: statusJabatanWhere,
           _count: { _all: true },
         });
         statusGroups.forEach((group) => {
+          const count = group._count._all;
           const key = group.status_jabatan || 'tidak_diketahui';
-          statusJabatanCounts[key] = (statusJabatanCounts[key] || 0) + group._count._all;
+          statusJabatanCounts[key] = (statusJabatanCounts[key] || 0) + count;
+          cardCounts.total += count;
+          if (key === 'selesai' || key === 'nonaktif') cardCounts.tidak_aktif += count;
+          else if (key === 'aktif' && group.status_verifikasi in cardCounts) {
+            cardCounts[group.status_verifikasi] += count;
+          }
         });
       } catch (err) {
         console.error('Gagal menghitung sebaran status jabatan:', err.message);
@@ -2107,6 +2115,7 @@ class SummaryController {
           scope: verificationScope,
           jabatanScope,
           statusJabatanCounts,
+          cardCounts,
           availableYears,
           tahun: tahunFilter,
           matchingCounts: {
