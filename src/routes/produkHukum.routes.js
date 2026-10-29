@@ -10,9 +10,40 @@ const { auth } = require('../middlewares/auth');
 const { requireDesaPermission } = require('../middlewares/desaPermission');
 const { uploadProdukHukum } = require('../middlewares/upload');
 const desaContextMiddleware = require('../middlewares/desaContext.middleware');
+const prisma = require('../config/prisma');
 
 // Akun desa hanya boleh masuk bila diberi hak akses "produk-hukum" oleh Admin Desa.
 router.use(auth, requireDesaPermission('produk-hukum'));
+
+// Kecamatan hanya membaca, dan hanya produk hukum desa di wilayahnya.
+const isKecamatan = (req) => String(req.user?.role || '').trim().toLowerCase() === 'kecamatan';
+
+router.use((req, res, next) => {
+  if (!isKecamatan(req)) return next();
+  if (req.method !== 'GET') {
+    return res.status(403).json({ success: false, message: 'Akun kecamatan hanya dapat melihat produk hukum' });
+  }
+  if (!req.user.kecamatan_id) {
+    return res.status(403).json({ success: false, message: 'Akun ini tidak terhubung ke kecamatan mana pun' });
+  }
+  req.kecamatanId = BigInt(req.user.kecamatan_id);
+  return next();
+});
+
+router.param('id', async (req, res, next, id) => {
+  if (!req.kecamatanId) return next();
+  try {
+    const ph = await prisma.produk_hukums.findFirst({
+      where: { id: String(id), desas: { kecamatan_id: req.kecamatanId } },
+      select: { id: true },
+    });
+    // 404, bukan 403: jangan bocorkan keberadaan produk hukum desa di kecamatan lain.
+    if (!ph) return res.status(404).json({ success: false, message: 'Produk Hukum tidak ditemukan' });
+    return next();
+  } catch (error) {
+    return next(error);
+  }
+});
 
 /**
  * @route   GET /api/produk-hukum

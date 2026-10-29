@@ -50,6 +50,11 @@ class ProdukHukumController {
         where.desa_id = req.desaId;
       }
 
+      // Diisi produkHukum.routes untuk akun kecamatan: batasi ke desa di wilayahnya.
+      if (req.kecamatanId) {
+        where.desas = { kecamatan_id: req.kecamatanId };
+      }
+
       // Add search filter if provided
       if (search) {
         where.judul = {
