@@ -114,4 +114,29 @@ router.get(['/core-dashboard', '/dashboard'], publicDashboardController.getCoreD
  */
 router.get('/sipanda', publicDashboardController.getSipandaDashboard);
 
+/**
+ * @route   GET /api/public/pegawai-kantor
+ * @desc    Susunan pegawai DPMD untuk tur 3D "Jelajah Kantor" di landing page.
+ *          Hanya kolom yang boleh tampil untuk umum (nama, jabatan, bidang) —
+ *          NIP, no HP, alamat, tanggal lahir, golongan, dan pangkat sengaja tidak
+ *          dipilih sama sekali.
+ * @access  Public
+ */
+router.get('/pegawai-kantor', async (req, res) => {
+  try {
+    const [rows] = await db.query(`
+      SELECT p.nama_pegawai AS nama, p.jabatan, p.sub_bidang, p.unit_kerja, p.eselon,
+             p.jenis_kelamin, p.status_kepegawaian, b.nama AS bidang
+      FROM pegawai p
+      LEFT JOIN bidangs b ON b.id = p.id_bidang
+      ORDER BY b.id, p.eselon IS NULL, p.eselon, p.nama_pegawai
+    `);
+    res.set('Cache-Control', 'public, max-age=600');
+    res.status(200).json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Error fetching pegawai kantor:', error);
+    res.status(500).json({ success: false, message: 'Gagal mengambil data pegawai' });
+  }
+});
+
 module.exports = router;
