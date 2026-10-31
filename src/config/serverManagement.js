@@ -57,6 +57,10 @@ const DEFAULT_CONFIG = {
     // Kode negara ISO (mis. "CN", "RU") yang request anonimnya ditolak.
     // Pengguna yang sudah login tetap boleh masuk. "ID" tidak boleh diisi.
     blocked_countries: [],
+    // Honeypot: IP anonim yang menyentuh jalur jebakan (HONEYPOT_PATTERN)
+    // langsung diblokir tanpa menunggu skor terkumpul.
+    honeypot: true,
+    honeypot_block_minutes: 1440,
   },
   // Monitor uptime: [{ name, url }]. Kosong = daftar bawaan (lihat
   // serverApps.service.js → defaultMonitors).
@@ -108,7 +112,15 @@ const EVENT_TYPES = {
   nginx_attack: { label: 'Serangan di Nginx', severity: 'medium', info: 'Pola serangan terdeteksi di log akses nginx.' },
   upload_rejected: { label: 'Unggahan Ditolak', severity: 'low', info: 'Unggahan ditolak karena kuota/ukuran storage.' },
   geo_blocked: { label: 'Diblokir (Negara)', severity: 'low', info: 'Request anonim dari negara yang sedang diblokir.' },
+  honeypot: { label: 'Masuk Honeypot', severity: 'critical', info: 'Menyentuh jalur jebakan yang tidak pernah dipakai pengguna sah — pasti pemindai/penyerang. Langsung diblokir.' },
 };
+
+/**
+ * Jalur jebakan. Tidak ada satu pun yang ada di aplikasi ini (Node + React),
+ * jadi yang memintanya pasti alat pemindai yang mencari rahasia/CMS/shell.
+ * Sengaja lebih sempit dari aturan `scanner` supaya salah tangkap nyaris nol.
+ */
+const HONEYPOT_PATTERN = /(\/\.env(\.\w+)?($|\?|\/))|(\/\.git\/(config|HEAD))|(\/wp-login\.php)|(\/xmlrpc\.php)|(\/phpmyadmin)|(\/\.aws\/credentials)|(\/vendor\/phpunit\/)|(\/(shell|cmd|c99|r57|wso)\.php)|(\/boaform)|(\/HNAP1)|(\/cgi-bin\/(luci|\.%2e))|(\/\.ssh\/id_rsa)|(\/etc\/passwd)/i;
 
 /**
  * Lokasi server di globe (titik tujuan garis serangan). Bawaan: Kantor DPMD
@@ -214,6 +226,7 @@ module.exports = {
   SEVERITY_SCORE,
   EVENT_TYPES,
   SERVER_LOCATION,
+  HONEYPOT_PATTERN,
   DETECTION_RULES,
   BAD_USER_AGENTS,
   FLOOD_THRESHOLDS,

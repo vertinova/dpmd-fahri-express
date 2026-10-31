@@ -97,9 +97,18 @@ const gerbang = (req, res, next) => {
 const pemeriksa = (req, res, next) => {
   try {
     const cfg = store.getConfigSync().security;
-    if (!cfg.detection) return next();
     const ip = security.bersihkanIp(req.ip);
     if (security.diWhitelist(ip)) return next();
+
+    // Honeypot berjalan walau deteksi pola dimatikan: jalurnya tidak pernah
+    // dipakai pengguna sah, jadi tidak ada risiko salah tangkap.
+    if (security.cekHoneypot({
+      ip, method: req.method, path: req.originalUrl, userAgent: req.headers['user-agent'], terautentikasi: () => tokenSah(req),
+    })) {
+      return res.status(404).json({ success: false, message: 'Not found' });
+    }
+
+    if (!cfg.detection) return next();
 
     const terautentikasi = tokenSah(req);
     const temuan = security.inspect({

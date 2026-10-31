@@ -31,6 +31,7 @@ const {
   BAD_USER_AGENTS,
   FLOOD_THRESHOLDS,
   SYSTEM_LOGS,
+  HONEYPOT_PATTERN,
 } = require('../config/serverManagement');
 
 const IS_LINUX = process.platform === 'linux';
@@ -168,7 +169,9 @@ const recordEvent = ({
   hitunganTipe.push({ t: Date.now(), type, severity: tingkat });
   hitunganSnapshot += 1;
 
-  if (type === 'blocked_request' || type === 'auto_blocked' || type === 'geo_blocked') return;
+  // Honeypot memblokir sendiri; menghitungnya ke skor akan memicu blokir
+  // otomatis kedua yang menimpa durasinya.
+  if (['blocked_request', 'auto_blocked', 'geo_blocked', 'honeypot'].includes(type)) return;
 
   // Skor & blokir otomatis.
   const daftar = skorIp.get(i) || [];
@@ -343,6 +346,7 @@ const pindaiNginx = async () => {
     const [, ip, method, url, , ua] = m;
     // Request /api dan /socket.io diteruskan ke Node dan sudah diperiksa di sana.
     if (url.startsWith('/api/') || url.startsWith('/socket.io')) continue;
+    if (cekHoneypot({ ip, method, path: url, userAgent: ua, source: 'nginx' })) continue;
     const agg = perIp.get(ip) || { total: 0, temuan: new Map(), contoh: null, ua };
     agg.total += 1;
     for (const t of inspect({ url, userAgent: ua })) {
@@ -487,7 +491,75 @@ const getSummary = async (rentang = '24h') => {
   };
 };
 
+/* ─────────────────────────── Honeypot ─────────────────────────── */
+
+/**
+ * IP anonim yang meminta jalur jebakan langsung diblokir. Mengembalikan true
+ * bila request ini memicu honeypot (pemanggil boleh langsung menolaknya).
+ */
+const cekHoneypot = ({ ip, method = null, path, userAgent = null, source = 'app', terautentikasi = null }) => {
+  const cfg = store.getConfigSync().security;
+  if (!cfg.honeypot || !path) return false;
+  const target = decodeAman(decodeAman(path));
+  const m = target.match(HONEYPOT_PATTERN);
+  if (!m) return false;
+  const i = bersihkanIp(ip);
+  if (ipPrivat(i) || diWhitelist(i)) return false;
+  // Token baru diperiksa setelah pola cocok — jwt.verify tidak perlu jalan
+  // untuk setiap request biasa.
+  if (typeof terautentikasi === 'function' && terautentikasi()) return false;
+  if (isBlocked(i)) return true;
+  const menit = Math.max(1, Number(cfg.honeypot_block_minutes) || 1440);
+  const alasan = `Honeypot: meminta ${m[0].slice(0, 60)}`;
+  recordEvent({ ip: i, type: 'honeypot', method, path, userAgent, source, detail: alasan, blocked: true });
+  blockIp({ ip: i, reason: alasan, minutes: menit, auto: true, by: 'honeypot' })
+    .then(() => {
+      alerts.raise(`honeypot:${i}`, {
+        level: 'warning',
+        kategori: 'keamanan',
+        title: 'Penyerang masuk honeypot',
+        message: `${i} meminta ${m[0].slice(0, 60)} dan diblokir ${menit} menit.`,
+      });
+      setTimeout(() => alerts.clear(`honeypot:${i}`), 15 * 60000).unref();
+    })
+    .catch((e) => logger.warn(`[ServerSecurity] Honeypot gagal memblokir: ${e.message}`));
+  return true;
+};
+
 /* ─────────────────────── Peta ancaman (globe) ─────────────────────── */
+
+/**
+ * Kejadian ber-lokasi berurutan waktu untuk replay di globe. Lokasi diambil
+ * dari tabel cache geo, jadi hanya IP yang sudah pernah dicari yang ikut.
+ */
+const getTimeline = async (range = '24h') => {
+  await flush();
+  await store.ensureTables();
+  const jam = RENTANG[range] || 24;
+  let baris = [];
+  try {
+    baris = await store.query(
+      `SELECT e.id, e.created_at AS t, e.ip_address AS ip, e.severity AS sev, e.event_type AS type,
+              g.lat, g.lon, g.country_code AS cc
+         FROM server_security_events e
+         JOIN server_ip_geo g ON g.ip_address = e.ip_address
+        WHERE e.created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+          AND e.event_type NOT IN ('blocked_request', 'geo_blocked')
+          AND g.lat IS NOT NULL
+        ORDER BY e.id DESC LIMIT 6000`,
+      jam,
+    );
+  } catch (error) {
+    // Tabel geo belum ada (belum pernah ada lookup) → replay kosong.
+    if (!/server_ip_geo/.test(error.message)) throw error;
+  }
+  return {
+    range,
+    events: baris.reverse().map((b) => ({
+      id: b.id, t: new Date(b.t).getTime(), ip: b.ip, sev: b.sev, type: b.type, lat: Number(b.lat), lon: Number(b.lon), cc: b.cc,
+    })),
+  };
+};
 
 /** Negara yang sedang diblokir untuk IP ini (kode ISO), atau null. */
 const negaraDiblokir = (ip) => {
@@ -645,7 +717,9 @@ module.exports = {
   getSummary,
   listEvents,
   getGeoMap,
+  getTimeline,
   negaraDiblokir,
+  cekHoneypot,
   hapusSemuaKejadian,
   ipPrivat,
   diWhitelist,

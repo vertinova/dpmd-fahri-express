@@ -17,6 +17,8 @@ const security = require('../services/serverSecurity.service');
 const storage = require('../services/serverStorage.service');
 const apps = require('../services/serverApps.service');
 const geo = require('../services/serverGeo.service');
+// `audit` sudah dipakai untuk fungsi jejak aktivitas di bawah.
+const audit_ = require('../services/serverAudit.service');
 const { LOG_FILES, SYSTEM_LOGS, CLEANUP_TARGETS, DEFAULT_CONFIG, SERVER_LOCATION } = require('../config/serverManagement');
 
 const LOG_MODULE = 'manajemen_server';
@@ -222,7 +224,7 @@ exports.securityEvents = async (req, res) => {
         const ipBersih = security.bersihkanIp(e.ip_address);
         const g = geo.dariCache(ipBersih);
         if (!g) geo.antre(ipBersih);
-        return { ...e, geo: g ? { cc: g.cc, country: g.country, city: g.city } : null };
+        return { ...e, geo: g ? { cc: g.cc, country: g.country, city: g.city, lat: g.lat, lon: g.lon } : null };
       });
     }
     res.json({ success: true, ...hasil });
@@ -301,6 +303,25 @@ exports.securityGeo = async (req, res) => {
   try {
     const data = await security.getGeoMap({ range: String(req.query.range || '24h'), visitors: metrics.getTraffic().top_ips || [] });
     res.json({ success: true, data: { ...data, server: SERVER_LOCATION } });
+  } catch (error) {
+    gagal(res, error);
+  }
+};
+
+exports.securityTimeline = async (req, res) => {
+  try {
+    res.json({ success: true, data: { ...(await security.getTimeline(String(req.query.range || '24h'))), server: SERVER_LOCATION } });
+  } catch (error) {
+    gagal(res, error);
+  }
+};
+
+exports.audit = async (req, res) => {
+  try {
+    const segar = req.query.refresh === '1';
+    const data = await audit_.getAudit({ segar });
+    if (segar) audit(req, 'read', 'audit_keamanan', `Menjalankan audit keamanan server: nilai ${data.grade} (${data.score})`);
+    res.json({ success: true, data });
   } catch (error) {
     gagal(res, error);
   }
@@ -461,6 +482,8 @@ exports.saveConfig = async (req, res) => {
         blocked_countries: Array.isArray(m.security?.blocked_countries)
           ? [...new Set(m.security.blocked_countries.map((c) => String(c).trim().toUpperCase()).filter((c) => /^[A-Z]{2}$/.test(c)))].slice(0, 100)
           : kini.security.blocked_countries || [],
+        honeypot: m.security?.honeypot ?? kini.security.honeypot,
+        honeypot_block_minutes: angka(m.security?.honeypot_block_minutes, 1, 525600, kini.security.honeypot_block_minutes),
       },
     };
     // Seluruh pengguna (desa, kecamatan, kantor) ada di Indonesia; memblokir ID

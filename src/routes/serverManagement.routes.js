@@ -36,6 +36,8 @@ router.get('/security/blocklist', c.blocklist);
 router.post('/security/blocklist', c.blockIp);
 router.post('/security/blocklist/bulk', c.blockBulk);
 router.get('/security/geo', c.securityGeo);
+router.get('/security/timeline', c.securityTimeline);
+router.get('/audit', c.audit);
 router.get('/security/geo/:ip', c.geoLookup);
 router.delete('/security/blocklist/:ip', c.unblockIp);
 
