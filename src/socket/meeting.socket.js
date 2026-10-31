@@ -4,6 +4,7 @@
  */
 
 const { Server } = require('socket.io');
+const { initJelajahSocket } = require('./jelajah.socket');
 const mediasoupService = require('../services/mediasoup.service');
 const hlsBroadcaster = require('../services/hlsBroadcaster.service');
 const prisma = require('../config/prisma');
@@ -159,6 +160,9 @@ function initSocketServer(httpServer) {
     // room ramai; default 1MB akan menutup koneksi. Naikkan ke 10MB.
     maxHttpBufferSize: 1e7,
   });
+
+  // Tamu Jelajah Kantor 3D: namespace terpisah tanpa JWT (lihat jelajah.socket.js).
+  initJelajahSocket(io);
 
   // Authentication middleware
   io.use(async (socket, next) => {
