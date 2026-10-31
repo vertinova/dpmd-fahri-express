@@ -16,7 +16,8 @@ const alerts = require('../services/serverAlerts.service');
 const security = require('../services/serverSecurity.service');
 const storage = require('../services/serverStorage.service');
 const apps = require('../services/serverApps.service');
-const { LOG_FILES, SYSTEM_LOGS, CLEANUP_TARGETS, DEFAULT_CONFIG } = require('../config/serverManagement');
+const geo = require('../services/serverGeo.service');
+const { LOG_FILES, SYSTEM_LOGS, CLEANUP_TARGETS, DEFAULT_CONFIG, SERVER_LOCATION } = require('../config/serverManagement');
 
 const LOG_MODULE = 'manajemen_server';
 
@@ -212,8 +213,19 @@ exports.securitySummary = async (req, res) => {
 
 exports.securityEvents = async (req, res) => {
   try {
-    const { page, limit, type, severity, ip, source, q, range } = req.query;
-    res.json({ success: true, ...(await security.listEvents({ page, limit, type, severity, ip, source, q, range })) });
+    const { page, limit, type, severity, ip, source, q, range, since_id } = req.query;
+    const hasil = await security.listEvents({ page, limit, type, severity, ip, source, q, range, since_id });
+    // geo=1: sertakan lokasi dari cache (untuk umpan langsung); yang belum
+    // diketahui diantrekan dan muncul di permintaan berikutnya.
+    if (req.query.geo === '1') {
+      hasil.data = hasil.data.map((e) => {
+        const ipBersih = security.bersihkanIp(e.ip_address);
+        const g = geo.dariCache(ipBersih);
+        if (!g) geo.antre(ipBersih);
+        return { ...e, geo: g ? { cc: g.cc, country: g.country, city: g.city } : null };
+      });
+    }
+    res.json({ success: true, ...hasil });
   } catch (error) {
     gagal(res, error);
   }
@@ -250,6 +262,78 @@ exports.blockIp = async (req, res) => {
     const hasil = await security.blockIp({ ip, reason: alasan, minutes: menit, by: req.user.name || req.user.email });
     audit(req, 'create', ip, `Memblokir IP ${ip}${menit ? ` selama ${menit} menit` : ' permanen'}: ${alasan}`);
     res.json({ success: true, data: hasil, message: `IP ${ip} diblokir` });
+  } catch (error) {
+    gagal(res, error);
+  }
+};
+
+exports.blockBulk = async (req, res) => {
+  try {
+    const daftar = Array.isArray(req.body?.ips) ? req.body.ips : [];
+    if (!daftar.length) return gagal(res, new Error('Daftar IP kosong'), 400);
+    if (daftar.length > 200) return gagal(res, new Error('Maksimal 200 IP sekali blokir'), 400);
+    const menit = req.body?.minutes ? Math.max(1, Math.min(525600, Number(req.body.minutes))) : null;
+    const alasan = String(req.body?.reason || 'Diblokir massal oleh superadmin').slice(0, 500);
+    const ipSaya = security.bersihkanIp(req.ip);
+    const diblokir = [];
+    const dilewati = [];
+    for (const mentah of daftar) {
+      const ip = security.bersihkanIp(mentah);
+      if (!net.isIP(ip)) dilewati.push({ ip, reason: 'IP tidak valid' });
+      else if (ip === ipSaya) dilewati.push({ ip, reason: 'IP Anda sendiri' });
+      else if (security.diWhitelist(ip)) dilewati.push({ ip, reason: 'Ada di whitelist' });
+      else if (security.ipPrivat(ip)) dilewati.push({ ip, reason: 'IP internal/proxy' });
+      else {
+        await security.blockIp({ ip, reason: alasan, minutes: menit, by: req.user.name || req.user.email });
+        diblokir.push(ip);
+      }
+    }
+    if (diblokir.length) {
+      audit(req, 'create', `${diblokir.length} IP`, `Memblokir massal ${diblokir.length} IP${menit ? ` selama ${menit} menit` : ' permanen'}: ${alasan}`, diblokir);
+    }
+    res.json({ success: true, data: { blocked: diblokir, skipped: dilewati }, message: `${diblokir.length} IP diblokir, ${dilewati.length} dilewati` });
+  } catch (error) {
+    gagal(res, error);
+  }
+};
+
+exports.securityGeo = async (req, res) => {
+  try {
+    const data = await security.getGeoMap({ range: String(req.query.range || '24h'), visitors: metrics.getTraffic().top_ips || [] });
+    res.json({ success: true, data: { ...data, server: SERVER_LOCATION } });
+  } catch (error) {
+    gagal(res, error);
+  }
+};
+
+exports.geoLookup = async (req, res) => {
+  try {
+    const ip = security.bersihkanIp(req.params.ip);
+    if (!net.isIP(ip)) return gagal(res, new Error('Alamat IP tidak valid'), 400);
+    const lokasi = await geo.resolveMany([ip], { tunggu: true });
+    const [ringkas] = await store.query(
+      `SELECT COUNT(*) AS n, MIN(created_at) AS first_seen, MAX(created_at) AS last_seen,
+              GROUP_CONCAT(DISTINCT event_type SEPARATOR ',') AS types
+         FROM server_security_events WHERE ip_address = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)`,
+      ip,
+    ).catch(() => [{}]);
+    const blokir = security.isBlocked(ip);
+    res.json({
+      success: true,
+      data: {
+        ip,
+        private: security.ipPrivat(ip),
+        whitelisted: security.diWhitelist(ip),
+        geo: lokasi[ip] || null,
+        geo_status: geo.status(),
+        blocked: blokir ? { reason: blokir.reason, auto: blokir.auto, expires_at: blokir.expires_at } : null,
+        score: security.skorIp(ip),
+        events_30d: ringkas?.n || 0,
+        first_seen: ringkas?.first_seen || null,
+        last_seen: ringkas?.last_seen || null,
+        types: ringkas?.types ? ringkas.types.split(',') : [],
+      },
+    });
   } catch (error) {
     gagal(res, error);
   }
@@ -373,8 +457,17 @@ exports.saveConfig = async (req, res) => {
         whitelist: Array.isArray(m.security?.whitelist)
           ? [...new Set(m.security.whitelist.map((w) => String(w).trim()).filter(Boolean))].slice(0, 200)
           : kini.security.whitelist || d.security.whitelist,
+        geo_lookup: m.security?.geo_lookup ?? kini.security.geo_lookup,
+        blocked_countries: Array.isArray(m.security?.blocked_countries)
+          ? [...new Set(m.security.blocked_countries.map((c) => String(c).trim().toUpperCase()).filter((c) => /^[A-Z]{2}$/.test(c)))].slice(0, 100)
+          : kini.security.blocked_countries || [],
       },
     };
+    // Seluruh pengguna (desa, kecamatan, kantor) ada di Indonesia; memblokir ID
+    // berarti halaman login tertutup bagi semua yang belum masuk.
+    if (baru.security.blocked_countries.includes('ID')) {
+      return gagal(res, new Error('Indonesia (ID) tidak boleh diblokir — semua pengguna akan terkunci dari halaman login.'), 400);
+    }
     for (const grup of ['alerts', 'storage', 'security']) {
       for (const [k, v] of Object.entries(baru[grup])) {
         if (typeof d[grup][k] === 'boolean') baru[grup][k] = v === true || v === 'true';

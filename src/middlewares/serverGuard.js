@@ -50,6 +50,22 @@ const gerbang = (req, res, next) => {
       });
     }
 
+    // Blokir negara: lokasi diambil dari cache saja (tanpa menunggu); IP yang
+    // belum dikenal diantrekan untuk lookup dan lolos sampai lokasinya diketahui.
+    const negara = security.negaraDiblokir(ip);
+    if (negara && !tokenSah(req)) {
+      const kini = Date.now();
+      if (kini - (terakhirCatatBlokir.get(`geo:${ip}`) || 0) > 60000) {
+        terakhirCatatBlokir.set(`geo:${ip}`, kini);
+        security.recordEvent({ ip, type: 'geo_blocked', method: req.method, path: req.originalUrl, userAgent: req.headers['user-agent'], detail: `Negara ${negara} diblokir`, blocked: true });
+      }
+      return res.status(403).json({
+        success: false,
+        code: 'NEGARA_DIBLOKIR',
+        message: 'Akses dari negara Anda tidak diizinkan untuk layanan ini.',
+      });
+    }
+
     const mulai = process.hrtime.bigint();
     res.on('finish', () => {
       try {

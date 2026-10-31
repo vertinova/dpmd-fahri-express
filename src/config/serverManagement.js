@@ -51,6 +51,12 @@ const DEFAULT_CONFIG = {
     retention_days: 30,
     // Baca log nginx & SSH di server untuk mendeteksi serangan di luar aplikasi.
     scan_system_logs: true,
+    // Cari lokasi (negara/kota/ISP) IP publik lewat ip-api.com untuk peta
+    // ancaman dan blokir negara. Mati = globe kosong, blokir negara tidak jalan.
+    geo_lookup: true,
+    // Kode negara ISO (mis. "CN", "RU") yang request anonimnya ditolak.
+    // Pengguna yang sudah login tetap boleh masuk. "ID" tidak boleh diisi.
+    blocked_countries: [],
   },
   // Monitor uptime: [{ name, url }]. Kosong = daftar bawaan (lihat
   // serverApps.service.js → defaultMonitors).
@@ -101,6 +107,17 @@ const EVENT_TYPES = {
   ssh_failed: { label: 'SSH Login Gagal', severity: 'medium', info: 'Percobaan masuk SSH ke server gagal (dari /var/log/auth.log).' },
   nginx_attack: { label: 'Serangan di Nginx', severity: 'medium', info: 'Pola serangan terdeteksi di log akses nginx.' },
   upload_rejected: { label: 'Unggahan Ditolak', severity: 'low', info: 'Unggahan ditolak karena kuota/ukuran storage.' },
+  geo_blocked: { label: 'Diblokir (Negara)', severity: 'low', info: 'Request anonim dari negara yang sedang diblokir.' },
+};
+
+/**
+ * Lokasi server di globe (titik tujuan garis serangan). Bawaan: Kantor DPMD
+ * Kabupaten Bogor, Cibinong. Bisa diganti lewat env SERVER_GEO_LAT/LON.
+ */
+const SERVER_LOCATION = {
+  label: process.env.SERVER_GEO_LABEL || 'DPMD Kab. Bogor',
+  lat: Number(process.env.SERVER_GEO_LAT) || -6.4815,
+  lon: Number(process.env.SERVER_GEO_LON) || 106.854,
 };
 
 /**
@@ -196,6 +213,7 @@ module.exports = {
   IP_TEPERCAYA,
   SEVERITY_SCORE,
   EVENT_TYPES,
+  SERVER_LOCATION,
   DETECTION_RULES,
   BAD_USER_AGENTS,
   FLOOD_THRESHOLDS,

@@ -22,6 +22,7 @@ const net = require('net');
 const logger = require('../utils/logger');
 const store = require('./serverStore.service');
 const alerts = require('./serverAlerts.service');
+const geo = require('./serverGeo.service');
 const {
   IP_TEPERCAYA,
   EVENT_TYPES,
@@ -167,7 +168,7 @@ const recordEvent = ({
   hitunganTipe.push({ t: Date.now(), type, severity: tingkat });
   hitunganSnapshot += 1;
 
-  if (type === 'blocked_request' || type === 'auto_blocked') return;
+  if (type === 'blocked_request' || type === 'auto_blocked' || type === 'geo_blocked') return;
 
   // Skor & blokir otomatis.
   const daftar = skorIp.get(i) || [];
@@ -486,11 +487,96 @@ const getSummary = async (rentang = '24h') => {
   };
 };
 
-const listEvents = async ({ page = 1, limit = 50, type, severity, ip, source, q, range = '7d' }) => {
+/* ─────────────────────── Peta ancaman (globe) ─────────────────────── */
+
+/** Negara yang sedang diblokir untuk IP ini (kode ISO), atau null. */
+const negaraDiblokir = (ip) => {
+  const daftar = store.getConfigSync().security.blocked_countries || [];
+  if (!daftar.length) return null;
+  const i = bersihkanIp(ip);
+  if (ipPrivat(i) || diWhitelist(i)) return null;
+  const g = geo.dariCache(i);
+  if (!g) {
+    geo.antre(i);
+    return null;
+  }
+  return g.cc && daftar.includes(g.cc) ? g.cc : null;
+};
+
+/**
+ * Titik-titik untuk globe: IP penyerang (kejadian keamanan) beserta lokasinya,
+ * ringkasan per negara, dan IP pengunjung teratas dari statistik trafik.
+ */
+const getGeoMap = async ({ range = '24h', visitors = [] } = {}) => {
+  await flush();
+  await store.ensureTables();
+  const jam = RENTANG[range] || 24;
+  const baris = await store.query(
+    `SELECT ip_address, COUNT(*) AS n, MAX(created_at) AS last_seen,
+            SUM(severity = 'critical') AS critical, SUM(severity = 'high') AS high,
+            GROUP_CONCAT(DISTINCT event_type ORDER BY event_type SEPARATOR ',') AS types,
+            GROUP_CONCAT(DISTINCT source SEPARATOR ',') AS sources
+       FROM server_security_events
+      WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR) AND event_type <> 'blocked_request'
+      GROUP BY ip_address ORDER BY (SUM(severity IN ('critical','high')) * 10 + COUNT(*)) DESC LIMIT 400`,
+    jam,
+  );
+  const ipPengunjung = visitors.map((v) => bersihkanIp(v.ip)).filter((i) => !ipPrivat(i));
+  const lokasi = await geo.resolveMany([...baris.map((b) => bersihkanIp(b.ip_address)), ...ipPengunjung]);
+
+  const negara = new Map();
+  let tanpaLokasi = 0;
+  const attackers = [];
+  for (const b of baris) {
+    const ip = bersihkanIp(b.ip_address);
+    const g = lokasi[ip] || null;
+    const serius = (b.critical || 0) + (b.high || 0);
+    const item = {
+      ip,
+      n: b.n,
+      critical: b.critical || 0,
+      high: b.high || 0,
+      severity: b.critical ? 'critical' : b.high ? 'high' : 'medium',
+      types: b.types ? b.types.split(',') : [],
+      sources: b.sources ? b.sources.split(',') : [],
+      last_seen: b.last_seen,
+      blocked: !!isBlocked(ip),
+      private: ipPrivat(ip),
+      score: skorSaatIni(ip),
+      geo: g && g.lat !== null ? g : null,
+    };
+    if (!item.geo) tanpaLokasi += 1;
+    attackers.push(item);
+    const kode = g?.cc || (item.private ? 'LAN' : '??');
+    const n = negara.get(kode) || { cc: kode, country: g?.country || (item.private ? 'Jaringan internal' : 'Belum diketahui'), events: 0, ips: 0, serius: 0, blocked_ips: 0 };
+    n.events += b.n;
+    n.ips += 1;
+    n.serius += serius;
+    if (item.blocked) n.blocked_ips += 1;
+    negara.set(kode, n);
+  }
+
+  const visitorsGeo = visitors
+    .map((v) => ({ ip: bersihkanIp(v.ip), count: v.count, errors: v.errors, last: v.last, geo: lokasi[bersihkanIp(v.ip)] || null }))
+    .filter((v) => v.geo && v.geo.lat !== null);
+
+  return {
+    range,
+    attackers,
+    countries: [...negara.values()].sort((a, b) => b.serius - a.serius || b.events - a.events),
+    visitors: visitorsGeo,
+    unresolved: tanpaLokasi,
+    blocked_countries: store.getConfigSync().security.blocked_countries || [],
+    geo: geo.status(),
+  };
+};
+
+const listEvents = async ({ page = 1, limit = 50, type, severity, ip, source, q, range = '7d', since_id: sejakId }) => {
   await flush();
   await store.ensureTables();
   const syarat = ['created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)'];
   const nilai = [RENTANG[range] || 168];
+  if (sejakId && Number(sejakId) > 0) { syarat.push('id > ?'); nilai.push(Number(sejakId)); }
   if (type) { syarat.push('event_type = ?'); nilai.push(type); }
   if (severity) { syarat.push('severity = ?'); nilai.push(severity); }
   if (source) { syarat.push('source = ?'); nilai.push(source); }
@@ -558,9 +644,12 @@ module.exports = {
   listBlocklist,
   getSummary,
   listEvents,
+  getGeoMap,
+  negaraDiblokir,
   hapusSemuaKejadian,
   ipPrivat,
   diWhitelist,
   bersihkanIp,
+  skorIp: (ip) => skorSaatIni(bersihkanIp(ip)),
   ambilHitunganSnapshot: () => { const n = hitunganSnapshot; hitunganSnapshot = 0; return n; },
 };
