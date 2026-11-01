@@ -20,6 +20,9 @@ const VERIFIKASI_TABLES = [
 // Lewat UNIX_TIMESTAMP (epoch, bebas zona) + 7 jam supaya tanggalnya selalu WIB.
 const tanggalWib = (kolom) => `DATE(DATE_ADD('1970-01-01', INTERVAL UNIX_TIMESTAMP(${kolom}) + 25200 SECOND))`;
 
+// Tab Desa | Kelurahan | Semua. Selain dua nilai ini (termasuk kosong) berarti tanpa filter.
+const parseStatusPemerintahan = (nilai) => (['desa', 'kelurahan'].includes(nilai) ? nilai : null);
+
 class SummaryController {
   /**
    * Get overall kelembagaan index with kecamatan and desa data
@@ -1043,34 +1046,37 @@ class SummaryController {
 
   /**
    * Get yearly statistics for kelembagaan trends
-   * GET /api/kelembagaan/statistik-tahunan
+   * GET /api/kelembagaan/statistik-tahunan?status_pemerintahan=desa|kelurahan
    */
   async statistikTahunan(req, res) {
     try {
       const tables = VERIFIKASI_TABLES;
+      // Aman disisipkan ke SQL: nilainya sudah dibatasi parseStatusPemerintahan.
+      const status = parseStatusPemerintahan(req.query.status_pemerintahan);
+      const diWilayah = status ? ` AND desa_id IN (SELECT id FROM desas WHERE status_pemerintahan = '${status}')` : '';
 
       const results = await Promise.all(
         tables.map(async (t) => {
           const [byYear, byYearVerified, byYearNonaktif, cumulativeActive, cumulativeVerified, totals] = await Promise.all([
             // Records created per year
             prisma.$queryRawUnsafe(
-              `SELECT YEAR(created_at) as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE created_at IS NOT NULL GROUP BY YEAR(created_at) ORDER BY tahun`
+              `SELECT YEAR(created_at) as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE created_at IS NOT NULL${diWilayah} GROUP BY YEAR(created_at) ORDER BY tahun`
             ),
             // Records verified per year
             prisma.$queryRawUnsafe(
-              `SELECT YEAR(verified_at) as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE verified_at IS NOT NULL GROUP BY YEAR(verified_at) ORDER BY tahun`
+              `SELECT YEAR(verified_at) as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE verified_at IS NOT NULL${diWilayah} GROUP BY YEAR(verified_at) ORDER BY tahun`
             ),
             // Records nonaktif per year (by updated_at as proxy)
             prisma.$queryRawUnsafe(
-              `SELECT YEAR(updated_at) as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE status_kelembagaan = 'nonaktif' AND updated_at IS NOT NULL GROUP BY YEAR(updated_at) ORDER BY tahun`
+              `SELECT YEAR(updated_at) as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE status_kelembagaan = 'nonaktif' AND updated_at IS NOT NULL${diWilayah} GROUP BY YEAR(updated_at) ORDER BY tahun`
             ),
             // Cumulative active count per year: created that year (aktif) minus deactivated that year
             prisma.$queryRawUnsafe(
               `SELECT y.tahun,
-                (SELECT COUNT(*) FROM ${t.model} WHERE YEAR(created_at) <= y.tahun) -
-                (SELECT COUNT(*) FROM ${t.model} WHERE status_kelembagaan = 'nonaktif' AND YEAR(updated_at) <= y.tahun) as jumlah_aktif,
-                (SELECT COUNT(*) FROM ${t.model} WHERE YEAR(created_at) <= y.tahun) as jumlah_total
-              FROM (SELECT DISTINCT YEAR(created_at) as tahun FROM ${t.model} WHERE created_at IS NOT NULL) y
+                (SELECT COUNT(*) FROM ${t.model} WHERE YEAR(created_at) <= y.tahun${diWilayah}) -
+                (SELECT COUNT(*) FROM ${t.model} WHERE status_kelembagaan = 'nonaktif' AND YEAR(updated_at) <= y.tahun${diWilayah}) as jumlah_aktif,
+                (SELECT COUNT(*) FROM ${t.model} WHERE YEAR(created_at) <= y.tahun${diWilayah}) as jumlah_total
+              FROM (SELECT DISTINCT YEAR(created_at) as tahun FROM ${t.model} WHERE created_at IS NOT NULL${diWilayah}) y
               ORDER BY y.tahun`
             ),
             // Cumulative verified count per year
@@ -1078,9 +1084,9 @@ class SummaryController {
             // Turun: lembaga verified yang dinonaktifkan (nonaktif_at) s/d tahun tsb
             prisma.$queryRawUnsafe(
               `SELECT y.tahun,
-                (SELECT COUNT(*) FROM ${t.model} WHERE status_verifikasi = 'verified' AND YEAR(created_at) <= y.tahun) -
-                (SELECT COUNT(*) FROM ${t.model} WHERE status_verifikasi = 'verified' AND status_kelembagaan = 'nonaktif' AND nonaktif_at IS NOT NULL AND YEAR(nonaktif_at) <= y.tahun) as jumlah_verified
-              FROM (SELECT DISTINCT YEAR(created_at) as tahun FROM ${t.model} WHERE created_at IS NOT NULL) y
+                (SELECT COUNT(*) FROM ${t.model} WHERE status_verifikasi = 'verified' AND YEAR(created_at) <= y.tahun${diWilayah}) -
+                (SELECT COUNT(*) FROM ${t.model} WHERE status_verifikasi = 'verified' AND status_kelembagaan = 'nonaktif' AND nonaktif_at IS NOT NULL AND YEAR(nonaktif_at) <= y.tahun${diWilayah}) as jumlah_verified
+              FROM (SELECT DISTINCT YEAR(created_at) as tahun FROM ${t.model} WHERE created_at IS NOT NULL${diWilayah}) y
               ORDER BY y.tahun`
             ),
             // Current totals
@@ -1092,7 +1098,7 @@ class SummaryController {
                 SUM(CASE WHEN status_verifikasi = 'verified' THEN 1 ELSE 0 END) as verified,
                 SUM(CASE WHEN status_verifikasi = 'unverified' THEN 1 ELSE 0 END) as unverified,
                 SUM(CASE WHEN status_verifikasi = 'ditolak' THEN 1 ELSE 0 END) as ditolak
-              FROM ${t.model}`
+              FROM ${t.model} WHERE 1 = 1${diWilayah}`
             ),
           ]);
 
@@ -1802,14 +1808,15 @@ class SummaryController {
   /**
    * Dashboard for all Pengurus across all kelembagaan
    * GET /api/kelembagaan/pengurus-dashboard
-   * Query params: ?kecamatan_id, ?desa_id, ?pengurusable_type, ?search, ?verification_scope
+   * Query params: ?kecamatan_id, ?desa_id, ?pengurusable_type, ?search, ?verification_scope, ?status_pemerintahan
    */
   async pengurusDashboard(req, res) {
     try {
       const {
         kecamatan_id, desa_id, pengurusable_type, search, verification_scope, jabatan,
-        page, per_page, export_all, status_jabatan, tahun, jenis_kelamin, summary_only,
+        page, per_page, export_all, status_jabatan, tahun, jenis_kelamin, summary_only, status_pemerintahan,
       } = req.query;
+      const statusWilayah = parseStatusPemerintahan(status_pemerintahan);
       const requestedScope = String(verification_scope || 'verified').toLowerCase();
       const verificationScope = ['verified', 'unverified', 'ditolak', 'all'].includes(requestedScope)
         ? requestedScope
@@ -1861,6 +1868,7 @@ class SummaryController {
       }
 
       if (desa_id) where.desa_id = BigInt(desa_id);
+      if (statusWilayah) where.desas = { status_pemerintahan: statusWilayah };
       if (pengurusable_type) {
         const normalizedType = String(pengurusable_type).trim();
         const allowedTypes = typeAliases[normalizedType] || [normalizedType];
@@ -2198,12 +2206,14 @@ class SummaryController {
 
       // Get kecamatan list for filter dropdown
       const kecamatans = await prisma.kecamatans.findMany({
+        where: statusWilayah ? { desas: { some: { status_pemerintahan: statusWilayah } } } : {},
         select: { id: true, nama: true },
         orderBy: { nama: 'asc' }
       });
 
       // Get desa list for filter dropdown (optionally filtered by kecamatan)
       const desaWhere = kecamatan_id ? { kecamatan_id: BigInt(kecamatan_id) } : {};
+      if (statusWilayah) desaWhere.status_pemerintahan = statusWilayah;
       const desas = await prisma.desas.findMany({
         where: desaWhere,
         select: { id: true, nama: true, kecamatan_id: true },
