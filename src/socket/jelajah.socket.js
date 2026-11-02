@@ -13,7 +13,7 @@
 //   klien → "sapa" {ke}                             menyapa satu pemain tertentu
 //   klien → "klakson"                               bunyi klakson kendaraan yang dikemudikan
 //   klien → "gaya" {t,b,c,s}                        ganti topi/baju/celana/sepatu (indeks lemari)
-//   klien → "skor" {level,ikan,kg,jenis,balap}      catatan untuk papan peringkat
+//   klien → "skor" {level,ikan,kg,jenis,balap,sirkuit} catatan untuk papan peringkat
 //   klien → "hadiah" {ke, n}                         kirim koin (10/20/50) ke tamu lain
 //   klien → "peringkat" (ack)                       minta papan peringkat
 //   server → "selamat" {id, ruang, pemain[], kendaraan{}}  saat baru masuk
@@ -38,9 +38,9 @@ const gayaBersih = (g) => Object.fromEntries(["t", "b", "c", "s"].map((k) => [k,
 const EMOTE = new Set(['lambai', 'jempol', 'tepuk', 'tawa', 'hati']);
 const POSE = new Set(['jalan', 'duduk', 'mobil', 'motor', 'perahu', 'mancing', 'renang']);
 const ID_KENDARAAN = /^(mobil|motor|perahu):\d{1,2}$/;
-// Batas dunia jelajah: kantor + kawasan Pemda di sekitarnya (lihat BATAS_KAWASAN di
-// dpmd-frontend/src/features/jelajah/scene/kawasanData.js), sedikit dilonggarkan.
-const BATAS = { x0: -200, x1: 650, z0: -730, z1: 180, y0: -1, y1: 9 };
+// Batas dunia jelajah: kompleks Pemda + koridor Jl. Tegar Beriman sampai McD & Cibinong City
+// Mall (lihat BATAS_KAWASAN di dpmd-frontend/src/features/jelajah/scene/kawasanData.js), dilonggarkan.
+const BATAS = { x0: -2100, x1: 1200, z0: -1130, z1: 180, y0: -2, y1: 9 };
 
 // Kata kasar yang paling umum disaring dari nama & chat. Bukan filter sempurna,
 // sekadar mencegah yang paling mencolok tampil di atas kepala tamu lain.
@@ -81,6 +81,7 @@ function ringkasPeringkat() {
     ikan: atas((a, b) => b.kg - a.kg, (c) => c.kg > 0),
     jenis: atas((a, b) => b.jenis - a.jenis, (c) => c.jenis > 0),
     balap: atas((a, b) => a.balap - b.balap, (c) => c.balap > 0),
+    sirkuit: atas((a, b) => a.sirkuit - b.sirkuit, (c) => c.sirkuit > 0),
   };
 }
 
@@ -290,6 +291,7 @@ function initJelajahSocket(io) {
       const lama = peringkat.get(kunci) || {};
       const kg = angka(m.kg, 0, 1000) ?? 0;
       const balap = angka(m.balap, 15, 3600);
+      const sirkuit = angka(m.sirkuit, 60, 7200);
       peringkat.set(kunci, {
         kunci,
         nama: data.nama,
@@ -299,6 +301,7 @@ function initJelajahSocket(io) {
         ikan: kg >= (lama.kg || 0) && typeof m.ikan === 'string' && /^[a-z]{2,12}$/.test(m.ikan) ? m.ikan : lama.ikan || null,
         jenis: Math.round(angka(m.jenis, 0, 200) ?? 0),
         balap: balap ? Math.min(lama.balap || Infinity, bulat(balap)) : lama.balap || null,
+        sirkuit: sirkuit ? Math.min(lama.sirkuit || Infinity, bulat(sirkuit)) : lama.sirkuit || null,
         waktu: Date.now(),
       });
       simpanPeringkat();
