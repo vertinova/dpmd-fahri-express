@@ -28,8 +28,8 @@ const JEDA_GERAK_MS = 80;
 const AVATAR = 4; // pilihan avatar per jenis kelamin
 const KULIT = 3;
 const EMOTE = new Set(['lambai', 'jempol', 'tepuk', 'tawa', 'hati']);
-const POSE = new Set(['jalan', 'duduk', 'mobil', 'motor']);
-const ID_KENDARAAN = /^(mobil|motor):\d{1,2}$/;
+const POSE = new Set(['jalan', 'duduk', 'mobil', 'motor', 'perahu', 'mancing']);
+const ID_KENDARAAN = /^(mobil|motor|perahu):\d{1,2}$/;
 // Batas dunia jelajah: kantor + kawasan Pemda di sekitarnya (lihat BATAS_KAWASAN di
 // dpmd-frontend/src/features/jelajah/scene/kawasanData.js), sedikit dilonggarkan.
 const BATAS = { x0: -200, x1: 650, z0: -730, z1: 180, y0: -1, y1: 9 };
@@ -183,8 +183,11 @@ function initJelajahSocket(io) {
             setir: bulat(angka(k.setir, -1, 1) ?? 0),
             pintu: bulat(angka(k.pintu, 0, 1) ?? 0),
             miring: bulat(angka(k.miring, -1, 1) ?? 0),
+            // 0 = pengemudi; 1–3 = penumpang (mobil berempat, motor & perahu berdua)
+            kursi: Math.round(angka(k.kursi, 0, 3) ?? 0),
           };
-          kendaraan.set(k.id, { x: s.kend.x, z: s.kend.z, rot: s.kend.rot });
+          // Posisi kendaraan untuk tamu yang baru masuk hanya dari pengemudinya.
+          if (s.kend.kursi === 0) kendaraan.set(k.id, { x: s.kend.x, z: s.kend.z, rot: s.kend.rot });
         }
       }
       data.s = s;
