@@ -40,7 +40,7 @@ const POSE = new Set(['jalan', 'duduk', 'mobil', 'motor', 'perahu', 'mancing', '
 const ID_KENDARAAN = /^(mobil|motor|perahu):\d{1,2}$/;
 // Batas dunia jelajah: kompleks Pemda + koridor Jl. Tegar Beriman sampai McD & Cibinong City
 // Mall (lihat BATAS_KAWASAN di dpmd-frontend/src/features/jelajah/scene/kawasanData.js), dilonggarkan.
-const BATAS = { x0: -2100, x1: 1200, z0: -1130, z1: 180, y0: -2, y1: 9 };
+const BATAS = { x0: -2100, x1: 1200, z0: -1130, z1: 180, y0: -2, y1: 26 }; // y sampai Lt 4 Cibinong City Mall
 
 // Kata kasar yang paling umum disaring dari nama & chat. Bukan filter sempurna,
 // sekadar mencegah yang paling mencolok tampil di atas kepala tamu lain.
