@@ -611,6 +611,7 @@ app.use('/api/pemdes/produk-hukum', require('./routes/pemdes-produk-hukum.routes
 app.use('/api/produk-hukum-bidang', require('./routes/produkHukumBidang.routes')); // Produk hukum tingkat kabupaten per bidang
 app.use('/api/produk-hukum-gabungan', require('./routes/produkHukumGabungan.routes')); // Ringkasan desa + bidang + referensi
 app.use('/api/gema', require('./routes/gema.routes')); // Asisten suara Core Dashboard
+app.use('/api/helpdesk', require('./routes/helpdesk.routes')); // Helpdesk: chatbot publik/desa + tiket berjenjang
 app.use('/api/asta-desa', require('./routes/astadesa.routes')); // Proxy baca API super admin ASTA DESA
 // API Asta Desa untuk pihak Bupati — dijaga API key, bukan login DPMD. Namespace
 // '/api/eksternal' dipisah dari '/api/public' supaya tidak ada yang mengira
@@ -709,6 +710,12 @@ function startServer() {
     } catch (err) {
       logger.error('Pemanasan ASTA DESA gagal dijalankan —', err.message);
     }
+
+    // Helpdesk: tabel & isi awal (idempoten), lalu pengingat tiket tertunda tiap jam.
+    require('./services/helpdeskSkema.service').siapkanHelpdesk().then(() => {
+      const { ingatkanTiketTertunda } = require('./controllers/helpdesk.controller');
+      setInterval(ingatkanTiketTertunda, 60 * 60 * 1000).unref();
+    });
 
     // Auto-seed bankeu_perubahan_master_kegiatan (idempotent)
     // Fire-and-forget - jangan blocking startup, error tidak akan crash server
