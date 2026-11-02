@@ -13,6 +13,9 @@
 //   klien → "sapa" {ke}                             menyapa satu pemain tertentu
 //   klien → "klakson"                               bunyi klakson kendaraan yang dikemudikan
 //   klien → "gaya" {t,b,c,s}                        ganti topi/baju/celana/sepatu (indeks lemari)
+//   klien → "skor" {level,ikan,kg,jenis,balap}      catatan untuk papan peringkat
+//   klien → "hadiah" {ke, n}                         kirim koin (10/20/50) ke tamu lain
+//   klien → "peringkat" (ack)                       minta papan peringkat
 //   server → "selamat" {id, ruang, pemain[], kendaraan{}}  saat baru masuk
 //   server → "masuk" / "keluar" / "posisi" / "ucap" / "emote" / "klakson" / "gaya" / "disapa" / "ditolak"
 
@@ -42,6 +45,44 @@ const BATAS = { x0: -200, x1: 650, z0: -730, z1: 180, y0: -1, y1: 9 };
 // Kata kasar yang paling umum disaring dari nama & chat. Bukan filter sempurna,
 // sekadar mencegah yang paling mencolok tampil di atas kepala tamu lain.
 const KATA_KASAR = /\b(anjing|anjg|bangsat|babi|kontol|memek|ngentot|goblok|tolol|asu|jancok|jancuk|bajingan|fuck|shit)\b/gi;
+
+// ---------- papan peringkat ----------
+// Catatan terbaik tiap tamu (per nama) — level, ikan terberat, jumlah jenis ikan, rekor
+// balapan motor — disimpan ke berkas supaya bertahan saat server dimulai ulang. Nilainya
+// dilaporkan klien (permainan santai, bukan kompetisi berhadiah), tetap dibatasi wajar.
+const fs = require('fs');
+const path = require('path');
+const BERKAS_PERINGKAT = path.join(__dirname, '../../data/jelajah/peringkat.json');
+const MAKS_CATATAN = 2000;
+const peringkat = new Map();
+try {
+  for (const c of JSON.parse(fs.readFileSync(BERKAS_PERINGKAT, 'utf8'))) if (c?.kunci) peringkat.set(c.kunci, c);
+} catch {
+  /* belum ada berkas */
+}
+let tundaSimpan = null;
+function simpanPeringkat() {
+  if (tundaSimpan) return;
+  tundaSimpan = setTimeout(() => {
+    tundaSimpan = null;
+    try {
+      fs.mkdirSync(path.dirname(BERKAS_PERINGKAT), { recursive: true });
+      fs.writeFileSync(BERKAS_PERINGKAT, JSON.stringify([...peringkat.values()]));
+    } catch (e) {
+      console.error('[jelajah] gagal menyimpan peringkat:', e.message);
+    }
+  }, 5000);
+}
+function ringkasPeringkat() {
+  const semua = [...peringkat.values()];
+  const atas = (urut, saring = () => true) => semua.filter(saring).sort(urut).slice(0, 10).map(({ kunci, ...c }) => c);
+  return {
+    level: atas((a, b) => b.level - a.level || b.xp - a.xp),
+    ikan: atas((a, b) => b.kg - a.kg, (c) => c.kg > 0),
+    jenis: atas((a, b) => b.jenis - a.jenis, (c) => c.jenis > 0),
+    balap: atas((a, b) => a.balap - b.balap, (c) => c.balap > 0),
+  };
+}
 
 function bersihkanTeks(nilai, maks) {
   if (typeof nilai !== 'string') return '';
@@ -154,6 +195,9 @@ function initJelajahSocket(io) {
     const bolehSapa = pembatas(3, 6000);
     const bolehKlakson = pembatas(5, 3000);
     const bolehGaya = pembatas(6, 10000);
+    const bolehSkor = pembatas(6, 30000);
+    const bolehHadiah = pembatas(5, 60000);
+    const bolehPeringkat = pembatas(10, 30000);
     let gerakTerakhir = 0;
 
     socket.emit('selamat', {
@@ -220,6 +264,8 @@ function initJelajahSocket(io) {
       // Keranjang belanja yang sedang ditenteng (isi: id barang, maks. 12), supaya tamu
       // lain melihatnya di tangan.
       if (Array.isArray(m.kr)) s.kr = m.kr.slice(0, 12).filter((id) => typeof id === 'string' && /^[a-z]{2,12}$/.test(id));
+      // aktivitas yang terlihat tamu lain (mis. sedang makan mie ayam)
+      if (m.ak === 'makan') s.ak = 'makan';
       data.s = s;
       kotor.add(socket.id);
     });
@@ -237,6 +283,32 @@ function initJelajahSocket(io) {
       nsp.to(kamar).emit('emote', { id: socket.id, jenis: m.jenis });
     });
 
+    socket.on('skor', (m) => {
+      if (!m || typeof m !== 'object' || !bolehSkor()) return;
+      const kunci = data.nama.toLowerCase();
+      if (!peringkat.has(kunci) && peringkat.size >= MAKS_CATATAN) return;
+      const lama = peringkat.get(kunci) || {};
+      const kg = angka(m.kg, 0, 1000) ?? 0;
+      const balap = angka(m.balap, 15, 3600);
+      peringkat.set(kunci, {
+        kunci,
+        nama: data.nama,
+        level: Math.round(angka(m.level, 1, 999) ?? 1),
+        xp: Math.round(angka(m.xp, 0, 1e8) ?? 0),
+        kg: Math.max(lama.kg || 0, bulat(kg)),
+        ikan: kg >= (lama.kg || 0) && typeof m.ikan === 'string' && /^[a-z]{2,12}$/.test(m.ikan) ? m.ikan : lama.ikan || null,
+        jenis: Math.round(angka(m.jenis, 0, 200) ?? 0),
+        balap: balap ? Math.min(lama.balap || Infinity, bulat(balap)) : lama.balap || null,
+        waktu: Date.now(),
+      });
+      simpanPeringkat();
+    });
+
+    socket.on('peringkat', (_m, balas) => {
+      if (typeof balas !== 'function' || !bolehPeringkat()) return;
+      balas(ringkasPeringkat());
+    });
+
     socket.on('gaya', (m) => {
       if (!bolehGaya()) return;
       data.gaya = gayaBersih(m);
@@ -247,6 +319,15 @@ function initJelajahSocket(io) {
     socket.on('klakson', () => {
       if (!bolehKlakson()) return;
       socket.to(kamar).emit('klakson', { id: socket.id });
+    });
+
+    // Koin hidup di perangkat masing-masing; pengirim sudah memotong koinnya sendiri,
+    // server hanya meneruskan (jumlah dibatasi & dibatasi lajunya).
+    socket.on('hadiah', (m) => {
+      const ke = typeof m?.ke === 'string' ? m.ke : '';
+      if (![10, 20, 50].includes(m?.n) || !pemain.has(ke) || ke === socket.id || !bolehHadiah()) return;
+      nsp.to(ke).emit('hadiah', { dari: socket.id, nama: data.nama, n: m.n });
+      nsp.to(kamar).emit('emote', { id: socket.id, jenis: 'hati' });
     });
 
     socket.on('sapa', (m) => {
