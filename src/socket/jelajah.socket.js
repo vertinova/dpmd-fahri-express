@@ -11,8 +11,10 @@
 //   klien → "ucap" {teks}                           chat ke semua pemain
 //   klien → "emote" {jenis}                         lambai, jempol, tepuk, tawa, hati
 //   klien → "sapa" {ke}                             menyapa satu pemain tertentu
+//   klien → "klakson"                               bunyi klakson kendaraan yang dikemudikan
+//   klien → "gaya" {t,b,c,s}                        ganti topi/baju/celana/sepatu (indeks lemari)
 //   server → "selamat" {id, ruang, pemain[], kendaraan{}}  saat baru masuk
-//   server → "masuk" / "keluar" / "posisi" / "ucap" / "emote" / "disapa" / "ditolak"
+//   server → "masuk" / "keluar" / "posisi" / "ucap" / "emote" / "klakson" / "gaya" / "disapa" / "ditolak"
 
 // Tamu dibagi ke beberapa "ruang" (salinan kantor) berisi maks. 10 orang: siaran
 // posisi tumbuh kuadrat terhadap jumlah pemain SATU ruang (10 tamu = 100 kiriman
@@ -27,8 +29,11 @@ const TICK_MS = 100;
 const JEDA_GERAK_MS = 80;
 const AVATAR = 4; // pilihan avatar per jenis kelamin
 const KULIT = 3;
+// Lemari gaya tamu: indeks topi/baju/celana/sepatu (0 = bawaan); batas atas longgar
+// supaya katalog di klien bisa bertambah tanpa mengubah server.
+const gayaBersih = (g) => Object.fromEntries(["t", "b", "c", "s"].map((k) => [k, Number.isInteger(g?.[k]) && g[k] >= 0 && g[k] < 32 ? g[k] : 0]));
 const EMOTE = new Set(['lambai', 'jempol', 'tepuk', 'tawa', 'hati']);
-const POSE = new Set(['jalan', 'duduk', 'mobil', 'motor', 'perahu', 'mancing']);
+const POSE = new Set(['jalan', 'duduk', 'mobil', 'motor', 'perahu', 'mancing', 'renang']);
 const ID_KENDARAAN = /^(mobil|motor|perahu):\d{1,2}$/;
 // Batas dunia jelajah: kantor + kawasan Pemda di sekitarnya (lihat BATAS_KAWASAN di
 // dpmd-frontend/src/features/jelajah/scene/kawasanData.js), sedikit dilonggarkan.
@@ -105,7 +110,7 @@ function initJelajahSocket(io) {
     const kulit = Number.isInteger(a.kulit) && a.kulit >= 0 && a.kulit < KULIT ? a.kulit : 0;
     socket.data.ip = ip;
     socket.data.ruang = no;
-    socket.data.profil = { nama, jk, avatar, kulit };
+    socket.data.profil = { nama, jk, avatar, kulit, gaya: gayaBersih(a.gaya) };
     next();
   });
 
@@ -147,6 +152,8 @@ function initJelajahSocket(io) {
     const bolehUcap = pembatas(5, 10000);
     const bolehEmote = pembatas(4, 4000);
     const bolehSapa = pembatas(3, 6000);
+    const bolehKlakson = pembatas(5, 3000);
+    const bolehGaya = pembatas(6, 10000);
     let gerakTerakhir = 0;
 
     socket.emit('selamat', {
@@ -183,6 +190,7 @@ function initJelajahSocket(io) {
             setir: bulat(angka(k.setir, -1, 1) ?? 0),
             pintu: bulat(angka(k.pintu, 0, 1) ?? 0),
             miring: bulat(angka(k.miring, -1, 1) ?? 0),
+            h: bulat(angka(k.h, 0, 5) ?? 0), // tinggi loncatan motor
             // 0 = pengemudi; 1–3 = penumpang (mobil berempat, motor & perahu berdua)
             kursi: Math.round(angka(k.kursi, 0, 3) ?? 0),
           };
@@ -224,6 +232,18 @@ function initJelajahSocket(io) {
     socket.on('emote', (m) => {
       if (!EMOTE.has(m?.jenis) || !bolehEmote()) return;
       nsp.to(kamar).emit('emote', { id: socket.id, jenis: m.jenis });
+    });
+
+    socket.on('gaya', (m) => {
+      if (!bolehGaya()) return;
+      data.gaya = gayaBersih(m);
+      socket.data.profil.gaya = data.gaya;
+      socket.to(kamar).emit('gaya', { id: socket.id, gaya: data.gaya });
+    });
+
+    socket.on('klakson', () => {
+      if (!bolehKlakson()) return;
+      socket.to(kamar).emit('klakson', { id: socket.id });
     });
 
     socket.on('sapa', (m) => {
