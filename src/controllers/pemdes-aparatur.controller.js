@@ -412,7 +412,7 @@ const getGrouped = async (req, res) => {
 
 /**
  * Dua hal yang perlu ditindaklanjuti bidang, untuk kolom notifikasi:
- * aparatur yang sudah lewat 60 tahun dan yang belum diputus verifikasinya.
+ * perangkat desa yang sudah lewat 60 tahun dan yang belum diputus verifikasinya.
  *
  * Keduanya sengaja dibatasi yang berstatus Aktif — yang sudah nonaktif tidak
  * menuntut tindakan apa pun, dan ikut menghitungnya hanya menggelembungkan
@@ -437,7 +437,18 @@ const getNotifikasi = async (req, res) => {
 		};
 		const urut = { desas: { nama: 'asc' } };
 
-		const whereUsia = { ...dasar, tanggal_lahir: { lt: batasLahir } };
+		// Batas 60 tahun hanya berlaku untuk perangkat desa (UU 6/2014 Pasal 53):
+		// kepala desa (termasuk PJ) dan BPD tidak dibatasi usia, jadi tidak
+		// boleh muncul di sini — dulu ikut terdaftar dan malah ditolak verifikator.
+		const whereUsia = {
+			...dasar,
+			AND: [
+				...(dasar.AND || []),
+				filterJenis('perangkat'),
+				...['kepala desa', 'kades'].map((kata) => ({ jabatan: { not: { contains: kata } } })),
+			],
+			tanggal_lahir: { lt: batasLahir },
+		};
 		const whereVerifikasi = { ...dasar, status_verifikasi: null };
 
 		const [totalUsia, contohUsia, totalVerifikasi, contohVerifikasi] = await Promise.all([
