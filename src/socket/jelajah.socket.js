@@ -190,6 +190,25 @@ function initJelajahSocket(io) {
           if (s.kend.kursi === 0) kendaraan.set(k.id, { x: s.kend.x, z: s.kend.z, rot: s.kend.rot });
         }
       }
+      // Pancingan yang sedang berlangsung, supaya tamu lain melihat joran, pelampung,
+      // ikan yang melawan, dan ikan hasil tangkapan.
+      const pc = m.pc;
+      if (pc && typeof pc === 'object') {
+        const f = angka(pc.f, 0, 6);
+        const px = angka(pc.x, BATAS.x0, BATAS.x1);
+        const pz = angka(pc.z, BATAS.z0, BATAS.z1);
+        if (f !== null && px !== null && pz !== null) {
+          s.pc = {
+            f: Math.round(f),
+            x: bulat(px),
+            z: bulat(pz),
+            y: bulat(angka(pc.y, -2, 20) ?? 0),
+            a: bulat(angka(pc.a, -1000, 1000) ?? 0),
+            t: bulat(angka(pc.t, 0, 2) ?? 0),
+            ...(typeof pc.i === 'string' && /^[a-z]{2,12}$/.test(pc.i) ? { i: pc.i, kg: bulat(angka(pc.kg, 0, 1000) ?? 0) } : {}),
+          };
+        }
+      }
       data.s = s;
       kotor.add(socket.id);
     });
