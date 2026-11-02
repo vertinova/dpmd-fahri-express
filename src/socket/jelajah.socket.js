@@ -217,6 +217,9 @@ function initJelajahSocket(io) {
           };
         }
       }
+      // Keranjang belanja yang sedang ditenteng (isi: id barang, maks. 12), supaya tamu
+      // lain melihatnya di tangan.
+      if (Array.isArray(m.kr)) s.kr = m.kr.slice(0, 12).filter((id) => typeof id === 'string' && /^[a-z]{2,12}$/.test(id));
       data.s = s;
       kotor.add(socket.id);
     });
