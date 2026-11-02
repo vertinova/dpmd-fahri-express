@@ -30,8 +30,9 @@ const KULIT = 3;
 const EMOTE = new Set(['lambai', 'jempol', 'tepuk', 'tawa', 'hati']);
 const POSE = new Set(['jalan', 'duduk', 'mobil', 'motor']);
 const ID_KENDARAAN = /^(mobil|motor):\d{1,2}$/;
-// Batas dunia jelajah (lihat dpmd-frontend/src/features/jelajah/scene/layout.js).
-const BATAS = { x0: -40, x1: 40, z0: -30, z1: 50, y0: -1, y1: 9 };
+// Batas dunia jelajah: kantor + kawasan Pemda di sekitarnya (lihat BATAS_KAWASAN di
+// dpmd-frontend/src/features/jelajah/scene/kawasanData.js), sedikit dilonggarkan.
+const BATAS = { x0: -200, x1: 650, z0: -730, z1: 180, y0: -1, y1: 9 };
 
 // Kata kasar yang paling umum disaring dari nama & chat. Bukan filter sempurna,
 // sekadar mencegah yang paling mencolok tampil di atas kepala tamu lain.
