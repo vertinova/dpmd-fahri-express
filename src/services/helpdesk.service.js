@@ -379,7 +379,8 @@ async function buatTiket(d, pesanAwal) {
 const KOLOM_TIKET = `
   t.*, c.name AS category_name, c.icon AS category_icon,
   b.nama AS bidang_nama, k.nama AS kecamatan_nama, d.nama AS desa_nama, h.name AS handled_by_name,
-  (SELECT COUNT(*) FROM helpdesk_messages m WHERE m.ticket_id = t.id) AS jumlah_pesan`;
+  (SELECT COUNT(*) FROM helpdesk_messages m WHERE m.ticket_id = t.id) AS jumlah_pesan,
+  (SELECT m.sender_type FROM helpdesk_messages m WHERE m.ticket_id = t.id AND m.sender_type <> 'sistem' ORDER BY m.id DESC LIMIT 1) AS pengirim_terakhir`;
 
 const JOIN_TIKET = `
   FROM helpdesk_tickets t

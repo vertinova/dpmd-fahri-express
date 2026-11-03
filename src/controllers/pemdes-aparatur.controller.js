@@ -148,6 +148,23 @@ const ejaanJabatanBaku = async (labelGabungan, jenis) => {
 };
 
 /**
+ * Seberapa jauh pemeriksaan satu baris — dipakai antrean Meja Verifikasi dan
+ * tabel, supaya yang setengah diperiksa terbedakan dari yang belum disentuh.
+ * Aturan itemnya sama dengan yang memutus status ringkas (itemBerlaku).
+ */
+const progresVerifikasi = (row) => {
+	const berlaku = itemBerlaku(row);
+	const keputusan = row.verifikasi_item && typeof row.verifikasi_item === 'object' ? row.verifikasi_item : {};
+	const diperiksa = berlaku.filter((item) => item.ada);
+	return {
+		total: diperiksa.length,
+		diperiksa: diperiksa.filter((item) => keputusan[item.key]?.status).length,
+		tidak_sesuai: diperiksa.filter((item) => keputusan[item.key]?.status === 'tidak_sesuai').length,
+		wajib_kosong: berlaku.filter((item) => item.wajib && !item.ada).map((item) => item.label),
+	};
+};
+
+/**
  * Get all aparatur desa across all desas (for bidang/pemdes users)
  * Supports search, filtering by kecamatan/desa/jabatan/gender/status, and pagination
  */
@@ -197,7 +214,7 @@ const getAllAparaturDesa = async (req, res) => {
 		res.json({
 			success: true,
 			message: 'Daftar Aparatur Desa',
-			data,
+			data: data.map((row) => ({ ...row, progres_verifikasi: progresVerifikasi(row) })),
 			meta: {
 				page: pageNum,
 				limit: limitNum,
