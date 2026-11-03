@@ -50,6 +50,8 @@ const requiredDirs = [
   path.join(__dirname, '../storage/uploads/bankeu-perubahan/annotated'),
   path.join(__dirname, '../storage/uploads/bantuan_provinsi_lpj/temp'),
   path.join(__dirname, '../storage/uploads/bankeu_proposal_2025/temp'),
+  path.join(__dirname, '../storage/uploads/cctv/events'),
+  path.join(__dirname, '../storage/uploads/cctv/faces'),
   path.join(__dirname, '../public/backups')
 ];
 
@@ -620,6 +622,9 @@ app.use('/api/eksternal/asta-desa', require('./routes/astaDesaBupati.routes'));
 
 // Video Meeting routes (SFU mediasoup) — aktif kembali setelah port RTC dibuka
 app.use('/api/video-meetings', require('./routes/videoMeeting.routes'));
+
+// Smart CCTV — pengawasan kamera terpadu (kontrak layanan AI + kelola kamera)
+app.use('/api/smart-cctv', require('./routes/smartCctv.routes'));
 
 // Chatbot Smart Search routes
 app.use('/api/chatbot', chatbotRoutes);
