@@ -128,10 +128,25 @@ const bacaIds = (nilai) => {
   return daftar.length ? [...new Set(daftar)] : null;
 };
 
+/**
+ * Sumber data: 'baru' = pernah diisi/diubah akun desa lewat web
+ * (diisi_desa_at terisi), 'lama' = belum pernah disentuh desa (murni impor
+ * CSV/arsip SPKED). Selain itu = semua.
+ */
+const SUMBER_DATA = ['baru', 'lama'];
+const bacaSumber = (nilai) => (SUMBER_DATA.includes(String(nilai || '')) ? String(nilai) : null);
+const LABEL_SUMBER = { baru: 'Data baru — diisi desa lewat web', lama: 'Data lama — impor/arsip, belum diisi desa' };
+const sumberBaris = (b) => (b.diisi_desa_at ? 'baru' : 'lama');
+
 const syaratBumdes = (req) => {
   const ids = bacaIds(req.query.ids);
+  const sumber = bacaSumber(req.query.sumber);
   // req.lingkupBumdes: pembatas wilayah dari rute kecamatan, bila nanti dipakai.
-  return { ...(req.lingkupBumdes || {}), ...(ids ? { id: { in: ids } } : {}) };
+  return {
+    ...(req.lingkupBumdes || {}),
+    ...(ids ? { id: { in: ids } } : {}),
+    ...(sumber === 'baru' ? { diisi_desa_at: { not: null } } : sumber === 'lama' ? { diisi_desa_at: null } : {}),
+  };
 };
 
 /**
@@ -307,10 +322,20 @@ class BumdesEksporController {
         }
       }
 
+      // Jumlah per sumber dari cakupan yang sama (tanpa saring sumber), supaya
+      // panel bisa menampilkan berapa yang baru diisi desa dan berapa data lama.
+      const cakupan = syaratBumdes({ ...req, query: { ...req.query, sumber: '' } });
+      const [jumlahBaru, jumlahSemua] = await Promise.all([
+        prisma.bumdes.count({ where: { ...cakupan, diisi_desa_at: { not: null } } }),
+        prisma.bumdes.count({ where: cakupan }),
+      ]);
+
       return res.json({
         success: true,
         data: {
           jumlah_bumdes: rows.length,
+          sumber: bacaSumber(req.query.sumber) || 'semua',
+          jumlah_per_sumber: { baru: jumlahBaru, lama: jumlahSemua - jumlahBaru },
           tersaring: Boolean(bacaIds(req.query.ids)),
           berkas: {
             jumlah,
@@ -346,12 +371,14 @@ class BumdesEksporController {
     // `ids` ikut DITANDATANGANI, bukan dibaca ulang dari query jalur unduhan:
     // kalau tidak, tiket untuk 5 BUM Desa bisa dipakai menarik seluruh 416.
     const ids = bacaIds(req.body.ids);
+    const sumber = bacaSumber(req.body.sumber);
 
     const tiket = jwt.sign(
       {
         tipe: 'bumdes-ekspor',
         jenis,
         ids: ids ? ids.join(',') : null,
+        sumber,
         uid: String(req.user.id),
         nama: req.user.name,
         email: req.user.email,
@@ -408,17 +435,32 @@ class BumdesEksporController {
     const kolomUtama = Object.keys(rows[0] || {})
       .filter((k) => k !== 'bumdes_produk' && !kolomDaftar.has(k));
 
-    const utama = wb.addWorksheet('Data BUM Desa');
-    utama.columns = [
-      ...kolomUtama.map((k) => ({ header: k, key: k })),
-      { header: 'JumlahProdukAktif', key: '__produk' },
-    ];
-    for (const r of rows) {
-      const baris = { __produk: (r.bumdes_produk || []).filter((p) => p.is_active).length };
-      kolomUtama.forEach((k) => { baris[k] = nilaiSel(r[k]); });
-      utama.addRow(baris);
+    // Data baru (diisi desa lewat web) dan data lama (impor/arsip) dipisah ke
+    // lembar sendiri; ekspor satu sumber cukup satu lembar.
+    const sumber = bacaSumber(req.query.sumber);
+    const lembarUtama = sumber
+      ? [[sumber === 'baru' ? 'Data Baru (diisi desa)' : 'Data Lama', rows]]
+      : [
+          ['Data Baru (diisi desa)', rows.filter((r) => sumberBaris(r) === 'baru')],
+          ['Data Lama', rows.filter((r) => sumberBaris(r) === 'lama')],
+        ];
+    for (const [judul, isi] of lembarUtama) {
+      const utama = wb.addWorksheet(judul);
+      utama.columns = [
+        { header: 'SumberData', key: '__sumber' },
+        ...kolomUtama.map((k) => ({ header: k, key: k })),
+        { header: 'JumlahProdukAktif', key: '__produk' },
+      ];
+      for (const r of isi) {
+        const baris = {
+          __sumber: LABEL_SUMBER[sumberBaris(r)],
+          __produk: (r.bumdes_produk || []).filter((p) => p.is_active).length,
+        };
+        kolomUtama.forEach((k) => { baris[k] = nilaiSel(r[k]); });
+        utama.addRow(baris);
+      }
+      rapikanKepala(utama);
     }
-    rapikanKepala(utama);
 
     // Daftar JSON diratakan: satu baris per entri, dengan identitas BUM Desa
     // ikut di tiap baris supaya lembarnya berdiri sendiri saat di-pivot.
@@ -429,11 +471,12 @@ class BumdesEksporController {
         { header: 'Kecamatan', key: 'kecamatan' },
         { header: 'Desa', key: 'desa' },
         { header: 'NamaBUMDesa', key: 'nama' },
+        { header: 'SumberData', key: '__sumber' },
         ...isian.map((k) => ({ header: k, key: k })),
       ];
       for (const r of rows) {
         for (const entri of bacaDaftar(r[kolom])) {
-          const baris = { id: r.id, kecamatan: r.kecamatan, desa: r.desa, nama: r.namabumdesa };
+          const baris = { id: r.id, kecamatan: r.kecamatan, desa: r.desa, nama: r.namabumdesa, __sumber: sumberBaris(r) === 'baru' ? 'Baru' : 'Lama' };
           isian.forEach((k) => { baris[k] = nilaiSel(entri?.[k]); });
           ws.addRow(baris);
         }
@@ -441,7 +484,7 @@ class BumdesEksporController {
       rapikanKepala(ws);
     }
 
-    const namaBerkas = `bumdes_data_lengkap_${stempel()}.xlsx`;
+    const namaBerkas = `bumdes_data_${sumber || 'lengkap'}_${stempel()}.xlsx`;
     res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     res.setHeader('Content-Disposition', `attachment; filename="${namaBerkas}"`);
     res.setHeader('Cache-Control', 'no-store');
@@ -449,7 +492,7 @@ class BumdesEksporController {
     res.end();
 
     logger.info(`✅ Ekspor data BUM Desa (${rows.length} baris) diunduh oleh ${req.user.email}`);
-    this.catat(req, 'data', `mengunduh ekspor data lengkap ${rows.length} BUM Desa`);
+    this.catat(req, 'data', `mengunduh ekspor data ${sumber ? `${sumber} (${LABEL_SUMBER[sumber]})` : 'lengkap'} ${rows.length} BUM Desa`);
   }
 
   /** berkas → .zip berisi berkas asli, ditata per kecamatan/desa/kelompok. */
@@ -465,7 +508,7 @@ class BumdesEksporController {
       },
     });
 
-    const namaBerkas = `bumdes_berkas_${stempel()}.zip`;
+    const namaBerkas = `bumdes_berkas_${bacaSumber(req.query.sumber) || 'semua'}_${stempel()}.zip`;
     res.setHeader('Content-Type', 'application/zip');
     res.setHeader('Content-Disposition', `attachment; filename="${namaBerkas}"`);
     res.setHeader('Cache-Control', 'no-store');

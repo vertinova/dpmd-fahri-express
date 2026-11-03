@@ -1026,6 +1026,12 @@ model bumdes {
   // Daftar JSON. Tiga kolom berkas di atas adalah berkas lama yang tahunnya
   // tidak pernah tercatat; keduanya sengaja hidup berdampingan.
   DokumenKetahananPangan                                        String?        @db.LongText
+
+  // --- Jejak pengisian oleh akun desa (2026-11) — lihat migrasi 20261103b ---
+  // Pembeda data lama (impor CSV/arsip) dari data yang diisi desa lewat web.
+  // NULL = belum pernah diisi/diubah akun desa.
+  diisi_desa_at                                                 DateTime?      @db.DateTime(0)
+  diisi_desa_oleh                                               BigInt?        @db.UnsignedBigInt
   bumdes_produk                                                 bumdes_produk[]
   produk_hukums_bumdes_produk_hukum_perdes_idToproduk_hukums    produk_hukums? @relation("bumdes_produk_hukum_perdes_idToproduk_hukums", fields: [produk_hukum_perdes_id], references: [id], onUpdate: NoAction, map: "bumdes_produk_hukum_perdes_id_foreign")
   produk_hukums_bumdes_produk_hukum_sk_bumdes_idToproduk_hukums produk_hukums? @relation("bumdes_produk_hukum_sk_bumdes_idToproduk_hukums", fields: [produk_hukum_sk_bumdes_id], references: [id], onUpdate: NoAction, map: "bumdes_produk_hukum_sk_bumdes_id_foreign")
@@ -1036,6 +1042,7 @@ model bumdes {
   @@index([produk_hukum_perdes_id], map: "idx_produk_hukum_perdes_id")
   @@index([produk_hukum_sk_bumdes_id], map: "idx_produk_hukum_sk_bumdes_id")
   @@index([status], map: "idx_status")
+  @@index([diisi_desa_at], map: "idx_bumdes_diisi_desa_at")
 }
 
 /// Katalog produk BUM Desa — etalase tanpa transaksi, tampil di dasbor

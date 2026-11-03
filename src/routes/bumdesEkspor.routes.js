@@ -87,6 +87,8 @@ const verifikasiTiket = (req, res, next) => {
   // Cakupan barisnya diambil dari TIKET, lalu query-nya ditimpa. Kalau dibaca
   // dari query, tiket untuk lima BUM Desa bisa dipakai menarik seluruh 416.
   req.query.ids = isi.ids || '';
+  // Pilihan data baru/lama juga dari tiket — query jalur unduhan diabaikan.
+  req.query.sumber = isi.sumber || '';
 
   // Controller memakai req.user hanya untuk jejak audit; isinya dari tiket,
   // karena tiketnya cuma berumur dua menit.

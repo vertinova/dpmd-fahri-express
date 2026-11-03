@@ -9,6 +9,18 @@ const path = require('path');
 const { KOLOM_DESA, KOLOM_ADMIN, siapkanData, FOLDER_LAMPIRAN, bacaAngka } = require('../config/bumdesFields');
 const { v4: uuidv4 } = require('uuid');
 
+/**
+ * Stempel setiap penulisan baris bumdes. Akun desa ikut meninggalkan
+ * diisi_desa_at/diisi_desa_oleh — satu-satunya pembeda data yang diisi desa
+ * lewat web dari data lama hasil impor (ekspor memisahkan keduanya).
+ */
+const jejakTulis = (user) => ({
+  updated_at: new Date(),
+  ...(user?.role === 'desa' && user?.id
+    ? { diisi_desa_at: new Date(), diisi_desa_oleh: BigInt(String(user.id)) }
+    : {}),
+});
+
 // Dokumen ketahanan pangan LAMA — kolom berkas tunggal tanpa tahun, diunggah
 // lewat /upload-file. Masih dibaca karena berkasnya sudah ada di produksi;
 // unggahan baru masuk ke daftar bertahun di bawah.
@@ -232,13 +244,13 @@ class BumdesController {
         // Update existing
         bumdes = await prisma.bumdes.update({
           where: { id: existing.id },
-          data: dataTersaring
+          data: { ...dataTersaring, ...jejakTulis(req.user) }
         });
         logger.info(`BUMDES updated for desa_id: ${targetDesaId} by user ${userId} (${userRole})`);
       } else {
         // Create new
         bumdes = await prisma.bumdes.create({
-          data: dataTersaring
+          data: { ...dataTersaring, created_at: new Date(), ...jejakTulis(req.user) }
         });
         logger.info(`BUMDES created for desa_id: ${targetDesaId}, id: ${bumdes.id} by user ${userId} (${userRole})`);
       }
@@ -420,7 +432,7 @@ class BumdesController {
       
       await prisma.bumdes.update({
         where: { id: parseInt(bumdes_id) },
-        data: updateData
+        data: { ...updateData, ...jejakTulis(req.user) }
       });
 
       logger.info('BUMDES File uploaded successfully', {
@@ -526,10 +538,26 @@ class BumdesController {
 
       const bumdes = await prisma.bumdes.update({
         where: { id: parseInt(id) },
-        data: dataToUpdate
+        data: { ...dataToUpdate, ...jejakTulis(req.user) }
       });
 
       logger.info(`BUMDES updated: ${id} by ${userRole}`);
+      // Simpan formulir desa sebelumnya tidak berjejak di activity_logs —
+      // riwayatnya hanya tersisa di log server.
+      ActivityLogger.log({
+        userId: BigInt(String(req.user.id)),
+        userName: req.user.name || req.user.email,
+        userRole,
+        bidangId: 3,
+        module: 'bumdes',
+        action: 'update',
+        entityType: 'bumdes',
+        entityId: bumdes.id,
+        entityName: `BUMDes ${bumdes.desa || bumdes.namabumdesa || ''}`.trim(),
+        description: `${req.user.name || req.user.email} memperbarui data BUMDes ${bumdes.desa || ''}`.trim(),
+        ipAddress: ActivityLogger.getIpFromRequest(req),
+        userAgent: ActivityLogger.getUserAgentFromRequest(req),
+      }).catch(() => {});
 
       return res.json({
         success: true,
@@ -1490,7 +1518,7 @@ class BumdesController {
         try {
           await prisma.bumdes.update({
             where: { id: bumdes.id },
-            data: { [padanan.kolomRelasi]: id },
+            data: { [padanan.kolomRelasi]: id, ...jejakTulis(req.user) },
           });
           tertaut = true;
         } catch (errTaut) {
@@ -1647,7 +1675,7 @@ class BumdesController {
           // Clear the field
           await prisma.bumdes.update({
             where: { id: bumdes.id },
-            data: { [field]: null }
+            data: { [field]: null, ...jejakTulis(req.user) }
           });
           updatedCount++;
           logger.info(`Cleared field ${field} for BUMDes ${bumdes.id}`);
@@ -1977,7 +2005,7 @@ const hapusBerkasBaru = async (req, res) => {
     data = { [kolom]: JSON.stringify(baru) };
   }
 
-  await prisma.bumdes.update({ where: { id }, data: { ...data, updated_at: new Date() } });
+  await prisma.bumdes.update({ where: { id }, data: { ...data, ...jejakTulis(req.user) } });
 
   // Hanya berkas di dalam folder yang semestinya yang boleh dihapus.
   const target = path.resolve(path.join(__dirname, '../../storage/uploads', folder, nama));
