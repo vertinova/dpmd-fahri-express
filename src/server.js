@@ -249,7 +249,12 @@ const limiter = rateLimit({
   max: (req) => (milikAkun(req) ? 3000 : 1000),
   keyGenerator: kunciRateLimit,
   // Ditangani oleh limiter khusus di bawah — jangan dihitung dua kali.
-  skip: (req) => req.path === '/auth/renew' || (req.path.startsWith('/asta-desa/') && milikAkun(req)),
+  // media-izin dipanggil nginx untuk tiap permintaan gambar kamera (satu IP
+  // publik sekantor); isinya hanya cek HMAC, jadi tidak ikut kuota umum.
+  skip: (req) =>
+    req.path === '/auth/renew' ||
+    req.path === '/smart-cctv/media-izin' ||
+    (req.path.startsWith('/asta-desa/') && milikAkun(req)),
   handler: balas429('Terlalu banyak permintaan.'),
   standardHeaders: true,
   legacyHeaders: false,
@@ -721,6 +726,12 @@ function startServer() {
       const { ingatkanTiketTertunda } = require('./controllers/helpdesk.controller');
       setInterval(ingatkanTiketTertunda, 60 * 60 * 1000).unref();
     });
+
+    // Smart CCTV: go2rtc menyimpan stream di memori saja — kamera aktif
+    // didaftarkan ulang setelah backend atau go2rtc restart.
+    const { sinkronGo2rtc } = require('./services/smartCctv.service');
+    setTimeout(sinkronGo2rtc, 15000).unref();
+    setInterval(sinkronGo2rtc, 5 * 60 * 1000).unref();
 
     // Auto-seed bankeu_perubahan_master_kegiatan (idempotent)
     // Fire-and-forget - jangan blocking startup, error tidak akan crash server

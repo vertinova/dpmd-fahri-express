@@ -73,21 +73,34 @@ const tanggal = (v) => {
  * Pisahkan kredensialnya ke kolom terpisah supaya bisa dienkripsi dan URL
  * yang tersimpan tetap bersih.
  */
+/**
+ * Ambil URL rtsp:// dari isian. Tempelan dari chat sering membawa teks lain
+ * ("Url nya rtsp://…") — tanpa ini teks itu ikut tersimpan, URL-nya tidak
+ * pernah bisa dibuka, dan kredensialnya tersimpan polos. null = tidak ada URL.
+ */
+const ambilUrlRtsp = (teks) => (String(teks || '').match(/rtsp:\/\/\S+/i) || [])[0] || null;
+
 const pisahKredensial = (url, username, password) => {
-  let urlBersih = String(url || '').trim();
+  let urlBersih = ambilUrlRtsp(url) || String(url || '').trim();
   let user = username ? String(username).trim() : null;
   let pass = password !== undefined && password !== null ? String(password) : null;
 
-  const cocok = urlBersih.match(/^(rtsp:\/\/)([^@/\s]+)@(.+)$/);
-  if (cocok && !user) {
+  // URL SELALU dibersihkan dari kredensial — kalau tidak, sandi tersimpan polos
+  // dan urlEfektif menyisipkan kredensial kedua (rtsp://u@u:p@host). Isian
+  // kolom diutamakan; kredensial di URL hanya mengisi kolom yang kosong.
+  const cocok = urlBersih.match(/^(rtsp:\/\/)([^@/\s]+)@(.+)$/i);
+  if (cocok) {
     const isi = cocok[2];
     const titik = isi.indexOf(':');
-    if (titik >= 0) {
-      user = isi.slice(0, titik);
-      pass = isi.slice(titik + 1);
-    } else {
-      user = isi;
-    }
+    const urai = (t) => {
+      try {
+        return decodeURIComponent(t);
+      } catch {
+        return t;
+      }
+    };
+    if (!user) user = urai(titik >= 0 ? isi.slice(0, titik) : isi);
+    if ((pass === null || pass === '') && titik >= 0) pass = urai(isi.slice(titik + 1));
     urlBersih = `rtsp://${cocok[3]}`;
   }
   if (pass === '') pass = null;
@@ -143,6 +156,29 @@ const daftarKamera = async () => {
 
 const cariKamera = (id) =>
   prisma.cctv_cameras.findUnique({ where: { id: BigInt(id) } });
+
+/**
+ * go2rtc menyimpan stream di memori saja: setelah go2rtc atau backend
+ * restart, kamera aktif harus didaftarkan ulang. Dipanggil saat startup dan
+ * berkala dari server.js; hanya menambah yang belum ada.
+ */
+const sinkronGo2rtc = async () => {
+  try {
+    const ada = await go2rtc.daftarStream();
+    if (ada === null) return; // go2rtc mati — dicoba lagi pada putaran berikutnya
+    const kamera = await prisma.cctv_cameras.findMany({ where: { status: 'active' } });
+    for (const k of kamera) {
+      if (!/^rtsp:\/\//i.test(String(k.rtsp_url))) continue; // URL rusak tidak bisa dibuka go2rtc
+      const src = k.go2rtc_src || `dpmd_${k.id}`;
+      if (ada[src]) continue;
+      if ((await go2rtc.tambahStream(src, urlEfektif(k))) && !k.go2rtc_src) {
+        await prisma.cctv_cameras.update({ where: { id: k.id }, data: { go2rtc_src: src } });
+      }
+    }
+  } catch (err) {
+    console.warn('[go2rtc] Sinkron stream gagal:', err.message);
+  }
+};
 
 // ───────────────────── Kamera: kontrak layanan AI ─────────────────────
 
@@ -633,8 +669,8 @@ const buatKamera = async (input, user) => {
       name: String(input.name).trim(),
       lokasi: input.lokasi ? String(input.lokasi).trim() : null,
       rtsp_url: urlBersih,
-      rtsp_url_main: input.rtsp_url_main ? String(input.rtsp_url_main).trim() : null,
-      rtsp_url_sub: input.rtsp_url_sub ? String(input.rtsp_url_sub).trim() : null,
+      rtsp_url_main: ambilUrlRtsp(input.rtsp_url_main),
+      rtsp_url_sub: ambilUrlRtsp(input.rtsp_url_sub),
       username,
       password_enc: encrypt(password),
       desa_id: input.desa_id ? BigInt(input.desa_id) : null,
@@ -676,8 +712,9 @@ const ubahKamera = async (id, input, user) => {
   if (input.rtsp_url) {
     const { urlBersih, username, password } = pisahKredensial(input.rtsp_url, input.username, input.password);
     data.rtsp_url = urlBersih;
-    data.username = username;
-    data.password_enc = encrypt(password);
+    // Kolom sandi "kosongkan bila tetap": tanpa sandi baru, sandi lama dipertahankan.
+    data.username = username || lama.username;
+    data.password_enc = password ? encrypt(password) : lama.password_enc;
     urlBerubah = true;
   } else if (input.password !== undefined && input.password !== null && input.password !== '') {
     data.password_enc = encrypt(input.password);
@@ -893,9 +930,11 @@ module.exports = {
   STAFF_ROLES,
   serialize,
   pisahKredensial,
+  ambilUrlRtsp,
   urlEfektif,
   daftarKamera,
   cariKamera,
+  sinkronGo2rtc,
   daftarKameraLayanan,
   kameraDetailLayanan,
   daftarEmbeddingLayanan,

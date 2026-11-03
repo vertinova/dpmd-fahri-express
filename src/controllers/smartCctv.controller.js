@@ -14,6 +14,7 @@ const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const svc = require('../services/smartCctv.service');
+const { tokenMedia, tokenMediaSah } = require('../utils/cctvSecret');
 
 const kosong = (res) => res.status(404).json({ success: false, message: 'Data tidak ditemukan' });
 const gagal = (res, err, pesan = 'Terjadi kesalahan pada server') => {
@@ -178,6 +179,9 @@ const buatKamera = async (req, res) => {
     if (!input.rtsp_url || !String(input.rtsp_url).trim()) {
       return res.status(422).json({ success: false, message: 'URL RTSP wajib diisi' });
     }
+    if (!svc.ambilUrlRtsp(input.rtsp_url)) {
+      return res.status(422).json({ success: false, message: 'URL RTSP tidak valid — harus memuat alamat yang diawali rtsp://' });
+    }
     const kamera = await svc.buatKamera(input, req.user);
     await catatKamera(req.user, 'create', `Menambah kamera CCTV "${kamera.name}"`, kamera);
     res.status(201).json({ success: true, data: tanpaPassword(kamera) });
@@ -188,6 +192,9 @@ const buatKamera = async (req, res) => {
 
 const ubahKamera = async (req, res) => {
   try {
+    if (req.body?.rtsp_url && !svc.ambilUrlRtsp(req.body.rtsp_url)) {
+      return res.status(422).json({ success: false, message: 'URL RTSP tidak valid — harus memuat alamat yang diawali rtsp://' });
+    }
     const kamera = await svc.ubahKamera(req.params.id, req.body || {}, req.user);
     if (!kamera) return kosong(res);
     await catatKamera(req.user, 'update', `Memperbarui kamera CCTV "${kamera.name}"`, kamera);
@@ -245,17 +252,42 @@ const urlStream = async (req, res) => {
   try {
     const kamera = await svc.cariKamera(req.params.id);
     if (!kamera) return kosong(res);
+    // URL go2rtc membawa token media: nginx menolak permintaan tanpa token sah
+    // (auth_request ke izinMedia), jadi aliran kamera tidak terbuka untuk umum.
+    const src = kamera.go2rtc_src || `dpmd_${kamera.id}`;
+    const { token, exp } = tokenMedia(src);
+    const q = `src=${encodeURIComponent(src)}&t=${encodeURIComponent(token)}`;
     res.json({
       success: true,
       data: {
-        webrtc_url: kamera.go2rtc_src ? `/go2rtc/api/webrtc?src=${encodeURIComponent(kamera.go2rtc_src)}` : null,
+        webrtc_url: kamera.go2rtc_src ? `/go2rtc/api/webrtc?${q}` : null,
+        go2rtc_mjpeg_url: kamera.go2rtc_src ? `/go2rtc/api/stream.mjpeg?${q}` : null,
+        go2rtc_frame_url: kamera.go2rtc_src ? `/go2rtc/api/frame.jpeg?${q}` : null,
         mjpeg_url: `/ai/cameras/${kamera.id}/stream`,
         snapshot_url: `/ai/cameras/${kamera.id}/snapshot?t=${Date.now()}`,
-        go2rtc_src: kamera.go2rtc_src
+        go2rtc_src: kamera.go2rtc_src,
+        berlaku_sampai: exp * 1000
       }
     });
   } catch (err) {
     gagal(res, err);
+  }
+};
+
+/**
+ * Dipanggil nginx (auth_request) untuk tiap permintaan /go2rtc/api/*.
+ * 204 = token media sah untuk stream itu, 403 = tolak. Hanya nama stream
+ * kamera (dpmd_<id>) yang boleh — src berupa URL ditolak supaya go2rtc tidak
+ * bisa dipakai membuka alamat sembarangan.
+ */
+const izinMedia = (req, res) => {
+  try {
+    const asli = new URL(req.get('X-Original-URI') || '/', 'http://lokal');
+    const src = asli.searchParams.get('src');
+    const sah = /^dpmd_\d+$/.test(src || '') && tokenMediaSah(src, asli.searchParams.get('t'));
+    res.status(sah ? 204 : 403).end();
+  } catch {
+    res.status(403).end();
   }
 };
 
@@ -494,6 +526,7 @@ module.exports = {
   toggleKamera,
   testKoneksi,
   urlStream,
+  izinMedia,
   daftarPeristiwa,
   detailPeristiwa,
   snapshotPeristiwa,

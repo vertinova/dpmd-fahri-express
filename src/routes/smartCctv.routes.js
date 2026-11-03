@@ -43,6 +43,10 @@ const ingestLimiter = rateLimit({
 
 // ───────────── Kelompok 1: kontrak layanan AI (tanpa login) ─────────────
 
+// Pemeriksa token media untuk nginx auth_request (/go2rtc/api/*). Sengaja
+// tanpa auth: yang diperiksa token di URL aslinya, bukan sesi login.
+router.get('/media-izin', ctrl.izinMedia);
+
 router.get('/face-recognition/cameras', ctrl.svcAuth, (req, res) => ctrl.kameraUntukAI(req, res));
 router.get('/face-recognition/cameras/:id', ctrl.svcAuth, (req, res) => ctrl.kameraUntukAIDetail(req, res));
 router.get('/face-recognition/face-embeddings', ctrl.svcAuth, (req, res) => ctrl.embeddingUntukAI(req, res));

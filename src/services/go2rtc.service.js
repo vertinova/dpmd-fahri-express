@@ -18,14 +18,25 @@ const klien = (timeout = 5000) => axios.create({ baseURL: base(), timeout });
 const urlWebRtc = (src) => `/go2rtc/api/webrtc?src=${encodeURIComponent(src)}`;
 
 /** Tambah/replace stream: POST /api/streams?src=NAME&input=URL */
+// Bentuk baku go2rtc untuk membuat stream adalah PUT ?name=NAMA&src=URL
+// (POST dipakai untuk mendorong stream ke tujuan/dst). Bentuk lama tetap
+// dicoba bila PUT ditolak, supaya build go2rtc yang berbeda tidak memutus.
 const tambahStream = async (src, input) => {
+  const nama = encodeURIComponent(src);
+  const url = encodeURIComponent(input);
   try {
-    await klien().post(`/api/streams?src=${encodeURIComponent(src)}&input=${encodeURIComponent(input)}`);
+    await klien().put(`/api/streams?name=${nama}&src=${url}`);
     console.log(`[go2rtc] Stream "${src}" didaftarkan`);
     return true;
-  } catch (err) {
-    console.warn(`[go2rtc] Gagal mendaftarkan stream "${src}":`, err.message);
-    return false;
+  } catch (errPut) {
+    try {
+      await klien().post(`/api/streams?src=${nama}&input=${url}`);
+      console.log(`[go2rtc] Stream "${src}" didaftarkan (bentuk lama)`);
+      return true;
+    } catch (err) {
+      console.warn(`[go2rtc] Gagal mendaftarkan stream "${src}":`, errPut.message, '/', err.message);
+      return false;
+    }
   }
 };
 

@@ -52,4 +52,30 @@ const decrypt = (value) => {
   }
 };
 
-module.exports = { encrypt, decrypt };
+/*
+ * Token media: izin menonton satu stream kamera tanpa header Authorization
+ * (<img>/<video>/WebSocket tidak bisa mengirimnya). Diterbitkan endpoint
+ * stream-url yang mewajibkan login, diperiksa nginx lewat auth_request
+ * sebelum permintaan diteruskan ke go2rtc. Bentuk: "<exp detik>.<hmac>".
+ */
+const UMUR_TOKEN_MEDIA = 12 * 60 * 60;
+const kunciMedia = () =>
+  crypto.createHash('sha256').update(`${process.env.JWT_SECRET || ''}:smart-cctv-media`).digest();
+const tandaMedia = (src, exp) =>
+  crypto.createHmac('sha256', kunciMedia()).update(`${src}.${exp}`).digest('base64url');
+
+const tokenMedia = (src) => {
+  const exp = Math.floor(Date.now() / 1000) + UMUR_TOKEN_MEDIA;
+  return { token: `${exp}.${tandaMedia(src, exp)}`, exp };
+};
+
+const tokenMediaSah = (src, token) => {
+  const [exp, tanda] = String(token || '').split('.');
+  if (!src || !/^\d+$/.test(exp || '') || !tanda) return false;
+  if (Number(exp) < Math.floor(Date.now() / 1000)) return false;
+  const harap = Buffer.from(tandaMedia(src, exp));
+  const dapat = Buffer.from(tanda);
+  return harap.length === dapat.length && crypto.timingSafeEqual(harap, dapat);
+};
+
+module.exports = { encrypt, decrypt, tokenMedia, tokenMediaSah };
