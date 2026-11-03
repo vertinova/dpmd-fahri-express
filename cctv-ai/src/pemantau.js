@@ -2,9 +2,12 @@
  * Pemantau kamera: ambil bingkai dari go2rtc bergiliran, analisis, kirim
  * peristiwa ke backend DPMD (kontrak /api/smart-cctv/internal/*).
  *
- * Bergiliran (satu kamera satu waktu), bukan paralel: CPU server dipakai
- * bersama aplikasi lain, dan dengan ±150–400 ms per bingkai, 9 kamera tetap
- * teranalisis tiap beberapa detik.
+ * Bingkai semua kamera diambil bersamaan (go2rtc menunggu keyframe, jadi
+ * mengambil satu per satu membuat tiap kamera baru dicek belasan detik sekali),
+ * lalu dianalisis bergiliran: CPU server dipakai bersama aplikasi lain.
+ *
+ * Tiap bingkai yang dianalisis digambari kotak (orang, wajah, rebah) dan
+ * disiarkan sebagai MJPEG "tampilan deteksi" ke penonton /cameras/:id/stream.
  */
 const crypto = require('crypto');
 const sharp = require('sharp');
@@ -31,7 +34,7 @@ const segarkanKamera = async () => {
 	const ada = new Set();
 	for (const k of d.cameras || []) {
 		ada.add(k.id);
-		const lama = kamera.get(k.id) || { rebahSejak: null, terakhirRebah: 0, jedaKenal: new Map(), jedaAsing: 0, jedaJatuh: 0, bingkaiTerakhir: null };
+		const lama = kamera.get(k.id) || { rebahSejak: null, terakhirRebah: 0, jedaKenal: new Map(), jedaAsing: 0, jedaJatuh: 0, jedaOrang: 0, orangDilapor: 0, terakhirAdaOrang: 0, bingkaiTerakhir: null, bertanda: null, penonton: new Set() };
 		kamera.set(k.id, {
 			...lama,
 			id: k.id,
@@ -65,18 +68,47 @@ const ambilBingkai = async (id) => {
 	return Buffer.from(await r.arrayBuffer());
 };
 
-/** Potret dengan kotak & label digambar di atasnya (untuk halaman Peringatan). */
-const tandai = async (jpg, lebar, tinggi, kotak, label, warna) => {
-	const [x, y, w, h] = kotak;
-	const aman = String(label).replace(/[<>&"]/g, '');
+/**
+ * Potret dengan kotak & label digambar di atasnya.
+ * tanda: [{ kotak: [x, y, w, h], label, warna }]
+ */
+const tandaiBanyak = async (jpg, lebar, tinggi, tanda) => {
+	if (!tanda.length) return jpg;
 	const tebal = Math.max(2, Math.round(lebar / 320));
 	const huruf = Math.max(12, Math.round(lebar / 45));
-	const svg = `<svg width="${lebar}" height="${tinggi}" xmlns="http://www.w3.org/2000/svg">
-		<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${warna}" stroke-width="${tebal}"/>
+	const isi = tanda
+		.map(({ kotak: [x, y, w, h], label, warna }) => {
+			const aman = String(label).replace(/[<>&"]/g, '');
+			return `<rect x="${x}" y="${y}" width="${w}" height="${h}" fill="none" stroke="${warna}" stroke-width="${tebal}"/>
 		<rect x="${x}" y="${Math.max(0, y - huruf - 6)}" width="${Math.min(lebar - x, aman.length * huruf * 0.62 + 10)}" height="${huruf + 6}" fill="${warna}"/>
-		<text x="${x + 5}" y="${Math.max(huruf, y - 5)}" font-family="sans-serif" font-size="${huruf}" font-weight="bold" fill="#fff">${aman}</text>
-	</svg>`;
-	return sharp(jpg).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).jpeg({ quality: 82 }).toBuffer();
+		<text x="${x + 5}" y="${Math.max(huruf, y - 5)}" font-family="sans-serif" font-size="${huruf}" font-weight="bold" fill="#fff">${aman}</text>`;
+		})
+		.join('');
+	const svg = `<svg width="${lebar}" height="${tinggi}" xmlns="http://www.w3.org/2000/svg">${isi}</svg>`;
+	return sharp(jpg).composite([{ input: Buffer.from(svg), top: 0, left: 0 }]).jpeg({ quality: 80 }).toBuffer();
+};
+const tandai = (jpg, lebar, tinggi, kotak, label, warna) => tandaiBanyak(jpg, lebar, tinggi, [{ kotak, label, warna }]);
+
+// ── tampilan deteksi (MJPEG) ─────────────────────────────────────────────
+const BATAS_MJPEG = '--bingkai';
+const kirimBingkai = (res, jpg) => {
+	try {
+		res.write(`${BATAS_MJPEG}\r\nContent-Type: image/jpeg\r\nContent-Length: ${jpg.length}\r\n\r\n`);
+		res.write(jpg);
+		res.write('\r\n');
+	} catch {
+		/* penonton sudah pergi */
+	}
+};
+const siarkan = (k) => {
+	for (const res of k.penonton) kirimBingkai(res, k.bertanda.jpg);
+};
+
+const jamWib = (ms) => new Date(ms + 7 * 3600 * 1000).getUTCHours();
+const luarJamKerja = (ms) => {
+	const h = jamWib(ms);
+	const hari = new Date(ms + 7 * 3600 * 1000).getUTCDay();
+	return hari === 0 || hari === 6 || h < cfg.JAM_KERJA_MULAI || h >= cfg.JAM_KERJA_SELESAI;
 };
 
 const kirim = async (jalur, isian, potret) => {
@@ -106,12 +138,26 @@ const cocokkan = (embedding) => {
 	return terbaik;
 };
 
-const prosesKamera = async (k) => {
-	const jpg = await ambilBingkai(k.id);
+const prosesKamera = async (k, jpg) => {
 	statistik.bingkai += 1;
 	const { lebar, tinggi, orang } = await deteksi.analisis(jpg);
 	const kini = Date.now();
 	k.bingkaiTerakhir = { pada: new Date(kini).toISOString(), orang: orang.length };
+	let adaPeristiwaWajah = false;
+
+	// ── Tampilan deteksi: semua orang, wajah, & yang rebah digambari kotak ──
+	const tanda = [];
+	for (const o of orang) {
+		tanda.push({ kotak: o.kotak, label: o.rebah ? 'Rebah' : `Orang ${Math.round(o.skor * 100)}%`, warna: o.rebah ? '#dc2626' : '#f59e0b' });
+		const w = o.wajah;
+		if (w && w.skor >= cfg.MIN_SKOR_WAJAH && w.kotak[2] >= cfg.MIN_WAJAH_PX && wajahTerdaftar.length) {
+			const cocok = cocokkan(w.embedding);
+			const kenal = cocok && cocok.nilai >= cfg.AMBANG_KENAL;
+			tanda.push({ kotak: w.kotak, label: kenal ? cocok.nama : 'Tidak dikenal', warna: kenal ? '#16a34a' : '#dc2626' });
+		}
+	}
+	k.bertanda = { jpg: await tandaiBanyak(jpg, lebar, tinggi, tanda), pada: kini };
+	siarkan(k);
 
 	// ── Wajah dikenal / tak dikenal ───────────────────────────────────────
 	if (k.wajahAktif) {
@@ -128,6 +174,7 @@ const prosesKamera = async (k) => {
 				k.jedaAsing = kini;
 			}
 			const potret = await tandai(jpg, lebar, tinggi, w.kotak, kenal ? cocok.nama : 'Tidak dikenal', kenal ? '#16a34a' : '#dc2626');
+			adaPeristiwaWajah = true;
 			await kirim('recognition-events', {
 				event_uuid: crypto.randomUUID(),
 				camera_id: k.id,
@@ -167,6 +214,33 @@ const prosesKamera = async (k) => {
 			k.rebahSejak = null;
 		}
 	}
+
+	// ── Orang terdeteksi (termasuk yang membelakangi kamera / di tepi bingkai) ──
+	// Dilaporkan paling sering sekali per JEDA_ORANG_MS per kamera, atau segera bila
+	// jumlah orangnya bertambah. Di luar jam kerja / hari libur menjadi peringatan.
+	if (orang.length) {
+		k.terakhirAdaOrang = kini;
+		const bertambah = orang.length > k.orangDilapor;
+		if (!adaPeristiwaWajah && (bertambah || kini - k.jedaOrang >= cfg.JEDA_ORANG_MS) && kini - k.jedaOrang >= 8000) {
+			k.jedaOrang = kini;
+			k.orangDilapor = orang.length;
+			const luar = luarJamKerja(kini);
+			const utama = [...orang].sort((a, b) => b.kotak[2] * b.kotak[3] - a.kotak[2] * a.kotak[3])[0];
+			await kirim('emergency-events', {
+				event_uuid: crypto.randomUUID(),
+				camera_id: k.id,
+				type: 'person',
+				severity: luar ? 'warning' : 'info',
+				confidence: utama.skor.toFixed(4),
+				bbox: utama.kotak,
+				jumlah_orang: orang.length,
+				luar_jam_kerja: luar,
+				occurred_at: new Date(kini).toISOString(),
+			}, k.bertanda.jpg);
+		}
+	} else if (k.orangDilapor && kini - k.terakhirAdaOrang > 30000) {
+		k.orangDilapor = 0;
+	}
 };
 
 const jalan = async () => {
@@ -179,10 +253,24 @@ const jalan = async () => {
 				await segarkanWajah();
 				terakhirSegar = mulai;
 			}
-			for (const k of kamera.values()) {
-				if (!k.aktif || dihentikan.has(k.id) || (!k.wajahAktif && !k.jatuhAktif)) continue;
+			const giliran = [...kamera.values()].filter((k) => k.aktif && !dihentikan.has(k.id) && (k.wajahAktif || k.jatuhAktif));
+			const bingkai = new Map();
+			for (let i = 0; i < giliran.length; i += 4) {
+				await Promise.all(
+					giliran.slice(i, i + 4).map((k) =>
+						ambilBingkai(k.id).then(
+							(jpg) => bingkai.set(k.id, jpg),
+							(err) => bingkai.set(k.id, err),
+						),
+					),
+				);
+			}
+			for (const k of giliran) {
+				const jpg = bingkai.get(k.id);
 				try {
-					await prosesKamera(k);
+					if (jpg instanceof Error) throw jpg;
+					await prosesKamera(k, jpg);
+					k.galat = null;
 				} catch (err) {
 					statistik.gagalBingkai += 1;
 					k.galat = err.message;
@@ -199,7 +287,31 @@ const jalan = async () => {
 	}
 };
 
+/** Penonton MJPEG tampilan deteksi kamera id. Mengembalikan false bila kamera tak dikenal. */
+const tonton = (id, res) => {
+	const k = kamera.get(Number(id));
+	if (!k) return false;
+	res.writeHead(200, {
+		'Content-Type': `multipart/x-mixed-replace; boundary=${BATAS_MJPEG.slice(2)}`,
+		'Cache-Control': 'no-store',
+		Connection: 'keep-alive',
+		'X-Accel-Buffering': 'no',
+	});
+	k.penonton.add(res);
+	if (k.bertanda) kirimBingkai(res, k.bertanda.jpg);
+	// bingkai terakhir diulang tiap 5 dtk supaya sambungan tidak dianggap mati
+	const detak = setInterval(() => k.bertanda && kirimBingkai(res, k.bertanda.jpg), 5000);
+	res.on('close', () => {
+		clearInterval(detak);
+		k.penonton.delete(res);
+	});
+	return true;
+};
+const bingkaiBertanda = (id) => kamera.get(Number(id))?.bertanda?.jpg || null;
+
 module.exports = {
+	tonton,
+	bingkaiBertanda,
 	jalan,
 	mulai: (id) => { dihentikan.delete(Number(id)); },
 	berhenti: (id) => { dihentikan.add(Number(id)); },

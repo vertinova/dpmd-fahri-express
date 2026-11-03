@@ -15,6 +15,7 @@ const path = require('path');
 const fs = require('fs');
 const { pathToFileURL, fileURLToPath } = require('url');
 const sharp = require('sharp');
+const cfg = require('./config');
 
 const MODUL = path.join(__dirname, '..', 'node_modules');
 
@@ -49,7 +50,7 @@ const pendeteksiOrang = new Human({
 	...dasar,
 	face: { enabled: false },
 	body: { enabled: false },
-	object: { enabled: true, modelPath: 'centernet.json', minConfidence: 0.35, maxDetected: 20 },
+	object: { enabled: true, modelPath: 'centernet.json', minConfidence: cfg.MIN_SKOR_ORANG, maxDetected: 20 },
 });
 
 const pemeriksa = new Human({
@@ -148,8 +149,13 @@ const analisis = async (jpg) => {
 		const badan = r.body[0];
 		const sudut = badan && badan.score >= 0.3 ? sudutBadan(badan) : null;
 		// Rebah: badan mendatar menurut pose, atau — bila pose tidak terbaca —
-		// kotak orangnya jauh lebih lebar daripada tingginya.
-		const rebah = sudut !== null ? sudut >= 60 : w > h * 1.4;
+		// kotak orangnya jauh lebih lebar daripada tingginya. Tebakan dari bentuk
+		// kotak hanya dipakai bila orangnya utuh di dalam bingkai, cukup besar, dan
+		// yakin: kepala/badan yang terpotong di tepi bingkai juga berkotak lebar
+		// (penyebab alarm "jatuh" palsu).
+		const tepi = Math.max(4, Math.min(lebar, tinggi) * 0.02);
+		const terpotong = x <= tepi || y <= tepi || x + w >= lebar - tepi || y + h >= tinggi - tepi;
+		const rebah = sudut !== null ? sudut >= 60 : !terpotong && o.score >= 0.5 && h >= tinggi * 0.08 && w > h * 1.6;
 		orang.push({ kotak: [x, y, w, h].map(Math.round), skor: o.score, wajah, sudut, rebah });
 	}
 	return { lebar, tinggi, orang };

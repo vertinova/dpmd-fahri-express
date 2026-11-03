@@ -8,7 +8,7 @@
  *  2. Pengelolaan kamera: CRUD + sinkron stream ke go2rtc + start/stop thread AI.
  *  3. Riwayat, pengakuan peristiwa, statistik, playback DVR, enrollment wajah.
  *
- * Setiap peristiwa baru: socket `cctv_alert` → Web Push → (opsional) mirror
+ * Setiap peristiwa baru: socket `cctv_alert` (tanpa Web Push) → (opsional) mirror
  * ke dashboard Laravel paralel yang berfungsi sebagai pembanding.
  */
 
@@ -18,10 +18,9 @@ const crypto = require('crypto');
 const axios = require('axios');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
-const { encrypt, decrypt } = require('../utils/cctvSecret');
+const { encrypt, decrypt, tokenMedia } = require('../utils/cctvSecret');
 const go2rtc = require('./go2rtc.service');
 const { emitCctvAlert } = require('../socket/cctv.socket');
-const pushNotification = require('./pushNotification.service');
 
 const AKAR = path.join(__dirname, '../..');
 const DIR_EVENT = path.join(AKAR, 'storage/uploads/cctv/events');
@@ -37,7 +36,8 @@ const STAFF_ROLES = [
   'pegawai'
 ];
 
-const JENIS_DIKENAL = ['known', 'unknown', 'fall', 'fall_warning', 'immobility', 'other'];
+// person = orang terdeteksi tanpa wajah yang bisa dikenali (membelakangi kamera, jauh, di tepi bingkai)
+const JENIS_DIKENAL = ['known', 'unknown', 'fall', 'fall_warning', 'immobility', 'other', 'person'];
 const STATUS_DIKENAL = ['active', 'acknowledged', 'resolved'];
 
 const aiBase = () => (process.env.PYTHON_AI_URL || 'http://127.0.0.1:8001').replace(/\/+$/, '');
@@ -282,7 +282,7 @@ const tulisSnapshot = (buffer, uuid, prefix) => {
   }
 };
 
-// ─────────────────────── Sebar peristiwa (socket+push+mirror) ───────────────────────
+// ─────────────────────── Sebar peristiwa (socket+mirror) ───────────────────────
 
 const sebarPeristiwa = async (peristiwa, kamera) => {
   // 1. Socket — grid kamera & toast staf langsung ter-update.
@@ -302,24 +302,8 @@ const sebarPeristiwa = async (peristiwa, kamera) => {
   } catch (err) {
     logger.warn(`[SmartCCTV] Gagal broadcast cctv_alert: ${err.message}`);
   }
-
-  // 2. Web Push — hanya peristiwa yang butuh perhatian (bukan wajah dikenal).
-  if (peristiwa.severity !== 'info') {
-    try {
-      const label =
-        peristiwa.type === 'fall' ? 'Terkdeteksi JATUH'
-        : peristiwa.type === 'fall_warning' ? 'Peringatan jatuh'
-        : peristiwa.type === 'unknown' ? 'Wajah tidak dikenal'
-        : 'Peristiwa CCTV';
-      await pushNotification.sendToRoles(STAFF_ROLES, {
-        title: `Smart CCTV — ${label}`,
-        body: `${kamera ? kamera.name : 'Kamera'}${peristiwa.nama ? ` · ${peristiwa.nama}` : ''} · ${new Date(peristiwa.occurred_at).toLocaleString('id-ID')}`,
-        path: `cctv/history?event=${peristiwa.id}`
-      });
-    } catch (err) {
-      logger.warn(`[SmartCCTV] Gagal mengirim push: ${err.message}`);
-    }
-  }
+  // Sengaja tanpa Web Push: peringatan CCTV hanya tampil di dalam aplikasi
+  // (socket, untuk staf berizin "peringatan") supaya tidak membanjiri ponsel pegawai.
 };
 
 /**
@@ -442,14 +426,16 @@ const simpanEmergencyEvent = async (fields, buffer) => {
     snapshot_path: snapshot,
     metadata: {
       fallen_duration: angka(fields.fallen_duration),
-      body_angle: angka(fields.body_angle)
+      body_angle: angka(fields.body_angle),
+      jumlah_orang: angka(fields.jumlah_orang),
+      luar_jam_kerja: fields.luar_jam_kerja === 'true' || fields.luar_jam_kerja === '1'
     },
     occurred_at: tanggal(fields.occurred_at) || new Date()
   };
 
   const peristiwa = await prisma.cctv_events.create({ data });
 
-  const fieldsMirror = { ...fields, type: jenis === 'fall_warning' ? 'other' : jenis };
+  const fieldsMirror = { ...fields, type: jenis === 'fall_warning' || jenis === 'person' ? 'other' : jenis };
   mirrorMultipart('/internal/emergency-events', fieldsMirror, buffer, 'emergency.jpg');
   const hasil = await sebarSetelahSimpan(peristiwa, kamera.id);
   return { status: 201, hasil: { success: true, log: hasil } };
@@ -768,59 +754,125 @@ const toggleKamera = async (id, aktif) => {
 // ───────────────────────────── Playback DVR ─────────────────────────────
 
 /**
- * Playback DVR Hikvision diproses layanan AI (ffmpeg → HLS).
- * Awalan "/ai" ditambahkan DI SINI (satu-satunya tempat) agar browser
- * same-origin lewat proxy. Frontend memakai stream_url apa adanya — JANGAN
- * menambah "/ai" lagi di sisi klien (menyebabkan /ai/ai/... → 404).
+ * Pemutaran ulang rekaman DVR/NVR Hikvision lewat go2rtc.
+ *
+ * DVR Hikvision menyajikan rekaman sebagai RTSP "tracks":
+ *   live     rtsp://…/Streaming/Channels/402            (kanal 4, sub-stream)
+ *   rekaman  rtsp://…/Streaming/tracks/401?starttime=20261103T145300Z
+ * starttime ditulis dalam jam LOKAL perangkat (WIB) dengan akhiran "Z".
+ *
+ * Tiap sesi = satu stream go2rtc sementara bernama "pb_<sid>" yang diputar di
+ * peramban lewat /go2rtc/api/ws (MSE, sama dengan live view) dengan token media.
+ * Geser waktu = daftarkan ulang stream yang sama dengan starttime baru.
+ * Sesi yang ditinggal dibersihkan otomatis.
  */
+const SESI_PLAYBACK = new Map(); // sid → { src, kameraId, start, timer }
+const SESI_KEDALUWARSA_MS = 2 * 60 * 60 * 1000;
+const WIB_MS = 7 * 60 * 60 * 1000;
+
+/** "2026-11-03T00:00:00" tanpa zona = WIB; ISO berzona dipakai apa adanya. */
+const bacaWaktu = (iso) => {
+  if (!iso) return null;
+  const s = String(iso);
+  const t = /([zZ]|[+-]\d\d:?\d\d)$/.test(s) ? new Date(s) : new Date(`${s}+07:00`);
+  return Number.isNaN(t.getTime()) ? null : t;
+};
+const jamHik = (t) => new Date(t.getTime() + WIB_MS).toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+
+/**
+ * Sumber go2rtc untuk rekaman, dari URL live kamera (beserta kredensialnya).
+ * DVR kantor merekam main-stream (…01) dalam H.265 — sub-stream tidak direkam —
+ * dan banyak peramban tidak bisa memutar H.265 lewat MSE, jadi go2rtc diminta
+ * mentranskode ke H.264 1280 px (ffmpeg) selama sesi berjalan; audio PCMU dibuang.
+ */
+const urlRekaman = (kamera, mulai, selesai) => {
+  const live = urlEfektif(kamera);
+  const m = /\/Streaming\/Channels\/(\d+)/i.exec(live);
+  if (!m) return null;
+  const kanal = Math.floor(Number(m[1]) / 100) || Number(m[1]);
+  const dasar = live.slice(0, m.index) + `/Streaming/tracks/${kanal}01`;
+  return `ffmpeg:${dasar}?starttime=${jamHik(mulai)}${selesai ? `&endtime=${jamHik(selesai)}` : ''}#video=h264#width=1280`;
+};
+
+const balasanSesi = (sid, sesi) => {
+  const { token } = tokenMedia(sesi.src);
+  return {
+    sid,
+    camera_id: sesi.kameraId,
+    mode: 'mse',
+    src: sesi.src,
+    ws_url: `/go2rtc/api/ws?src=${encodeURIComponent(sesi.src)}&t=${encodeURIComponent(token)}`,
+    start_ts: Math.floor(sesi.start.getTime() / 1000),
+    start_iso: sesi.start.toISOString()
+  };
+};
+
+const segarkanTimer = (sid) => {
+  const sesi = SESI_PLAYBACK.get(sid);
+  if (!sesi) return;
+  clearTimeout(sesi.timer);
+  sesi.timer = setTimeout(() => stopPlayback(sid).catch(() => {}), SESI_KEDALUWARSA_MS);
+  sesi.timer.unref?.();
+};
+
+const pasangRekaman = async (sesi, kamera, mulai, lookaheadMin) => {
+  const akhir = new Date(mulai.getTime() + Math.max(1, Number(lookaheadMin) || 60) * 60000);
+  const url = urlRekaman(kamera, mulai, akhir);
+  if (!url) return 'Kamera ini bukan DVR/NVR Hikvision (URL RTSP tidak berpola /Streaming/Channels/…) — pemutaran ulang belum didukung.';
+  if (!(await go2rtc.tambahStream(sesi.src, url))) return 'Gagal menyiapkan pemutaran di go2rtc.';
+  sesi.start = mulai;
+  return null;
+};
+
 const putarPlayback = async (body) => {
-  try {
-    const { data } = await axios.post(`${aiBase()}/api/v1/playback/session`, body, { timeout: 30000 });
-    if (data && data.stream_url) data.stream_url = `/ai${data.stream_url}`;
-    return { ok: true, data };
-  } catch (err) {
-    const pesan = err.response && err.response.data ? err.response.data : { message: err.message };
-    return { ok: false, status: err.response ? err.response.status : 503, data: pesan };
-  }
+  const kamera = await cariKamera(angka(body?.camera_id));
+  if (!kamera) return { ok: false, status: 404, data: { success: false, message: 'Kamera tidak ditemukan' } };
+  const mulai = bacaWaktu(body.start_iso);
+  if (!mulai) return { ok: false, status: 422, data: { success: false, message: 'Waktu mulai tidak valid' } };
+  if (mulai.getTime() > Date.now()) return { ok: false, status: 422, data: { success: false, message: 'Waktu mulai belum terjadi' } };
+  const sid = crypto.randomBytes(8).toString('hex');
+  const sesi = { src: `pb_${sid}`, kameraId: Number(kamera.id), start: mulai, timer: null };
+  const galat = await pasangRekaman(sesi, kamera, mulai, body.lookahead_min);
+  if (galat) return { ok: false, status: 502, data: { success: false, message: galat } };
+  SESI_PLAYBACK.set(sid, sesi);
+  segarkanTimer(sid);
+  return { ok: true, data: balasanSesi(sid, sesi) };
 };
 
 const seekPlayback = async (sid, body) => {
-  try {
-    const { data } = await axios.post(`${aiBase()}/api/v1/playback/session/${encodeURIComponent(sid)}/seek`, body, {
-      timeout: 30000
-    });
-    if (data && data.stream_url) data.stream_url = `/ai${data.stream_url}`;
-    return { ok: true, data };
-  } catch (err) {
-    const pesan = err.response && err.response.data ? err.response.data : { message: err.message };
-    return { ok: false, status: err.response ? err.response.status : 503, data: pesan };
-  }
+  const sesi = SESI_PLAYBACK.get(sid);
+  if (!sesi) return { ok: false, status: 404, data: { success: false, message: 'Sesi pemutaran sudah berakhir — tekan Putar lagi' } };
+  const kamera = await cariKamera(sesi.kameraId);
+  const mulai = bacaWaktu(body?.start_iso);
+  if (!kamera || !mulai) return { ok: false, status: 422, data: { success: false, message: 'Waktu tidak valid' } };
+  const galat = await pasangRekaman(sesi, kamera, mulai, body.lookahead_min);
+  if (galat) return { ok: false, status: 502, data: { success: false, message: galat } };
+  segarkanTimer(sid);
+  return { ok: true, data: balasanSesi(sid, sesi) };
 };
 
 const stopPlayback = async (sid) => {
-  try {
-    const { data } = await axios.post(`${aiBase()}/api/v1/playback/session/${encodeURIComponent(sid)}/stop`, {}, {
-      timeout: 10000
-    });
-    return { ok: true, data };
-  } catch (err) {
-    const pesan = err.response && err.response.data ? err.response.data : { message: err.message };
-    return { ok: false, status: err.response ? err.response.status : 503, data: pesan };
-  }
+  const sesi = SESI_PLAYBACK.get(sid);
+  if (!sesi) return { ok: true, data: { success: true, stopped: false } };
+  clearTimeout(sesi.timer);
+  SESI_PLAYBACK.delete(sid);
+  await go2rtc.hapusStream(sesi.src);
+  return { ok: true, data: { success: true, stopped: true } };
 };
 
+// Ketersediaan rekaman tidak bisa ditanyakan tanpa ISAPI; cukup tolak yang pasti
+// mustahil (kamera bukan Hikvision / tanggal di masa depan).
 const ketersediaanPlayback = async (cameraId, tanggalStr) => {
-  try {
-    const { data } = await axios.get(`${aiBase()}/api/v1/playback/availability`, {
-      params: { camera_id: cameraId, date: tanggalStr },
-      timeout: 15000
-    });
-    return { ok: true, data };
-  } catch (err) {
-    const pesan = err.response && err.response.data ? err.response.data : { message: err.message };
-    return { ok: false, status: err.response ? err.response.status : 503, data: pesan };
-  }
+  const kamera = await cariKamera(angka(cameraId));
+  if (!kamera) return { ok: true, data: { available: false, reason: 'no_camera' } };
+  if (!/\/Streaming\/Channels\/\d+/i.test(kamera.rtsp_url_main || kamera.rtsp_url || '')) return { ok: true, data: { available: false, reason: 'unsupported' } };
+  const hari = bacaWaktu(`${tanggalStr}T00:00:00`);
+  if (!hari || hari.getTime() > Date.now()) return { ok: true, data: { available: false, reason: 'future' } };
+  return { ok: true, data: { available: true, reason: null } };
 };
+
+/** Nama stream go2rtc sesi pemutaran yang masih hidup (untuk izinMedia). */
+const sesiPlaybackHidup = (src) => [...SESI_PLAYBACK.values()].some((s) => s.src === src);
 
 // ───────────────────────────── Wajah (enrollment) ─────────────────────────────
 
@@ -961,6 +1013,7 @@ module.exports = {
   seekPlayback,
   stopPlayback,
   ketersediaanPlayback,
+  sesiPlaybackHidup,
   daftarWajah,
   buatWajah,
   tambahFotoWajah,

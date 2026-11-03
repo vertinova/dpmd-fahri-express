@@ -31,6 +31,12 @@ module.exports = {
 	JEDA_KENAL_MS: angka('CCTV_AI_JEDA_KENAL_MS', 5 * 60 * 1000), // orang yang sama di kamera yang sama
 	JEDA_ASING_MS: angka('CCTV_AI_JEDA_ASING_MS', 2 * 60 * 1000), // "tidak dikenal" per kamera
 
+	// Orang terdeteksi (tanpa wajah yang bisa dikenali: membelakangi kamera, jauh, di tepi)
+	MIN_SKOR_ORANG: angka('CCTV_AI_MIN_SKOR_ORANG', 0.3),
+	JEDA_ORANG_MS: angka('CCTV_AI_JEDA_ORANG_MS', 60 * 1000), // per kamera; jumlah orang bertambah = lapor lagi
+	JAM_KERJA_MULAI: angka('CCTV_AI_JAM_KERJA_MULAI', 7), // WIB; di luar jam ini "orang" jadi peringatan
+	JAM_KERJA_SELESAI: angka('CCTV_AI_JAM_KERJA_SELESAI', 17),
+
 	// Jatuh
 	BATAS_JATUH_DETIK: angka('CCTV_AI_BATAS_JATUH_DETIK', 8), // rebah selama ini = jatuh
 	LUPA_REBAH_MS: angka('CCTV_AI_LUPA_REBAH_MS', 10000), // tidak rebah selama ini = hitungan diulang

@@ -6,8 +6,9 @@
  *    (Facial-recognition-cctv), dijaga API key / token internal, TANPA login.
  *    Path-nya sengaja dibuat sama persis dengan dashboard Laravel lama supaya
  *    layanan AI cukup mengganti LARAVEL_API_URL tanpa mengubah kode.
- * 2. Kamera, riwayat, statistik, playback — login + peran staf DPMD.
- * 3. Wajah (enrollment) — login + peran staf DPMD.
+ * 2. Kamera, riwayat, statistik, playback — login + staf DPMD + izin Smart CCTV.
+ * 3. Wajah (enrollment) — login + staf DPMD + izin "wajah".
+ * 4. Akses — superadmin menentukan siapa memakai bagian mana (lihat cctvAccess.js).
  *
  * Semua rute berawalan statis didepankan sebelum rute parameter.
  */
@@ -18,6 +19,8 @@ const router = express.Router();
 const { auth, checkRole } = require('../middlewares/auth');
 const { uploadCctvEvent, uploadCctvFoto } = require('../middlewares/upload');
 const ctrl = require('../controllers/smartCctv.controller');
+const akses = require('../controllers/cctvAkses.controller');
+const { butuhCctv } = require('../middlewares/cctvAccess');
 
 const STAFF_ROLES = [
   'superadmin',
@@ -76,38 +79,48 @@ router.post(
 
 const staf = checkRole(...STAFF_ROLES);
 
-router.get('/kamera', auth, staf, (req, res) => ctrl.daftarKamera(req, res));
-router.post('/kamera', auth, staf, (req, res) => ctrl.buatKamera(req, res));
-router.get('/kamera/stream-url/:id', auth, staf, (req, res) => ctrl.urlStream(req, res));
-router.get('/kamera/:id', auth, staf, (req, res) => ctrl.detailKamera(req, res));
-router.patch('/kamera/:id', auth, staf, (req, res) => ctrl.ubahKamera(req, res));
-router.delete('/kamera/:id', auth, staf, (req, res) => ctrl.hapusKamera(req, res));
-router.post('/kamera/:id/toggle', auth, staf, (req, res) => ctrl.toggleKamera(req, res));
-router.post('/kamera/:id/test', auth, staf, (req, res) => ctrl.testKoneksi(req, res));
+router.get('/kamera', auth, staf, butuhCctv('lihat', 'peringatan', 'kamera'), (req, res) => ctrl.daftarKamera(req, res));
+router.post('/kamera', auth, staf, butuhCctv('kamera'), (req, res) => ctrl.buatKamera(req, res));
+router.get('/kamera/stream-url/:id', auth, staf, butuhCctv('lihat'), (req, res) => ctrl.urlStream(req, res));
+router.get('/kamera/:id', auth, staf, butuhCctv('lihat', 'kamera'), (req, res) => ctrl.detailKamera(req, res));
+router.patch('/kamera/:id', auth, staf, butuhCctv('kamera'), (req, res) => ctrl.ubahKamera(req, res));
+router.delete('/kamera/:id', auth, staf, butuhCctv('kamera'), (req, res) => ctrl.hapusKamera(req, res));
+router.post('/kamera/:id/toggle', auth, staf, butuhCctv('kamera'), (req, res) => ctrl.toggleKamera(req, res));
+router.post('/kamera/:id/test', auth, staf, butuhCctv('kamera'), (req, res) => ctrl.testKoneksi(req, res));
 
 // ───────────── Kelompok 2: riwayat, statistik, playback (staf DPMD) ─────────────
 
-router.get('/stats', auth, staf, (req, res) => ctrl.statistik(req, res));
+router.get('/stats', auth, staf, butuhCctv('peringatan'), (req, res) => ctrl.statistik(req, res));
 
-router.get('/events', auth, staf, (req, res) => ctrl.daftarPeristiwa(req, res));
-router.post('/events/ack-all', auth, staf, (req, res) => ctrl.akuiSemua(req, res));
-router.get('/events/:id', auth, staf, (req, res) => ctrl.detailPeristiwa(req, res));
-router.get('/events/:id/snapshot', auth, staf, (req, res) => ctrl.snapshotPeristiwa(req, res));
-router.patch('/events/:id/ack', auth, staf, (req, res) => ctrl.acknowledgePeristiwa(req, res));
-router.patch('/events/:id/resolve', auth, staf, (req, res) => ctrl.resolvePeristiwa(req, res));
+router.get('/events', auth, staf, butuhCctv('peringatan'), (req, res) => ctrl.daftarPeristiwa(req, res));
+router.post('/events/ack-all', auth, staf, butuhCctv('peringatan'), (req, res) => ctrl.akuiSemua(req, res));
+router.get('/events/:id', auth, staf, butuhCctv('peringatan'), (req, res) => ctrl.detailPeristiwa(req, res));
+router.get('/events/:id/snapshot', auth, staf, butuhCctv('peringatan'), (req, res) => ctrl.snapshotPeristiwa(req, res));
+router.patch('/events/:id/ack', auth, staf, butuhCctv('peringatan'), (req, res) => ctrl.acknowledgePeristiwa(req, res));
+router.patch('/events/:id/resolve', auth, staf, butuhCctv('peringatan'), (req, res) => ctrl.resolvePeristiwa(req, res));
 
-router.post('/playback/session', auth, staf, (req, res) => ctrl.putar(req, res));
-router.post('/playback/session/:sid/seek', auth, staf, (req, res) => ctrl.seek(req, res));
-router.post('/playback/session/:sid/stop', auth, staf, (req, res) => ctrl.stop(req, res));
-router.get('/playback/availability', auth, staf, (req, res) => ctrl.ketersediaan(req, res));
+router.post('/playback/session', auth, staf, butuhCctv('lihat'), (req, res) => ctrl.putar(req, res));
+router.post('/playback/session/:sid/seek', auth, staf, butuhCctv('lihat'), (req, res) => ctrl.seek(req, res));
+router.post('/playback/session/:sid/stop', auth, staf, butuhCctv('lihat'), (req, res) => ctrl.stop(req, res));
+router.get('/playback/availability', auth, staf, butuhCctv('lihat'), (req, res) => ctrl.ketersediaan(req, res));
+
+// ───────────── Kelompok 4: hak akses (superadmin) ─────────────
+// /akses/saya & /akses/riwayat didepankan sebelum /akses/:userId.
+
+const superadmin = checkRole('superadmin');
+router.get('/akses/saya', auth, staf, akses.saya);
+router.get('/akses/riwayat', auth, superadmin, akses.riwayat);
+router.get('/akses', auth, superadmin, akses.daftar);
+router.put('/akses', auth, superadmin, akses.aturMassal);
+router.put('/akses/:userId', auth, superadmin, akses.atur);
 
 // ───────────── Kelompok 3: wajah (staf DPMD) ─────────────
 
-router.get('/faces', auth, staf, (req, res) => ctrl.daftarWajah(req, res));
-router.post('/faces', auth, staf, uploadCctvFoto.single('foto'), (req, res) => ctrl.buatWajah(req, res));
-router.patch('/faces/:id', auth, staf, (req, res) => ctrl.ubahWajah(req, res));
-router.delete('/faces/:id', auth, staf, (req, res) => ctrl.hapusWajah(req, res));
-router.post('/faces/:id/photos', auth, staf, uploadCctvFoto.single('foto'), (req, res) => ctrl.tambahFotoWajah(req, res));
-router.post('/faces/:id/recompute-embeddings', auth, staf, (req, res) => ctrl.recomputeWajah(req, res));
+router.get('/faces', auth, staf, butuhCctv('wajah'), (req, res) => ctrl.daftarWajah(req, res));
+router.post('/faces', auth, staf, butuhCctv('wajah'), uploadCctvFoto.single('foto'), (req, res) => ctrl.buatWajah(req, res));
+router.patch('/faces/:id', auth, staf, butuhCctv('wajah'), (req, res) => ctrl.ubahWajah(req, res));
+router.delete('/faces/:id', auth, staf, butuhCctv('wajah'), (req, res) => ctrl.hapusWajah(req, res));
+router.post('/faces/:id/photos', auth, staf, butuhCctv('wajah'), uploadCctvFoto.single('foto'), (req, res) => ctrl.tambahFotoWajah(req, res));
+router.post('/faces/:id/recompute-embeddings', auth, staf, butuhCctv('wajah'), (req, res) => ctrl.recomputeWajah(req, res));
 
 module.exports = router;

@@ -2156,6 +2156,7 @@ model users {
   absensi_lokasi_khusus_absensi_lokasi_khusus_user_idTousers     absensi_lokasi_khusus[]              @relation("absensi_lokasi_khusus_user_idTousers")
   absensi_pegawai                                                absensi_pegawai[]
   activity_logs                                                  activity_logs[]
+  cctv_akses                                                     cctv_akses[]
   anggaran_master_kegiatan                                       anggaran_master_kegiatan[]           @relation("anggaran_master_kegiatan_created_by")
   anggaran_pagu                                                  anggaran_pagu[]                      @relation("anggaran_pagu_created_by")
   anggaran_rka_items                                             anggaran_rka_items[]                 @relation("anggaran_rka_items_created_by")
@@ -2239,6 +2240,20 @@ model desa_user_permissions {
 
   @@unique([user_id, permission_key], map: "desa_user_permissions_unique")
   @@index([user_id], map: "desa_user_permissions_user_id_index")
+}
+
+/// Hak akses Smart CCTV per pengguna (lihat | peringatan | kamera | wajah), diatur superadmin.
+model cctv_akses {
+  id             BigInt    @id @default(autoincrement()) @db.UnsignedBigInt
+  user_id        BigInt    @db.UnsignedBigInt
+  izin           String    @db.VarChar(20)
+  berlaku_sampai DateTime? @db.DateTime(0)
+  diberi_oleh    BigInt?   @db.UnsignedBigInt
+  created_at     DateTime? @default(now()) @db.Timestamp(0)
+  users          users     @relation(fields: [user_id], references: [id], onDelete: Cascade, map: "fk_cctv_akses_user")
+
+  @@unique([user_id, izin], map: "cctv_akses_user_izin_unique")
+  @@index([user_id], map: "cctv_akses_user_index")
 }
 
 model kecamatan_user_permissions {
@@ -3769,6 +3784,7 @@ enum cctv_event_type {
   fall_warning
   immobility
   other
+  person
 }
 
 enum cctv_event_severity {

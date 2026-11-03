@@ -16,6 +16,8 @@ const http = require('http');
 const cfg = require('./config');
 const deteksi = require('./deteksi');
 const pemantau = require('./pemantau');
+// token media dibuat backend (src/utils/cctvSecret.js, kunci dari JWT_SECRET di .env yang sama)
+const { tokenMediaSah } = require('../../src/utils/cctvSecret');
 
 const balas = (res, status, isi) => {
 	res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
@@ -81,8 +83,20 @@ const server = http.createServer(async (req, res) => {
 				: { success: false, message: `Kamera tidak menjawab (${r.status}). Periksa URL RTSP dan jaringan.` });
 		}
 
-		m = p.match(/^\/cameras\/(\d+)\/snapshot$/);
+		// Tampilan deteksi (MJPEG bingkai bertanda) & potret: terbuka lewat nginx /ai/, jadi
+		// wajib membawa token media kamera yang sama dengan go2rtc (dari /kamera/stream-url).
+		m = p.match(/^\/cameras\/(\d+)\/(stream|snapshot)$/);
 		if (req.method === 'GET' && m) {
+			if (!tokenMediaSah(`dpmd_${m[1]}`, url.searchParams.get('t'))) return balas(res, 403, { success: false, message: 'Token media tidak sah' });
+			if (m[2] === 'stream') {
+				if (!pemantau.tonton(m[1], res)) return balas(res, 404, { success: false, message: 'Kamera tidak dipantau' });
+				return undefined;
+			}
+			const bertanda = pemantau.bingkaiBertanda(m[1]);
+			if (bertanda) {
+				res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' });
+				return res.end(bertanda);
+			}
 			const r = await fetch(`${cfg.GO2RTC_URL}/api/frame.jpeg?src=dpmd_${m[1]}`, { signal: AbortSignal.timeout(20000) });
 			if (!r.ok) return balas(res, 404, { success: false, message: 'Potret tidak tersedia' });
 			res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'no-store' });

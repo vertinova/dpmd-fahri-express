@@ -263,8 +263,9 @@ const urlStream = async (req, res) => {
         webrtc_url: kamera.go2rtc_src ? `/go2rtc/api/webrtc?${q}` : null,
         go2rtc_mjpeg_url: kamera.go2rtc_src ? `/go2rtc/api/stream.mjpeg?${q}` : null,
         go2rtc_frame_url: kamera.go2rtc_src ? `/go2rtc/api/frame.jpeg?${q}` : null,
-        mjpeg_url: `/ai/cameras/${kamera.id}/stream`,
-        snapshot_url: `/ai/cameras/${kamera.id}/snapshot?t=${Date.now()}`,
+        // tampilan deteksi AI (bingkai bertanda kotak orang/wajah) — token kamera yang sama
+        ai_mjpeg_url: `/ai/cameras/${kamera.id}/stream?t=${encodeURIComponent(token)}`,
+        ai_snapshot_url: `/ai/cameras/${kamera.id}/snapshot?t=${encodeURIComponent(token)}`,
         go2rtc_src: kamera.go2rtc_src,
         berlaku_sampai: exp * 1000
       }
@@ -284,7 +285,9 @@ const izinMedia = (req, res) => {
   try {
     const asli = new URL(req.get('X-Original-URI') || '/', 'http://lokal');
     const src = asli.searchParams.get('src');
-    const sah = /^dpmd_\d+$/.test(src || '') && tokenMediaSah(src, asli.searchParams.get('t'));
+    // kamera live (dpmd_<id>) atau sesi pemutaran ulang yang masih hidup (pb_<sid>)
+    const dikenal = /^dpmd_\d+$/.test(src || '') || (/^pb_[a-f0-9]{16}$/.test(src || '') && svc.sesiPlaybackHidup(src));
+    const sah = dikenal && tokenMediaSah(src, asli.searchParams.get('t'));
     res.status(sah ? 204 : 403).end();
   } catch {
     res.status(403).end();
