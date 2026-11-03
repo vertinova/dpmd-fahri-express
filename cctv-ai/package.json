@@ -1,0 +1,18 @@
+{
+  "name": "dpmd-cctv-ai",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Layanan deteksi Smart CCTV DPMD: pengenalan wajah & deteksi jatuh (CPU, tanpa GPU)",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "@tensorflow/tfjs-backend-wasm": "4.22.0",
+    "@tensorflow/tfjs-converter": "4.22.0",
+    "@tensorflow/tfjs-core": "4.22.0",
+    "@vladmandic/human": "3.3.6",
+    "dotenv": "^16.3.1",
+    "sharp": "^0.34.5"
+  }
+}

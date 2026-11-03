@@ -135,12 +135,15 @@ const kabariAIStop = (id) => panggilAI(`/cameras/${id}/stop`, {}, 4000);
 /** Test koneksi RTSP lewat layanan AI (ffmpeg probe). */
 const testKoneksi = async (kamera) => {
   const body = {
+    camera_id: Number(kamera.id),
     rtsp_url: urlEfektif(kamera),
     username: kamera.username || undefined,
     password: kamera.password_enc ? decrypt(kamera.password_enc) : undefined
   };
   const hasil = await panggilAI('/test-rtsp', body, 25000);
   if (!hasil.ok) return { ok: false, pesan: 'Layanan AI tidak terjangkau', detail: hasil.error };
+  // Layanan menjawab, tapi kameranya bisa saja tidak — nilai dari isinya.
+  if (hasil.data && hasil.data.success === false) return { ok: false, pesan: hasil.data.message || 'Kamera tidak menjawab', data: hasil.data };
   return { ok: true, data: hasil.data };
 };
 
@@ -198,7 +201,8 @@ const daftarKameraLayanan = async () => {
     rtsp_url: urlEfektif(k),
     location: k.lokasi || '',
     status: k.status,
-    recognition_enabled: k.recognition_enabled
+    recognition_enabled: k.recognition_enabled,
+    fall_detection_enabled: k.fall_detection_enabled
   }));
   return { cameras };
 };
