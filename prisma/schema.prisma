@@ -3344,6 +3344,7 @@ enum conversations_reference_type {
   bankeu_lpj
   bankeu_proposal
   bantuan_provinsi_lpj
+  helpdesk
 }
 
 enum messages_message_type {

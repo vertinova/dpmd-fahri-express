@@ -7,8 +7,8 @@
  * kelurahan, BUMDes). Semuanya dibaca dari tabel yang sama dengan yang dipakai
  * halaman lain, jadi bot tidak pernah tertinggal dari data terbaru.
  *
- * Hanya potongan yang relevan dengan pertanyaan yang dikirim ke Claude. Isinya
- * ditulis sebagai kalimat jadi supaya bisa langsung ditampilkan bila Claude
+ * Hanya potongan yang relevan dengan pertanyaan yang dikirim ke AI. Isinya
+ * ditulis sebagai kalimat jadi supaya bisa langsung ditampilkan bila AI
  * sedang tidak tersedia.
  */
 const Helpdesk = require('./helpdesk.service');

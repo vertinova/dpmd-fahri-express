@@ -4,14 +4,15 @@
  * KECAMATAN penanya -> BIDANG DPMD -> DPMD (sekretaris dinas & superadmin).
  *
  * Bot menjawab dari data akun penanya (tiket, proposal Bankeu, aparatur), data
- * resmi sistem (profil DPMD, wilayah), dan FAQ — disusun Claude bila
- * ANTHROPIC_API_KEY diisi. Yang belum terjawab ditawarkan pertanyaan
+ * resmi sistem (profil DPMD, wilayah), dan FAQ — disusun AI (Groq) bila
+ * HELPDESK_AI_API_KEY diisi. Yang belum terjawab ditawarkan pertanyaan
  * terdekat, lalu kontak WhatsApp dan tiket ke pihak yang berwenang.
  */
 const Helpdesk = require('../services/helpdesk.service');
 const Bot = require('../services/helpdeskBot.service');
 const { dataRelevan, lupakanSimpanan } = require('../services/helpdeskPengetahuan.service');
 const Pribadi = require('../services/helpdeskPribadi.service');
+const Jembatan = require('../services/helpdeskJembatan.service');
 const PushNotificationService = require('../services/pushNotificationService');
 const logger = require('../utils/logger');
 
@@ -248,6 +249,28 @@ async function jawabBot({ pesan, riwayat, akun, wilayah, kategoriId }) {
 			.sort((a, b) => (b.hits - a.hits) || (a.id - b.id))
 			.map((faq) => ({ faq, skor: 0, cakupan: 0 }));
 		hasil = [...hasil, ...sekategori].slice(0, 5);
+	}
+
+	/* Urusan akun tidak dijawab bot: penanya memilih program yang memakai akun
+	   itu lalu disambungkan langsung ke PIC-nya di kolom chat (Jembatan). */
+	if (!pribadi && !sapaan && Jembatan.niatAkun(kueri)) {
+		const katAkun = kategori.find((k) => k.slug === 'akun') || null;
+		const logIdAkun = await Helpdesk.catatChat({ userId: akun?.id, kategoriId: katAkun?.id, pertanyaan: pesan, terjawab: true, sumber: 'akun', faqId: null }).catch(() => null);
+		return {
+			jawaban: 'Urusan akun ditangani langsung oleh **PIC program** yang memakai akun tersebut. Akun Anda untuk program apa?',
+			terjawab: true,
+			sumber: 'akun',
+			log_id: logIdAkun,
+			aksi: [],
+			kategori: katAkun ? { id: katAkun.id, name: katAkun.name, slug: katAkun.slug, target_level: katAkun.target_level } : null,
+			saran: [],
+			kontak: null,
+			butuh_wilayah: null,
+			sapaan: false,
+			luar_topik: false,
+			program_akun: Jembatan.PROGRAM_AKUN.map(({ key, label, ket }) => ({ key, label, ket })),
+			pertanyaan_akun: pesan,
+		};
 	}
 
 	let data = [];
@@ -753,6 +776,7 @@ exports.balasTiketPetugas = async (req, res) => {
 		await Helpdesk.tambahPesan(tiket.id, {
 			sender_type: 'petugas', sender_id: req.user.id, sender_name: namaPetugas(req, cakupan), body: pesan,
 		}, { status, penanganId: req.user.id });
+		Jembatan.dariPanel(tiket.id, { id: req.user.id, name: namaPetugas(req, cakupan) }, pesan).catch((err) => logger.warn(`Helpdesk jembatan panel: ${err.message}`));
 		if (tiket.user_id) {
 			const pelapor = await Helpdesk.akun(tiket.user_id);
 			await notifikasi([tiket.user_id], `🛟 Tiket ${tiket.code} dibalas`, pesan.slice(0, 150), tautanPelapor(pelapor?.role));
@@ -793,7 +817,7 @@ exports.drafBalasanTiket = async (req, res) => {
 		const { cakupan, tiket } = await tiketPetugas(req, res);
 		if (!tiket) return undefined;
 		if (!Bot.aiAktif()) {
-			return res.status(503).json({ success: false, message: 'Asisten AI belum diaktifkan di server (ANTHROPIC_API_KEY kosong).' });
+			return res.status(503).json({ success: false, message: 'Asisten AI belum diaktifkan di server (HELPDESK_AI_API_KEY kosong).' });
 		}
 		const [pesan, faqs] = await Promise.all([Helpdesk.pesanTiket(tiket.id), Helpdesk.faqUntuk(Boolean(tiket.user_id))]);
 		const teksPelapor = pesan.filter((m) => m.sender_type === 'pelapor').map((m) => m.body).join(' ');
@@ -888,6 +912,12 @@ exports.kelolaData = async (req, res) => {
 				bidang,
 				ikon: IKON,
 				ai: { aktif: Bot.aiAktif(), model: Bot.MODEL },
+				program_akun: c.tingkat === 'dpmd' ? await Jembatan.daftarProgramPic() : [],
+				calon_pic: c.tingkat === 'dpmd' ? await Helpdesk.q(
+					`SELECT u.id, u.name, u.role, u.bidang_id, b.nama AS bidang FROM users u LEFT JOIN bidangs b ON b.id = u.bidang_id
+					  WHERE u.is_active = 1 AND u.role IN ('superadmin','kepala_dinas','sekretaris_dinas','kepala_bidang','ketua_tim','pegawai','bendahara')
+					  ORDER BY u.bidang_id, FIELD(u.role, 'kepala_bidang', 'ketua_tim', 'pegawai', 'bendahara'), u.name`,
+				) : [],
 			},
 		});
 	} catch (err) {
@@ -1029,6 +1059,14 @@ exports.simpanPengaturan = async (req, res) => {
 		};
 		const bidang = await Helpdesk.daftarBidang();
 		for (const b of bidang) data[`wa_bidang_${b.id}`] = teks(req.body[`wa_bidang_${b.id}`], 20);
+		if (req.body.pic_akun && typeof req.body.pic_akun === 'object') {
+			const peta = {};
+			for (const p of Jembatan.PROGRAM_AKUN) {
+				const id = Number(req.body.pic_akun[p.key]);
+				if (id > 0) peta[p.key] = id;
+			}
+			data.pic_akun = JSON.stringify(peta);
+		}
 		const salah = Object.entries(data).find(([k, v]) => (k === 'dpmd_whatsapp' || k.startsWith('wa_bidang_')) && v && !Helpdesk.nomorWa(v));
 		if (salah) return res.status(400).json({ success: false, message: 'Nomor WhatsApp tidak valid. Contoh: 081234567890' });
 		await Helpdesk.simpanPengaturan(data);
@@ -1036,5 +1074,67 @@ exports.simpanPengaturan = async (req, res) => {
 		return res.json({ success: true, message: 'Pengaturan disimpan' });
 	} catch (err) {
 		return gagal(res, 'simpan pengaturan', err);
+	}
+};
+
+/* ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ SAMBUNG KE PIC AKUN ━━━━━━━━━━━━━━━━━━━━━━━━━━━━ */
+/* Penanya urusan akun disambungkan ke PIC program di kolom chat; percakapannya
+   diteruskan ke fitur Pesan PIC (lihat helpdeskJembatan.service.js). */
+
+exports.programAkun = (req, res) => res.json({ success: true, data: Jembatan.PROGRAM_AKUN.map(({ key, label, ket }) => ({ key, label, ket })) });
+
+exports.sambungPic = async (req, res) => {
+	try {
+		if (req.body.website) return res.json({ success: true, data: {} });
+		const pesan = teks(req.body.pesan, 2000);
+		if (!pesan) return res.status(400).json({ success: false, message: 'Tuliskan keperluan Anda' });
+		const akun = await akunPenanya(req);
+		const nama = teks(req.body.nama, 150) || akun?.name || '';
+		if (!nama) return res.status(400).json({ success: false, message: 'Nama wajib diisi' });
+		const wilayah = await wilayahPenanya(akun, req.body);
+		const hasil = await Jembatan.sambung({
+			programKey: teks(req.body.program, 60),
+			pesan,
+			nama,
+			akun,
+			wilayah,
+			whatsapp: Helpdesk.nomorWa(req.body.whatsapp || akun?.no_hp),
+		});
+		await notifikasi([hasil.pic.id], `🛟 Pesan Helpdesk · ${hasil.program.label}`, `${nama}: ${pesan.slice(0, 140)}`, '/dpmd/pesan');
+		return res.status(201).json({
+			success: true,
+			data: { id: hasil.id, code: hasil.code, k: hasil.k, program: hasil.program.label, pic: hasil.pic.name },
+		});
+	} catch (err) {
+		if (err.status) return res.status(err.status).json({ success: false, message: err.message });
+		return gagal(res, 'sambung pic', err);
+	}
+};
+
+exports.benangPic = async (req, res) => {
+	try {
+		const id = Number(req.params.id);
+		if (!Jembatan.tokenSah(id, req.query.k)) return res.status(403).json({ success: false, message: 'Akses percakapan tidak sah' });
+		const data = await Jembatan.benang(id);
+		if (!data) return res.status(404).json({ success: false, message: 'Percakapan tidak ditemukan' });
+		return res.json({ success: true, data });
+	} catch (err) {
+		return gagal(res, 'benang pic', err);
+	}
+};
+
+exports.balasPic = async (req, res) => {
+	try {
+		const id = Number(req.params.id);
+		if (!Jembatan.tokenSah(id, req.body.k)) return res.status(403).json({ success: false, message: 'Akses percakapan tidak sah' });
+		const isi = teks(req.body.pesan, 2000);
+		if (!isi) return res.status(400).json({ success: false, message: 'Pesan tidak boleh kosong' });
+		const akun = await akunPenanya(req);
+		if (!(await Jembatan.balasPenanya(id, { isi, nama: teks(req.body.nama, 150) || akun?.name, akunId: akun?.id }))) {
+			return res.status(404).json({ success: false, message: 'Percakapan tidak ditemukan' });
+		}
+		return res.json({ success: true, data: await Jembatan.benang(id) });
+	} catch (err) {
+		return gagal(res, 'balas pic', err);
 	}
 };

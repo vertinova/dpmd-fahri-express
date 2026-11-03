@@ -45,6 +45,13 @@ router.post('/publik/chat', chatLimiter, authOpsional, helpdesk.chat);
 router.post('/publik/kontak', chatLimiter, authOpsional, helpdesk.kontak);
 router.post('/publik/umpan-balik', chatLimiter, helpdesk.umpanBalik);
 router.post('/publik/tiket', tiketLimiter, authOpsional, helpdesk.buatTiket);
+// Urusan akun: disambungkan langsung ke PIC program (diteruskan ke Pesan PIC).
+// Percakapan dibaca berkala oleh widget, jadi batasnya lebih longgar.
+const benangLimiter = rateLimit({ windowMs: 10 * 60 * 1000, max: 300, message: pesanBatas('Terlalu banyak permintaan. Tunggu sebentar.') });
+router.get('/publik/program-akun', helpdesk.programAkun);
+router.post('/publik/sambung', tiketLimiter, authOpsional, helpdesk.sambungPic);
+router.get('/publik/sambung/:id', benangLimiter, helpdesk.benangPic);
+router.post('/publik/sambung/:id/balas', chatLimiter, authOpsional, helpdesk.balasPic);
 
 // Tiket milik akun yang login
 router.get('/publik/tiket-saya', auth, helpdesk.tiketSaya);

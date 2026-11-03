@@ -232,6 +232,10 @@ async function buildReferenceLabel(refType, refId) {
 			});
 			if (proposal) return `Proposal Bankeu ${proposal.tahun_anggaran} - ${proposal.desas?.nama || ''}`;
 		}
+		if (refType === 'helpdesk') {
+			const [rows] = await sequelize.query('SELECT code, reporter_name, subject FROM helpdesk_tickets WHERE id = ? LIMIT 1', { replacements: [Number(refId)] });
+			if (rows[0]) return `Helpdesk ${rows[0].code} · ${rows[0].reporter_name}`;
+		}
 		if (refType === 'bantuan_provinsi_lpj') {
 			const [rows] = await sequelize.query(`
 				SELECT lpj.tahun_anggaran, d.nama AS desa_nama
@@ -530,6 +534,13 @@ class MessagingController {
 				where: { id: conversationId },
 				data: { last_message_at: now, updated_at: now },
 			});
+
+			// Percakapan Helpdesk: balasan PIC diteruskan ke tiket → tampil di chat penanya
+			if (conv.reference_type === 'helpdesk') {
+				require('../services/helpdeskJembatan.service')
+					.dariPesan(conv, content.trim(), { id: req.user.id, name: req.user.name || message.sender?.name })
+					.catch((err) => console.error('Helpdesk jembatan:', err.message));
+			}
 
 			const serialized = serializeMessage(message);
 
@@ -1739,4 +1750,5 @@ async function createVerificationChat(reviewerId, desaUserId, reviewerRole, desa
 }
 
 module.exports = new MessagingController();
+module.exports.serializeMessage = serializeMessage;
 module.exports.createVerificationChat = createVerificationChat;
