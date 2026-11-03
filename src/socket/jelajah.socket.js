@@ -16,8 +16,9 @@
 //   klien → "skor" {level,ikan,kg,jenis,balap,sirkuit} catatan untuk papan peringkat
 //   klien → "hadiah" {ke, n}                         kirim koin (10/20/50) ke tamu lain
 //   klien → "peringkat" (ack)                       minta papan peringkat
+//   klien → "lomba:daftar" / "lomba:ikan"           Lomba Galatama bersama (lihat jelajahLomba.js)
 //   server → "selamat" {id, ruang, pemain[], kendaraan{}}  saat baru masuk
-//   server → "masuk" / "keluar" / "posisi" / "ucap" / "emote" / "klakson" / "gaya" / "disapa" / "ditolak"
+//   server → "masuk" / "keluar" / "posisi" / "ucap" / "emote" / "klakson" / "gaya" / "disapa" / "ditolak" / "lomba"
 
 // Tamu dibagi ke beberapa "ruang" (salinan kantor) berisi maks. 10 orang: siaran
 // posisi tumbuh kuadrat terhadap jumlah pemain SATU ruang (10 tamu = 100 kiriman
@@ -51,6 +52,7 @@ const KATA_KASAR = /\b(anjing|anjg|bangsat|babi|kontol|memek|ngentot|goblok|tolo
 // balapan motor — disimpan ke berkas supaya bertahan saat server dimulai ulang. Nilainya
 // dilaporkan klien (permainan santai, bukan kompetisi berhadiah), tetap dibatasi wajar.
 const fs = require('fs');
+const { pasangLomba } = require('./jelajahLomba');
 const path = require('path');
 const BERKAS_PERINGKAT = path.join(__dirname, '../../data/jelajah/peringkat.json');
 const MAKS_CATATAN = 2000;
@@ -123,6 +125,7 @@ function initJelajahSocket(io) {
   const perIp = new Map();
   // nomor ruang → { pemain: Map(socket.id → data publik), kendaraan: Map(id → {x,z,rot}), kotor: Set }
   const daftarRuang = new Map();
+  const lomba = pasangLomba(nsp, { pembatas });
 
   // Ruang terisi yang masih ada tempat; bila semua penuh, buka ruang baru.
   function pilihRuang() {
@@ -206,7 +209,9 @@ function initJelajahSocket(io) {
       ruang: no,
       pemain: [...pemain.values()].filter((p) => p.id !== socket.id),
       kendaraan: Object.fromEntries(kendaraan),
+      lomba: lomba.publik(),
     });
+    lomba.pasang(socket, data);
     socket.to(kamar).emit('masuk', data);
 
     socket.on('gerak', (m) => {
