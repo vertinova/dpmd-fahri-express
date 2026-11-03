@@ -3742,7 +3742,7 @@ enum kerjasama_desa_bidang {
 }
 
 // -----------------------------------------------------------------------------
-// SMART CCTV � modul pengawasan kamera terpadu super app.
+// SMART CCTV — modul pengawasan kamera terpadu super app.
 // Sumber kebenaran kamera & peristiwa deteksi (wajah, jatuh) berpindah ke
 // sini dari dashboard Laravel; layanan AI (Facial-recognition-cctv) dan
 // go2rtc tetap menjadi pelaku teknis di baliknya.
