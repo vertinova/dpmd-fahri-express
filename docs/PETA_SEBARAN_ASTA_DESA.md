@@ -119,7 +119,7 @@ bekerja dengan token **super_admin**, yang di panel pun tidak mendapat filter ap
 pun — jadi tidak ada yang perlu ditiru. Bila suatu saat DPMD ingin membatasi
 tampilan per kecamatan, filternya harus ditambahkan sendiri di `buatLayer`.
 
-### 3.2b Foto rumah ikut bersama titik, bukan dari endpoint detail
+### 3.2b Foto rumah dilampirkan backend DPMD ke endpoint detail
 
 Foto disimpan Spatie Media Library, bukan di kolom. Kolom JSON `foto_rumah`
 memang ada di tabel, tetapi bukan tempat berkasnya — isinya bisa nama berkas,
@@ -128,17 +128,56 @@ bukan URL.
 `GET /api/v1/admin/sensuses/{id}` membalas `$sensus->toArray()` **tanpa** memuat
 relasi `media` dan **tanpa** menambahkan `foto_rumah_urls`. Jadi URL foto tidak
 pernah ada di endpoint detail, dan panel info yang menunggu foto dari situ akan
-selamanya kosong meski fotonya ada di ASTA DESA. Ini pernah terjadi dan
-diperbaiki: fotonya kini diambil di `/sebaran-peta` (`fotoRumahPertama`) dari
-`foto_rumah_urls` milik `/v1/sensuses`, lalu ikut bersama titiknya.
+selamanya kosong meski fotonya ada di ASTA DESA. Satu-satunya tempat URL itu
+muncul adalah `foto_rumah_urls` milik `/v1/sensuses` — endpoint yang disusuri
+untuk peta.
 
-Akibat sampingannya justru bagus: fotonya tampil **seketika** saat titik diklik,
-tidak menunggu permintaan detail. Fungsi `fotoRumah()` di `konfigPeta.js` tetap
-ada sebagai cadangan, dan `foto: fotoRumah(sensus) || f.foto` menjaga agar detail
-yang tidak berfoto tidak menghapus foto yang sudah tampil.
+Perbaikan pertama (Okt 2026) mengikutkan URL itu pada **setiap titik**
+`/sebaran-peta`, sehingga fotonya tampil seketika saat titik diklik. Harganya
+baru terukur kemudian: nama berkasnya acak (ULID + nama asli dari ponsel
+petugas) sehingga gzip nyaris tidak memadatkannya, dan 191 ribu di antaranya
+berarti **±5 MB dari ±11 MB** seluruh muatan peta — diunduh setiap pembukaan
+halaman demi satu foto yang hanya dilihat saat satu titik diklik.
+
+Sekarang URL itu dilampirkan `denganFotoTersimpan()` ke balasan
+`/asta-desa/sensus/:id`, dibaca dari penyusuran yang **sudah** tersimpan di
+memori backend (satu `find`, <3 ms, hanya saat ada titik diklik). Endpoint detail
+itu toh sudah dipanggil pada klik yang sama untuk 13 baris atribut lainnya, jadi
+fotonya datang bersama sisa panel alih-alih mendahuluinya. `fotoRumah()` di
+`konfigPeta.js` kini jalur utama foto, bukan cadangan; `foto: fotoRumah(sensus)
+|| f.foto` menjaga agar klik ulang tidak menghapus foto yang sudah tampil.
 
 Berkasnya dilayani statis dan publik dari `https://astadesa.rmlabs.id/storage/…`,
 jadi `<img>` lintas-origin bekerja tanpa header CORS.
+
+### 3.2c Muatan peta disiapkan sekali per penyusuran
+
+`/sebaran-peta` membalas ±191.000 titik. Tiga hal dibenahi bersamaan, dan
+semuanya di sisi server — halaman tidak perlu diubah:
+
+| | sebelum | sesudah |
+|---|---|---|
+| Unduhan (gzip) | ±11 MB | **±2,8 MB** |
+| JSON mentah yang di-parse peramban | ±73 MB | **±26 MB** |
+| CPU server per pembukaan halaman | ±1,8 dtk | **0 dtk** (muatan pertama ±0,7 dtk) |
+
+1. **Kolom yang tidak dibaca dibuang**: `status` dan `sumber_koordinat` (jumlah
+   per sumber koordinat tetap dilaporkan sebagai angka agregat), `foto` pindah ke
+   endpoint detail (§3.2b), dan nilai kosong dibuat `undefined` sehingga
+   kuncinya hilang dari JSON.
+2. **Koordinat dibulatkan ke 6 desimal** (±11 cm — dua kali lebih teliti
+   daripada GPS ponsel yang merekamnya). 14 desimal dikali 382 ribu angka adalah
+   belasan megabyte untuk ketelitian yang tidak ada di datanya.
+3. **Muatan gzip disimpan satu slot**, dikunci pada jumlah baris terbaca +
+   penanda kesiapan. Sebelumnya setiap pembukaan halaman memetakan 191 ribu
+   baris, men-stringify 73 MB, lalu meng-gzip-nya — ±1,8 detik CPU untuk jawaban
+   yang identik bit per bit, dan karena Node berutas satu, 1,8 detik itu menahan
+   seluruh permintaan lain. Balasan yang sudah utuh juga membawa `Cache-Control:
+   private, max-age=120`, jadi memuat ulang halaman dalam dua menit tidak
+   mengunduh apa pun; selama penyusuran **belum** utuh balasannya `no-store`,
+   supaya kemajuan penyusuran tetap terlihat.
+
+Pemeriksaannya: `node scripts/cek-sebaran-peta.js`.
 
 ### 3.3 Atribut titik diambil saat diklik
 

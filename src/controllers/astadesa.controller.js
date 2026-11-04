@@ -15,7 +15,13 @@
  * barunya ke daftar — jangan ganti yang lama, supaya versi lama tetap terbaca.
  */
 
+const zlib = require('zlib');
+const { promisify } = require('util');
+
 const asta = require('../services/astadesa.service');
+
+const gzip = promisify(zlib.gzip);
+const gunzip = promisify(zlib.gunzip);
 
 /**
  * Umur cache untuk angka pokok — jumlah keluarga terdata se-kabupaten.
@@ -1012,6 +1018,37 @@ exports.getSensus = jalankan(async (req, res) => {
  * Tidak dinormalkan. Justru di sinilah ~100 kolom itu berguna, dan menyaringnya
  * lewat daftar kandidat hanya akan membuang kolom yang belum kita kenal.
  */
+/**
+ * Salinan `sensus` dengan URL foto rumah dari penyusuran yang sudah tersimpan.
+ *
+ * Satu `find` menyusuri 191 ribu baris — terukur di bawah 3 ms, dan hanya saat
+ * sebuah titik diklik, jadi tidak perlu indeks tersendiri yang harus dijaga
+ * kesegarannya. Argumen `ambilSemua` SAMA PERSIS dengan yang dipakai
+ * `/sebaran-peta`; kalau tidak, kuncinya berbeda dan ini akan memulai
+ * penyusuran kedua selama belasan menit alih-alih membaca yang sudah ada.
+ *
+ * Mengembalikan `sensus` apa adanya bila penyusurannya belum siap atau barisnya
+ * tidak ketemu: foto yang belum tampil bukan alasan menggagalkan 104 kolom
+ * atribut yang justru jadi alasan orang mengklik titiknya.
+ */
+const denganFotoTersimpan = async (sensus, idParam) => {
+  const id = Number(sensus?.id ?? idParam);
+  if (!Number.isFinite(id)) return sensus;
+
+  const semua = await asta.ambilSemua('/sensuses', {}, {
+    pengguna: true,
+    latar: true,
+    sebagianBoleh: true,
+    profil: PROFIL_PENGGUNA
+  });
+
+  const baris = semua.rows.find((r) => r.id === id);
+  const foto = baris ? fotoRumahPertama(baris) : null;
+  // Salinan, bukan diubah di tempat: `sensus` menunjuk ke dalam badan respons
+  // yang tersimpan di cache service.
+  return foto ? { ...sensus, foto_rumah_urls: [foto] } : sensus;
+};
+
 exports.getSensusDetail = jalankan(async (req, res) => {
   const body = await asta.ambil(`/sensuses/${encodeURIComponent(req.params.id)}`, {}, { force: paksa(req) });
   const isi = body?.data ?? body ?? null;
@@ -1037,7 +1074,13 @@ exports.getSensusDetail = jalankan(async (req, res) => {
   // kosong pada baris yang tidak punya data petugas terpisah.
   const petugas = isi.petugas || sensus?.petugas || sensus?.user || null;
 
-  res.json({ success: true, data: { sensus, anggotas, petugas } });
+  // FOTO RUMAH TIDAK PERNAH ADA DI BALASAN INI: `/sensuses/{id}` membalas
+  // `$sensus->toArray()` tanpa relasi media dan tanpa `foto_rumah_urls` (lihat
+  // `fotoRumahPertama`). Yang memuat URL-nya adalah penyusuran `/v1/sensuses`
+  // yang sudah tersimpan untuk Peta Sebaran, jadi dipinjam dari sana.
+  const lengkap = fotoRumahPertama(sensus) ? sensus : await denganFotoTersimpan(sensus, req.params.id);
+
+  res.json({ success: true, data: { sensus: lengkap, anggotas, petugas } });
 });
 
 /**
@@ -2339,6 +2382,127 @@ exports.getPesan = jalankan(async (req, res) => {
 // admin — lewat `asta.ambilPublik`.
 
 /**
+ * Koordinat, dibulatkan ke enam angka desimal.
+ *
+ * Dipakai hanya untuk koordinat titik peta. ASTA DESA mengirim lintang/bujur
+ * apa adanya dari perangkat, kadang 14 desimal — dan 14 desimal yang ditulis
+ * 191 ribu kali itu belasan megabyte yang harus diunduh dan di-parse peramban
+ * demi ketelitian di bawah sepersejuta meter. Enam desimal ≈ 11 cm, dua kali
+ * lipat lebih teliti daripada GPS ponsel yang merekamnya; posisi titiknya tetap
+ * tak terbedakan dari panel super admin pada zoom apa pun.
+ */
+const koordRingkas = (n) => Math.round(n * 1e6) / 1e6;
+
+/**
+ * Isi balasan `/sebaran-peta` — titik plus angka kelengkapannya.
+ *
+ * Kolom yang TIDAK ada di sini sengaja dibuang, bukan terlupa:
+ *
+ *   • `status` dan `sumber_koordinat` tidak pernah dibaca halaman peta (jumlah
+ *     per sumber koordinat sudah dilaporkan sebagai angka agregat di bawah),
+ *     dan 191 ribu salinan dua kolom itu saja sepuluh megabyte mentah.
+ *   • `foto` — URL foto rumah — dulu ikut di setiap titik supaya fotonya tampil
+ *     seketika saat titik diklik. Harganya terukur 5 MB terkompresi dari ±9 MB
+ *     seluruh muatan: nama berkasnya acak (ULID + nama asli dari ponsel petugas)
+ *     sehingga gzip nyaris tidak bisa memadatkannya. Lima megabyte diunduh
+ *     SETIAP pembukaan halaman demi satu foto yang dilihat saat satu titik
+ *     diklik. Sekarang URL-nya ikut pada `/asta-desa/sensus/:id` yang memang
+ *     sudah dipanggil saat titik diklik — lihat `fotoRumahTersimpan`.
+ *
+ * Nilai kosong dibuat `undefined`, bukan null, supaya JSON.stringify
+ * menghilangkan kuncinya sekalian — pemanggil di frontend sudah menjaga
+ * ketiadaan kolom (`t.kk_nama || ''`).
+ */
+const bangunDataPeta = (semua) => {
+  let pakaiRumah = 0;
+  let pakaiLokasi = 0;
+  let tanpaKoordinat = 0;
+  let diLuarWilayah = 0;
+
+  const titik = [];
+
+  semua.rows.forEach((row) => {
+    // Koordinat rumah lebih dulu — itulah yang digambar panel. `lokasi_*` hanya
+    // cadangan, supaya baris yang koordinat rumahnya belum diisi tetap terpeta
+    // alih-alih hilang diam-diam.
+    let lat = keAngka(row.rumah_lat);
+    let lng = keAngka(row.rumah_lon);
+    let rumah = true;
+
+    if (lat === null || lng === null) {
+      lat = keAngka(row.lokasi_lat);
+      lng = keAngka(row.lokasi_lon);
+      rumah = false;
+    }
+
+    if (lat === null || lng === null) {
+      tanpaKoordinat += 1;
+      return;
+    }
+    if (!diKabupatenBogor(lat, lng)) {
+      diLuarWilayah += 1;
+      return;
+    }
+
+    if (rumah) pakaiRumah += 1;
+    else pakaiLokasi += 1;
+
+    titik.push({
+      id: row.id ?? null,
+      lat: koordRingkas(lat),
+      lng: koordRingkas(lng),
+      kecamatan: rapikan(row.kecamatan) || 'Tidak diketahui',
+      desa: rapikan(row.desa) || 'Tidak diketahui',
+      kk_nama: rapikan(row.kk_nama) || undefined,
+      // NIK di endpoint ini SUDAH disamarkan ASTA DESA (maskPrivacy). Disamarkan
+      // ulang di sini agar tetap aman bila suatu saat penyamaran di sana dicabut.
+      nik: samarkanNomor(row.kk_nik) || undefined,
+      petugas: namaPetugas(row) || rapikan(row.user?.name) || undefined,
+      tanggal: keHari(row.tanggal_pendataan) || undefined
+    });
+  });
+
+  return {
+    titik,
+    total_baris: semua.rows.length,
+    tanpa_koordinat: tanpaKoordinat,
+    di_luar_wilayah: diLuarWilayah,
+    // Dilaporkan supaya halaman bisa menyebutkan berapa titik yang TIDAK
+    // memakai koordinat rumah — satu-satunya sisa selisih dengan panel.
+    pakai_koordinat_rumah: pakaiRumah,
+    pakai_koordinat_lokasi: pakaiLokasi,
+    // Selama penyusuran pertama berjalan, titik di atas adalah yang SUDAH
+    // terbaca (muncul bertahap); `rincian_siap` tetap false sampai utuh.
+    sebagian: semua.truncated && semua.belum_siap !== true,
+    rincian_siap: semua.rows.length > 0 && semua.belum_siap !== true,
+    rincian_progres: semua.belum_siap === true ? semua.progres || null : null,
+    rincian_basi: semua.basi === true
+  };
+};
+
+/**
+ * Muatan peta disiapkan SEKALI per penyusuran, bukan sekali per permintaan.
+ *
+ * Jawaban endpoint ini ±191.000 titik, ±25 MB JSON. Memetakan barisnya,
+ * men-stringify, lalu meng-gzip-nya memakan sekitar dua detik CPU — dan karena
+ * Node berutas satu, dua detik itu menahan SELURUH permintaan lain, termasuk
+ * permintaan yang sama dari pembaca berikutnya. Padahal hasilnya identik bit per
+ * bit: selama penyusuran di belakangnya tidak berubah, tidak ada satu titik pun
+ * yang berbeda.
+ *
+ * Satu slot saja — jawaban terakhir, disimpan sebagai JANJI agar permintaan yang
+ * berbarengan ikut menunggu satu pembangunan, bukan membangunnya masing-masing.
+ * Kuncinya jumlah baris terbaca plus penanda kesiapan, jadi penyusuran yang
+ * masih bertambah tetap menghasilkan jawaban baru setiap kali barisnya
+ * bertambah, dan hasil utuh menggantikan yang sementara.
+ *
+ * Yang disimpan hanya bentuk gzip-nya: itu yang dipakai semua peramban, dan
+ * menyimpan teks mentahnya sekalian berarti menahan 25 MB di memori untuk jalur
+ * yang praktis tidak pernah terpakai.
+ */
+let muatanPeta = null; // { kunci, gz: Promise<Buffer> }
+
+/**
  * GET /api/asta-desa/sebaran-peta
  * Titik sebaran dengan koordinat RUMAH — sumber peta penuh.
  *
@@ -2353,8 +2517,9 @@ exports.getPesan = jalankan(async (req, res) => {
  * `/sebaran` dibiarkan utuh: tab ringkas sudah memakainya, barisnya lebih murah,
  * dan tidak ada gunanya membuat tab itu membayar muatan 104 kolom.
  *
- * Keduanya melaporkan `sumber_koordinat` supaya selisih jumlah titik antara
- * halaman ini dan panel bisa dijelaskan, bukan ditebak.
+ * Keduanya melaporkan `pakai_koordinat_rumah`/`pakai_koordinat_lokasi` supaya
+ * selisih jumlah titik antara halaman ini dan panel bisa dijelaskan, bukan
+ * ditebak.
  */
 exports.getSebaranPeta = jalankan(async (req, res) => {
   const force = paksa(req);
@@ -2371,76 +2536,48 @@ exports.getSebaranPeta = jalankan(async (req, res) => {
     profil: PROFIL_PENGGUNA
   });
 
-  let pakaiRumah = 0;
-  let pakaiLokasi = 0;
-  let tanpaKoordinat = 0;
-  let diLuarWilayah = 0;
+  // shortcut: dua penyusuran berurutan yang jumlah barisnya kebetulan sama
+  // persis dianggap sama, jadi baris yang DIUBAH (bukan ditambah) di ASTA DESA
+  // bisa tertinggal satu siklus penyusuran (±20 menit). Naikkan ke identitas
+  // array `semua.rows` bila itu mulai terasa — harganya menahan array 191 ribu
+  // baris yang lama di memori sampai permintaan berikutnya menggantikannya.
+  const kunci = [
+    semua.rows.length,
+    semua.truncated,
+    semua.belum_siap,
+    semua.basi,
+    semua.progres?.halaman ?? ''
+  ].join('|');
 
-  const titik = [];
-
-  semua.rows.forEach((row) => {
-    // Koordinat rumah lebih dulu — itulah yang digambar panel. `lokasi_*` hanya
-    // cadangan, supaya baris yang koordinat rumahnya belum diisi tetap terpeta
-    // alih-alih hilang diam-diam.
-    let lat = keAngka(row.rumah_lat);
-    let lng = keAngka(row.rumah_lon);
-    let sumber = 'rumah';
-
-    if (lat === null || lng === null) {
-      lat = keAngka(row.lokasi_lat);
-      lng = keAngka(row.lokasi_lon);
-      sumber = 'lokasi';
-    }
-
-    if (lat === null || lng === null) {
-      tanpaKoordinat += 1;
-      return;
-    }
-    if (!diKabupatenBogor(lat, lng)) {
-      diLuarWilayah += 1;
-      return;
-    }
-
-    if (sumber === 'rumah') pakaiRumah += 1;
-    else pakaiLokasi += 1;
-
-    titik.push({
-      id: row.id ?? null,
-      lat,
-      lng,
-      sumber_koordinat: sumber,
-      kecamatan: rapikan(row.kecamatan) || 'Tidak diketahui',
-      desa: rapikan(row.desa) || 'Tidak diketahui',
-      status: rapikan(row.status) || 'tidak diketahui',
-      kk_nama: rapikan(row.kk_nama),
-      // NIK di endpoint ini SUDAH disamarkan ASTA DESA (maskPrivacy). Disamarkan
-      // ulang di sini agar tetap aman bila suatu saat penyamaran di sana dicabut.
-      nik: samarkanNomor(row.kk_nik),
-      petugas: namaPetugas(row) || rapikan(row.user?.name),
-      tanggal: keHari(row.tanggal_pendataan),
-      foto: fotoRumahPertama(row)
+  // Yang disimpan JANJI-nya, bukan hasilnya: pembaca pertama setelah penyusuran
+  // selesai hampir tidak pernah datang sendiri (halaman ini juga menanyakan
+  // ulang tiap 20 detik selama belum siap), dan tanpa ini mereka semua
+  // membangun muatan yang sama bersamaan. Janji yang gagal dibuang supaya
+  // permintaan berikutnya mencoba lagi, bukan mewarisi galat yang sama.
+  if (muatanPeta?.kunci !== kunci) {
+    const gz = gzip(JSON.stringify({ success: true, data: bangunDataPeta(semua) }));
+    muatanPeta = { kunci, gz };
+    gz.catch(() => {
+      if (muatanPeta?.gz === gz) muatanPeta = null;
     });
-  });
+  }
 
-  res.json({
-    success: true,
-    data: {
-      titik,
-      total_baris: semua.rows.length,
-      tanpa_koordinat: tanpaKoordinat,
-      di_luar_wilayah: diLuarWilayah,
-      // Dilaporkan supaya halaman bisa menyebutkan berapa titik yang TIDAK
-      // memakai koordinat rumah — satu-satunya sisa selisih dengan panel.
-      pakai_koordinat_rumah: pakaiRumah,
-      pakai_koordinat_lokasi: pakaiLokasi,
-      // Selama penyusuran pertama berjalan, titik di atas adalah yang SUDAH
-      // terbaca (muncul bertahap); `rincian_siap` tetap false sampai utuh.
-      sebagian: semua.truncated && semua.belum_siap !== true,
-      rincian_siap: semua.rows.length > 0 && semua.belum_siap !== true,
-      rincian_progres: semua.belum_siap === true ? semua.progres || null : null,
-      rincian_basi: semua.basi === true
-    }
-  });
+  const gz = await muatanPeta.gz;
+
+  res.type('application/json');
+  res.set('Vary', 'Accept-Encoding');
+  // Selama penyusuran belum utuh, halaman menanyakan ulang tiap 20 detik untuk
+  // melihat kemajuannya — jawaban dari cache peramban akan membuat kemajuan itu
+  // membeku. Setelah utuh, dua menit: membuka ulang halaman peta (F5, atau
+  // kembali dari halaman lain) jadi tanpa unduhan sama sekali, sementara
+  // penyusuran di server umurnya belasan menit jadi tidak ada yang tertinggal.
+  res.set('Cache-Control', semua.belum_siap === true ? 'no-store' : 'private, max-age=120');
+
+  if (/gzip/.test(req.headers['accept-encoding'] || '')) {
+    res.set('Content-Encoding', 'gzip');
+    return res.send(gz);
+  }
+  return res.send(await gunzip(gz));
 });
 
 /**
