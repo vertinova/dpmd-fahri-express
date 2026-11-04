@@ -13,7 +13,7 @@
 //   klien → "sapa" {ke}                             menyapa satu pemain tertentu
 //   klien → "klakson"                               bunyi klakson kendaraan yang dikemudikan
 //   klien → "gaya" {t,b,c,s}                        ganti topi/baju/celana/sepatu (indeks lemari)
-//   klien → "skor" {level,ikan,kg,jenis,balap,sirkuit} catatan untuk papan peringkat
+//   klien → "skor" {level,ikan,kg,jenis,balap,sirkuit,pembangun,bintangW} catatan untuk papan peringkat
 //   klien → "hadiah" {ke, n}                         kirim koin (10/20/50) ke tamu lain
 //   klien → "peringkat" (ack)                       minta papan peringkat
 //   klien → "lomba:daftar" / "lomba:ikan"           Lomba Galatama bersama (lihat jelajahLomba.js)
@@ -84,6 +84,7 @@ function ringkasPeringkat() {
     jenis: atas((a, b) => b.jenis - a.jenis, (c) => c.jenis > 0),
     balap: atas((a, b) => a.balap - b.balap, (c) => c.balap > 0),
     sirkuit: atas((a, b) => a.sirkuit - b.sirkuit, (c) => c.sirkuit > 0),
+    pembangun: atas((a, b) => b.pembangun - a.pembangun || b.bintangW - a.bintangW, (c) => c.pembangun > 0),
   };
 }
 
@@ -307,6 +308,8 @@ function initJelajahSocket(io) {
         jenis: Math.round(angka(m.jenis, 0, 200) ?? 0),
         balap: balap ? Math.min(lama.balap || Infinity, bulat(balap)) : lama.balap || null,
         sirkuit: sirkuit ? Math.min(lama.sirkuit || Infinity, bulat(sirkuit)) : lama.sirkuit || null,
+        pembangun: Math.round(angka(m.pembangun, 0, 1e5) ?? lama.pembangun ?? 0),
+        bintangW: Math.round(angka(m.bintangW, 0, 120) ?? lama.bintangW ?? 0),
         waktu: Date.now(),
       });
       simpanPeringkat();
