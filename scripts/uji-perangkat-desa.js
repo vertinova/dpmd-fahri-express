@@ -18,6 +18,10 @@
  *   8. NIPD kembar ditolak 409.
  *   9. Kepala desa & staf: valid tanpa NIPD.
  *  10. Batalkan verifikasi → NIPD dicabut.
+ *  11. NIK & WhatsApp: wajib, format, kembar, tidak bocor di daftar.
+ *  12. Data lama tanpa NIK: tak bisa dinyatakan valid, tapi bisa dinonaktifkan.
+ *  13. Akun desa melengkapi NIK pada data terverifikasi → NIPD tetap;
+ *      mengubah isian lain → verifikasi gugur seperti biasa.
  * Semua data uji (baris, riwayat, berkas) dihapus di akhir, berhasil atau gagal.
  *
  * HANYA untuk backend lokal: skrip ini menulis data dan membersihkannya lewat
@@ -29,6 +33,7 @@
 require('dotenv').config();
 const fs = require('fs');
 const path = require('path');
+const jwt = require('jsonwebtoken');
 const prisma = require('../src/config/prisma');
 
 const API = process.env.UJI_API || 'http://127.0.0.1:3001/api';
@@ -58,11 +63,11 @@ const cek = (kondisi, pesan, detail) => {
 const langkah = (judul) => console.log(`\n▸ ${judul}`);
 
 let token = null;
-const panggil = async (metode, jalur, { json, form } = {}) => {
+const panggil = async (metode, jalur, { json, form, sebagai } = {}) => {
 	const res = await fetch(`${API}${jalur}`, {
 		method: metode,
 		headers: {
-			...(token ? { Authorization: `Bearer ${token}` } : {}),
+			...((sebagai || token) ? { Authorization: `Bearer ${sebagai || token}` } : {}),
 			...(json ? { 'Content-Type': 'application/json' } : {}),
 		},
 		body: json ? JSON.stringify(json) : form,
@@ -98,8 +103,12 @@ const DASAR = {
 
 const dibuat = []; // id aparatur uji, untuk dibersihkan
 
+// Tiap orang uji butuh NIK sendiri: NIK kembar di antara yang aktif ditolak.
+let urutNik = 0;
+const nikUji = () => `320101${String(Date.now()).slice(-6)}${String(++urutNik).padStart(4, '0')}`;
+
 const tambah = async (desaId, isian, berkas = true) => {
-	const r = await panggil('POST', `/pemdes/aparatur-desa?desa_id=${desaId}`, { form: formAparatur({ ...DASAR, ...isian }, berkas) });
+	const r = await panggil('POST', `/pemdes/aparatur-desa?desa_id=${desaId}`, { form: formAparatur({ ...DASAR, nik: nikUji(), whatsapp: '081234567890', ...isian }, berkas) });
 	if (r.isi?.data?.id) dibuat.push(r.isi.data.id);
 	return r;
 };
@@ -261,6 +270,91 @@ const jalankan = async () => {
 	cek(r.isi?.data?.status_verifikasi === null && r.isi?.data?.nipd === null, 'status kosong & NIPD dicabut', r.isi?.data);
 	d1 = await detail(id1);
 	cek((d1.riwayat || []).some((x) => x.aksi === 'terverifikasi') && (d1.riwayat || []).some((x) => x.aksi === 'verifikasi_dibatalkan'), 'riwayat mencatat verifikasi & pembatalan');
+
+	// 11 ────────────────────────────────────────────────────────────────────
+	langkah('NIK & WhatsApp wajib');
+	const jumlahBerkas = () => fs.readdirSync(DIR_BERKAS).length;
+	const berkasAwal = jumlahBerkas();
+	const orang = { nama_lengkap: `${PENANDA} Identitas`, jabatan: 'Staf Desa', tanggal_lahir: '1990-05-05' };
+	r = await tambah(desaId, { ...orang, nik: '' });
+	cek(r.status === 400 && /NIK wajib/.test(r.isi?.message), 'tanpa NIK ditolak', r.isi?.message);
+	r = await tambah(desaId, { ...orang, whatsapp: '' });
+	cek(r.status === 400 && /WhatsApp wajib/.test(r.isi?.message), 'tanpa WhatsApp ditolak', r.isi?.message);
+	r = await tambah(desaId, { ...orang, nik: '320101' });
+	cek(r.status === 400 && /16 digit/.test(r.isi?.message), 'NIK pendek ditolak', r.isi?.message);
+	r = await tambah(desaId, { ...orang, nik: '1111111111111111' });
+	cek(r.status === 400 && /16 digit/.test(r.isi?.message), 'NIK satu angka berulang ditolak', r.isi?.message);
+	r = await tambah(desaId, { ...orang, whatsapp: '12345' });
+	cek(r.status === 400 && /tidak valid/.test(r.isi?.message), 'WhatsApp salah ditolak', r.isi?.message);
+	cek(jumlahBerkas() === berkasAwal, 'berkas kiriman yang ditolak tidak tertinggal', jumlahBerkas() - berkasAwal);
+
+	const nikOrang = nikUji();
+	r = await tambah(desaId, { ...orang, nik: nikOrang, whatsapp: '0812-3456-7890' });
+	if (!cek(r.status === 201, 'isian lengkap tersimpan', r.isi?.message)) return;
+	const idOrang = r.isi.data.id;
+	cek(r.isi.data.nik === nikOrang && r.isi.data.whatsapp === '6281234567890', 'WhatsApp dinormalkan ke 62…', r.isi.data.whatsapp);
+	r = await tambah(desaId, { ...orang, nama_lengkap: `${PENANDA} Kembar NIK`, nik: nikOrang });
+	cek(r.status === 409, 'NIK kembar di antara yang aktif ditolak 409', r.isi?.message);
+	r = await panggil('GET', `/pemdes/aparatur-desa?${new URLSearchParams({ search: PENANDA, limit: 100 })}`);
+	const barisDaftar = (r.isi?.data || []).find((a) => a.id === idOrang);
+	cek(barisDaftar && !('nik' in barisDaftar) && !('whatsapp' in barisDaftar), 'daftar bidang tidak memuat NIK & WhatsApp', barisDaftar && Object.keys(barisDaftar).length);
+	const dOrang = await detail(idOrang);
+	cek(dOrang.nik === nikOrang, 'detail memuat NIK');
+
+	// 12 ────────────────────────────────────────────────────────────────────
+	langkah('Data lama tanpa NIK');
+	await prisma.aparatur_desa.update({ where: { id: idOrang }, data: { nik: null, whatsapp: null } });
+	r = await verifikasi(idOrang, { items: { biodata: { status: 'sesuai' } } });
+	cek(r.status === 400 && /NIK dan nomor WhatsApp/.test(r.isi?.message), 'biodata tak bisa dinyatakan sesuai', r.isi?.message);
+	r = await verifikasi(idOrang, { status: 'terverifikasi' });
+	cek(r.status === 400, 'jalur lama "terverifikasi" ikut tertahan', r.status);
+	r = await verifikasi(idOrang, { items: { file_ktp: { status: 'sesuai' } } });
+	cek(r.status === 200, 'item lain tetap bisa diperiksa', r.isi?.message);
+	r = await verifikasi(idOrang, { items: { biodata: { status: 'tidak_sesuai', catatan: 'NIK belum diisi' } } });
+	cek(r.status === 200 && r.isi?.data?.status_verifikasi === 'ditolak', 'bisa dikembalikan ke desa', r.isi?.message);
+
+	const fdAktif = new FormData();
+	fdAktif.append('status', 'Aktif');
+	r = await panggil('POST', `/pemdes/aparatur-desa/${idOrang}/lengkap`, { form: fdAktif });
+	cek(r.status === 400 && /NIK wajib/.test(r.isi?.message), 'tidak bisa disimpan sebagai aktif tanpa NIK', r.isi?.message);
+	const fdNonaktif = new FormData();
+	fdNonaktif.append('status', 'Tidak Aktif');
+	r = await panggil('POST', `/pemdes/aparatur-desa/${idOrang}/lengkap`, { form: fdNonaktif });
+	cek(r.status === 200 && r.isi?.data?.status === 'Tidak_Aktif', 'tetap bisa dinonaktifkan tanpa NIK', r.isi?.message);
+
+	// 13 ────────────────────────────────────────────────────────────────────
+	langkah('Akun desa melengkapi NIK pada data terverifikasi');
+	const akunDesa = await prisma.users.findFirst({ where: { role: 'desa', is_active: true, desa_id: desa.id, desa_user_permissions: { some: { permission_key: 'aparatur-desa' } } } })
+		|| await prisma.users.findFirst({ where: { role: 'desa', is_active: true, desa_id: desa.id } });
+	if (!akunDesa) {
+		console.log('  – tidak ada akun desa di desa uji; langkah ini dilewati (pakai --desa=<id>)');
+		return;
+	}
+	const sebagai = jwt.sign({ id: String(akunDesa.id), name: akunDesa.name, email: akunDesa.email, role: 'desa', desa_id: String(akunDesa.desa_id) }, process.env.JWT_SECRET, { expiresIn: '10m' });
+	const tv = await tambah(desaId, { nama_lengkap: `${PENANDA} Kadus Lama`, jabatan: 'Kadus V', tanggal_lahir: '1981-09-09' });
+	const idV = tv.isi.data.id;
+	r = await verifikasi(idV, semuaSesuai(await detail(idV)));
+	const nipdV = r.isi?.data?.nipd;
+	cek(r.isi?.data?.status_verifikasi === 'terverifikasi' && Boolean(nipdV), 'terverifikasi & NIPD terbit', r.isi?.message);
+	await prisma.aparatur_desa.update({ where: { id: idV }, data: { nik: null, whatsapp: null } });
+
+	// Kiriman sama dengan form: seluruh isian dikirim ulang, tanggal sebagai yyyy-mm-dd.
+	const kirimanDesa = (ubahan = {}) => {
+		const fd = new FormData();
+		const isian = { ...DASAR, nama_lengkap: `${PENANDA} Kadus Lama`, jabatan: 'Kadus V', tanggal_lahir: '1981-09-09', produk_hukum_id: '', ...ubahan };
+		for (const [k, v] of Object.entries(isian)) fd.append(k, v);
+		return fd;
+	};
+	const nikV = nikUji();
+	r = await panggil('POST', `/desa/aparatur-desa/${idV}`, { form: kirimanDesa({ nik: nikV, whatsapp: '081298765432' }), sebagai });
+	cek(r.status === 200, 'akun desa bisa menyimpan', r.isi?.message || r.status);
+	cek(r.isi?.data?.status_verifikasi === 'terverifikasi' && r.isi?.data?.nipd === nipdV, 'melengkapi NIK & WhatsApp → verifikasi & NIPD tetap', r.isi?.data?.nipd);
+	cek(r.isi?.data?.nik === nikV, 'NIK tersimpan');
+
+	r = await panggil('POST', `/desa/aparatur-desa/${idV}`, { form: kirimanDesa({ nik: nikV, whatsapp: '081298765432', agama: 'Katolik' }), sebagai });
+	cek(r.status === 200 && r.isi?.data?.status_verifikasi === null && r.isi?.data?.nipd === null, 'mengubah isian lain → verifikasi & NIPD gugur', r.isi?.data?.status_verifikasi);
+	r = await panggil('POST', `/desa/aparatur-desa/${idV}`, { form: kirimanDesa({ nik: '', whatsapp: '081298765432' }), sebagai });
+	cek(r.status === 400, 'akun desa tidak bisa mengosongkan NIK', r.isi?.message);
 };
 
 // ── Pembersihan ──────────────────────────────────────────────────────────────

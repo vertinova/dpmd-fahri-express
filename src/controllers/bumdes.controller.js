@@ -8,6 +8,7 @@ const fs = require('fs').promises;
 const path = require('path');
 const { KOLOM_DESA, KOLOM_ADMIN, siapkanData, FOLDER_LAMPIRAN, bacaAngka } = require('../config/bumdesFields');
 const { v4: uuidv4 } = require('uuid');
+const { nomorWhatsapp } = require('../utils/nomorWhatsapp');
 
 /**
  * Stempel setiap penulisan baris bumdes. Akun desa ikut meninggalkan
@@ -2031,14 +2032,6 @@ const KATEGORI_PRODUK_LAMA = ['Pertanian', 'Kerajinan', 'Fashion & Tekstil', 'Wi
 // Kategori yang dihitung sebagai WISATA desa (tab Wisata Desa di katalog).
 const KATEGORI_WISATA = ['Wisata Desa', 'Wisata'];
 
-/** Nomor HP/WA → 62xxxxxxxxxx (format wa.me); null bila tidak masuk akal. */
-const nomorWhatsapp = (v) => {
-  let d = String(v || '').replace(/[^\d]/g, '');
-  if (!d) return null;
-  if (d.startsWith('0')) d = `62${d.slice(1)}`;
-  else if (d.startsWith('8')) d = `62${d}`;
-  return /^62\d{8,13}$/.test(d) ? d : null;
-};
 const MAKS_UNGGULAN = 3;
 const FOLDER_PRODUK = 'bumdes_produk';
 const DIR_PRODUK = path.join(__dirname, '../../storage/uploads', FOLDER_PRODUK);

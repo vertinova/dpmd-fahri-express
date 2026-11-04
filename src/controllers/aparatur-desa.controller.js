@@ -7,19 +7,64 @@ const { AKSI, catatLogAparatur } = require('../utils/aparaturLog');
 const { Prisma } = require('@prisma/client');
 const { buatNipd } = require('../utils/aparaturNipd');
 const { periksaKolomSpam, alasanSpam } = require('../utils/teksSpam');
+const { periksaIdentitas, hanyaMelengkapiIdentitas } = require('../utils/aparaturIdentitas');
+
+/** Jawab penolakan. Berkas yang telanjur ditulis multer dibuang supaya tidak tertinggal tanpa pemilik. */
+const tolakKiriman = async (req, res, kode, pesan) => {
+	const berkas = Object.values(req.files || {}).flat();
+	await Promise.all(berkas.map((b) => fs.unlink(b.path).catch(() => {})));
+	res.status(kode).json({ success: false, message: pesan });
+	return true;
+};
 
 /**
- * Tolak isian yang berisi iklan (lihat utils/teksSpam.js). Berkas yang sudah
- * telanjur ditulis multer ikut dibuang supaya tidak tertinggal tanpa pemilik.
+ * Tolak isian yang berisi iklan (lihat utils/teksSpam.js).
  * Mengembalikan true bila permintaan sudah dijawab.
  */
 const tolakBilaSpam = async (req, res, data) => {
 	const pesan = periksaKolomSpam(data);
-	if (!pesan) return false;
-	const berkas = Object.values(req.files || {}).flat();
-	await Promise.all(berkas.map((b) => fs.unlink(b.path).catch(() => {})));
-	res.status(400).json({ success: false, message: pesan });
-	return true;
+	return pesan ? tolakKiriman(req, res, 400, pesan) : false;
+};
+
+/**
+ * Periksa NIK & WhatsApp, lalu tulis bentuk bakunya ke `data`. Mengembalikan
+ * true bila permintaan sudah dijawab. `data.status` harus sudah berbentuk enum.
+ *
+ * Kolom yang tidak dikirim memakai nilai tersimpan: ubah status cepat di
+ * halaman detail tidak mengirim keduanya. Data lama yang belum punya NIK tetap
+ * bisa dinonaktifkan — orang yang sudah berhenti sering tak terjangkau lagi —
+ * tetapi tidak bisa disimpan sebagai aktif.
+ */
+const tolakBilaIdentitasSalah = async (req, res, data, { desaId, olehBidang, lama = null }) => {
+	const aktif = (data.status || lama?.status || 'Aktif') !== 'Tidak_Aktif';
+	const hasil = periksaIdentitas(
+		{
+			nik: 'nik' in data ? data.nik : lama?.nik,
+			whatsapp: 'whatsapp' in data ? data.whatsapp : lama?.whatsapp,
+		},
+		{ wajib: aktif || !lama }
+	);
+	if (hasil.galat) return tolakKiriman(req, res, 400, hasil.galat);
+
+	// Baris Tidak Aktif boleh sama: orang yang sama bisa diangkat lagi lewat baris baru.
+	if (aktif && hasil.nik) {
+		const kembar = await prisma.aparatur_desa.findFirst({
+			where: { nik: hasil.nik, status: 'Aktif', ...(lama ? { id: { not: lama.id } } : {}) },
+			select: { nama_lengkap: true, desa_id: true, desas: { select: { nama: true } } },
+		});
+		if (kembar) {
+			// Nama pemilik hanya untuk yang berhak melihat barisnya; kalau tidak,
+			// kolom ini jadi alat mencari siapa pemilik sebuah NIK di desa lain.
+			const boleh = olehBidang || String(kembar.desa_id) === String(desaId);
+			return tolakKiriman(req, res, 409, boleh
+				? `NIK ini sudah dipakai ${kembar.nama_lengkap} (Desa ${kembar.desas?.nama}, aktif). Periksa apakah ini orang yang sama.`
+				: 'NIK ini sudah terdaftar pada aparatur aktif di desa lain. Periksa kembali, atau hubungi Bidang Pemerintahan Desa bila orangnya memang sama.');
+		}
+	}
+
+	data.nik = hasil.nik;
+	data.whatsapp = hasil.whatsapp;
+	return false;
 };
 
 // Data berubah = keputusan verifikasi Bidang Pemdes gugur. Kalau tidak,
@@ -185,7 +230,7 @@ const getAparaturDesaById = async (req, res) => {
  */
 const createAparaturDesa = async (req, res) => {
 	try {
-		const { desaId: desa_id, oleh } = konteksTulis(req);
+		const { desaId: desa_id, oleh, olehBidang } = konteksTulis(req);
 
 		// Normalize empty strings to null for nullable fields
 		const data = { ...req.body };
@@ -230,6 +275,8 @@ const createAparaturDesa = async (req, res) => {
 			data.status = data.status.replace(/ /g, '_');
 		}
 
+		if (await tolakBilaIdentitasSalah(req, res, data, { desaId: desa_id, olehBidang })) return;
+
 		// Handle file uploads (multer stores files in req.files as arrays)
 		const fileFields = [
 			'file_bpjs_kesehatan',
@@ -258,6 +305,8 @@ const createAparaturDesa = async (req, res) => {
 				jabatan: data.jabatan,
 				// NIPD tidak diterima dari isian: diterbitkan sistem saat verifikasi (utils/aparaturNipd.js).
 				niap: data.niap,
+				nik: data.nik,
+				whatsapp: data.whatsapp,
 				tempat_lahir: data.tempat_lahir,
 				tanggal_lahir: data.tanggal_lahir,
 				jenis_kelamin: data.jenis_kelamin,
@@ -389,6 +438,11 @@ const updateAparaturDesa = async (req, res) => {
 			data.status = data.status.replace(/ /g, '_');
 		}
 
+		if (await tolakBilaIdentitasSalah(req, res, data, { desaId: desa_id, olehBidang, lama: existing })) return;
+
+		const adaBerkasBaru = Object.keys(req.files || {}).length > 0;
+		const verifikasiTetap = !olehBidang && hanyaMelengkapiIdentitas(existing, data, adaBerkasBaru);
+
 		// Handle file uploads (multer stores files in req.files as arrays)
 		const fileFields = [
 			'file_bpjs_kesehatan',
@@ -428,6 +482,8 @@ const updateAparaturDesa = async (req, res) => {
 				nama_lengkap: data.nama_lengkap,
 				jabatan: data.jabatan,
 				niap: data.niap,
+				nik: data.nik,
+				whatsapp: data.whatsapp,
 				tempat_lahir: data.tempat_lahir,
 				tanggal_lahir: data.tanggal_lahir,
 				// Tanggal lahir yang benar-benar berubah = sudah dikoreksi, bukan taksiran lagi.
@@ -455,7 +511,7 @@ const updateAparaturDesa = async (req, res) => {
 				file_sk_terakhir: data.file_sk_terakhir || existing.file_sk_terakhir,
 				// Suntingan bidang tidak menggugurkan keputusannya sendiri — yang
 				// memeriksa dan yang membetulkan berada di pihak yang sama.
-				...(olehBidang ? {} : RESET_VERIFIKASI),
+				...(olehBidang || verifikasiTetap ? {} : RESET_VERIFIKASI),
 			},
 			include: {
 				desas: {
@@ -493,7 +549,7 @@ const updateAparaturDesa = async (req, res) => {
 		await catatLogAparatur({
 			aparaturId: id,
 			aksi: AKSI.diubah,
-			keterangan: `Data diperbarui oleh ${oleh}`,
+			keterangan: `Data diperbarui oleh ${oleh}${verifikasiTetap ? ' — verifikasi tetap berlaku' : ''}`,
 			user: req.user,
 		});
 

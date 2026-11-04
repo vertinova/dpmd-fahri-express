@@ -136,7 +136,7 @@ const buatNipd = ({ tanggal_lahir, jenis_kelamin, jabatan, tanggal_lahir_taksira
  * isinya (berkas terunggah / nomor terisi).
  */
 const ITEM_VERIFIKASI = [
-	{ key: 'biodata', label: 'Biodata diri', jenis: 'data', wajib: true, keterangan: 'Nama, tempat & tanggal lahir, jenis kelamin, agama, pendidikan' },
+	{ key: 'biodata', label: 'Biodata diri', jenis: 'data', wajib: true, keterangan: 'NIK, WhatsApp, nama, tempat & tanggal lahir, jenis kelamin, agama, pendidikan' },
 	{ key: 'jabatan_sk', label: 'Jabatan & SK pengangkatan', jenis: 'data', wajib: true, keterangan: 'Jabatan, nomor & tanggal SK, dasar hukum' },
 	{ key: 'bpjs', label: 'Nomor BPJS', jenis: 'data', wajib: false, kolom: ['bpjs_kesehatan_nomor', 'bpjs_ketenagakerjaan_nomor'] },
 	{ key: 'file_sk_terakhir', label: 'SK terakhir', jenis: 'berkas', wajib: true },

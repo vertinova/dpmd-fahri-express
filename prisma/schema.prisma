@@ -81,6 +81,11 @@ model aparatur_desa {
   jabatan                    String                      @db.VarChar(255)
   nipd                       String?                     @db.VarChar(255)
   niap                       String?                     @db.VarChar(255)
+  /// Wajib di formulir, NULL di sini: baris lama belum punya isinya.
+  /// Lihat utils/aparaturIdentitas.js.
+  nik                        String?                     @db.VarChar(16)
+  /// Format wa.me: 62xxxxxxxxxx.
+  whatsapp                   String?                     @db.VarChar(20)
   tempat_lahir               String                      @db.VarChar(255)
   tanggal_lahir              DateTime                    @db.Date
   /// Tanggal lahir masih taksiran impor Dapur Desa (1 Januari) — NIPD ditahan.
@@ -132,6 +137,7 @@ model aparatur_desa {
   @@index([desa_id], map: "aparatur_desa_desa_id_foreign")
   @@index([produk_hukum_id], map: "aparatur_desa_produk_hukum_id_foreign")
   @@index([dapur_id], map: "aparatur_desa_dapur_id_index")
+  @@index([nik], map: "aparatur_desa_nik_index")
 }
 
 /// Arsip aparatur dari Dapur Desa (integrasi API-nya sudah dimatikan, lihat

@@ -13,6 +13,7 @@ const {
 	kodeWilayah,
 } = require('../utils/aparaturNipd');
 const { periksaKolomSpam } = require('../utils/teksSpam');
+const { identitasKurang } = require('../utils/aparaturIdentitas');
 
 // Tabel aparatur_desa tidak punya kolom pembeda perangkat desa vs BPD —
 // satu-satunya penanda ada di teks jabatan. Aturannya ditulis sekali di sini
@@ -182,6 +183,9 @@ const getAllAparaturDesa = async (req, res) => {
 		const [data, totalItems] = await Promise.all([
 			prisma.aparatur_desa.findMany({
 				where,
+				// Daftar ini terbuka untuk seluruh peran internal; NIK & WhatsApp
+				// hanya dibuka per orang di detail.
+				omit: { nik: true, whatsapp: true },
 				include: {
 					desas: {
 						select: {
@@ -888,6 +892,17 @@ const verifikasiAparaturDesa = async (req, res) => {
 
 		// ── Hitung status ringkas & NIPD ─────────────────────────────────────
 		const ringkas = ringkasVerifikasi(aparatur, keputusan);
+
+		// Data lama boleh ada tanpa NIK & WhatsApp, tetapi tidak bisa dinyatakan
+		// valid. Menandai item lain tetap boleh, termasuk mengembalikannya ke desa.
+		const kurang = identitasKurang(aparatur);
+		if (kurang.length && (kiriman.biodata?.status === 'sesuai' || ringkas === 'terverifikasi')) {
+			return res.status(400).json({
+				success: false,
+				message: `Biodata belum bisa dinyatakan sesuai: ${kurang.join(' dan ')} belum diisi. Lengkapi datanya atau kembalikan ke desa.`,
+			});
+		}
+
 		let nipd = null;
 		let peringatan = null;
 		if (ringkas === 'terverifikasi') {
