@@ -47,7 +47,6 @@ router.post('/:id', uploadAparaturDesa.fields([
   { name: 'file_sk_terakhir', maxCount: 1 }
 ]), aparaturDesaController.updateAparaturDesa);
 
-// DELETE /api/desa/aparatur-desa/:id - Delete aparatur desa
-router.delete('/:id', aparaturDesaController.deleteAparaturDesa);
+// Sengaja tanpa DELETE: desa tidak boleh mengeluarkan aparatur dari data; penonaktifan adalah hak DPMD.
 
 module.exports = router;

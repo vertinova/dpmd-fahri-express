@@ -209,9 +209,9 @@ const analisis = async (teksAsli) => {
 const raporDesa = async (desa) => {
 	const [profil, jumlahAparatur, kades, bumdes, jumlahPh] = await Promise.all([
 		prisma.profil_desas.findFirst({ where: { desa_id: desa.id } }),
-		prisma.aparatur_desa.count({ where: { desa_id: desa.id } }),
+		prisma.aparatur_desa.count({ where: { desa_id: desa.id, status: 'Aktif' } }),
 		prisma.aparatur_desa.findFirst({
-			where: { desa_id: desa.id, jabatan: { contains: 'KEPALA DESA' } },
+			where: { desa_id: desa.id, status: 'Aktif', jabatan: { contains: 'KEPALA DESA' } },
 			select: { nama_lengkap: true },
 		}),
 		prisma.bumdes.findFirst({
@@ -252,7 +252,7 @@ const raporDesa = async (desa) => {
 const raporKecamatan = async (kec) => {
 	const [jumlahDesa, jumlahAparatur, jumlahBumdes, bumdesAktif, statusDesa] = await Promise.all([
 		prisma.desas.count({ where: { kecamatan_id: kec.id } }),
-		prisma.aparatur_desa.count({ where: { desas: { kecamatan_id: kec.id } } }),
+		prisma.aparatur_desa.count({ where: { desas: { kecamatan_id: kec.id }, status: 'Aktif' } }),
 		prisma.bumdes.count({ where: { kecamatan: { contains: kec.nama } } }),
 		prisma.bumdes.count({ where: { kecamatan: { contains: kec.nama }, status: 'aktif' } }),
 		prisma.profil_desas.groupBy({
@@ -402,7 +402,7 @@ const daftarBumdes = async (a) => {
 };
 
 const daftarAparatur = async (a) => {
-	const where = {};
+	const where = { status: 'Aktif' };
 	if (a.kecamatan) where.desas = { kecamatan_id: a.kecamatan.id };
 	if (a.desa) where.desa_id = a.desa.id;
 	if (a.jabatan) where.jabatan = { contains: a.jabatan.nama };

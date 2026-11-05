@@ -15,6 +15,8 @@
  * BPD tetap didata, tetapi TIDAK mendapat NIPD.
  */
 
+const { kanon } = require('./aparaturIdentitas');
+
 const KODE_KABUPATEN = '01';
 
 // Kode jabatan tetap. Kasi & Kaur dikenali dari URUSAN yang disebut, bukan
@@ -136,8 +138,8 @@ const buatNipd = ({ tanggal_lahir, jenis_kelamin, jabatan, tanggal_lahir_taksira
  * isinya (berkas terunggah / nomor terisi).
  */
 const ITEM_VERIFIKASI = [
-	{ key: 'biodata', label: 'Biodata diri', jenis: 'data', wajib: true, keterangan: 'NIK, WhatsApp, nama, tempat & tanggal lahir, jenis kelamin, agama, pendidikan' },
-	{ key: 'jabatan_sk', label: 'Jabatan & SK pengangkatan', jenis: 'data', wajib: true, keterangan: 'Jabatan, nomor & tanggal SK, dasar hukum' },
+	{ key: 'biodata', label: 'Biodata diri', jenis: 'data', wajib: true, kolom: ['nik', 'whatsapp', 'nama_lengkap', 'tempat_lahir', 'tanggal_lahir', 'jenis_kelamin', 'agama', 'pendidikan_terakhir'], keterangan: 'NIK, WhatsApp, nama, tempat & tanggal lahir, jenis kelamin, agama, pendidikan' },
+	{ key: 'jabatan_sk', label: 'Jabatan & SK pengangkatan', jenis: 'data', wajib: true, kolom: ['jabatan', 'niap', 'pangkat_golongan', 'tanggal_pengangkatan', 'nomor_sk_pengangkatan', 'produk_hukum_id'], keterangan: 'Jabatan, nomor & tanggal SK, dasar hukum' },
 	{ key: 'bpjs', label: 'Nomor BPJS', jenis: 'data', wajib: false, kolom: ['bpjs_kesehatan_nomor', 'bpjs_ketenagakerjaan_nomor'] },
 	{ key: 'file_sk_terakhir', label: 'SK terakhir', jenis: 'berkas', wajib: true },
 	{ key: 'file_ktp', label: 'KTP', jenis: 'berkas', wajib: true },
@@ -157,7 +159,7 @@ const itemBerlaku = (aparatur) =>
 	ITEM_VERIFIKASI.map((item) => {
 		let ada = true;
 		if (item.jenis === 'berkas') ada = terisi(aparatur[item.key]);
-		else if (item.kolom) ada = item.kolom.some((kolom) => terisi(aparatur[kolom]));
+		else if (item.kolom && !item.wajib) ada = item.kolom.some((kolom) => terisi(aparatur[kolom]));
 		return { ...item, ada };
 	}).filter((item) => item.wajib || item.ada);
 
@@ -191,6 +193,36 @@ const catatanUntukDesa = (aparatur, keputusan = {}, catatanUmum = null) => {
 	return baris.length ? baris.join('\n') : null;
 };
 
+/** Item yang isinya berubah oleh sebuah simpanan. Kolom yang tidak dikirim dianggap tetap. */
+const itemBerubah = (lama, baru, berkasBaru = []) =>
+	ITEM_VERIFIKASI.filter((item) =>
+		item.jenis === 'berkas'
+			? berkasBaru.includes(item.key)
+			: item.kolom.some((kolom) => kolom in baru && kanon(baru[kolom]) !== kanon(lama[kolom]))
+	);
+
+/**
+ * Kolom verifikasi setelah desa merevisi sebagian item: keputusan item yang
+ * berubah gugur, sisanya tetap, sehingga pemeriksa hanya mengulang yang direvisi.
+ * Status tidak pernah NAIK menjadi terverifikasi dari simpanan desa: NIPD hanya
+ * terbit lewat pemeriksaan bidang, yang juga memeriksa NIPD kembar.
+ */
+const verifikasiSetelahUbah = (lama, sesudah, berubah) => {
+	const sisa = { ...(lama.verifikasi_item && typeof lama.verifikasi_item === 'object' ? lama.verifikasi_item : {}) };
+	for (const item of berubah) delete sisa[item.key];
+
+	const ringkas = ringkasVerifikasi(sesudah, sisa);
+	const status = ringkas === 'terverifikasi' && lama.status_verifikasi !== 'terverifikasi' ? null : ringkas;
+	return {
+		verifikasi_item: sisa,
+		status_verifikasi: status,
+		dpmd_verified_at: status ? lama.dpmd_verified_at : null,
+		dpmd_verified_by: status ? lama.dpmd_verified_by : null,
+		catatan_verifikasi: status === 'ditolak' ? catatanUntukDesa(sesudah, sisa) : null,
+		nipd: status === 'terverifikasi' ? lama.nipd : null,
+	};
+};
+
 module.exports = {
 	KODE_KABUPATEN,
 	ITEM_VERIFIKASI,
@@ -201,4 +233,6 @@ module.exports = {
 	itemBerlaku,
 	ringkasVerifikasi,
 	catatanUntukDesa,
+	itemBerubah,
+	verifikasiSetelahUbah,
 };

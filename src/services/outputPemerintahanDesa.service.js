@@ -70,8 +70,10 @@ const fetchAparatur = async () => {
               SUM(file_kk IS NOT NULL) AS berkas_kk,
               SUM(file_ijazah_terakhir IS NOT NULL) AS berkas_ijazah,
               SUM(file_pas_foto IS NOT NULL) AS berkas_foto,
-              SUM(file_akta_kelahiran IS NOT NULL) AS berkas_akta
-       FROM aparatur_desa`
+              SUM(file_akta_kelahiran IS NOT NULL) AS berkas_akta,
+              (SELECT COUNT(*) FROM aparatur_desa) AS tercatat
+       FROM aparatur_desa
+       WHERE status = 'Aktif' AND tanggal_pemberhentian IS NULL`
     ),
     prisma.$queryRawUnsafe(
       `SELECT UPPER(jabatan) AS jabatan, COUNT(*) AS jumlah
@@ -87,6 +89,7 @@ const fetchAparatur = async () => {
               SUM(status = 'Aktif' AND tanggal_pemberhentian IS NULL) AS aktif,
               SUM(sumber_data = 'desa') AS input_desa
        FROM aparatur_desa
+       WHERE status = 'Aktif' AND tanggal_pemberhentian IS NULL
        GROUP BY desa_id`
     ),
   ]);
@@ -153,7 +156,8 @@ const getOutputPemerintahanDesa = async () => {
   const ringkasAparatur = {
     total: totalAparatur,
     aktif: toNumber(ap.aktif),
-    tidak_aktif: totalAparatur - toNumber(ap.aktif),
+    tidak_aktif: toNumber(ap.tercatat) - toNumber(ap.aktif),
+    tercatat: toNumber(ap.tercatat),
     input_desa: toNumber(ap.input_desa),
     dari_arsip: toNumber(ap.dari_arsip),
     persen_input_desa: persen(toNumber(ap.input_desa), totalAparatur),

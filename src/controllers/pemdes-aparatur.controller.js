@@ -362,8 +362,10 @@ const getGrouped = async (req, res) => {
 			if (!desa || !kec) continue;
 
 			const { kecamatan, entriDesa } = tempatDesa(desa, kec);
-			if (row.status === 'Aktif') entriDesa.aktif += 1;
-			if (row.status_verifikasi === 'terverifikasi') entriDesa.terverifikasi += 1;
+			if (row.status === 'Aktif') {
+				entriDesa.aktif += 1;
+				if (row.status_verifikasi === 'terverifikasi') entriDesa.terverifikasi += 1;
+			}
 
 			const { urutan, nomor } = peringkatJabatan(row.jabatan || '');
 			entriDesa.aparatur.push({
@@ -1126,11 +1128,14 @@ const getStats = async (req, res) => {
 		const where = bangunWhere({ ...saring, jabatan_in });
 		// AND, bukan spread: penyaring status dari pengguna tidak boleh tertimpa
 		// syarat kartu "aktif" (dan sebaliknya).
-		const dengan = (extra) => ({ AND: [where, extra] });
+		// Tidak aktif tidak masuk hitungan, kecuali memang disaring secara eksplisit.
+		const whereHitung = saring.status ? where : { AND: [where, { status: 'Aktif' }] };
+		const dengan = (extra) => ({ AND: [whereHitung, extra] });
 
 		const [
 			totalAparatur,
 			totalAktif,
+			totalTidakAktif,
 			totalLakiLaki,
 			totalPerempuan,
 			totalDesaDenganAparatur,
@@ -1139,31 +1144,32 @@ const getStats = async (req, res) => {
 			jabatanGroups,
 			cakupan_desa,
 		] = await Promise.all([
-			prisma.aparatur_desa.count({ where }),
-			prisma.aparatur_desa.count({ where: dengan({ status: 'Aktif' }) }),
+			prisma.aparatur_desa.count({ where: whereHitung }),
+			prisma.aparatur_desa.count({ where: { AND: [where, { status: 'Aktif' }] } }),
+			prisma.aparatur_desa.count({ where: { AND: [where, { status: 'Tidak_Aktif' }] } }),
 			prisma.aparatur_desa.count({ where: dengan({ jenis_kelamin: 'Laki_laki' }) }),
 			prisma.aparatur_desa.count({ where: dengan({ jenis_kelamin: 'Perempuan' }) }),
 			prisma.aparatur_desa.groupBy({
 				by: ['desa_id'],
-				where,
+				where: whereHitung,
 				_count: true,
 			}).then(groups => groups.length),
 			prisma.aparatur_desa.findMany({
-				where,
+				where: whereHitung,
 				select: { tanggal_lahir: true },
 			}),
 			prisma.aparatur_desa.groupBy({
 				by: ['pendidikan_terakhir'],
-				where,
+				where: whereHitung,
 				_count: { _all: true },
 				orderBy: { _count: { pendidikan_terakhir: 'desc' } },
 			}),
 			prisma.aparatur_desa.groupBy({
 				by: ['jabatan', 'status'],
-				where,
+				where: whereHitung,
 				_count: { _all: true },
 			}),
-			hitungCakupanDesa(saring, where),
+			hitungCakupanDesa(saring, whereHitung),
 		]);
 
 		// Age range calculation
@@ -1218,7 +1224,7 @@ const getStats = async (req, res) => {
 		// kecamatannya; jumlah desa ±400 sehingga peta kecilnya murah.
 		const perDesaStatus = await prisma.aparatur_desa.groupBy({
 			by: ['desa_id', 'status_verifikasi'],
-			where,
+			where: whereHitung,
 			_count: { _all: true },
 		});
 		const desaIds = [...new Set(perDesaStatus.map((g) => g.desa_id))];
@@ -1257,7 +1263,7 @@ const getStats = async (req, res) => {
 				verifikasi_per_kecamatan,
 				total: totalAparatur,
 				aktif: totalAktif,
-				tidak_aktif: totalAparatur - totalAktif,
+				tidak_aktif: totalTidakAktif,
 				laki_laki: totalLakiLaki,
 				perempuan: totalPerempuan,
 				desa_count: totalDesaDenganAparatur,

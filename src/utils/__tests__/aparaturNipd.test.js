@@ -14,7 +14,7 @@
  * tanpa mengubah tabel ini akan membuat uji gagal.
  */
 
-const { kodeJabatan, kodeWilayah, buatNipd, ringkasVerifikasi } = require('../aparaturNipd');
+const { kodeJabatan, kodeWilayah, buatNipd, ringkasVerifikasi, itemBerubah, verifikasiSetelahUbah } = require('../aparaturNipd');
 
 const DESA = '32.01.40.2007'; // Kec 40, Desa 2007
 
@@ -154,5 +154,114 @@ describe('NIPD hanya untuk data valid', () => {
 	});
 	it('SK terakhir belum diunggah → tidak bisa valid', () => {
 		expect(ringkasVerifikasi({ file_ktp: 'ktp.png' }, semua)).toBe('ditolak');
+	});
+});
+
+describe('verifikasiSetelahUbah: simpanan desa hanya menggugurkan item yang berubah', () => {
+	const sesuai = { status: 'sesuai' };
+	const baris = (extra = {}) => ({
+		nik: '3201010101010001',
+		whatsapp: '628123456789',
+		nama_lengkap: 'Budi',
+		tempat_lahir: 'Bogor',
+		tanggal_lahir: new Date('1990-05-17'),
+		jenis_kelamin: 'Laki_laki',
+		agama: 'Islam',
+		pendidikan_terakhir: 'SMA',
+		jabatan: 'Sekretaris Desa',
+		niap: null,
+		pangkat_golongan: null,
+		tanggal_pengangkatan: new Date('2020-01-01'),
+		nomor_sk_pengangkatan: '12/2020',
+		produk_hukum_id: null,
+		file_sk_terakhir: 'sk.pdf',
+		file_ktp: 'ktp.png',
+		status_verifikasi: 'ditolak',
+		dpmd_verified_at: new Date('2026-10-20'),
+		dpmd_verified_by: 'u1',
+		nipd: null,
+		verifikasi_item: {
+			biodata: sesuai,
+			jabatan_sk: sesuai,
+			file_sk_terakhir: sesuai,
+			file_ktp: { status: 'tidak_sesuai', catatan: 'buram' },
+		},
+		...extra,
+	});
+	const ubah = (lama, baru, berkas = []) => {
+		const berubah = itemBerubah(lama, baru, berkas);
+		return verifikasiSetelahUbah(lama, { ...lama, ...baru }, berubah);
+	};
+
+	it('KTP diganti pada baris ditolak: hanya keputusan KTP gugur', () => {
+		const hasil = ubah(baris(), {}, ['file_ktp']);
+		expect(Object.keys(hasil.verifikasi_item).sort()).toEqual(['biodata', 'file_sk_terakhir', 'jabatan_sk']);
+		expect(hasil.status_verifikasi).toBeNull();
+		expect(hasil.nipd).toBeNull();
+	});
+
+	it('dua item ditolak, satu direvisi: tetap ditolak, catatan hanya item yang belum direvisi', () => {
+		const lama = baris({
+			verifikasi_item: {
+				biodata: { status: 'tidak_sesuai', catatan: 'nama salah' },
+				jabatan_sk: sesuai,
+				file_sk_terakhir: sesuai,
+				file_ktp: { status: 'tidak_sesuai', catatan: 'buram' },
+			},
+		});
+		const hasil = ubah(lama, {}, ['file_ktp']);
+		expect(hasil.status_verifikasi).toBe('ditolak');
+		expect(hasil.catatan_verifikasi).toContain('nama salah');
+		expect(hasil.catatan_verifikasi).not.toContain('buram');
+	});
+
+	it('simpanan tanpa perubahan: tidak ada item berubah', () => {
+		const lama = baris({ nama_lengkap: 'Budi', tempat_lahir: null });
+		const baru = { nama_lengkap: ' Budi ', tempat_lahir: '', tanggal_lahir: new Date('1990-05-17'), jabatan: 'Sekretaris Desa' };
+		expect(itemBerubah(lama, baru)).toEqual([]);
+		expect(itemBerubah(lama, { tanggal_lahir: '1990-05-17' })).toEqual([]);
+	});
+
+	it('baris terverifikasi + berkas opsional baru: status null, NIPD null, keputusan lain tetap', () => {
+		const lama = baris({
+			status_verifikasi: 'terverifikasi',
+			nipd: '19900517014020071001',
+			verifikasi_item: { biodata: sesuai, jabatan_sk: sesuai, file_sk_terakhir: sesuai, file_ktp: sesuai },
+		});
+		const hasil = ubah(lama, { file_kk: 'kk.png' }, ['file_kk']);
+		expect(hasil.status_verifikasi).toBeNull();
+		expect(hasil.nipd).toBeNull();
+		expect(Object.keys(hasil.verifikasi_item).sort()).toEqual(['biodata', 'file_ktp', 'file_sk_terakhir', 'jabatan_sk']);
+	});
+
+	it('tidak pernah naik menjadi terverifikasi dari simpanan desa', () => {
+		const lama = baris({
+			bpjs_kesehatan_nomor: '0001',
+			verifikasi_item: {
+				biodata: sesuai,
+				jabatan_sk: sesuai,
+				file_sk_terakhir: sesuai,
+				file_ktp: sesuai,
+				bpjs: { status: 'tidak_sesuai', catatan: 'nomor salah' },
+			},
+		});
+		const hasil = ubah(lama, { bpjs_kesehatan_nomor: '' });
+		expect(hasil.status_verifikasi).toBeNull();
+		expect(hasil.nipd).toBeNull();
+	});
+
+	it('biodata tidak_sesuai karena NIK kosong, lalu NIK diisi: item gugur', () => {
+		const lama = baris({
+			nik: null,
+			verifikasi_item: {
+				biodata: { status: 'tidak_sesuai', catatan: 'NIK kosong' },
+				jabatan_sk: sesuai,
+				file_sk_terakhir: sesuai,
+				file_ktp: sesuai,
+			},
+		});
+		const hasil = ubah(lama, { nik: '3201010101010002' });
+		expect(hasil.verifikasi_item.biodata).toBeUndefined();
+		expect(hasil.status_verifikasi).toBeNull();
 	});
 });

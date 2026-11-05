@@ -860,7 +860,7 @@ class ChatbotController {
         prisma.bumdes.count(),
         prisma.produk_hukums.count(),
         prisma.berita.count(),
-        prisma.aparatur_desa.count(),
+        prisma.aparatur_desa.count({ where: { status: 'Aktif' } }),
         prisma.jadwal_kegiatan.count(),
         prisma.surat_masuk.count(),
       ]);

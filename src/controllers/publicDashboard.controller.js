@@ -1199,6 +1199,7 @@ const serializeProductLawShort = (productLaw, baseUrl) => {
 
 const buildAparaturDesaDetail = async (baseUrl) => {
   const rows = await prisma.aparatur_desa.findMany({
+    where: { status: 'Aktif' },
     select: {
       id: true,
       desa_id: true,
@@ -1280,7 +1281,7 @@ const buildAparaturDesaDetail = async (baseUrl) => {
   return {
     total: records.length,
     aktif,
-    tidak_aktif: records.length - aktif,
+    tidak_aktif: await prisma.aparatur_desa.count({ where: { status: 'Tidak_Aktif' } }),
     desa_count: new Set(records.map((record) => record.desa_id).filter(Boolean)).size,
     ...groupAparaturRecords(records),
     by_jabatan: countBy(records, (record) => record.jabatan),

@@ -628,7 +628,7 @@ async function getDesaDashboardSummary(req, res) {
           has_photo: !!profilDesa?.foto_kantor_desa_path
         },
         aparatur: {
-          total: aparaturDesa.length,
+          total: aparaturAktif,
           aktif: aparaturAktif,
           nonaktif: Math.max(aparaturDesa.length - aparaturAktif, 0)
         },

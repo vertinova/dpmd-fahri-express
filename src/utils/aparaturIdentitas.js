@@ -56,4 +56,4 @@ const hanyaMelengkapiIdentitas = (lama, baru, adaBerkasBaru = false) => {
 	return KOLOM_TERVERIFIKASI.every((kolom) => !(kolom in baru) || kanon(baru[kolom]) === kanon(lama[kolom]));
 };
 
-module.exports = { periksaIdentitas, identitasKurang, hanyaMelengkapiIdentitas };
+module.exports = { periksaIdentitas, identitasKurang, hanyaMelengkapiIdentitas, kanon };

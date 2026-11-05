@@ -5,7 +5,7 @@ const fs = require('fs').promises;
 const { keAparaturDesa, bandingkanDenganAparatur, cariPenghalangArsip } = require('../config/dapurDesa');
 const { AKSI, catatLogAparatur } = require('../utils/aparaturLog');
 const { Prisma } = require('@prisma/client');
-const { buatNipd } = require('../utils/aparaturNipd');
+const { buatNipd, itemBerubah, verifikasiSetelahUbah } = require('../utils/aparaturNipd');
 const { periksaKolomSpam, alasanSpam } = require('../utils/teksSpam');
 const { periksaIdentitas, hanyaMelengkapiIdentitas } = require('../utils/aparaturIdentitas');
 
@@ -30,9 +30,8 @@ const tolakBilaSpam = async (req, res, data) => {
  * Periksa NIK & WhatsApp, lalu tulis bentuk bakunya ke `data`. Mengembalikan
  * true bila permintaan sudah dijawab. `data.status` harus sudah berbentuk enum.
  *
- * Kolom yang tidak dikirim memakai nilai tersimpan: ubah status cepat di
- * halaman detail tidak mengirim keduanya. Data lama yang belum punya NIK tetap
- * bisa dinonaktifkan — orang yang sudah berhenti sering tak terjangkau lagi —
+ * Kolom yang tidak dikirim memakai nilai tersimpan. Data lama yang belum punya
+ * NIK tetap bisa dinonaktifkan oleh Bidang — orang yang sudah berhenti sering tak terjangkau lagi —
  * tetapi tidak bisa disimpan sebagai aktif.
  */
 const tolakBilaIdentitasSalah = async (req, res, data, { desaId, olehBidang, lama = null }) => {
@@ -67,10 +66,9 @@ const tolakBilaIdentitasSalah = async (req, res, data, { desaId, olehBidang, lam
 	return false;
 };
 
-// Data berubah = keputusan verifikasi Bidang Pemdes gugur. Kalau tidak,
-// baris yang sudah dibetulkan desa akan tetap berstatus "ditolak" —
-// dan yang sudah disetujui tetap "terverifikasi" padahal isinya lain.
-// NIPD ikut gugur: ia hanya sah untuk data yang dinyatakan valid.
+// Dipakai saat arsip Dapur Desa menimpa baris: seluruh keputusan verifikasi
+// gugur karena isinya diganti. NIPD ikut gugur: ia hanya sah untuk data yang
+// dinyatakan valid. (Simpanan desa biasa hanya menggugurkan item yang berubah.)
 const RESET_VERIFIKASI = {
 	status_verifikasi: null,
 	dpmd_verified_at: null,
@@ -79,6 +77,9 @@ const RESET_VERIFIKASI = {
 	verifikasi_item: Prisma.DbNull,
 	nipd: null,
 };
+
+// Aktif/nonaktif adalah kewenangan DPMD; kiriman akun desa untuk kolom ini diabaikan.
+const KOLOM_HAK_DPMD = ['status', 'tanggal_pemberhentian', 'nomor_sk_pemberhentian'];
 
 /** Tanggal (DATE) yang dikirim berbeda dari yang tersimpan? Dibandingkan per hari UTC. */
 const tanggalBerubah = (baru, lama) => {
@@ -253,6 +254,7 @@ const createAparaturDesa = async (req, res) => {
 		});
 
 		if (await tolakBilaSpam(req, res, data)) return;
+		if (!olehBidang) KOLOM_HAK_DPMD.forEach((kolom) => delete data[kolom]);
 
 		// Convert date strings to Date objects
 		if (data.tanggal_lahir) {
@@ -416,6 +418,7 @@ const updateAparaturDesa = async (req, res) => {
 		});
 
 		if (await tolakBilaSpam(req, res, data)) return;
+		if (!olehBidang) KOLOM_HAK_DPMD.forEach((kolom) => delete data[kolom]);
 
 		// Convert date strings to Date objects
 		if (data.tanggal_lahir) {
@@ -476,6 +479,8 @@ const updateAparaturDesa = async (req, res) => {
 			}
 		}
 
+		const berubah = olehBidang || verifikasiTetap ? [] : itemBerubah(existing, data, Object.keys(req.files || {}));
+
 		let aparatur = await prisma.aparatur_desa.update({
 			where: { id },
 			data: {
@@ -509,9 +514,9 @@ const updateAparaturDesa = async (req, res) => {
 				file_akta_kelahiran: data.file_akta_kelahiran || existing.file_akta_kelahiran,
 				file_ijazah_terakhir: data.file_ijazah_terakhir || existing.file_ijazah_terakhir,
 				file_sk_terakhir: data.file_sk_terakhir || existing.file_sk_terakhir,
-				// Suntingan bidang tidak menggugurkan keputusannya sendiri — yang
-				// memeriksa dan yang membetulkan berada di pihak yang sama.
-				...(olehBidang || verifikasiTetap ? {} : RESET_VERIFIKASI),
+				// Suntingan bidang tidak menggugurkan keputusannya sendiri. Simpanan desa hanya
+				// menggugurkan item yang isinya berubah.
+				...(berubah.length ? verifikasiSetelahUbah(existing, { ...existing, ...data }, berubah) : {}),
 			},
 			include: {
 				desas: {
@@ -549,7 +554,7 @@ const updateAparaturDesa = async (req, res) => {
 		await catatLogAparatur({
 			aparaturId: id,
 			aksi: AKSI.diubah,
-			keterangan: `Data diperbarui oleh ${oleh}${verifikasiTetap ? ' — verifikasi tetap berlaku' : ''}`,
+			keterangan: `Data diperbarui oleh ${oleh}${verifikasiTetap ? ' — verifikasi tetap berlaku' : berubah.length ? ` — perlu diperiksa ulang: ${berubah.map((item) => item.label).join(', ')}` : ''}`,
 			user: req.user,
 		});
 
@@ -563,74 +568,6 @@ const updateAparaturDesa = async (req, res) => {
 		res.status(500).json({
 			success: false,
 			message: 'Gagal mengupdate aparatur desa',
-			error: error.message,
-		});
-	}
-};
-
-/**
- * Delete aparatur desa
- */
-const deleteAparaturDesa = async (req, res) => {
-	try {
-		const { id } = req.params;
-		const { desa_id } = req.user;
-
-		// Check if aparatur exists and belongs to user's desa
-		const existing = await prisma.aparatur_desa.findFirst({
-			where: {
-				id,
-				desa_id: parseInt(desa_id),
-			},
-		});
-
-		if (!existing) {
-			return res.status(404).json({
-				success: false,
-				message: 'Data aparatur desa tidak ditemukan',
-			});
-		}
-
-		// Delete all associated files
-		const fileFields = [
-			'file_bpjs_kesehatan',
-			'file_bpjs_ketenagakerjaan',
-			'file_pas_foto',
-			'file_ktp',
-			'file_kk',
-			'file_akta_kelahiran',
-			'file_ijazah_terakhir',
-			'file_sk_terakhir',
-		];
-
-		for (const field of fileFields) {
-			if (existing[field]) {
-				const filePath = path.join(
-					__dirname,
-					'../../storage/uploads/aparatur_desa_files',
-					existing[field]
-				);
-				try {
-					await fs.unlink(filePath);
-				} catch (err) {
-					console.error(`Error deleting file ${field}:`, err);
-				}
-			}
-		}
-
-		await prisma.aparatur_desa.delete({
-			where: { id },
-		});
-
-		res.json({
-			success: true,
-			message: 'Aparatur desa berhasil dihapus',
-		});
-	} catch (error) {
-		console.error('Error deleting aparatur desa:', error);
-		res.status(500).json({
-			success: false,
-			message: 'Gagal menghapus aparatur desa',
 			error: error.message,
 		});
 	}
@@ -1006,7 +943,6 @@ module.exports = {
 	getAparaturDesaById,
 	createAparaturDesa,
 	updateAparaturDesa,
-	deleteAparaturDesa,
 	getRekonsiliasiDapurDesa,
 	putuskanDapurDesa,
 	tambahSemuaBaruDapurDesa,
