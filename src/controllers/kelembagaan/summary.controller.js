@@ -1249,6 +1249,18 @@ class SummaryController {
              SUM(status_verifikasi = 'ditolak') AS ditolak
            FROM ${t.model} WHERE status_kelembagaan = 'aktif' GROUP BY desa_id`
         )),
+        // Pengurus aktif pada lembaga aktif; pengurus purna/nonaktif tidak ikut dihitung
+        // supaya capaiannya sebanding dengan capaian lembaga di sebelahnya.
+        ...VERIFIKASI_TABLES.map(t => prisma.$queryRawUnsafe(
+          `SELECT p.desa_id,
+             COUNT(*) AS total,
+             SUM(p.status_verifikasi = 'verified') AS verified,
+             SUM(p.status_verifikasi = 'ditolak') AS ditolak
+           FROM pengurus p
+           JOIN ${t.model} l ON l.id = p.pengurusable_id AND l.status_kelembagaan = 'aktif'
+           WHERE p.pengurusable_type = '${t.model}' AND p.status_jabatan = 'aktif'
+           GROUP BY p.desa_id`
+        )),
       ]);
 
       const byDesa = new Map(desas.map(d => [String(d.id), {
@@ -1261,6 +1273,8 @@ class SummaryController {
         total: 0,
         verified: 0,
         ditolak: 0,
+        pengurus: Object.fromEntries(VERIFIKASI_TABLES.map(t => [t.key, { total: 0, verified: 0, ditolak: 0 }])),
+        pengurus_totals: { total: 0, verified: 0, ditolak: 0 },
       }]));
 
       VERIFIKASI_TABLES.forEach((t, idx) => {
@@ -1272,6 +1286,15 @@ class SummaryController {
           desa.total += row.total;
           desa.verified += row.verified;
           desa.ditolak += row.ditolak;
+        });
+        perTabel[VERIFIKASI_TABLES.length + idx].forEach(r => {
+          const desa = byDesa.get(String(r.desa_id));
+          if (!desa) return;
+          const row = { total: Number(r.total), verified: Number(r.verified || 0), ditolak: Number(r.ditolak || 0) };
+          desa.pengurus[t.key] = row;
+          desa.pengurus_totals.total += row.total;
+          desa.pengurus_totals.verified += row.verified;
+          desa.pengurus_totals.ditolak += row.ditolak;
         });
       });
 
