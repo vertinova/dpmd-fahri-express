@@ -20,8 +20,9 @@
 //   klien → "hadiah" {ke, n}                         kirim koin (10/20/50) ke tamu lain
 //   klien → "peringkat" (ack)                       minta papan peringkat
 //   klien → "lomba:daftar" / "lomba:ikan"           Lomba Galatama bersama (lihat jelajahLomba.js)
+//   klien → "basket:*"                              Lomba Basket antar-tamu (lihat jelajahBasket.js)
 //   server → "selamat" {id, ruang, pemain[], kendaraan{}}  saat baru masuk
-//   server → "masuk" / "keluar" / "posisi" / "ucap" / "emote" / "klakson" / "gaya" / "disapa" / "ditolak" / "lomba" / "gotong"
+//   server → "masuk" / "keluar" / "posisi" / "ucap" / "emote" / "klakson" / "gaya" / "disapa" / "ditolak" / "lomba" / "gotong" / "basket"
 
 // Tamu dibagi ke beberapa "ruang" (salinan kantor) berisi maks. 10 orang: siaran
 // posisi tumbuh kuadrat terhadap jumlah pemain SATU ruang (10 tamu = 100 kiriman
@@ -62,6 +63,7 @@ const BATAS = { x0: -2100, x1: 1200, z0: -1130, z1: 180, y0: -3, y1: 26 }; // y 
 const crypto = require('crypto');
 const fs = require('fs');
 const { pasangLomba } = require('./jelajahLomba');
+const { pasangBasket } = require('./jelajahBasket');
 const { ipKlien, kunciNama, namaTerlarang, sensor } = require('./jelajahSaring');
 const path = require('path');
 const DIR_DATA = process.env.JELAJAH_DATA_DIR || path.join(__dirname, '../../data/jelajah');
@@ -202,7 +204,7 @@ function pembatas(n, ms) {
   };
 }
 
-function initJelajahSocket(io, { tanpaDb = false } = {}) {
+function initJelajahSocket(io, { tanpaDb = false, basketDaftarMs } = {}) {
   const nsp = io.of('/jelajah');
   const perIp = new Map();
   const bisu = new Map(); // ip → kapan pembatasan chat berakhir
@@ -214,6 +216,7 @@ function initJelajahSocket(io, { tanpaDb = false } = {}) {
   // Kunci: nomor untuk salinan kantor, "kec:Nama[:n]" untuk dunia kecamatan.
   const daftarRuang = new Map();
   const lomba = pasangLomba(nsp, { pembatas });
+  const basket = pasangBasket(nsp, { pembatas, daftarMs: basketDaftarMs });
 
   // Ruang terisi yang masih ada tempat; bila semua penuh, buka ruang baru.
   function pilihRuang() {
@@ -256,7 +259,9 @@ function initJelajahSocket(io, { tanpaDb = false } = {}) {
     const avatar = Number.isInteger(a.avatar) && a.avatar >= 0 && a.avatar < AVATAR ? a.avatar : 0;
     const kulit = Number.isInteger(a.kulit) && a.kulit >= 0 && a.kulit < KULIT ? a.kulit : 0;
     socket.data.ip = ip;
-    socket.data.ruang = no;
+    // sedang ikut lomba basket: sambung ulang kembali ke lapangannya
+    const ruangLaga = basket.ruangUntuk(socket.data.kunci);
+    socket.data.ruang = ruangLaga !== null && daftarRuang.has(ruangLaga) && daftarRuang.get(ruangLaga).pemain.size < MAKS_PER_RUANG ? ruangLaga : no;
     socket.data.profil = { nama, jk, avatar, kulit, gaya: gayaBersih(a.gaya) };
     next();
   });
@@ -317,6 +322,7 @@ function initJelajahSocket(io, { tanpaDb = false } = {}) {
         pemain: [...pemain.values()].filter((p) => p.id !== socket.id),
         kendaraan: Object.fromEntries(kendaraan),
         lomba: lomba.publik(),
+        basket: basket.publikRuang(no),
         nama: data.nama,
         namaDitolak: socket.data.namaDitolak,
         gotong: gotongKini(),
@@ -331,13 +337,16 @@ function initJelajahSocket(io, { tanpaDb = false } = {}) {
       // Ruang kosong ditutup; kendaraannya kembali ke posisi awal untuk tamu berikutnya.
       if (!pemain.size) daftarRuang.delete(no);
     };
+    basket.sambung(socket, data, no);
     sambut();
     lomba.pasang(socket, data);
+    basket.pasang(socket, data, () => no);
 
     socket.on('pindah', (m) => {
       const kec = m?.kec == null ? null : bersihkanTeks(m.kec, 40);
       if ((kec !== null && !NAMA_KEC.test(kec)) || !bolehPindah()) return socket.emit('ditolak', { alasan: 'Tunggu sebentar sebelum berpindah lagi.' });
       socket.data.aktif = Date.now();
+      basket.keluar(socket);
       tinggalkanRuang();
       const tujuan = kec === null ? pilihRuang() : ruangKecamatan(kec);
       // semua salinan kantor penuh: lepas koneksi, tamu tetap bisa menjelajah sendiri
