@@ -6,7 +6,8 @@
 // setelah tersambung ulang tetap tercatat; tamu lain hanya melihat `pid` publik.
 //
 // Format galatama: pendaftaran 30 dtk → sesi 5 menit → juara = ikan terberat (babon),
-// bila sama total berat. Kursi kosong diisi pemancing tetap kolam (NPC) sampai 6 peserta.
+// bila sama total berat. Tamu yang daftar sendirian ditemani pemancing tetap kolam (NPC)
+// sampai 6 peserta; bila ada 2 tamu atau lebih, lombanya tanpa NPC.
 // Koin hidup di perangkat tamu: biaya & hadiah dipotong/ditambah oleh klien, server
 // hanya mencatat dan mengumumkan hasil (permainan santai, tangkapan tetap dibatasi wajar).
 //
@@ -92,7 +93,8 @@ function pasangLomba(nsp, { pembatas }) {
   function mulai() {
     const kini = Date.now();
     const manusia = lomba.peserta.size;
-    LAWAN.slice(0, Math.max(0, ISI_SAMPAI - manusia)).forEach((l, i) => {
+    // Ada teman terdaftar = lomba antar-tamu murni; NPC hanya menemani tamu yang daftar sendirian.
+    LAWAN.slice(0, manusia > 1 ? 0 : ISI_SAMPAI - manusia).forEach((l, i) => {
       lomba.peserta.set(`npc:${i}`, { pid: `npc${i}`, nama: l.nama, ikon: l.ikon, npc: true, l, ikan: 0, total: 0, babon: 0, babonIkan: null, berikut: kini + jedaLawan(l) });
     });
     lomba.fase = 'jalan';

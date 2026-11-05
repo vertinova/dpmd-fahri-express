@@ -13,7 +13,7 @@
 //   klien → "emote" {jenis}                         lambai, jempol, tepuk, tawa, hati
 //   klien → "sapa" {ke}                             menyapa satu pemain tertentu
 //   klien → "klakson"                               bunyi klakson kendaraan yang dikemudikan
-//   klien → "gaya" {t,b,c,s}                        ganti topi/baju/celana/sepatu (indeks lemari)
+//   klien → "gaya" {t,b,c,s,k}                      ganti topi/baju/celana/sepatu/kerudung (indeks lemari)
 //   klien → "skor" {level,ikan,kg,jenis,balap,sirkuit,pembangun,bintangW} catatan untuk papan peringkat
 //   klien → "hadiah" {ke, n}                         kirim koin (10/20/50) ke tamu lain
 //   klien → "peringkat" (ack)                       minta papan peringkat
@@ -37,9 +37,9 @@ const TICK_MS = 100;
 const JEDA_GERAK_MS = 80;
 const AVATAR = 4; // pilihan avatar per jenis kelamin
 const KULIT = 3;
-// Lemari gaya tamu: indeks topi/baju/celana/sepatu (0 = bawaan); batas atas longgar
+// Lemari gaya tamu: indeks topi/baju/celana/sepatu/kerudung (0 = bawaan); batas atas longgar
 // supaya katalog di klien bisa bertambah tanpa mengubah server.
-const gayaBersih = (g) => Object.fromEntries(["t", "b", "c", "s"].map((k) => [k, Number.isInteger(g?.[k]) && g[k] >= 0 && g[k] < 32 ? g[k] : 0]));
+const gayaBersih = (g) => Object.fromEntries(["t", "b", "c", "s", "k"].map((k) => [k, Number.isInteger(g?.[k]) && g[k] >= 0 && g[k] < 32 ? g[k] : 0]));
 const EMOTE = new Set(['lambai', 'jempol', 'tepuk', 'tawa', 'hati']);
 const POSE = new Set(['jalan', 'duduk', 'mobil', 'motor', 'perahu', 'mancing', 'renang', 'jongkok', 'panjat']);
 const ID_KENDARAAN = /^(mobil|motor|perahu):\d{1,2}$/;
