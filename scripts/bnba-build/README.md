@@ -84,7 +84,7 @@ menelusuri baris bermasalah kembali ke file desa.
   bila di masa depan), dan baris ketua RT yang tidak menulis nomor RW mewarisi RW
   dari baris ketua RW di atasnya. Judul sheetnya `DESA X - KECAMATAN Y`, jadi
   sertakan `--desa`/`--kecamatan`.
-- **Desa & kecamatan** diambil dari sel `Desa/Kelurahan` / `Kecamatan` di kepala
+- **Desa & kecamatan** diambil dari sel `Desa`/`Desa/Kelurahan` / `Kecamatan` di kepala
   sheet, atau dari judul `NOMINATIF … DESA X` / `KECAMATAN Y`, lalu dicocokkan ke
   `desa-reference.json` untuk mendapat `kode_desa`. Nama desa yang ada di lebih
   dari satu kecamatan (mis. Curug, Barengkok) dibedakan lewat nama kecamatan.
@@ -161,3 +161,4 @@ keputusan mana yang benar ada di DPMD/desa.
 | `desa-reference.js` | Pencarian `kode_desa` dari nama desa + kecamatan. |
 | `desa-reference.json` | 40 kecamatan, 435 desa/kelurahan. Segarkan lewat `refresh-desa-reference.js`. |
 | `validate-template.js` | Cek workbook hasil memakai aturan baca importer. |
+| `reader.test.js` | Self-check deteksi desa/kecamatan (`node --test scripts/bnba-build/reader.test.js`). |

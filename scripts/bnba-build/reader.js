@@ -277,14 +277,18 @@ function extractRows(rows, header) {
  * Mendukung dua pola: label "Desa/Kelurahan" + nilai di kanannya, atau judul
  * "NOMINATIF ... DESA X" / "KECAMATAN Y".
  */
+// Kata-kata yang muncul sebagai header kolom ALAMAT RUMAH, bukan nama wilayah.
+const HEADER_WORDS = new Set(['DESA', 'KELURAHAN', 'KECAMATAN', 'KODE POS', 'RT', 'RW', 'JALAN/GANG DAN NOMOR RUMAH']);
+
 function detectWilayah(rows) {
   const result = { desa: '', kecamatan: '' };
 
   const valueRightOf = (rowIdx, colIdx) => {
     const raw = rows[rowIdx] || [];
     for (let c = colIdx + 1; c < colIdx + 6 && c < raw.length; c += 1) {
-      const v = normLabel(raw[c]);
-      if (v) return v;
+      // Format BNBA resmi menulis nilainya sebagai ": HAMBARO".
+      const v = normLabel(raw[c]).replace(/^:\s*/, '');
+      if (v && !HEADER_WORDS.has(v)) return v;
     }
     return '';
   };
@@ -294,7 +298,7 @@ function detectWilayah(rows) {
     for (let c = 0; c < raw.length; c += 1) {
       const label = normLabel(raw[c]);
       if (!label) continue;
-      if (!result.desa && /^DESA\s*\/\s*KELURAHAN$/.test(label)) result.desa = valueRightOf(i, c);
+      if (!result.desa && /^DESA(\s*\/\s*KELURAHAN)?$/.test(label)) result.desa = valueRightOf(i, c);
       if (!result.kecamatan && /^KECAMATAN$/.test(label) && c < raw.length - 1) {
         const v = valueRightOf(i, c);
         if (v) result.kecamatan = v;

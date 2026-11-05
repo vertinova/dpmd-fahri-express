@@ -551,7 +551,9 @@ function buildFromWorkbook(filePath, opts, reference) {
     const kept = [];
     for (const row of out[def.name]) {
       const lembagaKey = def.lembaga.map((c) => row[c] || '').join('|');
-      const identity = row.nik || row.nama_lengkap;
+      // NIK hanya jadi identitas bila 16 digit: banyak file desa memakai NIK
+      // potongan/placeholder yang sama untuk beberapa orang sekaligus.
+      const identity = /^\d{16}$/.test(row.nik || '') ? row.nik : row.nama_lengkap;
       const key = `${lembagaKey}|${identity}|${row.jabatan}`;
       if (seen.has(key)) {
         duplicates += 1;
