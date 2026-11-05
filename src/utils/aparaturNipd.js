@@ -133,7 +133,8 @@ const buatNipd = ({ tanggal_lahir, jenis_kelamin, jabatan, tanggal_lahir_taksira
 /* ─────────────────────────── Verifikasi per item ─────────────────────────── */
 
 /**
- * Item yang diperiksa Bidang Pemdes. `wajib` = harus ada dan sesuai sebelum
+ * Item yang diperiksa Bidang Pemdes. Untuk jabatan ber-NIPD SEMUA item wajib (lihat
+ * itemBerlaku); `wajib` di sini berlaku juga bagi jabatan lain: harus ada dan sesuai sebelum
  * data bisa dinyatakan valid. Item tidak wajib hanya ikut diperiksa bila ada
  * isinya (berkas terunggah / nomor terisi).
  */
@@ -155,13 +156,16 @@ const KUNCI_ITEM = new Set(ITEM_VERIFIKASI.map((item) => item.key));
 const terisi = (nilai) => nilai !== null && nilai !== undefined && String(nilai).trim() !== '';
 
 /** Item yang berlaku untuk satu aparatur, beserta apakah isinya ada. */
-const itemBerlaku = (aparatur) =>
-	ITEM_VERIFIKASI.map((item) => {
+const itemBerlaku = (aparatur) => {
+	// Jabatan ber-NIPD: NIPD baru terbit setelah SEMUA persyaratan ada dan sesuai.
+	const berhakNipd = kodeJabatan(aparatur.jabatan).berhak;
+	return ITEM_VERIFIKASI.map((item) => {
 		let ada = true;
 		if (item.jenis === 'berkas') ada = terisi(aparatur[item.key]);
-		else if (item.kolom && !item.wajib) ada = item.kolom.some((kolom) => terisi(aparatur[kolom]));
-		return { ...item, ada };
+		else if (item.kolom && !item.wajib) ada = berhakNipd ? item.kolom.every((kolom) => terisi(aparatur[kolom])) : item.kolom.some((kolom) => terisi(aparatur[kolom]));
+		return { ...item, ada, wajib: item.wajib || berhakNipd };
 	}).filter((item) => item.wajib || item.ada);
+};
 
 /**
  * Status ringkas dari keputusan per item:
@@ -187,7 +191,7 @@ const catatanUntukDesa = (aparatur, keputusan = {}, catatanUmum = null) => {
 	for (const item of itemBerlaku(aparatur)) {
 		const k = keputusan?.[item.key];
 		if (k?.status === 'tidak_sesuai') baris.push(`${item.label}: ${k.catatan || 'tidak sesuai'}`);
-		else if (item.wajib && !item.ada) baris.push(`${item.label}: belum diunggah`);
+		else if (item.wajib && !item.ada) baris.push(`${item.label}: ${item.jenis === 'berkas' ? 'belum diunggah' : 'belum diisi'}`);
 	}
 	if (catatanUmum) baris.push(catatanUmum);
 	return baris.length ? baris.join('\n') : null;

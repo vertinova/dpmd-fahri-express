@@ -14,7 +14,7 @@
  * tanpa mengubah tabel ini akan membuat uji gagal.
  */
 
-const { kodeJabatan, kodeWilayah, buatNipd, ringkasVerifikasi, itemBerubah, verifikasiSetelahUbah } = require('../aparaturNipd');
+const { kodeJabatan, kodeWilayah, buatNipd, ringkasVerifikasi, catatanUntukDesa, itemBerubah, verifikasiSetelahUbah } = require('../aparaturNipd');
 
 const DESA = '32.01.40.2007'; // Kec 40, Desa 2007
 
@@ -157,6 +157,45 @@ describe('NIPD hanya untuk data valid', () => {
 	});
 });
 
+describe('jabatan ber-NIPD: semua persyaratan harus lengkap dan sesuai', () => {
+	const sesuai = { status: 'sesuai' };
+	const BERKAS = ['file_sk_terakhir', 'file_ktp', 'file_pas_foto', 'file_kk', 'file_akta_kelahiran', 'file_ijazah_terakhir', 'file_bpjs_kesehatan', 'file_bpjs_ketenagakerjaan'];
+	const lengkap = {
+		jabatan: 'Sekretaris Desa',
+		bpjs_kesehatan_nomor: '0001',
+		bpjs_ketenagakerjaan_nomor: '0002',
+		...Object.fromEntries(BERKAS.map((k) => [k, `${k}.pdf`])),
+	};
+	const semuaSesuai = Object.fromEntries(['biodata', 'jabatan_sk', 'bpjs', ...BERKAS].map((k) => [k, sesuai]));
+
+	it('semua ada dan sesuai → terverifikasi', () => {
+		expect(ringkasVerifikasi(lengkap, semuaSesuai)).toBe('terverifikasi');
+	});
+
+	it('Sekdes hanya punya SK & KTP, keduanya sesuai → dikembalikan, catatan menyebut yang kurang', () => {
+		const baris = { jabatan: 'Sekretaris Desa', file_sk_terakhir: 'sk.pdf', file_ktp: 'ktp.png' };
+		expect(ringkasVerifikasi(baris, semuaSesuai)).toBe('ditolak');
+		const catatan = catatanUntukDesa(baris, semuaSesuai);
+		expect(catatan).toContain('Kartu Keluarga: belum diunggah');
+		expect(catatan).toContain('Nomor BPJS: belum diisi');
+		expect(catatan).not.toContain('KTP');
+	});
+
+	it('satu berkas belum diperiksa → belum diputus, NIPD belum boleh terbit', () => {
+		const { file_kk, ...tanpaKk } = semuaSesuai;
+		expect(file_kk).toBeDefined();
+		expect(ringkasVerifikasi(lengkap, tanpaKk)).toBeNull();
+	});
+
+	it('hanya satu nomor BPJS terisi → belum lengkap', () => {
+		expect(ringkasVerifikasi({ ...lengkap, bpjs_ketenagakerjaan_nomor: null }, semuaSesuai)).toBe('ditolak');
+	});
+
+	it.each(['Kepala Desa', 'Ketua BPD', 'Staf Desa'])('%s tidak ber-NIPD: cukup SK & KTP', (jabatan) => {
+		expect(ringkasVerifikasi({ jabatan, file_sk_terakhir: 'sk.pdf', file_ktp: 'ktp.png' }, semuaSesuai)).toBe('terverifikasi');
+	});
+});
+
 describe('verifikasiSetelahUbah: simpanan desa hanya menggugurkan item yang berubah', () => {
 	const sesuai = { status: 'sesuai' };
 	const baris = (extra = {}) => ({
@@ -236,6 +275,8 @@ describe('verifikasiSetelahUbah: simpanan desa hanya menggugurkan item yang beru
 
 	it('tidak pernah naik menjadi terverifikasi dari simpanan desa', () => {
 		const lama = baris({
+			// Jabatan tanpa NIPD: pada jabatan ber-NIPD, BPJS kosong berarti dikembalikan ke desa.
+			jabatan: 'Kepala Desa',
 			bpjs_kesehatan_nomor: '0001',
 			verifikasi_item: {
 				biodata: sesuai,

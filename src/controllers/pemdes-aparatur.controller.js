@@ -941,7 +941,7 @@ const verifikasiAparaturDesa = async (req, res) => {
 
 		const PESAN = {
 			terverifikasi: nipd ? `Data valid — NIPD ${nipd} diterbitkan` : 'Data valid dan terverifikasi',
-			ditolak: 'Ada item yang tidak sesuai — desa diminta membetulkan',
+			ditolak: 'Ada persyaratan yang tidak sesuai atau belum lengkap — desa diminta membetulkan',
 		};
 		if (diputuskan) {
 			await catatLogAparatur({
