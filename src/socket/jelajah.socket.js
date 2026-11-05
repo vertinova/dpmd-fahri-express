@@ -8,6 +8,7 @@
 //
 // Alur:
 //   klien → "gerak" {x,y,z,rot,pose,udara,lari,kend?}   (maks ±12x/detik, sisanya dibuang)
+//   klien → "pindah" {kec}                         masuk dunia kecamatan (kec: nama) / kembali ke kantor (null)
 //   klien → "ucap" {teks}                           chat ke semua pemain
 //   klien → "emote" {jenis}                         lambai, jempol, tepuk, tawa, hati
 //   klien → "sapa" {ke}                             menyapa satu pemain tertentu
@@ -26,6 +27,9 @@
 // Tamu baru masuk ke ruang terisi yang masih ada tempat, supaya tetap bertemu orang.
 const MAKS_PER_RUANG = 10;
 const MAKS_RUANG = 6;
+const MAKS_TAMU = MAKS_PER_RUANG * MAKS_RUANG;
+// Nama kecamatan dari klien hanya dipakai sebagai kunci ruang; ruang tertutup saat kosong.
+const NAMA_KEC = /^[\p{L} .'-]{2,40}$/u;
 const MAKS_PER_IP = 10;
 // Tamu yang diam (tab ditinggal) dikeluarkan supaya kursinya bisa dipakai tamu lain.
 const BATAS_DIAM_MS = 10 * 60 * 1000;
@@ -37,11 +41,11 @@ const KULIT = 3;
 // supaya katalog di klien bisa bertambah tanpa mengubah server.
 const gayaBersih = (g) => Object.fromEntries(["t", "b", "c", "s"].map((k) => [k, Number.isInteger(g?.[k]) && g[k] >= 0 && g[k] < 32 ? g[k] : 0]));
 const EMOTE = new Set(['lambai', 'jempol', 'tepuk', 'tawa', 'hati']);
-const POSE = new Set(['jalan', 'duduk', 'mobil', 'motor', 'perahu', 'mancing', 'renang']);
+const POSE = new Set(['jalan', 'duduk', 'mobil', 'motor', 'perahu', 'mancing', 'renang', 'jongkok', 'panjat']);
 const ID_KENDARAAN = /^(mobil|motor|perahu):\d{1,2}$/;
 // Batas dunia jelajah: kompleks Pemda + koridor Jl. Tegar Beriman sampai McD & Cibinong City
 // Mall (lihat BATAS_KAWASAN di dpmd-frontend/src/features/jelajah/scene/kawasanData.js), dilonggarkan.
-const BATAS = { x0: -2100, x1: 1200, z0: -1130, z1: 180, y0: -2, y1: 26 }; // y sampai Lt 4 Cibinong City Mall
+const BATAS = { x0: -2100, x1: 1200, z0: -1130, z1: 180, y0: -3, y1: 26 }; // y sampai Lt 4 Cibinong City Mall
 
 // Kata kasar yang paling umum disaring dari nama & chat. Bukan filter sempurna,
 // sekadar mencegah yang paling mencolok tampil di atas kepala tamu lain.
@@ -124,7 +128,8 @@ function pembatas(n, ms) {
 function initJelajahSocket(io) {
   const nsp = io.of('/jelajah');
   const perIp = new Map();
-  // nomor ruang → { pemain: Map(socket.id → data publik), kendaraan: Map(id → {x,z,rot}), kotor: Set }
+  // ruang → { pemain: Map(socket.id → data publik), kendaraan: Map(id → {x,z,rot}), kotor: Set }
+  // Kunci: nomor untuk salinan kantor, "kec:Nama[:n]" untuk dunia kecamatan.
   const daftarRuang = new Map();
   const lomba = pasangLomba(nsp, { pembatas });
 
@@ -132,7 +137,7 @@ function initJelajahSocket(io) {
   function pilihRuang() {
     let terbaik = null;
     for (const [no, r] of daftarRuang) {
-      if (r.pemain.size < MAKS_PER_RUANG && (!terbaik || r.pemain.size > daftarRuang.get(terbaik).pemain.size)) terbaik = no;
+      if (typeof no === 'number' && r.pemain.size < MAKS_PER_RUANG && (!terbaik || r.pemain.size > daftarRuang.get(terbaik).pemain.size)) terbaik = no;
     }
     if (terbaik !== null) return terbaik;
     for (let no = 1; no <= MAKS_RUANG; no++) {
@@ -144,8 +149,19 @@ function initJelajahSocket(io) {
     return null;
   }
 
+  // Ruang kecamatan: teman di kecamatan yang sama masuk ruang yang sama; bila penuh, ruang berikutnya.
+  function ruangKecamatan(kec) {
+    for (let n = 1; ; n++) {
+      const kunci = n === 1 ? `kec:${kec}` : `kec:${kec}:${n}`;
+      const r = daftarRuang.get(kunci);
+      if (!r) daftarRuang.set(kunci, { pemain: new Map(), kendaraan: new Map(), kotor: new Set() });
+      if (!r || r.pemain.size < MAKS_PER_RUANG) return kunci;
+    }
+  }
+
   nsp.use((socket, next) => {
     const ip = ipDari(socket);
+    if (nsp.sockets.size >= MAKS_TAMU) return next(new Error('penuh'));
     const no = pilihRuang();
     if (no === null) return next(new Error('penuh'));
     if ((perIp.get(ip) || 0) >= MAKS_PER_IP) return next(new Error('terlalu-banyak'));
@@ -187,8 +203,8 @@ function initJelajahSocket(io) {
     let no = socket.data.ruang;
     if (!daftarRuang.has(no) || daftarRuang.get(no).pemain.size >= MAKS_PER_RUANG) no = pilihRuang();
     if (no === null) return socket.disconnect(true);
-    const { pemain, kendaraan, kotor } = daftarRuang.get(no);
-    const kamar = `ruang:${no}`;
+    let { pemain, kendaraan, kotor } = daftarRuang.get(no);
+    let kamar = `ruang:${no}`;
     socket.join(kamar);
     perIp.set(ip, (perIp.get(ip) || 0) + 1);
     const data = { id: socket.id, ...socket.data.profil, s: null };
@@ -203,17 +219,46 @@ function initJelajahSocket(io) {
     const bolehSkor = pembatas(6, 30000);
     const bolehHadiah = pembatas(5, 60000);
     const bolehPeringkat = pembatas(10, 30000);
+    const bolehPindah = pembatas(10, 30000);
     let gerakTerakhir = 0;
 
-    socket.emit('selamat', {
-      id: socket.id,
-      ruang: no,
-      pemain: [...pemain.values()].filter((p) => p.id !== socket.id),
-      kendaraan: Object.fromEntries(kendaraan),
-      lomba: lomba.publik(),
-    });
+    const sambut = () => {
+      socket.emit('selamat', {
+        id: socket.id,
+        ruang: typeof no === 'number' ? no : null,
+        pemain: [...pemain.values()].filter((p) => p.id !== socket.id),
+        kendaraan: Object.fromEntries(kendaraan),
+        lomba: lomba.publik(),
+      });
+      socket.to(kamar).emit('masuk', data);
+    };
+    const tinggalkanRuang = () => {
+      pemain.delete(socket.id);
+      kotor.delete(socket.id);
+      socket.to(kamar).emit('keluar', { id: socket.id });
+      socket.leave(kamar);
+      // Ruang kosong ditutup; kendaraannya kembali ke posisi awal untuk tamu berikutnya.
+      if (!pemain.size) daftarRuang.delete(no);
+    };
+    sambut();
     lomba.pasang(socket, data);
-    socket.to(kamar).emit('masuk', data);
+
+    socket.on('pindah', (m) => {
+      const kec = m?.kec == null ? null : bersihkanTeks(m.kec, 40);
+      if ((kec !== null && !NAMA_KEC.test(kec)) || !bolehPindah()) return socket.emit('ditolak', { alasan: 'Tunggu sebentar sebelum berpindah lagi.' });
+      socket.data.aktif = Date.now();
+      tinggalkanRuang();
+      const tujuan = kec === null ? pilihRuang() : ruangKecamatan(kec);
+      // semua salinan kantor penuh: lepas koneksi, tamu tetap bisa menjelajah sendiri
+      if (tujuan === null) return socket.disconnect(true);
+      no = tujuan;
+      ({ pemain, kendaraan, kotor } = daftarRuang.get(no));
+      kamar = `ruang:${no}`;
+      socket.join(kamar);
+      data.s = null;
+      pemain.set(socket.id, data);
+      sambut();
+    });
 
     socket.on('gerak', (m) => {
       const kini = Date.now();
@@ -226,6 +271,11 @@ function initJelajahSocket(io) {
       const rot = angka(m.rot, -1000, 1000);
       if (x === null || y === null || z === null || rot === null) return;
       const s = { x: bulat(x), y: bulat(y), z: bulat(z), rot: bulat(rot), pose: POSE.has(m.pose) ? m.pose : 'jalan', udara: !!m.udara, lari: !!m.lari };
+      // kemajuan memanjat (0..1) & tinggi pagar (0 = tepi air), supaya tamu lain melihat gerakannya
+      if (s.pose === 'panjat') {
+        s.pu = bulat(angka(m.pu, 0, 1) ?? 0);
+        s.pt = bulat(angka(m.pt, 0, 2) ?? 0);
+      }
       const k = m.kend;
       if (k && typeof k === 'object' && typeof k.id === 'string' && ID_KENDARAAN.test(k.id)) {
         const kx = angka(k.x, BATAS.x0, BATAS.x1);
@@ -349,14 +399,10 @@ function initJelajahSocket(io) {
     });
 
     socket.on('disconnect', () => {
-      pemain.delete(socket.id);
-      kotor.delete(socket.id);
       const sisa = (perIp.get(ip) || 1) - 1;
       if (sisa > 0) perIp.set(ip, sisa);
       else perIp.delete(ip);
-      nsp.to(kamar).emit('keluar', { id: socket.id });
-      // Ruang kosong ditutup; kendaraannya kembali ke posisi awal untuk tamu berikutnya.
-      if (!pemain.size) daftarRuang.delete(no);
+      tinggalkanRuang();
     });
   });
 
