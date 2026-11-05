@@ -19,6 +19,7 @@ const LAGA_MS = 4 * 60 * 1000;
 const SKOR_MENANG = 21;
 const JAM_SERANG_MS = 14 * 1000;
 const JEDA_SKOR_MS = 1500;
+const HAK_MS = 5000; // sesudah gol bola tetap di lantai; selama ini hanya tim yang kebobolan boleh mengambilnya
 const SIMPAN_HASIL_MS = 60 * 1000;
 const MAKS_PESERTA = 6;
 const TENGGANG_PUTUS_MS = 20 * 1000; // jaringan kantor sering putus sesaat: kursi ditahan sebentar
@@ -160,6 +161,7 @@ function pasangBasket(nsp, { pembatas, daftarMs = DAFTAR_MS }) {
       jam: Math.max(0, L.jamMs),
       skor: L.skor,
       pemegang: L.pemegang,
+      hak: L.hak?.tim ?? null,
       sisi: L.sisi,
       bidik: L.bidik,
       menang: L.menang,
@@ -189,6 +191,7 @@ function pasangBasket(nsp, { pembatas, daftarMs = DAFTAR_MS }) {
     if (L.timBola !== P.tim) L.asisten = null;
     L.timBola = P.tim;
     L.pemegang = P.pid;
+    L.hak = null;
     L.bidik = null;
     L.tembakan = null;
     L.bola = null;
@@ -336,11 +339,9 @@ function pasangBasket(nsp, { pembatas, daftarMs = DAFTAR_MS }) {
       if (kini < L.sampai) return;
       const [a, b] = L.skor;
       if (a >= SKOR_MENANG || b >= SKOR_MENANG || (L.sisaMs <= 0 && a !== b)) return akhiri(L, kini);
-      const timBola = L.timBolaBerikut;
-      const rumah = RIM[1 - timBola]; // ring yang dijaga tim itu
-      const { P } = terdekat(L, (q) => q.tim === timBola, rumah.x, rumah.z);
+      // bola tetap di bawah ring: tim yang kebobolan harus kembali mengambilnya
       L.fase = 'main';
-      if (P) berikan(L, P, { kebalMs: 1200 });
+      L.hak = { tim: L.timBolaBerikut, sampai: kini + HAK_MS };
       return siarkan(L, { k: 'lanjut' });
     }
 
@@ -351,22 +352,24 @@ function pasangBasket(nsp, { pembatas, daftarMs = DAFTAR_MS }) {
       if (L.jamMs <= 0) {
         const pegang = [...L.peserta.values()].find((P) => P.pid === L.pemegang);
         const s = pos(pegang);
-        const { P } = terdekat(L, (q) => q.tim !== pegang.tim, s.x, s.z);
-        if (P) {
-          berikan(L, P, { kebalMs: 800 });
-          siarkan(L, { k: 'hangus' });
-        } else L.jamMs = JAM_SERANG_MS;
+        lepaskanBola(L, s.x, s.z);
+        L.hak = { tim: 1 - pegang.tim, sampai: kini + HAK_MS };
+        siarkan(L, { k: 'hangus' });
       }
+    }
+    if (L.hak && kini >= L.hak.sampai) {
+      L.hak = null; // tidak diambil: bola bebas supaya laga tidak bisa ditahan
+      siarkan(L);
     }
     if (L.tembakan) majukanTerbang(L, dt, kini);
     else if (L.bola) {
       for (let i = 0; i < 3; i++) langkahBola(L.bola, dt / 3);
       if (L.bola.y < 1.9) {
-        const { P, d } = terdekat(L, () => true, L.bola.x, L.bola.z);
+        const { P, d } = terdekat(L, (q) => !L.hak || q.tim === L.hak.tim, L.bola.x, L.bola.z);
         if (P && d < 0.85) {
           if (L.bolaDariTembakan) P.reb += 1;
           L.bolaDariTembakan = false;
-          berikan(L, P);
+          berikan(L, P, { kebalMs: L.hak ? 1200 : 0 });
           return siarkan(L, { k: 'ambil', pid: P.pid });
         }
       }
@@ -444,6 +447,7 @@ function pasangBasket(nsp, { pembatas, daftarMs = DAFTAR_MS }) {
           sisaMs: LAGA_MS,
           jamMs: JAM_SERANG_MS,
           pemegang: null,
+          hak: null,
           sisi: 1,
           bidik: null,
           bola: null,
