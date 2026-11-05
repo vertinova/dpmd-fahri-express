@@ -512,6 +512,8 @@ app.use('/api/bumdes/ekspor', require('./routes/bumdesEkspor.routes'));
 app.use('/api/bumdes', bumdesRoutes); // Admin routes
 // Pasar BUM Desa untuk publik (tanpa login) — dipakai landing page.
 app.use('/api/public/bumdes', require('./routes/bumdesPublic.routes'));
+// Jelajah Kantor 3D: data kecamatan, kode simpan, penghitung pemakaian.
+app.use('/api/public/jelajah', require('./routes/jelajahPublic.routes'));
 app.use('/api/desa/musdesus', musdesusRoutes);
 app.use('/api/musdesus', musdesusRoutes); // Admin routes
 app.use('/api/desa', desaKelembagaanRoutes); // Desa kelembagaan routes (RW, RT, Posyandu, etc.)
