@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
+const { pantauPermintaan } = require('../services/pantauAktivitas');
 const prisma = require('../config/prisma');
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -160,6 +161,7 @@ const auth = async (req, res, next) => {
 
     // Update last_active_at (throttled, fire-and-forget)
     updateLastActive(req.user.id);
+    pantauPermintaan(req, res);
 
     next();
   } catch (error) {

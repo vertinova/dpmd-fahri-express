@@ -6,6 +6,7 @@ const logger = require('../utils/logger');
 const { validateDesaProfile, mustCompleteDesaProfile } = require('../config/desaProfile');
 const { SANDI_DEFAULT } = require('../config/sandiDefault');
 const serverSecurity = require('../services/serverSecurity.service');
+const { catatAktivitas } = require('../services/pantauAktivitas');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -208,6 +209,7 @@ const login = async (req, res) => {
 
     // Record success login history (fire-and-forget) — sertakan koordinat lokasi.
     recordLoginHistory(req, user.id, 'success', { latitude, longitude });
+    catatAktivitas(user, { jenis: 'login', teks: 'Masuk ke aplikasi', ip: req.ip });
 
     // Auto-register device_id if provided
     const { device_id } = req.body;

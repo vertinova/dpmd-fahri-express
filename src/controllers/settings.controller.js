@@ -1,6 +1,7 @@
 const bcrypt = require('bcryptjs');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
+const { ambilAktivitas, catatHalaman, halamanKini } = require('../services/pantauAktivitas');
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -254,7 +255,7 @@ const getOnlineUsers = async (req, res) => {
   try {
     const minutesThreshold = parseInt(req.query.minutes) || 5;
     const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 20;
+    const limit = Math.min(parseInt(req.query.limit) || 20, 500);
     const skip = (page - 1) * limit;
 
     const threshold = new Date(Date.now() - minutesThreshold * 60 * 1000);
@@ -324,6 +325,7 @@ const getOnlineUsers = async (req, res) => {
           avatar: u.avatar,
           last_active_at: u.last_active_at,
           last_login: u.login_histories[0] || null,
+          halaman_kini: halamanKini(u.id),
           desa: u.desa_id ? (desaMap[u.desa_id.toString()] || null) : null,
           kecamatan: u.kecamatan_id ? (kecMap[u.kecamatan_id.toString()] || null) : null,
           dinas: u.dinas_id ? (dinasMap[u.dinas_id.toString()] ? { nama_dinas: dinasMap[u.dinas_id.toString()].nama } : null) : null,
@@ -345,10 +347,39 @@ const getOnlineUsers = async (req, res) => {
   }
 };
 
+/**
+ * Denyut kehadiran dari peramban: menjaga status online orang yang sedang membaca
+ * tanpa memanggil API, dan mencatat halaman yang dibukanya. last_active_at sendiri
+ * sudah disentuh middleware auth.
+ */
+const updatePresence = (req, res) => {
+  const { path } = req.body || {};
+  if (typeof path === 'string' && path.startsWith('/') && path.length <= 300) {
+    catatHalaman(req.user, path, req.ip);
+  }
+  return res.status(204).end();
+};
+
+/**
+ * Aktivitas langsung untuk monitor user online - superadmin only
+ */
+const getOnlineActivity = (req, res) => {
+  return res.json({
+    success: true,
+    data: ambilAktivitas({
+      setelah: Number(req.query.setelah) || 0,
+      userId: req.query.user_id || null,
+      batas: Math.min(parseInt(req.query.batas) || 100, 200),
+    }),
+  });
+};
+
 module.exports = {
   changePassword,
   backupDatabase,
   getDatabaseInfo,
   getLoginHistory,
-  getOnlineUsers
+  getOnlineUsers,
+  updatePresence,
+  getOnlineActivity
 };
