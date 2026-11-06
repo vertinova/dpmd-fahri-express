@@ -252,6 +252,9 @@ function initSocketServer(httpServer) {
   // tidak bercampur dengan signaling meeting.
   require('./cctv.socket').initCctvSocket(io);
 
+  // Cermin layar: namespace sendiri dengan pemeriksaan sendiri (lihat cermin.socket.js).
+  require('./cermin.socket').initCerminSocket(io);
+
   // Handle connections  // Handle connections
   io.on('connection', (socket) => {
     console.log(`[Socket] User connected: ${socket.user.name} (${socket.id})`);
