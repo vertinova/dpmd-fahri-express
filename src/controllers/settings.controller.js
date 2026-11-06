@@ -2,6 +2,7 @@ const bcrypt = require('bcryptjs');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const { ambilAktivitas, catatHalaman, halamanKini } = require('../services/pantauAktivitas');
+const { bisaDitonton } = require('../socket/cermin.socket');
 const { exec } = require('child_process');
 const path = require('path');
 const fs = require('fs');
@@ -326,6 +327,7 @@ const getOnlineUsers = async (req, res) => {
           last_active_at: u.last_active_at,
           last_login: u.login_histories[0] || null,
           halaman_kini: halamanKini(u.id),
+          bisa_ditonton: bisaDitonton(u.id.toString()),
           desa: u.desa_id ? (desaMap[u.desa_id.toString()] || null) : null,
           kecamatan: u.kecamatan_id ? (kecMap[u.kecamatan_id.toString()] || null) : null,
           dinas: u.dinas_id ? (dinasMap[u.dinas_id.toString()] ? { nama_dinas: dinasMap[u.dinas_id.toString()].nama } : null) : null,

@@ -41,8 +41,14 @@ const catatJejak = (admin, sasaran, mulai) => {
   }).catch((err) => logger.error('Gagal mencatat jejak cermin layar:', err.message));
 };
 
+let nspRef = null;
+
+/** Peramban pengguna ini memegang soket cermin? Versi lama aplikasi tidak punya. */
+const bisaDitonton = (userId) => !!nspRef?.adapter.rooms.has(ruangSubjek(userId));
+
 const initCerminSocket = (io) => {
   const nsp = io.of('/cermin');
+  nspRef = nsp;
   const jumlah = (ruang) => nsp.adapter.rooms.get(ruang)?.size ?? 0;
   const selaraskan = (id) => nsp.to(ruangSubjek(id)).emit(jumlah(ruangPenonton(id)) ? 'mulai-rekam' : 'henti-rekam');
 
@@ -125,4 +131,4 @@ const initCerminSocket = (io) => {
   });
 };
 
-module.exports = { initCerminSocket };
+module.exports = { initCerminSocket, bisaDitonton };
