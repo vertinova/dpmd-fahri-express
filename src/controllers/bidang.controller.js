@@ -152,13 +152,13 @@ class BidangController {
           
         case 5: // Pemberdayaan Masyarakat (PMD - Kelembagaan)
           return {
-            total_rw: await prisma.rws.count(),
-            total_rt: await prisma.rts.count(),
-            total_posyandu: await prisma.posyandus.count(),
-            total_karang_taruna: await prisma.karang_tarunas.count(),
-            total_lpm: await prisma.lpms.count(),
-            total_pkk: await prisma.pkks.count(),
-            total_satlinmas: await prisma.satlinmas.count(),
+            total_rw: await prisma.rws.count({ where: { status_kelembagaan: 'aktif' } }),
+            total_rt: await prisma.rts.count({ where: { status_kelembagaan: 'aktif' } }),
+            total_posyandu: await prisma.posyandus.count({ where: { status_kelembagaan: 'aktif' } }),
+            total_karang_taruna: await prisma.karang_tarunas.count({ where: { status_kelembagaan: 'aktif' } }),
+            total_lpm: await prisma.lpms.count({ where: { status_kelembagaan: 'aktif' } }),
+            total_pkk: await prisma.pkks.count({ where: { status_kelembagaan: 'aktif' } }),
+            total_satlinmas: await prisma.satlinmas.count({ where: { status_kelembagaan: 'aktif' } }),
             aktif_rw: await prisma.rws.count({ 
               where: { status_kelembagaan: 'aktif' } 
             }),

@@ -371,13 +371,13 @@ async function getDesaDashboardSummary(req, res) {
       bankeuProposals,
       beritaTerbaru
     ] = await Promise.all([
-      prisma.rws.count({ where: { desa_id: desaId } }),
-      prisma.rts.count({ where: { desa_id: desaId } }),
-      prisma.posyandus.count({ where: { desa_id: desaId } }),
-      prisma.karang_tarunas.findFirst({ where: { desa_id: desaId } }),
-      prisma.lpms.findFirst({ where: { desa_id: desaId } }),
-      prisma.satlinmas.findFirst({ where: { desa_id: desaId } }),
-      prisma.pkks.findFirst({ where: { desa_id: desaId } }),
+      prisma.rws.count({ where: { desa_id: desaId, status_kelembagaan: 'aktif' } }),
+      prisma.rts.count({ where: { desa_id: desaId, status_kelembagaan: 'aktif' } }),
+      prisma.posyandus.count({ where: { desa_id: desaId, status_kelembagaan: 'aktif' } }),
+      prisma.karang_tarunas.findFirst({ where: { desa_id: desaId, status_kelembagaan: 'aktif' } }),
+      prisma.lpms.findFirst({ where: { desa_id: desaId, status_kelembagaan: 'aktif' } }),
+      prisma.satlinmas.findFirst({ where: { desa_id: desaId, status_kelembagaan: 'aktif' } }),
+      prisma.pkks.findFirst({ where: { desa_id: desaId, status_kelembagaan: 'aktif' } }),
       prisma.profil_desas.findUnique({
         where: { desa_id: desaId },
         select: {

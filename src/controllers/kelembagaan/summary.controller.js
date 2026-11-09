@@ -554,9 +554,9 @@ class SummaryController {
       const desaIds = kecamatan.desas.map(d => d.id);
 
       const [totalRW, totalRT, totalPosyandu] = await Promise.all([
-        prisma.rws.count({ where: { desa_id: { in: desaIds } } }),
-        prisma.rts.count({ where: { desa_id: { in: desaIds } } }),
-        prisma.posyandus.count({ where: { desa_id: { in: desaIds } } })
+        prisma.rws.count({ where: { desa_id: { in: desaIds }, status_kelembagaan: 'aktif' } }),
+        prisma.rts.count({ where: { desa_id: { in: desaIds }, status_kelembagaan: 'aktif' } }),
+        prisma.posyandus.count({ where: { desa_id: { in: desaIds }, status_kelembagaan: 'aktif' } })
       ]);
 
       res.json({

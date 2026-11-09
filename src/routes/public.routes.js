@@ -68,14 +68,14 @@ router.get('/landing-stats', async (req, res) => {
         (SELECT COUNT(*) FROM desas WHERE status_pemerintahan = 'desa') AS total_desa,
         (SELECT COUNT(*) FROM bumdes WHERE status = 'aktif') AS bumdes_aktif,
         (
-          (SELECT COUNT(*) FROM rws) +
-          (SELECT COUNT(*) FROM rts) +
-          (SELECT COUNT(*) FROM lpms) +
-          (SELECT COUNT(*) FROM pkks) +
-          (SELECT COUNT(*) FROM posyandus) +
-          (SELECT COUNT(*) FROM karang_tarunas) +
-          (SELECT COUNT(*) FROM satlinmas) +
-          (SELECT COUNT(*) FROM lembaga_lainnyas)
+          (SELECT COUNT(*) FROM rws WHERE status_kelembagaan = 'aktif') +
+          (SELECT COUNT(*) FROM rts WHERE status_kelembagaan = 'aktif') +
+          (SELECT COUNT(*) FROM lpms WHERE status_kelembagaan = 'aktif') +
+          (SELECT COUNT(*) FROM pkks WHERE status_kelembagaan = 'aktif') +
+          (SELECT COUNT(*) FROM posyandus WHERE status_kelembagaan = 'aktif') +
+          (SELECT COUNT(*) FROM karang_tarunas WHERE status_kelembagaan = 'aktif') +
+          (SELECT COUNT(*) FROM satlinmas WHERE status_kelembagaan = 'aktif') +
+          (SELECT COUNT(*) FROM lembaga_lainnyas WHERE status_kelembagaan = 'aktif')
         ) AS total_kelembagaan
     `);
 

@@ -598,7 +598,7 @@ const daftarKelembagaan = async (a) => {
 	const l = a.lembaga;
 	const model = prisma[l.tabel];
 
-	const where = {};
+	const where = { status_kelembagaan: 'aktif' };
 	if (a.desa) where.desa_id = a.desa.id;
 	else if (a.kecamatan) where.desas = { kecamatan_id: a.kecamatan.id };
 

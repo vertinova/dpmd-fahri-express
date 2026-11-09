@@ -350,7 +350,7 @@ class KecamatanKelembagaanController {
         const model = TYPE_TO_MODEL[type];
         return prisma[model].groupBy({
           by: ['desa_id', 'status_verifikasi'],
-          where: { desa_id: { in: desaIds } },
+          where: { desa_id: { in: desaIds }, status_kelembagaan: 'aktif' },
           _count: { id: true },
         }).then(rows => ({ type, rows }));
       });
@@ -462,10 +462,10 @@ class KecamatanKelembagaanController {
       const countQueries = LEMBAGA_TYPES.map(type => {
         const model = TYPE_TO_MODEL[type];
         return Promise.all([
-          prisma[model].count({ where: { desa_id: { in: desaIds } } }),
-          prisma[model].count({ where: { desa_id: { in: desaIds }, status_verifikasi: 'verified' } }),
-          prisma[model].count({ where: { desa_id: { in: desaIds }, status_verifikasi: 'unverified' } }),
-          prisma[model].count({ where: { desa_id: { in: desaIds }, status_verifikasi: 'ditolak' } }),
+          prisma[model].count({ where: { desa_id: { in: desaIds }, status_kelembagaan: 'aktif' } }),
+          prisma[model].count({ where: { desa_id: { in: desaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'verified' } }),
+          prisma[model].count({ where: { desa_id: { in: desaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'unverified' } }),
+          prisma[model].count({ where: { desa_id: { in: desaIds }, status_kelembagaan: 'aktif', status_verifikasi: 'ditolak' } }),
         ]).then(([total, verified, unverified, ditolak]) => ({
           type,
           route: TYPE_TO_ROUTE[type],
