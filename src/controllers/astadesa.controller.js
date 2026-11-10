@@ -2528,7 +2528,21 @@ const koordRingkas = (n) => Math.round(n * 1e6) / 1e6;
  * ASTA DESA, dan di berkas batas wilayah frontend tidak selalu sama persis
  * (kapital, spasi, tanda baca), jadi ketiganya dicocokkan lewat kunci ini.
  */
-const kunciWilayah = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+//
+// Langkahnya SALINAN `App\Support\Wilayah` (desaKey/kecamatanKey) di ASTA DESA:
+// baris sensus menulis "Ds. Nambo", berkas batas "Nambo"; desa kembar ditulis
+// "Tapos Satu", "Tapos 1", atau "Taposi". Awalan Ds./Desa/Kel./Kec. dibuang,
+// akhiran satu/dua/1/2 jadi i/ii, lalu huruf kecil tanpa spasi dan tanda baca.
+// Frontend (`kunciWilayah` di usePetaSebaran.js) wajib identik.
+const kunciWilayah = (s) =>
+  String(s || '')
+    .replace(/^\s*(ds\.|desa\s|kel\.|kelurahan\s|kec\.|kecamatan\s)\s*/i, '')
+    .replace(/\s+satu\s*$/i, 'i')
+    .replace(/\s+dua\s*$/i, 'ii')
+    .replace(/\s*1\s*$/, 'i')
+    .replace(/\s*2\s*$/, 'ii')
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, '');
 
 /**
  * Urutan kolom satu titik di balasan `/sebaran-peta?kecamatan=`. Frontend
