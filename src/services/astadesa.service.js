@@ -292,6 +292,62 @@ const pemulih = (_k, v) => {
   return v;
 };
 
+/**
+ * Serialisasi setara `JSON.stringify(v, pengganti)`, tetapi keluar sepotong demi
+ * sepotong.
+ *
+ * MENGAPA TIDAK CUKUP JSON.stringify. Kepala potret memuat seluruh `olahan`:
+ * ratusan kelompok desa x ±80 kolom, deret angka mentah, dan peta id -> wilayah
+ * untuk ±190 ribu keluarga. Dengan `pengganti` yang dipanggil per nilai, satu
+ * panggilan itu terukur menahan event loop ±1 detik — dan proses ini melayani
+ * SELURUH aplikasi DPMD, bukan hanya Asta Desa. Dengan generator, penulis bisa
+ * memberi jeda ke event loop di antara potongan.
+ */
+function* elemenJson(daftar) {
+  let teks = '';
+  let pertama = true;
+  for (const e of daftar) {
+    const pemisah = pertama ? '' : ',';
+    pertama = false;
+    if (e === null || typeof e !== 'object') {
+      teks += pemisah + (JSON.stringify(e) ?? 'null');
+      if (teks.length >= 65536) {
+        yield teks;
+        teks = '';
+      }
+    } else {
+      yield teks + pemisah;
+      teks = '';
+      yield* potonganJson(e);
+    }
+  }
+  if (teks) yield teks;
+}
+
+function* potonganJson(v) {
+  if (v === null || typeof v !== 'object') {
+    yield JSON.stringify(v) ?? 'null';
+  } else if (v instanceof Map || v instanceof Set) {
+    yield `{"${JENIS}":"${v instanceof Map ? 'Map' : 'Set'}","v":[`;
+    yield* elemenJson(v instanceof Map ? v.entries() : v);
+    yield ']}';
+  } else if (Array.isArray(v)) {
+    yield '[';
+    yield* elemenJson(v);
+    yield ']';
+  } else {
+    yield '{';
+    let pertama = true;
+    for (const kunci of Object.keys(v)) {
+      if (v[kunci] === undefined) continue;
+      yield `${pertama ? '' : ','}${JSON.stringify(kunci)}:`;
+      pertama = false;
+      yield* potonganJson(v[kunci]);
+    }
+    yield '}';
+  }
+}
+
 const berkasPotret = (kunci) =>
   path.join(DIR_POTRET, `${crypto.createHash('sha1').update(kunci).digest('hex')}.ndjson`);
 
@@ -312,7 +368,19 @@ const tulisPotret = async (kunci, hasil, at) => {
     });
   try {
     const { rows, ...sisa } = hasil;
-    await tulis(`${JSON.stringify({ kunci, at, hasil: sisa }, pengganti)}\n`);
+    // `daftarGrup` hanya susunan ulang isi `grup`; ikut menuliskannya berarti
+    // menyerialkan seluruh kelompok desa dua kali. Dibangun lagi di `bacaPotret`.
+    const olahan = sisa.olahan?.daftarGrup ? { ...sisa.olahan, daftarGrup: undefined } : sisa.olahan;
+    let penampung = '';
+    for (const potong of potonganJson({ kunci, at, hasil: { ...sisa, olahan } })) {
+      penampung += potong;
+      if (penampung.length >= 262144) {
+        await tulis(penampung);
+        penampung = '';
+        await jedaLoop();
+      }
+    }
+    await tulis(`${penampung}\n`);
     const semuaBaris = Array.isArray(rows) ? rows : [];
     for (let i = 0; i < semuaBaris.length; i += BARIS_PER_POTONG) {
       await tulis(`${JSON.stringify(semuaBaris.slice(i, i + BARIS_PER_POTONG), pengganti)}\n`);
@@ -372,9 +440,10 @@ const bacaPotret = async (berkas) => {
   if (!kepala) return { usang: true };
   const value = { ...kepala.hasil, rows };
   // `daftarGrup` adalah Array.from(grup.values()) yang dibekukan saat
-  // penyusuran — elemen yang SAMA dengan isi `grup`. Setelah JSON keduanya
-  // menjadi salinan terpisah; satukan lagi supaya tetap satu sumber.
-  if (value.olahan?.grup instanceof Map && Array.isArray(value.olahan.daftarGrup)) {
+  // penyusuran — elemen yang SAMA dengan isi `grup`. Tidak ikut ditulis ke disk
+  // (lihat `tulisPotret`), jadi dibangun lagi di sini; potret lama yang masih
+  // memuatnya pun diganti, supaya tetap satu sumber.
+  if (value.olahan?.grup instanceof Map) {
     value.olahan.daftarGrup = Array.from(value.olahan.grup.values());
   }
   return { kunci: kepala.kunci, at: kepala.at, value };

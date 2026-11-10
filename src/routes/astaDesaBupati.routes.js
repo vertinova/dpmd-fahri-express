@@ -83,16 +83,32 @@ const samarkan = (v) => {
 const samarkanDalam = (nilai, kedalaman = 0) => {
   if (kedalaman > 12 || nilai === null || typeof nilai !== 'object') return nilai;
 
+  // SALIN SAAT BERUBAH, jangan menimpa di tempat. Sebagian isi respons adalah
+  // rekap yang disimpan bersama dan dipakai juga oleh jalur internal (lihat
+  // `dariTurunan` di controller). Menimpanya di sini berarti satu panggilan dari
+  // luar diam-diam menyamarkan data milik semua pemakai lain. Bagian yang tidak
+  // memuat nomor identitas tetap dikembalikan apa adanya, tanpa disalin.
   if (Array.isArray(nilai)) {
-    for (let i = 0; i < nilai.length; i += 1) nilai[i] = samarkanDalam(nilai[i], kedalaman + 1);
-    return nilai;
+    let salinan = null;
+    for (let i = 0; i < nilai.length; i += 1) {
+      const baru = samarkanDalam(nilai[i], kedalaman + 1);
+      if (baru === nilai[i]) continue;
+      if (!salinan) salinan = nilai.slice();
+      salinan[i] = baru;
+    }
+    return salinan || nilai;
   }
 
+  let salinan = null;
   for (const kunci of Object.keys(nilai)) {
-    if (POLA_NOMOR_IDENTITAS.test(kunci)) nilai[kunci] = samarkan(nilai[kunci]);
-    else nilai[kunci] = samarkanDalam(nilai[kunci], kedalaman + 1);
+    const baru = POLA_NOMOR_IDENTITAS.test(kunci)
+      ? samarkan(nilai[kunci])
+      : samarkanDalam(nilai[kunci], kedalaman + 1);
+    if (baru === nilai[kunci]) continue;
+    if (!salinan) salinan = { ...nilai };
+    salinan[kunci] = baru;
   }
-  return nilai;
+  return salinan || nilai;
 };
 
 /**

@@ -15,13 +15,53 @@
  * barunya ke daftar — jangan ganti yang lama, supaya versi lama tetap terbaca.
  */
 
-const zlib = require('zlib');
 const { promisify } = require('util');
+const zlib = require('zlib');
 
 const asta = require('../services/astadesa.service');
 
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
+
+/**
+ * Hasil turunan sebuah potret, dihitung sekali lalu dipakai ulang.
+ *
+ * MENGAPA ADA. Baris dan agregat penyusuran hanya berubah tiap ±30 menit, tetapi
+ * rekap di atasnya dulu dihitung ulang di SETIAP permintaan, padahal halaman
+ * bertanya tiap 15–60 detik per penonton. Pada ±190 ribu baris satu `/ringkasan`
+ * terukur menahan event loop ±590 ms dan `/demografi/kategori` ±860 ms. Proses
+ * ini melayani seluruh aplikasi DPMD, jadi yang melambat bukan hanya Asta Desa.
+ *
+ * Kuncinya IDENTITAS objek sumber (array `rows` atau objek `olahan`) lewat
+ * WeakMap: begitu penyusuran baru menggantikannya, seluruh turunannya ikut
+ * terbuang sendiri tanpa perlu dibersihkan. `{...value, basi: true}` tetap
+ * memakai array yang sama, jadi potret basi pun tidak dihitung ulang.
+ *
+ * `tanda` membedakan keadaan dari sumber yang sama. Selama penyusuran pertama
+ * `rows` terus bertambah, jadi di sana tandanya panjang array.
+ *
+ * NILAI YANG DIKEMBALIKAN DIPAKAI BERSAMA ANTARPERMINTAAN. Jangan pernah
+ * mengubahnya; salin dulu bila perlu.
+ */
+const turunan = new WeakMap(); // sumber -> Map(nama -> { tanda, nilai })
+// Penyaring wilayah menjadi bagian nama, dan nilainya datang dari query string.
+// Pagar ini memastikan permintaan acak tidak bisa membengkakkan memori.
+const BATAS_TURUNAN = 64;
+
+const dariTurunan = (sumber, nama, tanda, hitung) => {
+  let peta = turunan.get(sumber);
+  if (!peta) {
+    peta = new Map();
+    turunan.set(sumber, peta);
+  }
+  const ada = peta.get(nama);
+  if (ada && ada.tanda === tanda) return ada.nilai;
+  const nilai = hitung();
+  peta.delete(nama);
+  peta.set(nama, { tanda, nilai });
+  if (peta.size > BATAS_TURUNAN) peta.delete(peta.keys().next().value);
+  return nilai;
+};
 
 /**
  * Umur cache untuk angka pokok — jumlah keluarga terdata se-kabupaten.
@@ -295,16 +335,34 @@ const PROFIL_ADMIN = { nama: 'ringkas', ringkas: (row) => normalSensus(row) };
  * detik, bukan menunggu ratusan ribu baris sensus.
  *
  * Tidak ada baris yang disimpan (`ringkas` → null): akun membawa NIK dan
- * nomor HP, dan yang dibutuhkan di sini hanya dua angka.
+ * nomor HP, dan yang dibutuhkan di sini hanya hitungannya.
+ *
+ * Rekap tab Petugas & Akun ikut dihitung di sini. Dulu tab itu punya penyusuran
+ * `/users` kedua tanpa profil: dua kali puluhan halaman untuk data yang sama,
+ * baris mentah ber-NIK mengendap di memori, dan karena tanpa profil tidak bisa
+ * ditulis ke disk, rekapnya kosong lagi setiap selesai restart.
  */
 const PROFIL_PETUGAS = {
-  nama: 'petugas-mendata',
+  nama: 'rekap-akun',
   ringkas: () => null,
   olah: {
-    buat: () => ({ akun: 0, mendata: 0 }),
+    buat: () => ({ akun: 0, mendata: 0, perRole: new Map(), perKecamatan: new Map(), totalSensus: 0 }),
     tambah: (s, row) => {
       s.akun += 1;
       if (Number(row?.sensuses_count) > 0) s.mendata += 1;
+
+      // Pengguna berperan ganda dihitung pada SETIAP perannya, jadi jumlah
+      // seluruh baris per_role bisa melebihi jumlah akun. Itu memang yang ingin
+      // dijawab — "berapa akun yang boleh memverifikasi di tingkat desa" tidak
+      // berkurang hanya karena orangnya juga surveyor.
+      const peran = namaRole(row);
+      if (peran.length === 0) tambah(s.perRole, 'tanpa peran');
+      peran.forEach((r) => tambah(s.perRole, r));
+
+      const kec = rapikan(pilih(row, KUNCI_KECAMATAN));
+      if (kec) tambah(s.perKecamatan, kec);
+
+      s.totalSensus += keAngka(row?.sensuses_count) || 0;
     },
     selesai: (s) => s
   }
@@ -583,6 +641,84 @@ const kesiapanSusur = (semua, totalHidup = null, susulan = null) => {
   };
 };
 
+/**
+ * Rekap seluruh baris `/admin/sensuses` untuk /ringkasan: per kecamatan, desa,
+ * status, petugas, dan hari. Dihitung sekali per potret (lihat `dariTurunan`).
+ *
+ * `rows` sudah berbentuk `normalSensus` (PROFIL_ADMIN), jadi tidak dinormalkan
+ * ulang di sini.
+ */
+const rekapBaris = (rows) =>
+  dariTurunan(rows, 'rekap', rows.length, () => {
+    const perKecamatan = new Map(); // kecamatan -> { total, desa:Set, status:Map, berkoordinat }
+    const perStatus = new Map();
+    const perPetugas = new Map(); // petugas -> { total, kecamatan:Set }
+    const perHari = new Map();
+    const perDesa = new Map(); // "kec|desa" -> { kecamatan, desa, total }
+    let berkoordinat = 0;
+    let totalAnggota = 0;
+
+    rows.forEach((r) => {
+      const kec = perKecamatan.get(r.kecamatan) || {
+        total: 0,
+        desa: new Set(),
+        status: new Map(),
+        berkoordinat: 0
+      };
+      kec.total += 1;
+      kec.desa.add(r.desa);
+      tambah(kec.status, r.status);
+      if (r.lat !== null) kec.berkoordinat += 1;
+      perKecamatan.set(r.kecamatan, kec);
+
+      tambah(perStatus, r.status);
+
+      if (r.petugas) {
+        const p = perPetugas.get(r.petugas) || { total: 0, kecamatan: new Set() };
+        p.total += 1;
+        p.kecamatan.add(r.kecamatan);
+        perPetugas.set(r.petugas, p);
+      }
+
+      const hari = keHari(r.tanggal);
+      if (hari) tambah(perHari, hari);
+
+      const kunciDesa = `${r.kecamatan}|${r.desa}`;
+      const d = perDesa.get(kunciDesa) || { kecamatan: r.kecamatan, desa: r.desa, total: 0 };
+      d.total += 1;
+      perDesa.set(kunciDesa, d);
+
+      if (r.lat !== null) berkoordinat += 1;
+      if (r.jumlah_anggota) totalAnggota += r.jumlah_anggota;
+    });
+
+    const daftarDesa = Array.from(perDesa.values());
+    return {
+      berkoordinat,
+      totalAnggota,
+      jumlahKecamatan: Array.from(perKecamatan.keys()).filter((k) => k !== 'Tidak diketahui').length,
+      jumlahDesa: daftarDesa.filter((d) => d.desa !== 'Tidak diketahui').length,
+      jumlahPetugas: perPetugas.size,
+      per_kecamatan: Array.from(perKecamatan.entries())
+        .map(([kecamatan, v]) => ({
+          kecamatan,
+          total: v.total,
+          total_desa: v.desa.size,
+          berkoordinat: v.berkoordinat,
+          per_status: keDaftar(v.status, 'status')
+        }))
+        .sort((a, b) => b.total - a.total),
+      per_desa: daftarDesa.sort((a, b) => b.total - a.total),
+      per_status: keDaftar(perStatus, 'status'),
+      petugas: Array.from(perPetugas.entries())
+        .map(([nama, v]) => ({ nama, total: v.total, kecamatan: Array.from(v.kecamatan) }))
+        .sort((a, b) => b.total - a.total),
+      tren: Array.from(perHari.entries())
+        .map(([tanggal, total]) => ({ tanggal, total }))
+        .sort((a, b) => a.tanggal.localeCompare(b.tanggal))
+    };
+  });
+
 // ── Endpoint ────────────────────────────────────────────────────────────────
 
 /**
@@ -601,6 +737,8 @@ exports.getStatus = jalankan(async (req, res) => {
     }
   });
 });
+
+const batasiPetugas = (daftar, batas) => (batas ? daftar.slice(0, batas) : daftar);
 
 /**
  * GET /api/asta-desa/ringkasan
@@ -702,49 +840,7 @@ exports.getRingkasan = jalankan(async (req, res) => {
     keAngka(semua.total) ??
     semua.rows.length;
 
-  const baris = semua.rows.map(normalSensus);
-
-  const perKecamatan = new Map(); // kecamatan -> { total, desa:Set, status:Map, berkoordinat }
-  const perStatus = new Map();
-  const perPetugas = new Map(); // petugas -> { total, kecamatan:Set }
-  const perHari = new Map();
-  const perDesa = new Map(); // "kec|desa" -> { kecamatan, desa, total }
-  let berkoordinat = 0;
-  let totalAnggota = 0;
-
-  baris.forEach((r) => {
-    const kec = perKecamatan.get(r.kecamatan) || {
-      total: 0,
-      desa: new Set(),
-      status: new Map(),
-      berkoordinat: 0
-    };
-    kec.total += 1;
-    kec.desa.add(r.desa);
-    tambah(kec.status, r.status);
-    if (r.lat !== null) kec.berkoordinat += 1;
-    perKecamatan.set(r.kecamatan, kec);
-
-    tambah(perStatus, r.status);
-
-    if (r.petugas) {
-      const p = perPetugas.get(r.petugas) || { total: 0, kecamatan: new Set() };
-      p.total += 1;
-      p.kecamatan.add(r.kecamatan);
-      perPetugas.set(r.petugas, p);
-    }
-
-    const hari = keHari(r.tanggal);
-    if (hari) tambah(perHari, hari);
-
-    const kunciDesa = `${r.kecamatan}|${r.desa}`;
-    const d = perDesa.get(kunciDesa) || { kecamatan: r.kecamatan, desa: r.desa, total: 0 };
-    d.total += 1;
-    perDesa.set(kunciDesa, d);
-
-    if (r.lat !== null) berkoordinat += 1;
-    if (r.jumlah_anggota) totalAnggota += r.jumlah_anggota;
-  });
+  const rekap = rekapBaris(semua.rows);
 
   // Bentuk pengganti dari `/summary`, dipakai selama penyusuran belum pernah
   // selesai. Lapangan yang tidak bisa diketahui dari agregat — berapa desa di
@@ -794,7 +890,7 @@ exports.getRingkasan = jalankan(async (req, res) => {
       // bukan disamarkan — dan supaya persentase yang dihitung dari hasil
       // pembacaan (berapa persen berkoordinat) dibagi dengan populasi yang
       // memang diukur, bukan dengan angka se-kabupaten.
-      total_terbaca: baris.length,
+      total_terbaca: semua.rows.length,
       kembar_terbuang: semua.kembar || 0,
 
       // Resmi lebih dulu: `sensus_per_kecamatan` dari /summary adalah GROUP BY
@@ -802,17 +898,16 @@ exports.getRingkasan = jalankan(async (req, res) => {
       // Hitungan dari baris hanya cadangan, dan baris tanpa kecamatan
       // ("Tidak diketahui") tidak dihitung sebagai kecamatan.
       total_kecamatan:
-        kecamatanRingkasan.length ||
-        (barisAda ? Array.from(perKecamatan.keys()).filter((k) => k !== 'Tidak diketahui').length : null),
+        kecamatanRingkasan.length || (barisAda ? rekap.jumlahKecamatan : null),
       // Tidak ada hitungan resmi desa di API ASTA DESA; dari baris, pasangan
       // kecamatan|desa (nama desa yang sama di dua kecamatan = dua desa).
-      total_desa: barisAda ? Array.from(perDesa.values()).filter((d) => d.desa !== 'Tidak diketahui').length : null,
+      total_desa: barisAda ? rekap.jumlahDesa : null,
 
       // Resmi: akun dengan sensuses_count > 0 (lihat PROFIL_PETUGAS). Selama
       // penyusuran akun yang singkat itu belum selesai, cadangannya hitungan
       // dari baris sensus — `total_petugas_resmi` membedakan keduanya.
       // Bukan panjang `petugas_teraktif`: itu hanya sepuluh teratas.
-      total_petugas: petugasResmi ? petugasResmi.mendata : barisAda ? perPetugas.size : null,
+      total_petugas: petugasResmi ? petugasResmi.mendata : barisAda ? rekap.jumlahPetugas : null,
       total_petugas_resmi: Boolean(petugasResmi),
 
       // Hitungan resmi 30 hari terakhir dan 30 hari sebelumnya, dari basis data
@@ -830,50 +925,36 @@ exports.getRingkasan = jalankan(async (req, res) => {
             },
 
       total_anggota_tercatat: rincianDariBaris
-        ? totalAnggota || null
+        ? rekap.totalAnggota || null
         : keAngka(ringkasanApi?.data?.total?.sensus_anggotas),
 
       // Hanya bisa dihitung dari baris mentah: ringkasan tidak membawa
       // koordinat sama sekali. Dibagi `total_terbaca`, jadi persentase dari
       // baris sementara tetap perkiraan yang sah.
-      berkoordinat: barisAda ? berkoordinat : null,
+      berkoordinat: barisAda ? rekap.berkoordinat : null,
 
       per_kecamatan:
-        rincianDariBaris || (rincianSementara && !kecamatanRingkasan.length)
-          ? Array.from(perKecamatan.entries())
-              .map(([kecamatan, v]) => ({
-                kecamatan,
-                total: v.total,
-                total_desa: v.desa.size,
-                berkoordinat: v.berkoordinat,
-                per_status: keDaftar(v.status, 'status')
-              }))
-              .sort((a, b) => b.total - a.total)
-          : kecamatanRingkasan,
+        rincianDariBaris || (rincianSementara && !kecamatanRingkasan.length) ? rekap.per_kecamatan : kecamatanRingkasan,
 
       // Rincian per desa tidak ada di ringkasan; ia hanya lahir dari baris.
-      per_desa: barisAda ? Array.from(perDesa.values()).sort((a, b) => b.total - a.total) : [],
+      per_desa: barisAda ? rekap.per_desa : [],
 
       per_status:
-        rincianDariBaris || (rincianSementara && !statusRingkasan.length)
-          ? keDaftar(perStatus, 'status')
-          : statusRingkasan,
+        rincianDariBaris || (rincianSementara && !statusRingkasan.length) ? rekap.per_status : statusRingkasan,
 
-      petugas:
-        rincianDariBaris || (rincianSementara && !petugasRingkasan.length)
-          ? Array.from(perPetugas.entries())
-              .map(([nama, v]) => ({ nama, total: v.total, kecamatan: Array.from(v.kecamatan) }))
-              .sort((a, b) => b.total - a.total)
-          : petugasRingkasan,
+      // Halaman internal hanya menggambar puncak daftar, jadi rutenya meminta
+      // `req.petugasTeratas` saja (lihat astadesa.routes.js). Daftar utuhnya
+      // ribuan nama, ikut terkirim tiap menit, dan ikut tersimpan di localStorage
+      // perangkat, untuk baris yang tidak pernah tampil.
+      petugas: batasiPetugas(
+        rincianDariBaris || (rincianSementara && !petugasRingkasan.length) ? rekap.petugas : petugasRingkasan,
+        req.petugasTeratas
+      ),
 
       // Tren HARIAN hanya bisa disusun dari baris. Ringkasan membawa tren
       // bulanan, dan menaruhnya di lapangan yang sama akan membuat halaman
       // membaca dua belas bulan sebagai dua belas hari.
-      tren: barisAda
-        ? Array.from(perHari.entries())
-            .map(([tanggal, total]) => ({ tanggal, total }))
-            .sort((a, b) => a.tanggal.localeCompare(b.tanggal))
-        : [],
+      tren: barisAda ? rekap.tren : [],
 
       // Dari mana rincian di atas berasal, supaya halaman bisa mengatakannya
       // apa adanya dan tidak menyajikan angka sebagian sebagai angka penuh.
@@ -1107,45 +1188,28 @@ exports.getPengguna = jalankan(async (req, res) => {
   // batas 30 detik untuk gagal begitu server sedang sibuk.
   const [halaman, semua] = await Promise.all([
     asta.ambil('/users', params, { force }),
-    asta.ambilSemua('/users', {}, { force, latar: true })
+    asta.ambilSemua('/users', {}, { force, latar: true, profil: PROFIL_PETUGAS })
   ]);
-
-  const perRole = new Map();
-  const perKecamatan = new Map();
-  let totalSensusPerAkun = 0;
-  semua.rows.forEach((u) => {
-    // Pengguna berperan ganda dihitung pada SETIAP perannya, jadi jumlah seluruh
-    // baris per_role bisa melebihi jumlah akun. Itu memang yang ingin dijawab —
-    // "berapa akun yang boleh memverifikasi di tingkat desa" tidak berkurang
-    // hanya karena orangnya juga surveyor.
-    const peran = namaRole(u);
-    if (peran.length === 0) tambah(perRole, 'tanpa peran');
-    peran.forEach((r) => tambah(perRole, r));
-
-    const kec = rapikan(pilih(u, KUNCI_KECAMATAN));
-    if (kec) tambah(perKecamatan, kec);
-
-    totalSensusPerAkun += keAngka(u?.sensuses_count) || 0;
-  });
+  const o = semua.olahan;
 
   res.json({
     success: true,
     data: Array.isArray(halaman?.data) ? halaman.data : [],
     meta: metaDari(halaman),
     rekap: {
-      total: semua.rows.length,
-      per_role: keDaftar(perRole, 'role'),
-      per_kecamatan: keDaftar(perKecamatan, 'kecamatan'),
+      total: o ? o.akun : 0,
+      per_role: o ? keDaftar(o.perRole, 'role') : [],
+      per_kecamatan: o ? keDaftar(o.perKecamatan, 'kecamatan') : [],
       // Jumlah sensus menurut kolom `sensuses_count` tiap akun. Berguna sebagai
       // pembanding rekap petugas di /ringkasan: yang pertama menghitung per
       // AKUN, yang kedua per NAMA petugas pada baris sensus, dan selisih di
       // antara keduanya menandakan baris yang petugasnya tidak tertaut akun.
-      total_sensus_per_akun: totalSensusPerAkun,
+      total_sensus_per_akun: o ? o.totalSensus : 0,
       sebagian: semua.truncated,
 
       // Hanya menyangkut rekapitulasi di atas. Tabel akun per halaman tetap
       // diambil langsung dan selalu terisi.
-      rincian_siap: semua.rows.length > 0,
+      rincian_siap: Boolean(o?.akun),
       rincian_basi: semua.basi === true
     }
   });
@@ -1495,6 +1559,21 @@ const KATEGORI_SENSUS = {
  */
 const KOLOM_TERLARANG = /(^id$|_id$|^uuid|nik|no_kk|nomor_kk|nama|alamat|telp|tlp|_hp$|^hp|whatsapp|^wa$|email|lat$|lon$|lng$|koordinat|lokasi|foto|gambar|media|_urls?$|tanggal_lahir|tgl_lahir|tempat_lahir|catatan|keterangan|ttd|tanda_tangan|signature|token|password|_at$|^tanggal|^tgl|user|petugas|surveyor|^status$|^kecamatan$|^desa$|^kelurahan$|^rt$|^rw$|dusun|kode_pos|anggotas?)/i;
 
+/**
+ * Keputusan KOLOM_TERLARANG per nama kolom. Nama kolomnya hanya ±100 macam,
+ * sedangkan pengujiannya berjalan untuk tiap kolom di tiap baris: ±19 juta kali
+ * regex berisi puluhan cabang per penyusuran, untuk jawaban yang selalu sama.
+ */
+const kolomTerlarang = new Map();
+const terlarang = (kunci) => {
+  let v = kolomTerlarang.get(kunci);
+  if (v === undefined) {
+    v = KOLOM_TERLARANG.test(kunci);
+    kolomTerlarang.set(kunci, v);
+  }
+  return v;
+};
+
 /** Nilai yang tampak seperti nomor identitas (NIK/KK/telepon). */
 const MIRIP_NOMOR = /^\+?\d{9,}$/;
 
@@ -1562,8 +1641,9 @@ const OLAH_KATEGORI = {
     const idSensus = row?.id ?? row?.sensus_id;
     if (idSensus !== undefined && idSensus !== null) s.wilayahPerId.set(String(idSensus), g.kunci);
 
-    Object.entries(row).forEach(([kunci, v]) => {
-      if (KOLOM_TERLARANG.test(kunci)) return;
+    Object.keys(row).forEach((kunci) => {
+      if (terlarang(kunci)) return;
+      const v = row[kunci];
       let meta = s.kolom.get(kunci);
       if (!meta) {
         meta = { buang: false, teks: false, multi: false, semuaAngka: true, beda: new Set() };
@@ -1586,7 +1666,8 @@ const OLAH_KATEGORI = {
       k.terisi += 1;
 
       nilai.forEach((n) => {
-        if (MIRIP_NOMOR.test(n.replace(/[\s-]/g, ''))) {
+        // Teks di bawah 9 karakter mustahil memuat 9 digit: lewati regex-nya.
+        if (n.length >= 9 && MIRIP_NOMOR.test(n.replace(/[\s-]/g, ''))) {
           meta.buang = true;
           return;
         }
@@ -1727,17 +1808,27 @@ const gabungGrupWilayah = (daftar) => {
   return Array.from(peta.values());
 };
 
-/** Ringkasan statistik satu kolom angka, atau null bila tak ada angkanya. */
+/**
+ * Ringkasan statistik satu kolom angka, atau null bila tak ada angkanya.
+ *
+ * Float64Array, bukan `[...arr].sort(pembanding)`: pengurutan numerik bawaannya
+ * tidak memanggil fungsi JS per perbandingan, dan kolom se-kabupaten berisi
+ * ±190 ribu nilai. Deret milik satu desa tidak berubah selama potretnya sama,
+ * jadi hasilnya ikut disimpan.
+ */
 const statistikAngka = (angkaArr) => {
   if (!angkaArr.length) return null;
-  const urut = [...angkaArr].sort((a, b) => a - b);
-  const jumlah = urut.reduce((a, b) => a + b, 0);
-  return {
-    rata_rata: Math.round((jumlah / urut.length) * 100) / 100,
-    median: urut[Math.floor(urut.length / 2)],
-    min: urut[0],
-    maks: urut[urut.length - 1]
-  };
+  return dariTurunan(angkaArr, 'statistik', angkaArr.length, () => {
+    const urut = Float64Array.from(angkaArr).sort();
+    let jumlah = 0;
+    for (let i = 0; i < urut.length; i += 1) jumlah += urut[i];
+    return {
+      rata_rata: Math.round((jumlah / urut.length) * 100) / 100,
+      median: urut[Math.floor(urut.length / 2)],
+      min: urut[0],
+      maks: urut[urut.length - 1]
+    };
+  });
 };
 
 /**
@@ -1827,6 +1918,24 @@ const rekapWilayah = (grupSemua, fKec) => {
 };
 
 /**
+ * Isi `/demografi/kategori` untuk satu penyaring wilayah (huruf kecil, null =
+ * semua). Disimpan per potret dan per penyaring: tanpa penyaring, penggabungannya
+ * menyentuh jutaan angka, sementara halamannya bertanya berkala.
+ */
+const lingkupKategori = (o, fKec, fDesa) =>
+  dariTurunan(o, `kategori|${fKec || ''}|${fDesa || ''}`, 0, () => {
+    const grupSemua = o.daftarGrup;
+    const grup = grupSemua.filter(
+      (g) => (!fKec || g.kecamatan.toLowerCase() === fKec) && (!fDesa || g.desa.toLowerCase() === fDesa)
+    );
+    return {
+      total: grup.reduce((a, g) => a + g.n, 0),
+      wilayah: rekapWilayah(grupSemua, fKec),
+      kategori: susunKategori(gabungKolom(grup), o.kolom)
+    };
+  });
+
+/**
  * GET /api/asta-desa/demografi/kategori?kecamatan=&desa=
  *
  * Profil keluarga per kategori sensus: untuk SETIAP kolom kategorikal di
@@ -1847,21 +1956,15 @@ exports.getKategoriSensus = jalankan(async (req, res) => {
     profil: PROFIL_PENGGUNA
   });
   const o = semua.olahan;
-  const grupSemua = o ? o.daftarGrup : [];
-
-  const grup = grupSemua.filter(
-    (g) => (!fKec || g.kecamatan.toLowerCase() === fKec) && (!fDesa || g.desa.toLowerCase() === fDesa)
-  );
-  const total = grup.reduce((a, g) => a + g.n, 0);
-  const kategori = o ? susunKategori(gabungKolom(grup), o.kolom) : [];
+  const lingkup = o ? lingkupKategori(o, fKec, fDesa) : { total: 0, wilayah: rekapWilayah([], fKec), kategori: [] };
 
   res.json({
     success: true,
     data: {
-      total_keluarga: total,
+      total_keluarga: lingkup.total,
       filter: { kecamatan: rapikan(req.query.kecamatan), desa: rapikan(req.query.desa) },
-      wilayah: rekapWilayah(grupSemua, fKec),
-      kategori,
+      wilayah: lingkup.wilayah,
+      kategori: lingkup.kategori,
       sebagian: semua.truncated,
       rincian_siap: Boolean(o),
       rincian_basi: semua.basi === true,
@@ -2413,13 +2516,54 @@ const koordRingkas = (n) => Math.round(n * 1e6) / 1e6;
  * menghilangkan kuncinya sekalian — pemanggil di frontend sudah menjaga
  * ketiadaan kolom (`t.kk_nama || ''`).
  */
-const bangunDataPeta = (semua) => {
+/**
+ * Kunci pencocokan nama wilayah. Ejaan nama di baris sensus, di daftar wilayah
+ * ASTA DESA, dan di berkas batas wilayah frontend tidak selalu sama persis
+ * (kapital, spasi, tanda baca), jadi ketiganya dicocokkan lewat kunci ini.
+ */
+const kunciWilayah = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+/**
+ * Urutan kolom satu titik di balasan `/sebaran-peta?kecamatan=`. Frontend
+ * (`bukaTitik` di usePetaSebaran.js) membacanya dengan urutan yang SAMA —
+ * ubah keduanya bersamaan.
+ */
+const KOLOM_TITIK = ['id', 'lat', 'lng', 'desa', 'petugas', 'kk_nama', 'nik', 'tanggal'];
+
+/**
+ * Indeks peta satu penyusuran: titik dikelompokkan per kecamatan dalam bentuk
+ * ternormalisasi, plus angka kelengkapannya.
+ *
+ * NORMALISASI (cara yang sama dengan Peta Sebaran panel ASTA DESA). Dulu tiap
+ * titik membawa nama kecamatan, desa, dan petugas sebagai teks, dan seluruh
+ * ±191 ribu titik se-kabupaten dikirim sekaligus (±25 MB JSON). Kini nama desa
+ * dan petugas dikirim SEKALI per kecamatan sebagai daftar; titik berupa larik
+ * berurutan `KOLOM_TITIK` yang hanya menyimpan nomor urut keduanya, dan titik
+ * baru dikirim untuk kecamatan yang dibuka.
+ *
+ * Kolom yang tidak ada di sini sengaja dibuang: `status`/`sumber_koordinat`
+ * tidak pernah dibaca halaman peta, dan URL `foto` (±5 MB terkompresi untuk
+ * seluruh titik) ikut pada `/asta-desa/sensus/:id` saat titik diklik — lihat
+ * `fotoRumahTersimpan`.
+ */
+const bangunIndeksPeta = (semua) => {
   let pakaiRumah = 0;
   let pakaiLokasi = 0;
   let tanpaKoordinat = 0;
   let diLuarWilayah = 0;
+  let totalTitik = 0;
 
-  const titik = [];
+  // kunciWilayah(kecamatan) -> { nama, desa[], jumlahDesa[], petugas[], titik[][], nomor }
+  const perKecamatan = new Map();
+  const nomorDari = (daftar, nomor, nama) => {
+    let i = nomor.get(nama);
+    if (i === undefined) {
+      i = daftar.length;
+      daftar.push(nama);
+      nomor.set(nama, i);
+    }
+    return i;
+  };
 
   semua.rows.forEach((row) => {
     // Koordinat rumah lebih dulu — itulah yang digambar panel. `lokasi_*` hanya
@@ -2446,24 +2590,38 @@ const bangunDataPeta = (semua) => {
 
     if (rumah) pakaiRumah += 1;
     else pakaiLokasi += 1;
+    totalTitik += 1;
 
-    titik.push({
-      id: row.id ?? null,
-      lat: koordRingkas(lat),
-      lng: koordRingkas(lng),
-      kecamatan: rapikan(row.kecamatan) || 'Tidak diketahui',
-      desa: rapikan(row.desa) || 'Tidak diketahui',
-      kk_nama: rapikan(row.kk_nama) || undefined,
+    const namaKec = rapikan(row.kecamatan) || 'Tidak diketahui';
+    const kunci = kunciWilayah(namaKec);
+    let kec = perKecamatan.get(kunci);
+    if (!kec) {
+      kec = { nama: namaKec, desa: [], jumlahDesa: [], petugas: [], titik: [], nomorDesa: new Map(), nomorPetugas: new Map() };
+      perKecamatan.set(kunci, kec);
+    }
+
+    const iDesa = nomorDari(kec.desa, kec.nomorDesa, rapikan(row.desa) || 'Tidak diketahui');
+    kec.jumlahDesa[iDesa] = (kec.jumlahDesa[iDesa] || 0) + 1;
+    const petugas = namaPetugas(row) || rapikan(row.user?.name);
+
+    // Urutan = KOLOM_TITIK. Teks kosong '' dan petugas -1, bukan null: lebih
+    // pendek, dan frontend mengembalikannya ke `undefined`.
+    kec.titik.push([
+      row.id ?? null,
+      koordRingkas(lat),
+      koordRingkas(lng),
+      iDesa,
+      petugas ? nomorDari(kec.petugas, kec.nomorPetugas, petugas) : -1,
+      rapikan(row.kk_nama) || '',
       // NIK di endpoint ini SUDAH disamarkan ASTA DESA (maskPrivacy). Disamarkan
       // ulang di sini agar tetap aman bila suatu saat penyamaran di sana dicabut.
-      nik: samarkanNomor(row.kk_nik) || undefined,
-      petugas: namaPetugas(row) || rapikan(row.user?.name) || undefined,
-      tanggal: keHari(row.tanggal_pendataan) || undefined
-    });
+      samarkanNomor(row.kk_nik) || '',
+      keHari(row.tanggal_pendataan) || ''
+    ]);
   });
 
-  return {
-    titik,
+  const rekap = {
+    total_titik: totalTitik,
     total_baris: semua.rows.length,
     tanpa_koordinat: tanpaKoordinat,
     di_luar_wilayah: diLuarWilayah,
@@ -2478,12 +2636,45 @@ const bangunDataPeta = (semua) => {
     rincian_progres: semua.belum_siap === true ? semua.progres || null : null,
     rincian_basi: semua.basi === true
   };
+
+  return { perKecamatan, rekap };
+};
+
+/**
+ * Isi balasan `/sebaran-peta`.
+ *
+ * Tanpa `kecamatan`: hanya rekap jumlah titik per kecamatan dan per desa
+ * (beberapa kilobyte) — bahan choropleth tingkat kabupaten. Dengan
+ * `kecamatan`: titik kecamatan itu saja, ternormalisasi.
+ */
+const isiPeta = (indeks, kecamatan) => {
+  if (!kecamatan) {
+    return {
+      ...indeks.rekap,
+      per_kecamatan: Array.from(indeks.perKecamatan.values()).map((k) => ({
+        kecamatan: k.nama,
+        total: k.titik.length,
+        desa: k.desa.map((desa, i) => ({ desa, total: k.jumlahDesa[i] }))
+      }))
+    };
+  }
+  const kec = indeks.perKecamatan.get(kunciWilayah(kecamatan));
+  return {
+    ...indeks.rekap,
+    // Nama yang DIMINTA, bukan ejaan baris: frontend memakai ini untuk memastikan
+    // balasan memang milik kecamatan yang sedang dibuka.
+    kecamatan,
+    kolom: KOLOM_TITIK,
+    desa: kec ? kec.desa : [],
+    petugas: kec ? kec.petugas : [],
+    titik: kec ? kec.titik : []
+  };
 };
 
 /**
  * Muatan peta disiapkan SEKALI per penyusuran, bukan sekali per permintaan.
  *
- * Jawaban endpoint ini ±191.000 titik, ±25 MB JSON. Memetakan barisnya,
+ * Indeksnya menyusun ±191.000 titik. Memetakan barisnya,
  * men-stringify, lalu meng-gzip-nya memakan sekitar dua detik CPU — dan karena
  * Node berutas satu, dua detik itu menahan SELURUH permintaan lain, termasuk
  * permintaan yang sama dari pembaca berikutnya. Padahal hasilnya identik bit per
@@ -2500,11 +2691,36 @@ const bangunDataPeta = (semua) => {
  * menyimpan teks mentahnya sekalian berarti menahan 25 MB di memori untuk jalur
  * yang praktis tidak pernah terpakai.
  */
-let muatanPeta = null; // { kunci, gz: Promise<Buffer> }
+// { kunci, indeks, gz: Map(kunciWilayah kecamatan | '' -> Promise<Buffer>) }.
+// Indeks dibangun sekali per penyusuran; tiap kecamatan di-gzip saat pertama
+// diminta. Paling banyak 41 entri (rekap + 40 kecamatan): kecamatan yang tidak
+// dikenal tidak disimpan, jadi query acak tidak bisa membengkakkan memori.
+let muatanPeta = null;
+
+const muatanPetaUntuk = (semua, kunci, kecamatan) => {
+  if (muatanPeta?.kunci !== kunci) muatanPeta = { kunci, indeks: null, gz: new Map() };
+  const slot = muatanPeta;
+  if (!slot.indeks) slot.indeks = bangunIndeksPeta(semua);
+
+  const k = kunciWilayah(kecamatan);
+  const ada = slot.gz.get(k);
+  if (ada) return ada;
+
+  const gz = gzip(JSON.stringify({ success: true, data: isiPeta(slot.indeks, kecamatan) }));
+  if (k && !slot.indeks.perKecamatan.has(k)) return gz;
+  slot.gz.set(k, gz);
+  // Janji yang gagal dibuang supaya permintaan berikutnya mencoba lagi.
+  gz.catch(() => {
+    if (slot.gz.get(k) === gz) slot.gz.delete(k);
+  });
+  return gz;
+};
 
 /**
- * GET /api/asta-desa/sebaran-peta
- * Titik sebaran dengan koordinat RUMAH — sumber peta penuh.
+ * GET /api/asta-desa/sebaran-peta[?kecamatan=]
+ * Titik sebaran dengan koordinat RUMAH — sumber peta penuh. Tanpa `kecamatan`
+ * hanya rekap jumlah per kecamatan/desa; titiknya diminta per kecamatan saat
+ * kecamatan itu diklik di peta (lihat `isiPeta`).
  *
  * BEDANYA DENGAN `/sebaran`. Yang itu menyusuri `/admin/sensuses`, yang resource-
  * nya hanya membawa `lokasi: {lat, lon}`; cukup untuk gelembung agregat per
@@ -2552,17 +2768,8 @@ exports.getSebaranPeta = jalankan(async (req, res) => {
   // Yang disimpan JANJI-nya, bukan hasilnya: pembaca pertama setelah penyusuran
   // selesai hampir tidak pernah datang sendiri (halaman ini juga menanyakan
   // ulang tiap 20 detik selama belum siap), dan tanpa ini mereka semua
-  // membangun muatan yang sama bersamaan. Janji yang gagal dibuang supaya
-  // permintaan berikutnya mencoba lagi, bukan mewarisi galat yang sama.
-  if (muatanPeta?.kunci !== kunci) {
-    const gz = gzip(JSON.stringify({ success: true, data: bangunDataPeta(semua) }));
-    muatanPeta = { kunci, gz };
-    gz.catch(() => {
-      if (muatanPeta?.gz === gz) muatanPeta = null;
-    });
-  }
-
-  const gz = await muatanPeta.gz;
+  // membangun muatan yang sama bersamaan.
+  const gz = await muatanPetaUntuk(semua, kunci, rapikan(req.query.kecamatan));
 
   res.type('application/json');
   res.set('Vary', 'Accept-Encoding');
@@ -2748,9 +2955,15 @@ const panaskan = async (force = false) => {
     // Paling depan karena paling singkat (±25 halaman): kartu "Petugas mendata"
     // sudah resmi beberapa detik setelah menyala.
     await susurPemanasan('/users', { profil: PROFIL_PETUGAS }, 'petugas', force);
-    await susurPemanasan('/sensuses', { profil: PROFIL_ADMIN }, 'admin', force);
+    const admin = await susurPemanasan('/sensuses', { profil: PROFIL_ADMIN }, 'admin', force);
+    if (admin) rekapBaris(admin.rows);
 
     const peta = await susurPemanasan('/sensuses', { pengguna: true, profil: PROFIL_PENGGUNA }, 'pengguna', force);
+    // Disiapkan di sini supaya pembaca pertama setelah penyusuran tidak ikut
+    // menunggu pembentukannya.
+    if (peta?.olahan) {
+      lingkupKategori(peta.olahan, null, null);
+    }
     const lookup = peta?.olahan?.wilayahPerId?.size ? peta.olahan.wilayahPerId : null;
     if (!lookup) {
       console.warn(

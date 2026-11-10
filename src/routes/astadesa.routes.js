@@ -43,7 +43,12 @@ router.use(auth);
 router.use(izinkanAstaDesa);
 
 router.get('/status', controller.getStatus);
-router.get('/ringkasan', controller.getRingkasan);
+// Tab Ringkasan dan Petugas menggambar paling banyak 20 petugas teratas. Rute API
+// Bupati memakai handler yang sama TANPA batas ini, jadi kontraknya tidak berubah.
+router.get('/ringkasan', (req, res, next) => {
+  req.petugasTeratas = 20;
+  next();
+}, controller.getRingkasan);
 router.get('/sebaran', controller.getSebaran);
 router.get('/sensus', controller.getSensus);
 router.get('/demografi', controller.getDemografi);
