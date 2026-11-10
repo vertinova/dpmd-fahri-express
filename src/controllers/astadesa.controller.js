@@ -2460,7 +2460,14 @@ exports.getLayer = jalankan(async (req, res) => {
  */
 exports.getTargetKk = jalankan(async (req, res) => {
   const hari = Math.min(90, Math.max(7, Number(req.query.hari) || 30));
-  const body = await asta.ambil('/target-kk', { hari }, { force: paksa(req), ttlMs: TTL_ANGKA_POKOK });
+  // Menghitungnya di ASTA DESA lambat, dan cache di kedua sisi hanya 60 detik:
+  // tanpa `basiMaksMs`, tiap menit ada pembaca yang menunggu hitungan ulang itu.
+  // Salinan ≤30 menit dijawab seketika (umurnya terbaca di `diperbarui`).
+  const body = await asta.ambil('/target-kk', { hari }, {
+    force: paksa(req),
+    ttlMs: TTL_ANGKA_POKOK,
+    basiMaksMs: 30 * 60 * 1000
+  });
   res.json({ success: true, data: body?.data ?? null });
 });
 
@@ -2952,6 +2959,11 @@ const panaskan = async (force = false) => {
   if (!asta.terkonfigurasi() || sedangMemanaskan) return;
   sedangMemanaskan = true;
   try {
+    // Capaian target KK satu permintaan saja tetapi lambat dihitung di sana;
+    // dipanaskan lebih dulu supaya pembaca pertama setelah restart tidak menunggu.
+    // Parameternya harus sama dengan CapaianTargetKk (hari: 30) agar kuncinya kena.
+    await asta.ambil('/target-kk', { hari: 30 }, { force }).catch(() => {});
+
     // Paling depan karena paling singkat (±25 halaman): kartu "Petugas mendata"
     // sudah resmi beberapa detik setelah menyala.
     await susurPemanasan('/users', { profil: PROFIL_PETUGAS }, 'petugas', force);

@@ -500,7 +500,10 @@ const buatKunci = (path, params) => {
  * Ambil satu endpoint (satu halaman) dengan cache TTL.
  * @param {string} path    mis. '/summary', '/sensuses'
  * @param {object} params  query string
- * @param {object} opts    { ttlMs, force }
+ * @param {object} opts    { ttlMs, force, basiMaksMs }
+ *   `basiMaksMs`: salinan yang lewat TTL tapi belum setua ini langsung dijawab,
+ *   sementara pembaruannya berjalan di latar. Untuk endpoint yang lambat
+ *   dihitung di sisi ASTA DESA, supaya pembaca tidak menunggu tiap TTL habis.
  */
 const ambil = async (path, params = {}, opts = {}) => {
   const kunci = buatKunci(path, params);
@@ -508,7 +511,8 @@ const ambil = async (path, params = {}, opts = {}) => {
 
   const tersimpan = cache.get(kunci);
   if (!opts.force && tersimpan && Date.now() - tersimpan.at < ttl) return tersimpan.value;
-  if (!opts.force && inflight.has(kunci)) return inflight.get(kunci);
+  const basiBoleh = !opts.force && tersimpan && Date.now() - tersimpan.at < (opts.basiMaksMs || 0);
+  if (!opts.force && inflight.has(kunci)) return basiBoleh ? tersimpan.value : inflight.get(kunci);
 
   const promise = requestMentah(path, params)
     .then((value) => {
@@ -522,6 +526,11 @@ const ambil = async (path, params = {}, opts = {}) => {
     });
 
   inflight.set(kunci, promise);
+  if (basiBoleh) {
+    // Pembaruan latar yang gagal cukup dicoba lagi oleh permintaan berikutnya.
+    promise.catch(() => {});
+    return tersimpan.value;
+  }
   return promise;
 };
 
