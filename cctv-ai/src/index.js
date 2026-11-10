@@ -85,9 +85,13 @@ const server = http.createServer(async (req, res) => {
 
 		// Tampilan deteksi (MJPEG bingkai bertanda) & potret: terbuka lewat nginx /ai/, jadi
 		// wajib membawa token media kamera yang sama dengan go2rtc (dari /kamera/stream-url).
-		m = p.match(/^\/cameras\/(\d+)\/(stream|snapshot)$/);
+		m = p.match(/^\/cameras\/(\d+)\/(stream|snapshot|deteksi)$/);
 		if (req.method === 'GET' && m) {
 			if (!tokenMediaSah(`dpmd_${m[1]}`, url.searchParams.get('t'))) return balas(res, 403, { success: false, message: 'Token media tidak sah' });
+			if (m[2] === 'deteksi') {
+				const d = pemantau.deteksiTerakhir(m[1]);
+				return d ? balas(res, 200, { success: true, ...d }) : balas(res, 404, { success: false, message: 'Belum ada hasil analisis' });
+			}
 			if (m[2] === 'stream') {
 				if (!pemantau.tonton(m[1], res)) return balas(res, 404, { success: false, message: 'Kamera tidak dipantau' });
 				return undefined;

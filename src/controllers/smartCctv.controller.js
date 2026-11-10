@@ -266,6 +266,8 @@ const urlStream = async (req, res) => {
         // tampilan deteksi AI (bingkai bertanda kotak orang/wajah) — token kamera yang sama
         ai_mjpeg_url: `/ai/cameras/${kamera.id}/stream?t=${encodeURIComponent(token)}`,
         ai_snapshot_url: `/ai/cameras/${kamera.id}/snapshot?t=${encodeURIComponent(token)}`,
+        // kotak deteksi terakhir sebagai JSON, digambar di atas video live
+        ai_deteksi_url: `/ai/cameras/${kamera.id}/deteksi?t=${encodeURIComponent(token)}`,
         go2rtc_src: kamera.go2rtc_src,
         berlaku_sampai: exp * 1000
       }

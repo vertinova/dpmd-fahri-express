@@ -157,6 +157,8 @@ const prosesKamera = async (k, jpg) => {
 		}
 	}
 	k.bertanda = { jpg: await tandaiBanyak(jpg, lebar, tinggi, tanda), pada: kini };
+	// Kotak yang sama sebagai data, untuk digambar di atas video live (GET /cameras/:id/deteksi).
+	k.tandaTerakhir = { pada: kini, lebar, tinggi, tanda };
 	siarkan(k);
 
 	// ── Wajah dikenal / tak dikenal ───────────────────────────────────────
@@ -309,9 +311,16 @@ const tonton = (id, res) => {
 };
 const bingkaiBertanda = (id) => kamera.get(Number(id))?.bertanda?.jpg || null;
 
+/** Kotak analisis terakhir; umur_ms dihitung di sini supaya jam peramban yang meleset tidak berpengaruh. */
+const deteksiTerakhir = (id) => {
+	const t = kamera.get(Number(id))?.tandaTerakhir;
+	return t ? { umur_ms: Date.now() - t.pada, lebar: t.lebar, tinggi: t.tinggi, tanda: t.tanda } : null;
+};
+
 module.exports = {
 	tonton,
 	bingkaiBertanda,
+	deteksiTerakhir,
 	jalan,
 	mulai: (id) => { dihentikan.delete(Number(id)); },
 	berhenti: (id) => { dihentikan.add(Number(id)); },
