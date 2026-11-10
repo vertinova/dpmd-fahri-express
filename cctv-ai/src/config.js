@@ -28,6 +28,7 @@ module.exports = {
 	AMBANG_KENAL: angka('CCTV_AI_AMBANG_KENAL', 0.55), // kemiripan minimal untuk "dikenal"
 	MIN_SKOR_WAJAH: angka('CCTV_AI_MIN_SKOR_WAJAH', 0.6),
 	MIN_WAJAH_PX: angka('CCTV_AI_MIN_WAJAH_PX', 24), // wajah lebih kecil terlalu kabur untuk dinilai
+	MIN_PERIKSA_PX: angka('CCTV_AI_MIN_PERIKSA_PX', 120), // orang lebih kecil: wajah & pose tidak diperiksa
 	JEDA_KENAL_MS: angka('CCTV_AI_JEDA_KENAL_MS', 5 * 60 * 1000), // orang yang sama di kamera yang sama
 	JEDA_ASING_MS: angka('CCTV_AI_JEDA_ASING_MS', 2 * 60 * 1000), // "tidak dikenal" per kamera
 

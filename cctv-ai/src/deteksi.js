@@ -136,6 +136,21 @@ const analisis = async (jpg, petak = 0) => {
 		const tinggiPotong = Math.min(tinggi - atas, Math.round(h * (1 + 2 * pad)));
 		if (lebarPotong < 16 || tinggiPotong < 16) continue;
 
+		const tepi = Math.max(4, Math.min(lebar, tinggi) * 0.02);
+		const terpotong = x <= tepi || y <= tepi || x + w >= lebar - tepi || y + h >= tinggi - tepi;
+		// Rebah menurut bentuk kotak (dipakai bila pose tidak terbaca). Hanya untuk orang
+		// utuh di dalam bingkai, cukup besar, dan yakin: kepala/badan yang terpotong di
+		// tepi bingkai juga berkotak lebar (penyebab alarm "jatuh" palsu).
+		const rebahBentuk = !terpotong && o.score >= 0.5 && h >= tinggi * 0.08 && w > h * 1.6;
+
+		// Orang kecil/jauh: wajahnya (± 1/7 tinggi badan) tidak mungkin mencapai
+		// MIN_WAJAH_PX dan posenya tidak terbaca, jadi blazeface/movenet dilewati —
+		// pemeriksaan per orang itulah bagian analisis yang paling mahal.
+		if (Math.max(w, h) < cfg.MIN_PERIKSA_PX) {
+			orang.push({ kotak: [x, y, w, h].map(Math.round), skor: o.score, wajah: null, sudut: null, rebah: rebahBentuk });
+			continue;
+		}
+
 		const skala = TINGGI_POTONGAN / tinggiPotong;
 		const potongan = await sharp(jpg)
 			.extract({ left: kiri, top: atas, width: lebarPotong, height: tinggiPotong })
@@ -161,14 +176,8 @@ const analisis = async (jpg, petak = 0) => {
 			: null;
 		const badan = r.body[0];
 		const sudut = badan && badan.score >= 0.3 ? sudutBadan(badan) : null;
-		// Rebah: badan mendatar menurut pose, atau — bila pose tidak terbaca —
-		// kotak orangnya jauh lebih lebar daripada tingginya. Tebakan dari bentuk
-		// kotak hanya dipakai bila orangnya utuh di dalam bingkai, cukup besar, dan
-		// yakin: kepala/badan yang terpotong di tepi bingkai juga berkotak lebar
-		// (penyebab alarm "jatuh" palsu).
-		const tepi = Math.max(4, Math.min(lebar, tinggi) * 0.02);
-		const terpotong = x <= tepi || y <= tepi || x + w >= lebar - tepi || y + h >= tinggi - tepi;
-		const rebah = sudut !== null ? sudut >= 60 : !terpotong && o.score >= 0.5 && h >= tinggi * 0.08 && w > h * 1.6;
+		// Rebah: badan mendatar menurut pose, atau bentuk kotak bila pose tidak terbaca.
+		const rebah = sudut !== null ? sudut >= 60 : rebahBentuk;
 		orang.push({ kotak: [x, y, w, h].map(Math.round), skor: o.score, wajah, sudut, rebah });
 	}
 	return { lebar, tinggi, orang, kendaraan };

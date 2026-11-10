@@ -75,7 +75,7 @@ const ambilBingkai = async (id) => {
 const tandaiBanyak = async (jpg, lebar, tinggi, tanda) => {
 	if (!tanda.length) return jpg;
 	const tebal = Math.max(2, Math.round(lebar / 320));
-	const huruf = Math.max(12, Math.round(lebar / 45));
+	const huruf = Math.max(10, Math.round(lebar / 75)); // kecil supaya label banyak objek tidak saling tutup
 	const isi = tanda
 		.map(({ kotak: [x, y, w, h], label, warna }) => {
 			const aman = String(label).replace(/[<>&"]/g, '');
@@ -138,35 +138,44 @@ const cocokkan = (embedding) => {
 	return terbaik;
 };
 
-/** Tumpang-tindih dua kotak [x, y, w, h] (intersection over union). */
-const iou = ([ax, ay, aw, ah], [bx, by, bw, bh]) => {
-	const lebarIrisan = Math.max(0, Math.min(ax + aw, bx + bw) - Math.max(ax, bx));
-	const tinggiIrisan = Math.max(0, Math.min(ay + ah, by + bh) - Math.max(ay, by));
-	const irisan = lebarIrisan * tinggiIrisan;
-	const gabungan = aw * ah + bw * bh - irisan;
-	return gabungan > 0 ? irisan / gabungan : 0;
-};
+let nomorJejak = 0;
+// Jarak pusat maksimal (dalam kelipatan ukuran kotak) untuk dianggap objek yang sama:
+// antar-analisis (beberapa detik) orang berjalan / motor melaju bisa pindah jauh,
+// jadi tumpang-tindih kotak (IoU) saja tidak cukup.
+const BATAS_JARAK = 3;
 
 /**
- * Pelacakan sederhana untuk TAMPILAN saja (peristiwa & peringatan tetap memakai
- * hasil mentah): orang kecil/jauh skornya naik-turun di sekitar ambang, jadi
- * kotak orang yang terlewat di satu analisis dipertahankan sampai terlewat
- * lebih dari TAHAN_ORANG_ANALISIS kali berturut-turut.
+ * Pelacakan untuk TAMPILAN saja (peristiwa & peringatan tetap memakai hasil
+ * mentah). Tiap kotak baru dipasangkan dengan jejak lama sejenis yang pusatnya
+ * terdekat, sehingga mewarisi id-nya: kotak "pindah" mengikuti objeknya (dan
+ * dianimasikan di peramban), bukan menyisakan kotak lama sebagai objek kedua.
+ * Jejak yang tak berpasangan (skor objek kecil/jauh naik-turun di sekitar
+ * ambang) ditahan sampai terlewat lebih dari TAHAN_ORANG_ANALISIS kali.
  */
-const lacakOrang = (lama, baru) => {
-	const terpakai = new Set();
-	const tertahan = [];
-	for (const j of lama) {
-		let terbaik = -1;
-		let nilai = 0.2; // tumpang-tindih minimal untuk dianggap orang yang sama
+const lacak = (lama, baru) => {
+	const pasangan = [];
+	lama.forEach((j, a) => {
+		const [jx, jy, jw, jh] = j.kotak;
 		baru.forEach((b, i) => {
-			if (terpakai.has(i) || b.jenis !== j.jenis) return;
-			const n = iou(j.kotak, b.kotak);
-			if (n > nilai) { nilai = n; terbaik = i; }
+			if (b.jenis !== j.jenis) return;
+			const [bx, by, bw, bh] = b.kotak;
+			const rasio = (bw * bh) / (jw * jh || 1);
+			if (rasio < 0.4 || rasio > 2.5) return; // ukurannya terlalu berbeda
+			const jarak = Math.hypot(bx + bw / 2 - (jx + jw / 2), by + bh / 2 - (jy + jh / 2)) / Math.sqrt(Math.max(jw * jh, bw * bh, 1));
+			if (jarak < BATAS_JARAK) pasangan.push({ a, i, jarak });
 		});
-		if (terbaik >= 0) terpakai.add(terbaik);
-		else if (j.hilang < cfg.TAHAN_ORANG_ANALISIS) tertahan.push({ ...j, hilang: j.hilang + 1 });
+	});
+	pasangan.sort((p, q) => p.jarak - q.jarak);
+	const lamaDipakai = new Set();
+	const baruDipakai = new Set();
+	for (const { a, i } of pasangan) {
+		if (lamaDipakai.has(a) || baruDipakai.has(i)) continue;
+		lamaDipakai.add(a);
+		baruDipakai.add(i);
+		baru[i].id = lama[a].id;
 	}
+	baru.forEach((b, i) => { if (!baruDipakai.has(i)) b.id = ++nomorJejak; });
+	const tertahan = lama.filter((j, a) => !lamaDipakai.has(a) && j.hilang < cfg.TAHAN_ORANG_ANALISIS).map((j) => ({ ...j, hilang: j.hilang + 1 }));
 	return [...baru, ...tertahan];
 };
 
@@ -182,22 +191,24 @@ const prosesKamera = async (k, jpg) => {
 
 	// ── Tampilan deteksi: semua orang, wajah, & yang rebah digambari kotak ──
 	const jejakBaru = orang.map((o) => {
-		const t = [{ kotak: o.kotak, label: o.rebah ? 'Rebah' : `Orang ${Math.round(o.skor * 100)}%`, warna: o.rebah ? '#dc2626' : '#f59e0b' }];
+		// tanda.jenis = kelompok untuk saringan tampilan di peramban (orang / wajah / kendaraan).
+		const t = [{ kotak: o.kotak, jenis: 'orang', label: o.rebah ? 'Rebah' : `Orang ${Math.round(o.skor * 100)}%`, warna: o.rebah ? '#dc2626' : '#f59e0b' }];
 		const w = o.wajah;
 		if (w && w.skor >= cfg.MIN_SKOR_WAJAH && w.kotak[2] >= cfg.MIN_WAJAH_PX && wajahTerdaftar.length) {
 			const cocok = cocokkan(w.embedding);
 			const kenal = cocok && cocok.nilai >= cfg.AMBANG_KENAL;
-			t.push({ kotak: w.kotak, label: kenal ? cocok.nama : 'Tidak dikenal', warna: kenal ? '#16a34a' : '#dc2626' });
+			t.push({ kotak: w.kotak, jenis: 'wajah', label: kenal ? cocok.nama : 'Tidak dikenal', warna: kenal ? '#16a34a' : '#dc2626' });
 		}
 		return { kotak: o.kotak, jenis: 'orang', tanda: t, hilang: 0 };
 	});
 	// Kendaraan hanya untuk tampilan; peristiwa & peringatan tetap soal orang.
 	for (const v of kendaraan) {
 		const nama = v.jenis[0].toUpperCase() + v.jenis.slice(1);
-		jejakBaru.push({ kotak: v.kotak, jenis: v.jenis, tanda: [{ kotak: v.kotak, label: `${nama} ${Math.round(v.skor * 100)}%`, warna: '#2563eb' }], hilang: 0 });
+		jejakBaru.push({ kotak: v.kotak, jenis: v.jenis, tanda: [{ kotak: v.kotak, jenis: 'kendaraan', label: `${nama} ${Math.round(v.skor * 100)}%`, warna: '#2563eb' }], hilang: 0 });
 	}
-	k.jejak = lacakOrang(k.jejak || [], jejakBaru);
-	const tanda = k.jejak.flatMap((j) => j.tanda);
+	k.jejak = lacak(k.jejak || [], jejakBaru);
+	// id stabil per objek → peramban bisa menggeser kotak yang sama, bukan menggambar baru.
+	const tanda = k.jejak.flatMap((j) => j.tanda.map((t, n) => ({ ...t, id: `${j.id}-${n}` })));
 	k.bertanda = { jpg: await tandaiBanyak(jpg, lebar, tinggi, tanda), pada: kini };
 	// Kotak yang sama sebagai data, untuk digambar di atas video live (GET /cameras/:id/deteksi).
 	k.tandaTerakhir = { pada: kini, lebar, tinggi, tanda };
@@ -298,19 +309,19 @@ const jalan = async () => {
 				terakhirSegar = mulai;
 			}
 			const giliran = [...kamera.values()].filter((k) => k.aktif && !dihentikan.has(k.id) && (k.wajahAktif || k.jatuhAktif));
+			// Bingkai diambil beberapa langkah di depan giliran analisis (go2rtc menunggu
+			// keyframe, jadi diambil bersamaan), bukan semua di awal putaran: bingkai kamera
+			// terakhir tidak lagi berumur satu putaran penuh saat dianalisis, sehingga kotak
+			// tidak tertinggal jauh dari video live.
 			const bingkai = new Map();
-			for (let i = 0; i < giliran.length; i += 4) {
-				await Promise.all(
-					giliran.slice(i, i + 4).map((k) =>
-						ambilBingkai(k.id).then(
-							(jpg) => bingkai.set(k.id, jpg),
-							(err) => bingkai.set(k.id, err),
-						),
-					),
-				);
-			}
-			for (const k of giliran) {
-				const jpg = bingkai.get(k.id);
+			const pesan = (i) => {
+				const k = giliran[i];
+				if (k && !bingkai.has(k.id)) bingkai.set(k.id, ambilBingkai(k.id).catch((err) => err));
+			};
+			for (let i = 0; i < giliran.length; i++) {
+				for (let j = i; j < i + 3; j++) pesan(j);
+				const k = giliran[i];
+				const jpg = await bingkai.get(k.id);
 				try {
 					if (jpg instanceof Error) throw jpg;
 					await prosesKamera(k, jpg);
@@ -360,6 +371,7 @@ const deteksiTerakhir = (id) => {
 };
 
 module.exports = {
+	lacak, // diekspor untuk uji
 	tonton,
 	bingkaiBertanda,
 	deteksiTerakhir,
