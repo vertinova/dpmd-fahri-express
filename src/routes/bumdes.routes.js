@@ -3,7 +3,7 @@ const router = express.Router();
 const bumdesController = require('../controllers/bumdes.controller');
 const { auth, checkRole } = require('../middlewares/auth');
 const { requireDesaPermission } = require('../middlewares/desaPermission');
-const { uploadBumdes, uploadBumdesLampiran, uploadBumdesProduk, uploadProdukHukum } = require('../middlewares/upload');
+const { uploadBumdes, uploadBumdesLampiran, batasUkuranBumdes, uploadBumdesProduk, uploadProdukHukum } = require('../middlewares/upload');
 
 // Define allowed roles for BUMDes management (SPKED = Bidang 3)
 const bumdesRoles = ['desa', 'dinas', 'superadmin', 'sarana_prasarana', 'pegawai', 'kepala_bidang', 'kepala_dinas', 'ketua_tim'];
@@ -49,7 +49,7 @@ router.post(
 
 // Lampiran daftar JSON (bukti PADes, MoU kemitraan, laporan
 // pertanggungjawaban). Pemeriksaan hak kelola ada di controller.
-router.post('/lampiran', auth, checkRole(...bumdesRoles), uploadBumdesLampiran.single('file'), bumdesController.uploadLampiran);
+router.post('/lampiran', auth, checkRole(...bumdesRoles), uploadBumdesLampiran.single('file'), batasUkuranBumdes, bumdesController.uploadLampiran);
 
 // KATALOG PRODUK — etalase seluruh BUM Desa (tanpa transaksi) + kelola produk
 // milik BUM Desa sendiri. Harus di atas '/:id' supaya '/produk' tidak dibaca
@@ -80,6 +80,7 @@ router.post(
   auth,
   checkRole(...bumdesRoles),
   uploadBumdes.single('file'),
+  batasUkuranBumdes,
   bumdesController.uploadDesaBumdesFile
 );
 router.get('/:id', auth, checkRole(...bumdesRoles), bumdesController.getBumdesById);

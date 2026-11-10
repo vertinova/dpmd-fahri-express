@@ -161,13 +161,33 @@ const fileFilterBumdes = (req, file, cb) => {
   else cb(new Error('Jenis berkas tidak didukung. Gunakan PDF, DOC, DOCX, XLS, XLSX, JPG, PNG, atau WEBP.'), false);
 };
 
+// Laporan Pertanggungjawaban (LPJ) BUM Desa boleh sampai 100 MB; dokumen lain
+// tetap memakai MAX_FILE_SIZE. Multer hanya punya satu batas per instance, jadi
+// batasnya dibuka ke 100 MB lalu batasUkuranBumdes memeriksa per jenis berkas.
+const MAKS_BUMDES = parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024;
+const MAKS_LPJ_BUMDES = 100 * 1024 * 1024;
+const BATAS_MULTER_BUMDES = Math.max(MAKS_BUMDES, MAKS_LPJ_BUMDES);
+
+/** Berkas LPJ: kolom lama LaporanKeuangan2021–2024, atau lampiran ?jenis=lpj. */
+const berkasLpjBumdes = (req) =>
+  req.query?.jenis === 'lpj' || /^LaporanKeuangan\d{4}$/.test(String(req.body?.field_name || ''));
+
+/** Dipasang SETELAH multer: tolak berkas non-LPJ yang melewati MAX_FILE_SIZE. */
+const batasUkuranBumdes = (req, res, next) => {
+  if (!req.file || berkasLpjBumdes(req) || req.file.size <= MAKS_BUMDES) return next();
+  if (req.file.path) fs.unlink(req.file.path, () => {});
+  return res.status(413).json({
+    success: false,
+    message: `Ukuran berkas maksimal ${Math.round(MAKS_BUMDES / 1048576)} MB (LPJ maksimal 100 MB).`,
+    error_code: 'FILE_TOO_LARGE',
+  });
+};
+
 // Multer configurations
 const uploadBumdes = multer({
   storage: storageBumdes,
   fileFilter: fileFilterBumdes,
-  limits: {
-    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 // 5MB default
-  }
+  limits: { fileSize: BATAS_MULTER_BUMDES },
 });
 
 // Lampiran di dalam daftar JSON BUM Desa (bukti PADes, MoU kemitraan, laporan
@@ -184,7 +204,7 @@ const uploadBumdesLampiran = multer({
     },
   }),
   fileFilter: fileFilterBumdes,
-  limits: { fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024 },
+  limits: { fileSize: BATAS_MULTER_BUMDES },
 });
 
 // Foto produk katalog BUM Desa — di-re-encode ke WebP oleh controller.
@@ -813,6 +833,7 @@ const uploadCctvFoto = multer({
 module.exports = {
   uploadBumdes,
   uploadBumdesLampiran,
+  batasUkuranBumdes,
   uploadBumdesProduk,
   uploadMusdesus,
   uploadPerjadinDinas,
