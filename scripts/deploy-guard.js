@@ -137,6 +137,10 @@ const picuDeploy = (secret, sha) =>
 		req.end();
 	});
 
+// Repo sedang di-rollback dari panel: diam sampai ada push baru ke main.
+const PIN_FILE = process.env.GUARD_PIN_FILE || '/var/www/webhook/pins.json';
+try { const pins = JSON.parse(fs.readFileSync(PIN_FILE, 'utf8')); if (pins && pins[REPO_NAME]) process.exit(0); } catch { /* belum ada pin */ }
+
 (async () => {
 	try {
 		git('fetch', '--quiet', 'origin', BRANCH);

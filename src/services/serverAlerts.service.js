@@ -20,19 +20,39 @@ const JEDA_PUSH_MS = 30 * 60 * 1000;
 const hitunganBeruntun = new Map();
 const SAMPEL_BERUNTUN = 3;
 
+const terkirimPush = new Set(); // key peringatan yang sudah dikirim, untuk pesan pulih
+
+const kirimPulih = async (peringatan) => {
+  if (!terkirimPush.delete(peringatan.key)) return;
+  const cfg = store.getConfigSync();
+  if (!cfg.alerts.push_notification) return;
+  try {
+    const push = require('./pushNotification.service');
+    await push.sendToRoles(['superadmin'], {
+      title: `✅ Server pulih: ${peringatan.title}`,
+      body: 'Kondisi kembali normal.',
+      data: { type: 'server_alert', url: '/superadmin/server' },
+    }, { userIds: cfg.notifications?.push_users || [] });
+  } catch (error) {
+    logger.warn(`[ServerAlerts] Push pulih gagal: ${error.message}`);
+  }
+};
+
 const kirimPush = async (peringatan) => {
   const cfg = store.getConfigSync();
   if (!cfg.alerts.push_notification) return;
+  if (cfg.notifications?.push_min_level === 'critical' && peringatan.level !== 'critical') return;
   const terakhir = terakhirDikirim.get(peringatan.key) || 0;
   if (Date.now() - terakhir < JEDA_PUSH_MS) return;
   terakhirDikirim.set(peringatan.key, Date.now());
   try {
     const push = require('./pushNotification.service');
+    terkirimPush.add(peringatan.key);
     await push.sendToRoles(['superadmin'], {
       title: `${peringatan.level === 'critical' ? '🚨' : '⚠️'} Server: ${peringatan.title}`,
       body: peringatan.message,
       data: { type: 'server_alert', url: '/superadmin/server' },
-    });
+    }, { userIds: cfg.notifications?.push_users || [] });
   } catch (error) {
     logger.warn(`[ServerAlerts] Push gagal: ${error.message}`);
   }
@@ -61,6 +81,7 @@ const clear = (key) => {
   aktif.delete(key);
   riwayat.unshift({ ...ada, status: 'pulih', at: new Date() });
   if (riwayat.length > 200) riwayat.pop();
+  kirimPulih(ada);
 };
 
 const periksa = (key, kondisi, detail) => {

@@ -46,17 +46,19 @@ class PushNotificationService {
 	 * @param {Array} roles - Array of role names
 	 * @param {Object} notification - Notification payload (can include {path} for dynamic URL)
 	 */
-	async sendToRoles(roles, notification) {
+	async sendToRoles(roles, notification, { userIds = [] } = {}) {
 		try {
-			// Get users with specified roles who have push subscriptions
+			// Get users with specified roles (atau id tambahan) who have push subscriptions
 			const users = await prisma.users.findMany({
-				where: {
-					role: { in: roles },
-					is_active: true,
-					push_subscriptions: {
-						some: {}
-					}
-				},
+				where: userIds.length
+					? { is_active: true, push_subscriptions: { some: {} }, OR: [{ role: { in: roles } }, { id: { in: userIds.map((i) => BigInt(i)) } }] }
+					: {
+						role: { in: roles },
+						is_active: true,
+						push_subscriptions: {
+							some: {}
+						}
+					},
 				include: {
 					push_subscriptions: {
 						orderBy: { created_at: 'desc' },

@@ -56,6 +56,25 @@ router.post('/proxmox/guests/:vmid/power/:action', c.pvePower);
 router.post('/proxmox/guests/:vmid/resize', c.pveResize);
 router.put('/proxmox/guests/:vmid/resources', c.pveResources);
 
+router.get('/backups', c.backups);
+router.post('/backups/mysql', c.backupMysql);
+router.post('/backups/volume/delete', c.deleteBackupVolume);
+router.post('/backups/:vmid/snapshots', c.createSnapshot);
+router.post('/backups/:vmid/snapshots/:name/rollback', c.rollbackSnapshot);
+router.delete('/backups/:vmid/snapshots/:name', c.deleteSnapshot);
+router.post('/backups/:vmid/vzdump', c.createVzdump);
+
+router.get('/deploy', c.deployStatus);
+router.post('/deploy/fetch', c.deployFetch);
+router.post('/deploy/:repo/redeploy', c.redeploy);
+router.post('/deploy/:repo/rollback', c.deployRollback);
+
+router.get('/journal', c.journal);
+router.get('/posture', c.posture);
+router.get('/notifications/recipients', c.notificationRecipients);
+router.get('/notifications/users', c.notificationUsers);
+router.post('/notifications/test', c.testNotification);
+
 router.get('/config', c.getConfig);
 router.put('/config', c.saveConfig);
 

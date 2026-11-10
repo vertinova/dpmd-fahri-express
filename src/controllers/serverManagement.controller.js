@@ -485,13 +485,27 @@ exports.saveConfig = async (req, res) => {
         honeypot: m.security?.honeypot ?? kini.security.honeypot,
         honeypot_block_minutes: angka(m.security?.honeypot_block_minutes, 1, 525600, kini.security.honeypot_block_minutes),
       },
+      notifications: {
+        push_users: Array.isArray(m.notifications?.push_users)
+          ? [...new Set(m.notifications.push_users.map(Number).filter((i) => Number.isInteger(i) && i > 0))].slice(0, 50)
+          : kini.notifications.push_users || [],
+        push_min_level: m.notifications?.push_min_level === 'critical' ? 'critical' : 'warning',
+        daily_report: m.notifications?.daily_report ?? kini.notifications.daily_report,
+        daily_report_hour: Math.round(angka(m.notifications?.daily_report_hour, 0, 23, kini.notifications.daily_report_hour)),
+      },
     };
+    // Buang id yang tidak ada atau tidak aktif, tanpa memberi tahu.
+    if (baru.notifications.push_users.length) {
+      const ada = await prisma.users.findMany({ where: { id: { in: baru.notifications.push_users.map((i) => BigInt(i)) }, is_active: true }, select: { id: true } });
+      const sah = new Set(ada.map((u) => Number(u.id)));
+      baru.notifications.push_users = baru.notifications.push_users.filter((i) => sah.has(i));
+    }
     // Seluruh pengguna (desa, kecamatan, kantor) ada di Indonesia; memblokir ID
     // berarti halaman login tertutup bagi semua yang belum masuk.
     if (baru.security.blocked_countries.includes('ID')) {
       return gagal(res, new Error('Indonesia (ID) tidak boleh diblokir — semua pengguna akan terkunci dari halaman login.'), 400);
     }
-    for (const grup of ['alerts', 'storage', 'security']) {
+    for (const grup of ['alerts', 'storage', 'security', 'notifications']) {
       for (const [k, v] of Object.entries(baru[grup])) {
         if (typeof d[grup][k] === 'boolean') baru[grup][k] = v === true || v === 'true';
       }
@@ -603,5 +617,210 @@ exports.pveResources = async (req, res) => {
     });
   } catch (error) {
     gagalPve(res, error);
+  }
+};
+
+/* ─────────────────────── Backup & snapshot ─────────────────────── */
+
+const backupSvc = require('../services/serverBackup.service');
+const deploySvc = require('../services/serverDeploy.service');
+const journalSvc = require('../services/serverJournal.service');
+const notifySvc = require('../services/serverNotify.service');
+const prisma = require('../config/prisma');
+const { DEPLOY_REPOS } = require('../config/serverManagement');
+
+exports.backups = async (req, res) => {
+  const mysql = backupSvc.listMysql();
+  const kosong = { guests: [], backup_storages: [] };
+  if (!proxmox.getConfigInfo().configured) {
+    return res.json({ success: true, data: { proxmox: { configured: false, error: null }, ...kosong, mysql } });
+  }
+  try {
+    const hasil = await proxmox.listBackups({ segar: req.query.refresh === '1' });
+    res.json({ success: true, data: { proxmox: { configured: true, error: null }, ...hasil, mysql } });
+  } catch (error) {
+    res.json({ success: true, data: { proxmox: { configured: true, error: error.message }, ...kosong, mysql } });
+  }
+};
+
+exports.createSnapshot = async (req, res) => {
+  try {
+    const hasil = await proxmox.createSnapshot(req.params.vmid, { name: req.body?.name, description: req.body?.description });
+    audit(req, 'create', hasil.guest.name, `Snapshot "${hasil.name}" dibuat untuk ${hasil.guest.name} (${hasil.guest.vmid})`);
+    res.json({ success: true, data: { upid: hasil.upid, name: hasil.name } });
+  } catch (error) {
+    gagalPve(res, error);
+  }
+};
+
+exports.rollbackSnapshot = async (req, res) => {
+  try {
+    const vmid = req.params.vmid;
+    if (String(req.body?.konfirmasi) !== String(vmid)) return gagal(res, new Error('Ketik VMID untuk konfirmasi'), 400);
+    const hasil = await proxmox.rollbackSnapshot(vmid, req.params.name);
+    audit(req, 'update', hasil.guest.name, `Rollback snapshot "${req.params.name}" pada ${hasil.guest.name} (${hasil.guest.vmid})`);
+    res.json({ success: true, data: { upid: hasil.upid } });
+  } catch (error) {
+    gagalPve(res, error);
+  }
+};
+
+exports.deleteSnapshot = async (req, res) => {
+  try {
+    const hasil = await proxmox.deleteSnapshot(req.params.vmid, req.params.name);
+    audit(req, 'delete', hasil.guest.name, `Hapus snapshot "${req.params.name}" pada ${hasil.guest.name} (${hasil.guest.vmid})`);
+    res.json({ success: true, data: { upid: hasil.upid } });
+  } catch (error) {
+    gagalPve(res, error);
+  }
+};
+
+exports.createVzdump = async (req, res) => {
+  try {
+    const storageDipilih = String(req.body?.storage || '');
+    const hasil = await proxmox.createVzdump(req.params.vmid, { storage: storageDipilih, notes: req.body?.notes });
+    audit(req, 'create', hasil.guest.name, `Backup penuh ${hasil.guest.name} (${hasil.guest.vmid}) ke ${storageDipilih}`);
+    res.json({ success: true, data: { upid: hasil.upid } });
+  } catch (error) {
+    gagalPve(res, error);
+  }
+};
+
+exports.deleteBackupVolume = async (req, res) => {
+  try {
+    const volid = String(req.body?.volid || '');
+    const hasil = await proxmox.deleteBackupVolume(volid);
+    audit(req, 'delete', 'backup', `Hapus berkas backup ${volid}`);
+    res.json({ success: true, data: hasil });
+  } catch (error) {
+    gagalPve(res, error);
+  }
+};
+
+exports.backupMysql = (req, res) => {
+  try {
+    backupSvc.startMysqlBackup();
+    audit(req, 'create', 'mysql', 'Backup database MySQL dimulai');
+    res.status(202).json({ success: true, data: { running: true } });
+  } catch (error) {
+    gagal(res, error, error.status || 500);
+  }
+};
+
+/* ─────────────────────────── Deploy ─────────────────────────── */
+
+const gagalDeploy = (res, error) => gagal(res, error, error.status || 502);
+
+exports.deployStatus = async (req, res) => {
+  try {
+    res.json({ success: true, data: await deploySvc.getStatus() });
+  } catch (error) {
+    gagalDeploy(res, error);
+  }
+};
+
+exports.deployFetch = async (req, res) => {
+  try {
+    res.json({ success: true, data: await deploySvc.fetchSemua() });
+  } catch (error) {
+    gagalDeploy(res, error);
+  }
+};
+
+const labelRepo = (key) => DEPLOY_REPOS.find((r) => r.key === key)?.label || key;
+
+exports.redeploy = async (req, res) => {
+  try {
+    const hasil = await deploySvc.picu(req.params.repo, { oleh: req.user.name });
+    audit(req, 'update', req.params.repo, `Deploy ulang ${labelRepo(req.params.repo)}`);
+    res.json({ success: true, data: hasil });
+  } catch (error) {
+    gagalDeploy(res, error);
+  }
+};
+
+exports.deployRollback = async (req, res) => {
+  try {
+    const sha = String(req.body?.sha || '').trim();
+    const hasil = await deploySvc.picu(req.params.repo, { rollbackTo: sha, oleh: req.user.name });
+    audit(req, 'update', req.params.repo, `Rollback deploy ${labelRepo(req.params.repo)} ke ${sha.slice(0, 7)}`);
+    res.json({ success: true, data: hasil });
+  } catch (error) {
+    gagalDeploy(res, error);
+  }
+};
+
+/* ─────────────────── Jurnal, postur, notifikasi ─────────────────── */
+
+exports.journal = async (req, res) => {
+  try {
+    res.json({ success: true, data: await journalSvc.getJournal({ hours: req.query.hours }) });
+  } catch (error) {
+    gagal(res, error);
+  }
+};
+
+exports.posture = async (req, res) => {
+  try {
+    res.json({ success: true, data: await journalSvc.getPosture() });
+  } catch (error) {
+    gagal(res, error);
+  }
+};
+
+const bentukPenerima = (u) => ({ id: Number(u.id), name: u.name, email: u.email, role: u.role, has_push: u._count.push_subscriptions > 0 });
+const pilihPenerima = { id: true, name: true, email: true, role: true, _count: { select: { push_subscriptions: true } } };
+
+exports.notificationRecipients = async (req, res) => {
+  try {
+    await store.getConfig({ segar: true });
+    const ids = (store.getConfigSync().notifications?.push_users || []).map((i) => BigInt(i));
+    const [superadmin, tambahan] = await Promise.all([
+      prisma.users.findMany({ where: { is_active: true, role: 'superadmin' }, select: pilihPenerima, orderBy: { name: 'asc' } }),
+      ids.length
+        ? prisma.users.findMany({ where: { is_active: true, role: { not: 'superadmin' }, id: { in: ids } }, select: pilihPenerima, orderBy: { name: 'asc' } })
+        : [],
+    ]);
+    res.json({
+      success: true,
+      data: {
+        superadmin: superadmin.map((u) => { const { role, ...sisa } = bentukPenerima(u); return sisa; }),
+        tambahan: tambahan.map(bentukPenerima),
+      },
+    });
+  } catch (error) {
+    gagal(res, error);
+  }
+};
+
+exports.notificationUsers = async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim();
+    if (q.length < 2) return res.json({ success: true, data: [] });
+    const daftar = await prisma.users.findMany({
+      where: { is_active: true, role: { not: 'superadmin' }, OR: [{ name: { contains: q } }, { email: { contains: q } }] },
+      select: pilihPenerima,
+      take: 20,
+      orderBy: { name: 'asc' },
+    });
+    res.json({ success: true, data: daftar.map(bentukPenerima) });
+  } catch (error) {
+    gagal(res, error);
+  }
+};
+
+exports.testNotification = async (req, res) => {
+  try {
+    const jenis = req.body?.jenis === 'laporan' ? 'laporan' : 'pesan';
+    await store.getConfig({ segar: true });
+    const isi = jenis === 'laporan'
+      ? await notifySvc.susunLaporan()
+      : { title: '🔔 Uji notifikasi server', body: 'Notifikasi push Manajemen Server DPMD berfungsi.' };
+    const terkirim = await notifySvc.kirimPush(isi);
+    if (!terkirim) return gagal(res, new Error('Belum ada penerima yang mengaktifkan push notification di perangkatnya'), 400);
+    audit(req, 'read', 'notifikasi', `Uji notifikasi push (${jenis})`);
+    res.json({ success: true, data: { terkirim } });
+  } catch (error) {
+    gagal(res, error);
   }
 };

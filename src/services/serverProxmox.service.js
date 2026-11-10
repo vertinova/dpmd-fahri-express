@@ -388,6 +388,126 @@ const updateResources = async (vmid, { memory_mb, swap_mb, cores }) => {
   return { guest: g, changes: body, needs_reboot: g.type === 'qemu' };
 };
 
+/* ───────────────────── Backup & snapshot ───────────────────── */
+
+const NAMA_SNAPSHOT = /^[A-Za-z][A-Za-z0-9_]{1,39}$/;
+const iso = (detik) => (detik ? new Date(detik * 1000).toISOString() : null);
+
+let cacheBackup = null; // { at, data }
+let volumeBackup = []; // daftar datar semua volume backup { volid, storage, node } untuk validasi hapus
+
+const listBackups = async ({ segar = false } = {}) => {
+  if (!segar && cacheBackup && Date.now() - cacheBackup.at < 30000) return cacheBackup.data;
+  const ringkas = !segar && cacheRingkasan && Date.now() - cacheRingkasan.at < 30000 ? cacheRingkasan : await getOverview();
+  const guests = ringkas.guests.filter((g) => !g.template);
+  const nodes = [...new Set(ringkas.nodes.map((n) => n.node))];
+
+  const snapshotPerGuest = await Promise.all(guests.map((g) => panggil('GET', `/nodes/${g.node}/${g.type}/${g.vmid}/snapshot`).catch(() => [])));
+
+  const backupStorages = [];
+  const berkas = [];
+  await Promise.all(nodes.map(async (n) => {
+    const daftar = await panggil('GET', `/nodes/${n}/storage?content=backup&enabled=1`).catch(() => []);
+    await Promise.all((Array.isArray(daftar) ? daftar : []).map(async (s) => {
+      backupStorages.push({ storage: s.storage, node: n, total: s.total ?? null, used: s.used ?? null, avail: s.avail ?? null });
+      const isi = await panggil('GET', `/nodes/${n}/storage/${encodeURIComponent(s.storage)}/content?content=backup`).catch(() => []);
+      for (const b of (Array.isArray(isi) ? isi : [])) berkas.push({ ...b, storage: s.storage, node: n });
+    }));
+  }));
+  volumeBackup = berkas.map((b) => ({ volid: b.volid, storage: b.storage, node: b.node }));
+
+  const hasil = {
+    guests: guests.map((g, i) => ({
+      vmid: g.vmid,
+      name: g.name,
+      type: g.type,
+      status: g.status,
+      node: g.node,
+      protected: g.protected,
+      is_self: g.is_self,
+      snapshots: (Array.isArray(snapshotPerGuest[i]) ? snapshotPerGuest[i] : [])
+        .filter((s) => s.name !== 'current')
+        .map((s) => ({ name: s.name, description: s.description || '', snaptime: iso(s.snaptime) }))
+        .sort((a, b) => String(b.snaptime || '').localeCompare(String(a.snaptime || ''))),
+      backups: berkas
+        .filter((b) => Number(b.vmid) === g.vmid)
+        .map((b) => ({ volid: b.volid, storage: b.storage, size: b.size ?? null, ctime: iso(b.ctime), format: b.format || null, notes: b.notes || null }))
+        .sort((a, b) => String(b.ctime || '').localeCompare(String(a.ctime || ''))),
+    })),
+    backup_storages: backupStorages.sort((a, b) => a.storage.localeCompare(b.storage)),
+  };
+  cacheBackup = { at: Date.now(), data: hasil };
+  return hasil;
+};
+
+/** `panel_YYYYMMDD_HHmm` waktu WIB. */
+const namaSnapshotBawaan = () => {
+  const p = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jakarta', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
+    .formatToParts(new Date()).map((x) => [x.type, x.value]));
+  return `panel_${p.year}${p.month}${p.day}_${p.hour}${p.minute}`;
+};
+
+const cekNamaSnapshot = (name) => {
+  if (!NAMA_SNAPSHOT.test(String(name || ''))) {
+    throw Object.assign(new Error('Nama snapshot harus diawali huruf, 2–40 karakter, hanya huruf/angka/underscore.'), { status: 400 });
+  }
+  return String(name);
+};
+
+const kosongkanBackup = () => { cacheBackup = null; };
+
+const createSnapshot = async (vmid, { name, description } = {}) => {
+  const g = await cariGuest(vmid);
+  const nama = cekNamaSnapshot(String(name || '').trim() || namaSnapshotBawaan());
+  const upid = await panggil('POST', `/nodes/${g.node}/${g.type}/${g.vmid}/snapshot`, { snapname: nama, description: String(description || '').slice(0, 200) }, { timeout: 60000 });
+  kosongkanBackup();
+  return { upid, name: nama, guest: g };
+};
+
+const rollbackSnapshot = async (vmid, name) => {
+  const g = await cariGuest(vmid);
+  if (g.protected) {
+    throw Object.assign(new Error(g.is_self
+      ? 'Container ini menjalankan panel yang sedang Anda buka. Rollback snapshot-nya dari sini akan memutus panel. Lakukan dari Proxmox langsung.'
+      : `${g.name} ditandai terlindungi (PROXMOX_PROTECTED_VMIDS) sehingga tidak bisa di-rollback dari panel.`), { status: 400 });
+  }
+  const nama = cekNamaSnapshot(name);
+  const upid = await panggil('POST', `/nodes/${g.node}/${g.type}/${g.vmid}/snapshot/${encodeURIComponent(nama)}/rollback`, g.status === 'running' ? { start: 1 } : null, { timeout: 60000 });
+  cacheRingkasan = null;
+  kosongkanBackup();
+  return { upid, guest: g };
+};
+
+const deleteSnapshot = async (vmid, name) => {
+  const g = await cariGuest(vmid);
+  const nama = cekNamaSnapshot(name);
+  const upid = await panggil('DELETE', `/nodes/${g.node}/${g.type}/${g.vmid}/snapshot/${encodeURIComponent(nama)}`, null, { timeout: 60000 });
+  kosongkanBackup();
+  return { upid, guest: g };
+};
+
+const createVzdump = async (vmid, { storage, notes } = {}) => {
+  const g = await cariGuest(vmid);
+  const { backup_storages: daftar } = await listBackups();
+  if (!daftar.some((s) => s.storage === storage && s.node === g.node)) {
+    throw Object.assign(new Error('Storage backup tidak valid untuk node ini'), { status: 400 });
+  }
+  const catatan = String(notes || '').replace(/[\r\n]+/g, ' ').trim().slice(0, 200) || 'Dari panel DPMD';
+  const upid = await panggil('POST', `/nodes/${g.node}/vzdump`, { vmid: g.vmid, storage, mode: 'snapshot', compress: 'zstd', 'notes-template': catatan }, { timeout: 60000 });
+  kosongkanBackup();
+  return { upid, guest: g };
+};
+
+const deleteBackupVolume = async (volid) => {
+  // Hanya volume yang terdaftar sebagai content=backup yang boleh dihapus.
+  await listBackups({ segar: true });
+  const v = volumeBackup.find((x) => x.volid === volid);
+  if (!volid || !v) throw Object.assign(new Error('Berkas backup tidak ditemukan'), { status: 404 });
+  await panggil('DELETE', `/nodes/${v.node}/storage/${encodeURIComponent(v.storage)}/content/${encodeURIComponent(v.volid)}`, null, { timeout: 60000 });
+  kosongkanBackup();
+  return { ok: true };
+};
+
 const testConnection = async () => {
   const v = await panggil('GET', '/version');
   return { version: v?.version, release: v?.release, repoid: v?.repoid };
@@ -421,6 +541,12 @@ module.exports = {
   powerAction,
   resizeDisk,
   updateResources,
+  listBackups,
+  createSnapshot,
+  rollbackSnapshot,
+  deleteSnapshot,
+  createVzdump,
+  deleteBackupVolume,
   start,
   uraiDisk,
 };

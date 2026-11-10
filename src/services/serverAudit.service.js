@@ -289,4 +289,4 @@ const getAudit = async ({ segar = false } = {}) => {
   return sedang;
 };
 
-module.exports = { getAudit };
+module.exports = { getAudit, getCachedAudit: () => (cache ? { ...cache.data, at: new Date(cache.at) } : null) };

@@ -65,6 +65,16 @@ const DEFAULT_CONFIG = {
   // Monitor uptime: [{ name, url }]. Kosong = daftar bawaan (lihat
   // serverApps.service.js → defaultMonitors).
   monitors: [],
+  notifications: {
+    // Id akun TAMBAHAN (selain semua superadmin) penerima push notification server. Maks 50.
+    push_users: [],
+    // Level terendah yang dikirim: 'warning' atau 'critical'.
+    push_min_level: 'warning',
+    // Kirim laporan ringkas harian lewat push.
+    daily_report: false,
+    // Jam kirim laporan harian (WIB, 0-23).
+    daily_report_hour: 7,
+  },
 };
 
 /**
@@ -218,8 +228,31 @@ const SYSTEM_SERVICES = [
   { unit: 'coturn', label: 'TURN server (video meeting)' },
 ];
 
+/** Repo yang bisa di-deploy ulang / di-rollback dari panel. */
+const DEPLOY_REPOS = [
+  { key: 'dpmd-fahri-express', label: 'Backend', dir: process.env.DEPLOY_BACKEND_DIR || '/var/www/backend', proses: 'dpmd-backend' },
+  { key: 'dpmd-frontend', label: 'Frontend', dir: process.env.DEPLOY_FRONTEND_DIR || '/var/www/frontend', proses: null },
+];
+
+/** Deskripsi jejak audit -> kategori jurnal tindakan (urutan penting). */
+const KATEGORI_TINDAKAN = [
+  [/^Membuka blokir/i, 'buka_blokir'],
+  [/^Memblokir/i, 'blokir'],
+  [/^(Deploy ulang|Rollback deploy)/i, 'deploy'],
+  [/^(Snapshot|Rollback snapshot|Hapus snapshot|Backup|Hapus berkas backup)/i, 'backup'],
+  [/^(Proxmox|Menambah disk|Mengubah sumber daya)/i, 'proxmox'],
+  [/^(PM2|Memperbarui \d+ monitor)/i, 'aplikasi'],
+  [/(pengaturan|konfigurasi|notifikasi)/i, 'konfigurasi'],
+  [/^(Membersihkan|Menghapus seluruh jejak|Mereset)/i, 'pembersihan'],
+];
+
+const kategoriTindakan = (deskripsi) => (KATEGORI_TINDAKAN.find(([re]) => re.test(String(deskripsi || ''))) || [null, 'lainnya'])[1];
+
 module.exports = {
   CONFIG_KEY,
+  DEPLOY_REPOS,
+  KATEGORI_TINDAKAN,
+  kategoriTindakan,
   BACKEND_ROOT,
   DEFAULT_CONFIG,
   IP_TEPERCAYA,

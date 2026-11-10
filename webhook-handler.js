@@ -24,9 +24,10 @@ const fs = require('fs');
 
 // ─── Konfigurasi ────────────────────────────────────────────────────────────────
 
-const PORT = 9000;
+const PORT = Number(process.env.WEBHOOK_PORT) || 9000;
 const SECRET = 'dpmd-webhook-secret-2026';
-const LOG_FILE = '/var/www/webhook/webhook.log';
+const LOG_FILE = process.env.WEBHOOK_LOG_FILE || '/var/www/webhook/webhook.log';
+const PIN_FILE = process.env.WEBHOOK_PIN_FILE || '/var/www/webhook/pins.json';
 const MAX_LOG_LINES = 100;
 const CMD_TIMEOUT = 300_000; // 5 menit per command
 const MAX_BUFFER = 10 * 1024 * 1024; // 10 MB stdout/stderr
@@ -97,6 +98,26 @@ function log(message) {
   } catch {
     // Log file belum ada / permission — abaikan
   }
+}
+
+// ─── Pin Rollback ────────────────────────────────────────────────────────────────
+
+function bacaPin() { try { return JSON.parse(fs.readFileSync(PIN_FILE, 'utf8')) || {}; } catch { return {}; } }
+function tulisPin(pins) { try { fs.writeFileSync(PIN_FILE, JSON.stringify(pins, null, 2)); } catch (e) { log(`Gagal menulis ${PIN_FILE}: ${e.message}`); } }
+
+// Panel (backend di mesin yang sama) memanggil 127.0.0.1:9000 langsung tanpa
+// header proxy; permintaan yang lewat nginx selalu membawa X-Forwarded-For.
+function dariLokal(req) {
+  const a = String(req.socket.remoteAddress || '').replace(/^::ffff:/, '');
+  return (a === '127.0.0.1' || a === '::1') && !req.headers['x-forwarded-for'] && !req.headers['x-real-ip'];
+}
+
+// Rollback: reset ke commit pilihan, dan JANGAN salin webhook-handler.js lama
+// supaya handler yang paham rollback & pin tetap terpasang.
+function configRollback(config, sha) {
+  return { ...config, commands: config.commands
+    .filter((c) => !c.includes('webhook-handler.js'))
+    .map((c) => (c === '/usr/bin/git reset --hard origin/main' ? `/usr/bin/git reset --hard ${sha}` : c)) };
 }
 
 // ─── Signature Verification ──────────────────────────────────────────────────────
@@ -251,7 +272,7 @@ function handleStatus(req, res) {
           ? new Date(p.pm2_env.pm_uptime).toISOString()
           : null,
       }));
-      jsonResponse(res, 200, { processes, deploying: Object.keys(deployLock) });
+      jsonResponse(res, 200, { processes, deploying: Object.keys(deployLock), pins: bacaPin() });
     } catch {
       textResponse(res, 200, stdout.substring(0, 2000));
     }
@@ -312,14 +333,31 @@ async function handleWebhook(req, res) {
     return jsonResponse(res, 200, { skipped: true, reason: 'deployment in progress' });
   }
 
+  const pins = bacaPin();
+  const rollbackTo = payload.rollback_to;
+  let jalankan = config;
+  if (rollbackTo !== undefined) {
+    if (!dariLokal(req)) { log(`Rejected: rollback dari luar mesin (by: ${pusher})`); return jsonResponse(res, 403, { error: 'rollback hanya dari panel lokal' }); }
+    if (!/^[0-9a-f]{40}$/.test(String(rollbackTo))) return jsonResponse(res, 400, { error: 'sha tidak valid' });
+    jalankan = configRollback(config, rollbackTo);
+    pins[repoName] = { sha: rollbackTo, at: new Date().toISOString(), by: pusher };
+    tulisPin(pins);
+    log(`ROLLBACK ${repoName} ke ${rollbackTo} oleh ${pusher}`);
+  } else if (pins[repoName]) {
+    // Cron deploy-guard melihat HEAD ≠ origin/main lalu mengetuk; abaikan selama pin aktif.
+    if (/^deploy-guard/i.test(pusher)) { log(`Skipped: ${repoName} sedang di-rollback ke ${String(pins[repoName].sha).slice(0, 7)}`); return jsonResponse(res, 200, { skipped: true, reason: 'pinned' }); }
+    delete pins[repoName]; tulisPin(pins); log(`Pin rollback ${repoName} dilepas oleh ${pusher}`);
+  }
+
   // Respond dulu, deploy secara async
   jsonResponse(res, 200, {
     queued: true,
     repo: repoName,
+    rollback: rollbackTo !== undefined,
     queue_size: queuedDeployments + 1,
   });
 
-  enqueueDeployment(repoName, config);
+  enqueueDeployment(repoName, jalankan);
   return;
 
   // Jalankan deployment
