@@ -274,6 +274,20 @@ model bankeu_lpj {
   @@index([uploaded_by], map: "fk_bankeu_lpj_user")
 }
 
+model bankeu_lpj_video {
+  id               BigInt   @id @default(autoincrement()) @db.UnsignedBigInt
+  desa_id          BigInt   @db.UnsignedBigInt
+  tahun_anggaran   Int      @db.Year
+  dayeuh_pajajaran Json
+  infrastruktur    Json
+  updated_by       BigInt   @db.UnsignedBigInt
+  created_at       DateTime @default(now()) @db.Timestamp(0)
+  updated_at       DateTime @default(now()) @db.Timestamp(0)
+  desas            desas    @relation(fields: [desa_id], references: [id], onDelete: Cascade, map: "fk_bankeu_lpj_video_desa")
+
+  @@unique([desa_id, tahun_anggaran], map: "uq_bankeu_lpj_video_desa_tahun")
+}
+
 model bantuan_provinsi_lpj {
   id                                                 BigInt                      @id @default(autoincrement()) @db.UnsignedBigInt
   desa_id                                            BigInt                      @db.UnsignedBigInt
@@ -1114,6 +1128,7 @@ model desas {
   updated_at                 DateTime?                    @db.Timestamp(0)
   aparatur_desa              aparatur_desa[]
   bankeu_lpj                 bankeu_lpj[]
+  bankeu_lpj_video           bankeu_lpj_video[]
   bankeu_proposal_2025       bankeu_proposal_2025[]
   bankeu_perubahan_lpj       bankeu_perubahan_lpj[]
   bankeu_perubahan_proposals bankeu_perubahan_proposals[]

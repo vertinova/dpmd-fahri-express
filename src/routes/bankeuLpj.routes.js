@@ -14,6 +14,10 @@ router.use(requireDesaPermission('bankeu'));
 // Get LPJ for logged-in desa
 router.get('/', bankeuLpjController.getMyLpj);
 
+// Link video wajib LPJ (TA 2026+)
+router.get('/video', bankeuLpjController.getVideo);
+router.put('/video', bankeuLpjController.simpanVideo);
+
 // Upload or replace LPJ file
 router.post('/upload', upload.bankeuLpj, bankeuLpjController.uploadLpj);
 

@@ -3,6 +3,18 @@ const sequelize = require('../config/database');
 const logger = require('../utils/logger');
 const path = require('path');
 const fs = require('fs');
+const { KATEGORI_VIDEO, normalisasiDaftarVideo, videoLengkap, keArray } = require('../utils/lpjVideo');
+
+// Bentuk respons video; baris null = belum diisi.
+function bentukDataVideo(tahun, baris) {
+  return {
+    tahun_anggaran: tahun,
+    dayeuh_pajajaran: baris ? keArray(baris.dayeuh_pajajaran) : [],
+    infrastruktur: baris ? keArray(baris.infrastruktur) : [],
+    lengkap: videoLengkap(baris),
+    updated_at: baris && baris.updated_at ? baris.updated_at.toISOString() : null
+  };
+}
 
 class BankeuLpjController {
   /**
@@ -46,6 +58,75 @@ class BankeuLpjController {
         message: 'Gagal mengambil data LPJ',
         error: error.message
       });
+    }
+  }
+
+  /**
+   * Link video wajib LPJ milik desa yang login
+   * GET /api/desa/bankeu-lpj/video?tahun=2026
+   */
+  async getVideo(req, res) {
+    try {
+      const tahun = parseInt(req.query.tahun) || 2026;
+      const user = await prisma.users.findUnique({
+        where: { id: BigInt(req.user.id) },
+        select: { desa_id: true }
+      });
+      if (!user || !user.desa_id) {
+        return res.status(403).json({ success: false, message: 'User tidak terkait dengan desa manapun' });
+      }
+      const baris = await prisma.bankeu_lpj_video.findUnique({
+        where: { desa_id_tahun_anggaran: { desa_id: user.desa_id, tahun_anggaran: tahun } }
+      });
+      res.json({ success: true, data: bentukDataVideo(tahun, baris) });
+    } catch (error) {
+      logger.error('Error fetching video LPJ:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil link video', error: error.message });
+    }
+  }
+
+  /**
+   * Simpan link video wajib LPJ
+   * PUT /api/desa/bankeu-lpj/video
+   * Body: { tahun_anggaran, dayeuh_pajajaran: string[], infrastruktur: string[] }
+   */
+  async simpanVideo(req, res) {
+    try {
+      const tahun = Number(req.body.tahun_anggaran);
+      if (!Number.isInteger(tahun) || tahun < 2026 || tahun > 2100) {
+        return res.status(400).json({ success: false, message: 'Tahun anggaran tidak valid (2026-2100)' });
+      }
+
+      const label = { dayeuh_pajajaran: 'Dayeuh Pajajaran', infrastruktur: 'Infrastruktur' };
+      const hasil = {};
+      for (const k of KATEGORI_VIDEO) {
+        const r = normalisasiDaftarVideo(req.body[k]);
+        if (!r.ok) {
+          return res.status(400).json({ success: false, message: `Video ${label[k]}: ${r.pesan}` });
+        }
+        hasil[k] = r.daftar;
+      }
+
+      const user = await prisma.users.findUnique({
+        where: { id: BigInt(req.user.id) },
+        select: { desa_id: true }
+      });
+      if (!user || !user.desa_id) {
+        return res.status(403).json({ success: false, message: 'User tidak terkait dengan desa manapun' });
+      }
+
+      const updatedBy = BigInt(req.user.id);
+      const baris = await prisma.bankeu_lpj_video.upsert({
+        where: { desa_id_tahun_anggaran: { desa_id: user.desa_id, tahun_anggaran: tahun } },
+        create: { desa_id: user.desa_id, tahun_anggaran: tahun, ...hasil, updated_by: updatedBy },
+        update: { ...hasil, updated_by: updatedBy, updated_at: new Date() }
+      });
+
+      logger.info(`Video LPJ Bankeu disimpan: desa_id=${user.desa_id}, tahun=${tahun}, user_id=${req.user.id}`);
+      res.json({ success: true, data: bentukDataVideo(tahun, baris) });
+    } catch (error) {
+      logger.error('Error saving video LPJ:', error);
+      res.status(500).json({ success: false, message: 'Gagal menyimpan link video', error: error.message });
     }
   }
 
@@ -95,6 +176,21 @@ class BankeuLpjController {
           success: false,
           message: 'Desa tidak terkait dengan kecamatan manapun'
         });
+      }
+
+      // TA 2026+: link video wajib lengkap sebelum LPJ boleh diunggah
+      if (tahun >= 2026) {
+        const baris = await prisma.bankeu_lpj_video.findUnique({
+          where: { desa_id_tahun_anggaran: { desa_id: user.desa_id, tahun_anggaran: tahun } }
+        });
+        if (!videoLengkap(baris)) {
+          files.forEach(f => { try { if (f.path) fs.unlinkSync(f.path); } catch (e) {} });
+          return res.status(400).json({
+            success: false,
+            error_code: 'VIDEO_WAJIB',
+            message: 'Lengkapi minimal 3 link video Dayeuh Pajajaran dan 3 link video Infrastruktur sebelum mengunggah LPJ.'
+          });
+        }
       }
 
       // Create target directory: bankeu_lpj/{kecamatan_id}/{desa_id}/
@@ -329,11 +425,27 @@ class BankeuLpjController {
         }
       });
 
+      // TA 2026+: sertakan link video per desa
+      let totalVideoLengkap = 0;
+      if (tahun >= 2026) {
+        const videoRows = await prisma.bankeu_lpj_video.findMany({ where: { tahun_anggaran: tahun } });
+        const videoMap = {};
+        videoRows.forEach(v => { videoMap[String(v.desa_id)] = v; });
+        Object.values(desaTracker).forEach(d => {
+          const v = videoMap[String(d.desa_id)];
+          if (!v) { d.video = null; return; }
+          const lengkap = videoLengkap(v);
+          if (lengkap) totalVideoLengkap++;
+          d.video = { dayeuh_pajajaran: keArray(v.dayeuh_pajajaran), infrastruktur: keArray(v.infrastruktur), lengkap };
+        });
+      }
+
       res.json({
         success: true,
         data: {
           tahun_anggaran: tahun,
           summary: {
+            ...(tahun >= 2026 ? { total_video_lengkap: totalVideoLengkap } : {}),
             total_desa: totalDesa,
             total_uploaded: totalUploaded,
             total_belum: totalDesa - totalUploaded,
