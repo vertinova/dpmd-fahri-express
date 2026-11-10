@@ -26,7 +26,7 @@ const {
 } = require('../controllers/kelembagaan/index');
 
 // Import dashboard controller
-const { getDesaDashboardSummary } = require('../controllers/dashboard/desa.dashboard.controller');
+const { getDesaDashboardSummary, getDesaBankeuPenyaluran } = require('../controllers/dashboard/desa.dashboard.controller');
 
 // All routes require authentication
 router.use(auth);
@@ -36,6 +36,9 @@ router.use(desaContextMiddleware);
 
 // Dashboard summary endpoint (for Desa Dashboard Page)
 router.get('/dashboard/summary', getDesaDashboardSummary);
+
+// Penyaluran Bankeu per tahun anggaran (?tahun=); auth + desaContext sudah berlaku di atas
+router.get('/bankeu-penyaluran', getDesaBankeuPenyaluran);
 
 // Modul Kelembagaan — akun desa wajib punya izin dari Admin Desa.
 // Guard sengaja dibatasi ke prefix milik kelembagaan saja: router ini di-mount di

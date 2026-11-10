@@ -2,6 +2,7 @@
 const fs = require('fs').promises;
 const path = require('path');
 const ActivityLogger = require('../utils/activityLogger');
+const { tahunPenyaluran, namaBerkasPenyaluran } = require('../utils/berkasPenyaluranBankeu');
 
 /**
  * Upload and replace bankeu-tahap2.json file
@@ -67,7 +68,9 @@ const uploadBankeuT2Data = async (req, res) => {
 
     // Backup old file (optional, with timestamp)
     const publicDir = path.join(__dirname, '../../public');
-    const targetFile = path.join(publicDir, 'bankeu-tahap2.json');
+    const tahun = tahunPenyaluran(req.query.tahun);
+    const namaBerkas = namaBerkasPenyaluran(2, tahun);
+    const targetFile = path.join(publicDir, namaBerkas);
     const backupDir = path.join(publicDir, 'backups');
     
     // Create backups directory if not exists
@@ -81,7 +84,7 @@ const uploadBankeuT2Data = async (req, res) => {
     try {
       await fs.access(targetFile);
       const timestamp = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
-      const backupFile = path.join(backupDir, `bankeu-tahap2_backup_${timestamp}.json`);
+      const backupFile = path.join(backupDir, `${namaBerkas.replace('.json', '')}_backup_${timestamp}.json`);
       await fs.copyFile(targetFile, backupFile);
     } catch (error) {
       // File doesn't exist, skip backup
@@ -126,7 +129,7 @@ const uploadBankeuT2Data = async (req, res) => {
         action: 'update',
         entityType: 'bankeu_tahap_2',
         entityName: 'Bantuan Keuangan Tahap 2',
-        description: `${req.user.name} memperbarui data Bantuan Keuangan Tahap 2 (${validRows} desa)`
+        description: `${req.user.name} memperbarui data Bantuan Keuangan Tahap 2 TA ${tahun} (${validRows} desa)`
       });
     } catch (logError) {
       console.error('Error logging bankeu activity:', logError);
@@ -136,6 +139,7 @@ const uploadBankeuT2Data = async (req, res) => {
       success: true,
       message: 'Data Bantuan Keuangan Tahap 2 berhasil diupdate',
       data: {
+        tahun_anggaran: tahun,
         totalRows,
         validRows,
         uniqueDesa,
@@ -170,7 +174,9 @@ const uploadBankeuT2Data = async (req, res) => {
 const getBankeuT2Data = async (req, res) => {
   try {
     const publicDir = path.join(__dirname, '../../public');
-    const targetFile = path.join(publicDir, 'bankeu-tahap2.json');
+    const tahun = tahunPenyaluran(req.query.tahun);
+    const namaBerkas = namaBerkasPenyaluran(2, tahun);
+    const targetFile = path.join(publicDir, namaBerkas);
 
     // Check if file exists
     try {
@@ -178,7 +184,7 @@ const getBankeuT2Data = async (req, res) => {
     } catch {
       return res.status(404).json({
         success: false,
-        message: 'File data Bantuan Keuangan Tahap 2 tidak ditemukan'
+        message: `File data Bantuan Keuangan Tahap 2 TA ${tahun} tidak ditemukan`
       });
     }
 
@@ -188,6 +194,7 @@ const getBankeuT2Data = async (req, res) => {
 
     res.json({
       success: true,
+      tahun_anggaran: tahun,
       data: jsonData
     });
 
@@ -207,7 +214,9 @@ const getBankeuT2Data = async (req, res) => {
 const getBankeuT2Info = async (req, res) => {
   try {
     const publicDir = path.join(__dirname, '../../public');
-    const targetFile = path.join(publicDir, 'bankeu-tahap2.json');
+    const tahun = tahunPenyaluran(req.query.tahun);
+    const namaBerkas = namaBerkasPenyaluran(2, tahun);
+    const targetFile = path.join(publicDir, namaBerkas);
 
     // Check if file exists
     try {
@@ -215,7 +224,7 @@ const getBankeuT2Info = async (req, res) => {
     } catch {
       return res.status(404).json({
         success: false,
-        message: 'File data Bantuan Keuangan Tahap 2 tidak ditemukan'
+        message: `File data Bantuan Keuangan Tahap 2 TA ${tahun} tidak ditemukan`
       });
     }
 
@@ -243,7 +252,8 @@ const getBankeuT2Info = async (req, res) => {
     res.json({
       success: true,
       data: {
-        fileName: 'bankeu-tahap2.json',
+        fileName: namaBerkas,
+        tahun_anggaran: tahun,
         fileSize: stats.size,
         lastModified: stats.mtime,
         totalRows: jsonData.length,
@@ -267,6 +277,7 @@ const getBankeuT2Info = async (req, res) => {
  */
 const getBankeuT2BackupList = async (req, res) => {
   try {
+    const tahun = tahunPenyaluran(req.query.tahun);
     const publicDir = path.join(__dirname, '../../public');
     const backupDir = path.join(publicDir, 'backups');
 
@@ -282,7 +293,7 @@ const getBankeuT2BackupList = async (req, res) => {
 
     // Read backup directory
     const files = await fs.readdir(backupDir);
-    const backupFiles = files.filter(file => file.startsWith('bankeu-tahap2_backup_'));
+    const backupFiles = files.filter(file => file.startsWith(`${namaBerkasPenyaluran(2, tahun).replace('.json', '')}_backup_`));
 
     // Get file stats for each backup
     const backups = await Promise.all(

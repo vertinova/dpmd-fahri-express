@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const prisma = require('../../config/prisma');
 const Berita = require('../../models/Berita');
+const { tahunPenyaluran, namaBerkasPenyaluran } = require('../../utils/berkasPenyaluranBankeu');
 
 /**
  * Validate desa access from request
@@ -686,6 +687,47 @@ async function getDesaDashboardSummary(req, res) {
   }
 }
 
+/**
+ * Data penyaluran Bankeu Tahap 1 & 2 desa login untuk satu tahun anggaran (?tahun=).
+ */
+async function getDesaBankeuPenyaluran(req, res) {
+  try {
+    const desaId = validateDesaAccess(req, res);
+    if (!desaId) return;
+
+    const desa = await prisma.desas.findUnique({
+      where: { id: desaId },
+      select: { nama: true, kecamatans: { select: { nama: true } } }
+    });
+    if (!desa) {
+      return res.status(404).json({ success: false, message: 'Desa tidak ditemukan' });
+    }
+
+    const tahun = tahunPenyaluran(req.query.tahun);
+    const desaNama = desa.nama.toUpperCase().trim();
+    const kecamatanNama = desa.kecamatans?.nama.toUpperCase().trim();
+    const cari = (tahap) => readPublicJsonFile(namaBerkasPenyaluran(tahap, tahun)).find(item =>
+      item.desa?.toUpperCase().trim() === desaNama &&
+      item.kecamatan?.toUpperCase().trim() === kecamatanNama
+    );
+    const bentuk = (item) => ({
+      status: item?.sts || 'Data tidak tersedia',
+      realisasi: item ? cleanCurrency(item.Realisasi) : 0,
+      realisasiFormatted: item ? item.Realisasi : '0',
+      hasData: !!item
+    });
+
+    res.json({
+      success: true,
+      data: { tahun_anggaran: tahun, tahap1: bentuk(cari(1)), tahap2: bentuk(cari(2)) }
+    });
+  } catch (error) {
+    console.error('Error in getDesaBankeuPenyaluran:', error);
+    res.status(500).json({ success: false, message: 'Gagal mengambil data penyaluran Bankeu', error: error.message });
+  }
+}
+
 module.exports = {
-  getDesaDashboardSummary
+  getDesaDashboardSummary,
+  getDesaBankeuPenyaluran
 };
