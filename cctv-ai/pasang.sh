@@ -7,7 +7,8 @@
 # Yang dilakukan:
 #   1. Membuat CCTV_SERVICE_API_KEY & CCTV_INTERNAL_TOKEN di .env backend bila
 #      belum ada (acak 64 heksa), lalu me-restart backend agar memuatnya.
-#   2. npm install dependensi layanan (model AI ikut di paket npm).
+#   2. npm install dependensi layanan (model Human ikut di paket npm; model
+#      YOLOX-s diunduh sendiri oleh layanan ke cctv-ai/models/ saat berjalan).
 #   3. Memasang & menyalakan systemd dpmd-cctv-ai (127.0.0.1:8001, prioritas
 #      CPU rendah supaya aplikasi utama tetap didahulukan).
 # Pembaruan berikutnya ikut deploy otomatis (lihat webhook-handler.js).
@@ -41,7 +42,7 @@ fi
 
 echo "▸ 2. Dependensi layanan"
 cd "$LAYANAN"
-PATH="$NODE_BIN:$PATH" "$NODE_BIN/npm" install --omit=dev --no-audit --no-fund 2>&1 | tail -2
+ONNXRUNTIME_NODE_INSTALL=skip PATH="$NODE_BIN:$PATH" "$NODE_BIN/npm" install --omit=dev --no-audit --no-fund 2>&1 | tail -2
 
 echo "▸ 3. Layanan systemd"
 cat > /etc/systemd/system/dpmd-cctv-ai.service <<UNIT

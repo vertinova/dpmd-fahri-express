@@ -2,8 +2,9 @@
  * Mesin deteksi Smart CCTV — @vladmandic/human di backend WASM (CPU saja).
  *
  * Rantai per bingkai CCTV:
- *   1. deteksi ORANG di seluruh bingkai (centernet) — wajah di CCTV terlalu
- *      kecil untuk langsung dicari detektor wajah;
+ *   1. deteksi ORANG di seluruh bingkai — YOLOX-s (yolox.js, onnxruntime) bila
+ *      modelnya siap, selain itu centernet; wajah di CCTV terlalu kecil untuk
+ *      langsung dicari detektor wajah;
  *   2. tiap orang dipotong (diperlebar) lalu diperbesar, kemudian dicari
  *      wajahnya (blazeface + faceres → embedding 1024 dimensi) dan posenya
  *      (movenet) untuk menilai apakah orang itu rebah/jatuh.
@@ -16,6 +17,7 @@ const fs = require('fs');
 const { pathToFileURL, fileURLToPath } = require('url');
 const sharp = require('sharp');
 const cfg = require('./config');
+const yolox = require('./yolox');
 
 const MODUL = path.join(__dirname, '..', 'node_modules');
 
@@ -74,6 +76,19 @@ const muat = async () => {
 	await pendeteksiOrang.load();
 	await pemeriksa.load();
 	siap = true;
+	yolox.siapkan(); // di latar; sampai siap, orang dicari dengan centernet
+};
+
+/** Orang di bingkai lewat centernet (cadangan bila YOLOX belum siap). */
+const orangCenternet = async (jpg) => {
+	const { t, lebar, tinggi } = await keTensor(pendeteksiOrang, jpg);
+	let hasil;
+	try {
+		hasil = await pendeteksiOrang.detect(t);
+	} finally {
+		pendeteksiOrang.tf.dispose(t);
+	}
+	return { lebar, tinggi, objek: hasil.object.filter((x) => x.label === 'person') };
 };
 
 const keTensor = async (human, jpg) => {
@@ -105,16 +120,10 @@ const TINGGI_POTONGAN = 640;
  */
 const analisis = async (jpg) => {
 	if (!siap) throw new Error('Model belum termuat');
-	const { t, lebar, tinggi } = await keTensor(pendeteksiOrang, jpg);
-	let hasil;
-	try {
-		hasil = await pendeteksiOrang.detect(t);
-	} finally {
-		pendeteksiOrang.tf.dispose(t);
-	}
+	const { lebar, tinggi, objek } = yolox.aktif() ? await yolox.orang(jpg) : await orangCenternet(jpg);
 
 	const orang = [];
-	for (const o of hasil.object.filter((x) => x.label === 'person')) {
+	for (const o of objek) {
 		const [x, y, w, h] = o.box;
 		const pad = 0.15;
 		const kiri = Math.max(0, Math.round(x - w * pad));
@@ -182,4 +191,12 @@ const embeddingFoto = async (jpg) => {
 /** Kemiripan dua embedding, 0..1 (ukuran bawaan Human untuk faceres). */
 const kemiripan = (a, b) => pemeriksa.match.similarity(a, b);
 
-module.exports = { muat, analisis, embeddingFoto, kemiripan, siap: () => siap };
+module.exports = {
+	muat,
+	analisis,
+	embeddingFoto,
+	kemiripan,
+	siap: () => siap,
+	pendeteksi: () => (yolox.aktif() ? 'yolox_s' : 'centernet'),
+	keadaanYolox: yolox.keadaan,
+};

@@ -138,6 +138,38 @@ const cocokkan = (embedding) => {
 	return terbaik;
 };
 
+/** Tumpang-tindih dua kotak [x, y, w, h] (intersection over union). */
+const iou = ([ax, ay, aw, ah], [bx, by, bw, bh]) => {
+	const lebarIrisan = Math.max(0, Math.min(ax + aw, bx + bw) - Math.max(ax, bx));
+	const tinggiIrisan = Math.max(0, Math.min(ay + ah, by + bh) - Math.max(ay, by));
+	const irisan = lebarIrisan * tinggiIrisan;
+	const gabungan = aw * ah + bw * bh - irisan;
+	return gabungan > 0 ? irisan / gabungan : 0;
+};
+
+/**
+ * Pelacakan sederhana untuk TAMPILAN saja (peristiwa & peringatan tetap memakai
+ * hasil mentah): orang kecil/jauh skornya naik-turun di sekitar ambang, jadi
+ * kotak orang yang terlewat di satu analisis dipertahankan sampai terlewat
+ * lebih dari TAHAN_ORANG_ANALISIS kali berturut-turut.
+ */
+const lacakOrang = (lama, baru) => {
+	const terpakai = new Set();
+	const tertahan = [];
+	for (const j of lama) {
+		let terbaik = -1;
+		let nilai = 0.2; // tumpang-tindih minimal untuk dianggap orang yang sama
+		baru.forEach((b, i) => {
+			if (terpakai.has(i)) return;
+			const n = iou(j.kotak, b.kotak);
+			if (n > nilai) { nilai = n; terbaik = i; }
+		});
+		if (terbaik >= 0) terpakai.add(terbaik);
+		else if (j.hilang < cfg.TAHAN_ORANG_ANALISIS) tertahan.push({ ...j, hilang: j.hilang + 1 });
+	}
+	return [...baru, ...tertahan];
+};
+
 const prosesKamera = async (k, jpg) => {
 	statistik.bingkai += 1;
 	const { lebar, tinggi, orang } = await deteksi.analisis(jpg);
@@ -146,16 +178,18 @@ const prosesKamera = async (k, jpg) => {
 	let adaPeristiwaWajah = false;
 
 	// ── Tampilan deteksi: semua orang, wajah, & yang rebah digambari kotak ──
-	const tanda = [];
-	for (const o of orang) {
-		tanda.push({ kotak: o.kotak, label: o.rebah ? 'Rebah' : `Orang ${Math.round(o.skor * 100)}%`, warna: o.rebah ? '#dc2626' : '#f59e0b' });
+	const jejakBaru = orang.map((o) => {
+		const t = [{ kotak: o.kotak, label: o.rebah ? 'Rebah' : `Orang ${Math.round(o.skor * 100)}%`, warna: o.rebah ? '#dc2626' : '#f59e0b' }];
 		const w = o.wajah;
 		if (w && w.skor >= cfg.MIN_SKOR_WAJAH && w.kotak[2] >= cfg.MIN_WAJAH_PX && wajahTerdaftar.length) {
 			const cocok = cocokkan(w.embedding);
 			const kenal = cocok && cocok.nilai >= cfg.AMBANG_KENAL;
-			tanda.push({ kotak: w.kotak, label: kenal ? cocok.nama : 'Tidak dikenal', warna: kenal ? '#16a34a' : '#dc2626' });
+			t.push({ kotak: w.kotak, label: kenal ? cocok.nama : 'Tidak dikenal', warna: kenal ? '#16a34a' : '#dc2626' });
 		}
-	}
+		return { kotak: o.kotak, tanda: t, hilang: 0 };
+	});
+	k.jejak = lacakOrang(k.jejak || [], jejakBaru);
+	const tanda = k.jejak.flatMap((j) => j.tanda);
 	k.bertanda = { jpg: await tandaiBanyak(jpg, lebar, tinggi, tanda), pada: kini };
 	// Kotak yang sama sebagai data, untuk digambar di atas video live (GET /cameras/:id/deteksi).
 	k.tandaTerakhir = { pada: kini, lebar, tinggi, tanda };

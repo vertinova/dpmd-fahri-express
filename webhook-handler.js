@@ -66,7 +66,7 @@ const REPOS = {
       `${NODE_BIN}/pm2 delete dpmd-backend 2>/dev/null; ${NODE_BIN}/pm2 start /var/www/backend/ecosystem.config.js`,
       // Layanan deteksi Smart CCTV (cctv-ai/): hanya bila sudah dipasang lewat
       // cctv-ai/pasang.sh — dependensinya diperbarui lalu layanannya direstart.
-      `/bin/bash -c 'if [ -f /etc/systemd/system/dpmd-cctv-ai.service ]; then cd /var/www/backend/cctv-ai && PATH=${NODE_BIN}:$PATH ${NODE_BIN}/npm install --omit=dev --no-audit --no-fund && systemctl restart dpmd-cctv-ai && echo "cctv-ai direstart"; else echo "cctv-ai belum dipasang"; fi'`,
+      `/bin/bash -c 'if [ -f /etc/systemd/system/dpmd-cctv-ai.service ]; then cd /var/www/backend/cctv-ai && ONNXRUNTIME_NODE_INSTALL=skip PATH=${NODE_BIN}:$PATH ${NODE_BIN}/npm install --omit=dev --no-audit --no-fund && systemctl restart dpmd-cctv-ai && echo "cctv-ai direstart"; else echo "cctv-ai belum dipasang"; fi'`,
     ],
   },
   'dpmd-frontend': {

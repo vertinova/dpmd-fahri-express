@@ -33,7 +33,10 @@ module.exports = {
 
 	// Orang terdeteksi (tanpa wajah yang bisa dikenali: membelakangi kamera, jauh, di tepi)
 	MIN_SKOR_ORANG: angka('CCTV_AI_MIN_SKOR_ORANG', 0.3),
+	MIN_SKOR_ORANG_YOLOX: angka('CCTV_AI_MIN_SKOR_ORANG_YOLOX', 0.45), // salah deteksi YOLOX-s terukur di 0,32–0,43
+	YOLOX_THREAD: angka('CCTV_AI_YOLOX_THREAD', 3),
 	JEDA_ORANG_MS: angka('CCTV_AI_JEDA_ORANG_MS', 60 * 1000), // per kamera; jumlah orang bertambah = lapor lagi
+	TAHAN_ORANG_ANALISIS: angka('CCTV_AI_TAHAN_ORANG_ANALISIS', 1), // kotak orang yang terlewat tetap tampil selama sekian analisis
 	JAM_KERJA_MULAI: angka('CCTV_AI_JAM_KERJA_MULAI', 7), // WIB; di luar jam ini "orang" jadi peringatan
 	JAM_KERJA_SELESAI: angka('CCTV_AI_JAM_KERJA_SELESAI', 17),
 

@@ -52,7 +52,7 @@ const server = http.createServer(async (req, res) => {
 	const p = url.pathname.replace(/\/+$/, '') || '/';
 	try {
 		if (req.method === 'GET' && (p === '/health' || p === '/')) {
-			return balas(res, 200, { success: true, model_siap: deteksi.siap(), ...pemantau.ringkasan() });
+			return balas(res, 200, { success: true, model_siap: deteksi.siap(), pendeteksi: deteksi.pendeteksi(), yolox: deteksi.keadaanYolox(), ...pemantau.ringkasan() });
 		}
 
 		let m = p.match(/^\/cameras\/(\d+)\/(start|stop)$/);
