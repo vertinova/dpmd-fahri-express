@@ -160,7 +160,7 @@ const lacakOrang = (lama, baru) => {
 		let terbaik = -1;
 		let nilai = 0.2; // tumpang-tindih minimal untuk dianggap orang yang sama
 		baru.forEach((b, i) => {
-			if (terpakai.has(i)) return;
+			if (terpakai.has(i) || b.jenis !== j.jenis) return;
 			const n = iou(j.kotak, b.kotak);
 			if (n > nilai) { nilai = n; terbaik = i; }
 		});
@@ -172,7 +172,10 @@ const lacakOrang = (lama, baru) => {
 
 const prosesKamera = async (k, jpg) => {
 	statistik.bingkai += 1;
-	const { lebar, tinggi, orang } = await deteksi.analisis(jpg);
+	// Petak kiri/kanan bergantian; orang kecil yang hanya terbaca di satu petak
+	// ditahan lacakOrang selama analisis petak lainnya.
+	k.petak = (k.petak || 0) + 1;
+	const { lebar, tinggi, orang, kendaraan } = await deteksi.analisis(jpg, k.petak);
 	const kini = Date.now();
 	k.bingkaiTerakhir = { pada: new Date(kini).toISOString(), orang: orang.length };
 	let adaPeristiwaWajah = false;
@@ -186,8 +189,13 @@ const prosesKamera = async (k, jpg) => {
 			const kenal = cocok && cocok.nilai >= cfg.AMBANG_KENAL;
 			t.push({ kotak: w.kotak, label: kenal ? cocok.nama : 'Tidak dikenal', warna: kenal ? '#16a34a' : '#dc2626' });
 		}
-		return { kotak: o.kotak, tanda: t, hilang: 0 };
+		return { kotak: o.kotak, jenis: 'orang', tanda: t, hilang: 0 };
 	});
+	// Kendaraan hanya untuk tampilan; peristiwa & peringatan tetap soal orang.
+	for (const v of kendaraan) {
+		const nama = v.jenis[0].toUpperCase() + v.jenis.slice(1);
+		jejakBaru.push({ kotak: v.kotak, jenis: v.jenis, tanda: [{ kotak: v.kotak, label: `${nama} ${Math.round(v.skor * 100)}%`, warna: '#2563eb' }], hilang: 0 });
+	}
 	k.jejak = lacakOrang(k.jejak || [], jejakBaru);
 	const tanda = k.jejak.flatMap((j) => j.tanda);
 	k.bertanda = { jpg: await tandaiBanyak(jpg, lebar, tinggi, tanda), pada: kini };

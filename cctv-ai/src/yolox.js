@@ -65,16 +65,20 @@ const iou = ([ax, ay, aw, ah], [bx, by, bw, bh]) => {
 	return irisan / (aw * ah + bw * bh - irisan);
 };
 
+// Kelas COCO yang dipakai → label tampilan.
+const KELAS = { 0: 'orang', 1: 'sepeda', 2: 'mobil', 3: 'motor', 5: 'bus', 7: 'truk' };
+const ID_KELAS = Object.keys(KELAS).map(Number);
+
 /**
- * Orang di satu bingkai JPEG.
- * @returns {{ lebar, tinggi, objek: Array<{ box: [x, y, w, h], score }> }} koordinat bingkai asli
+ * Objek di satu area bingkai (a = { left, top, width, height }), koordinat
+ * bingkai asli. Kotak yang menempel tepi potong (a.potong: 'kiri'/'kanan')
+ * dibuang: kemungkinan objeknya terpotong dan utuh di petak lain/bingkai utuh.
  */
-const orang = async (jpg) => {
-	const { width: lebar, height: tinggi } = await sharp(jpg).metadata();
-	const r = Math.min(UKURAN / lebar, UKURAN / tinggi);
-	const w = Math.round(lebar * r);
-	const h = Math.round(tinggi * r);
-	const rgb = await sharp(jpg).resize(w, h).removeAlpha().raw().toBuffer();
+const deteksiArea = async (jpg, a) => {
+	const r = Math.min(UKURAN / a.width, UKURAN / a.height);
+	const w = Math.round(a.width * r);
+	const h = Math.round(a.height * r);
+	const rgb = await sharp(jpg).extract({ left: a.left, top: a.top, width: a.width, height: a.height }).resize(w, h).removeAlpha().raw().toBuffer();
 	// Letterbox 640×640 berlatar 114, kanal BGR, tanpa normalisasi (praproses YOLOX ≥ 0.1.1).
 	const luas = UKURAN * UKURAN;
 	const data = new Float32Array(3 * luas).fill(114);
@@ -92,7 +96,7 @@ const orang = async (jpg) => {
 	const k = o.dims[2];
 	const d = o.data;
 
-	// Dekode grid (demo_postprocess YOLOX); kelas 0 = person.
+	// Dekode grid (demo_postprocess YOLOX); skor = objectness × kelas terbaik.
 	const calon = [];
 	let idx = 0;
 	for (const s of LANGKAH) {
@@ -100,7 +104,12 @@ const orang = async (jpg) => {
 		for (let gy = 0; gy < g; gy++) {
 			for (let gx = 0; gx < g; gx++, idx++) {
 				const b = idx * k;
-				const score = d[b + 4] * d[b + 5];
+				let kelas = -1;
+				let score = 0;
+				for (const c of ID_KELAS) {
+					const n = d[b + 4] * d[b + 5 + c];
+					if (n > score) { score = n; kelas = c; }
+				}
 				if (score < cfg.MIN_SKOR_ORANG_YOLOX) continue;
 				const cx = (d[b] + gx) * s;
 				const cy = (d[b + 1] + gy) * s;
@@ -108,24 +117,50 @@ const orang = async (jpg) => {
 				const bh = Math.exp(d[b + 3]) * s;
 				const x0 = Math.max(0, (cx - bw / 2) / r);
 				const y0 = Math.max(0, (cy - bh / 2) / r);
-				const x1 = Math.min(lebar, (cx + bw / 2) / r);
-				const y1 = Math.min(tinggi, (cy + bh / 2) / r);
-				if (x1 - x0 >= 4 && y1 - y0 >= 4) calon.push({ score, box: [x0, y0, x1 - x0, y1 - y0] });
+				const x1 = Math.min(a.width, (cx + bw / 2) / r);
+				const y1 = Math.min(a.height, (cy + bh / 2) / r);
+				if (x1 - x0 < 4 || y1 - y0 < 4) continue;
+				if ((a.potong === 'kanan' && x1 >= a.width - 2) || (a.potong === 'kiri' && x0 <= 2)) continue;
+				calon.push({ label: KELAS[kelas], score, box: [a.left + x0, a.top + y0, x1 - x0, y1 - y0] });
 			}
 		}
 	}
-	// NMS
+	return calon;
+};
+
+/** NMS per kelas; paling banyak 30 objek. */
+const nms = (calon) => {
 	const objek = [];
 	for (const c of calon.sort((a, b) => b.score - a.score)) {
-		if (objek.length >= 20) break;
-		if (objek.every((p) => iou(p.box, c.box) < 0.45)) objek.push(c);
+		if (objek.length >= 30) break;
+		if (objek.every((p) => p.label !== c.label || iou(p.box, c.box) < 0.45)) objek.push(c);
 	}
-	return { lebar, tinggi, objek };
+	return objek;
+};
+
+/**
+ * Orang & kendaraan di satu bingkai JPEG: bingkai utuh, ditambah satu petak
+ * (petak 0 = kiri, 1 = kanan) yang diperbesar ±1,2× supaya orang kecil/jauh
+ * terbaca (bingkai utuh 960 px menyusut ke 640). Kedua petak dipakai
+ * bergantian antar-analisis karena onnxruntime-node menjalankan inferensi
+ * berurutan: tiap petak menambah satu inferensi penuh.
+ * @returns {{ lebar, tinggi, objek: Array<{ label, box: [x, y, w, h], score }> }}
+ */
+const deteksi = async (jpg, petak = 0) => {
+	const { width: lebar, height: tinggi } = await sharp(jpg).metadata();
+	const calon = await deteksiArea(jpg, { left: 0, top: 0, width: lebar, height: tinggi });
+	// Petak ±0,55 lebar (tumpang tindih ±10%); bingkai yang tidak lebar tidak dipetak.
+	const lebarPetak = Math.min(lebar, Math.max(tinggi, Math.ceil(lebar * 0.55)));
+	if (lebarPetak < lebar * 0.9) {
+		const kanan = petak % 2 === 1;
+		calon.push(...(await deteksiArea(jpg, { left: kanan ? lebar - lebarPetak : 0, top: 0, width: lebarPetak, height: tinggi, potong: kanan ? 'kiri' : 'kanan' })));
+	}
+	return { lebar, tinggi, objek: nms(calon) };
 };
 
 module.exports = {
 	siapkan,
-	orang,
+	deteksi,
 	aktif: () => !!sesi,
 	keadaan: () => ({ aktif: !!sesi, galat }),
 };

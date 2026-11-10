@@ -88,7 +88,8 @@ const orangCenternet = async (jpg) => {
 	} finally {
 		pendeteksiOrang.tf.dispose(t);
 	}
-	return { lebar, tinggi, objek: hasil.object.filter((x) => x.label === 'person') };
+	const label = { person: 'orang', bicycle: 'sepeda', car: 'mobil', motorcycle: 'motor', bus: 'bus', truck: 'truk' };
+	return { lebar, tinggi, objek: hasil.object.filter((x) => label[x.label]).map((x) => ({ ...x, label: label[x.label] })) };
 };
 
 const keTensor = async (human, jpg) => {
@@ -116,11 +117,14 @@ const TINGGI_POTONGAN = 640;
 
 /**
  * Analisis satu bingkai JPEG. Kotak dalam koordinat bingkai asli [x, y, w, h].
- * @returns {{ lebar, tinggi, orang: Array<{ kotak, skor, wajah, sudut, rebah }> }}
+ * petak: petak YOLOX yang ikut diperiksa kali ini (lihat yolox.deteksi).
+ * @returns {{ lebar, tinggi, orang: Array<{ kotak, skor, wajah, sudut, rebah }>, kendaraan: Array<{ kotak, skor, jenis }> }}
  */
-const analisis = async (jpg) => {
+const analisis = async (jpg, petak = 0) => {
 	if (!siap) throw new Error('Model belum termuat');
-	const { lebar, tinggi, objek } = yolox.aktif() ? await yolox.orang(jpg) : await orangCenternet(jpg);
+	const { lebar, tinggi, objek: semua } = yolox.aktif() ? await yolox.deteksi(jpg, petak) : await orangCenternet(jpg);
+	const objek = semua.filter((o) => o.label === 'orang');
+	const kendaraan = semua.filter((o) => o.label !== 'orang').map((o) => ({ kotak: o.box.map(Math.round), skor: o.score, jenis: o.label }));
 
 	const orang = [];
 	for (const o of objek) {
@@ -167,7 +171,7 @@ const analisis = async (jpg) => {
 		const rebah = sudut !== null ? sudut >= 60 : !terpotong && o.score >= 0.5 && h >= tinggi * 0.08 && w > h * 1.6;
 		orang.push({ kotak: [x, y, w, h].map(Math.round), skor: o.score, wajah, sudut, rebah });
 	}
-	return { lebar, tinggi, orang };
+	return { lebar, tinggi, orang, kendaraan };
 };
 
 /**
