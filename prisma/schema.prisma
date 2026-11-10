@@ -3134,6 +3134,7 @@ enum produk_hukums_jenis {
   Peraturan_Desa        @map("Peraturan Desa")
   Peraturan_Kepala_Desa @map("Peraturan Kepala Desa")
   Keputusan_Kepala_Desa @map("Keputusan Kepala Desa")
+  Keputusan_Camat       @map("Keputusan Camat")
 }
 
 enum aparatur_desa_jenis_kelamin {
@@ -3151,6 +3152,7 @@ enum produk_hukums_singkatan_jenis {
   PERDES
   PERKADES
   SK_KADES @map("SK KADES")
+  SK_CAMAT @map("SK CAMAT")
 }
 
 enum surat_masuk_status {
