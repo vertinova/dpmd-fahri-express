@@ -100,29 +100,153 @@ const IP_TEPERCAYA = [
 /** Bobot skor ancaman per tingkat keparahan. */
 const SEVERITY_SCORE = { low: 1, medium: 3, high: 8, critical: 15 };
 
+/** Penjelasan mitigasi WAF yang sama untuk semua serangan berpola (injeksi/traversal). */
+const MITIGASI_WAF = 'Permintaan anonim dengan pola ini langsung ditolak 403 oleh WAF dan skor ancaman IP naik tinggi; bila berulang, IP diblokir otomatis. Bila pelakunya pengguna yang sedang login, permintaan hanya dicatat (tidak ditolak).';
+
 /**
  * Jenis kejadian keamanan. Label & penjelasan ikut dikirim ke frontend supaya
  * superadmin yang bukan orang keamanan tetap paham artinya.
+ * Field: apa (definisi), tujuan (maksud penyerang), dampak, mitigasi (yang
+ * benar-benar dilakukan sistem), saran (opsional).
  */
 const EVENT_TYPES = {
-  sql_injection: { label: 'SQL Injection', severity: 'critical', info: 'Upaya menyisipkan perintah SQL untuk membaca/merusak database.' },
-  xss: { label: 'Cross-Site Scripting (XSS)', severity: 'high', info: 'Upaya menyisipkan skrip berbahaya ke halaman.' },
-  path_traversal: { label: 'Path Traversal', severity: 'critical', info: 'Upaya membaca berkas sistem di luar folder aplikasi (mis. /etc/passwd).' },
-  command_injection: { label: 'Command Injection', severity: 'critical', info: 'Upaya menjalankan perintah shell di server.' },
-  scanner: { label: 'Pemindaian Celah', severity: 'medium', info: 'Bot mencari berkas sensitif/CMS umum (.env, wp-admin, phpmyadmin).' },
-  bad_bot: { label: 'Alat Peretasan', severity: 'high', info: 'User-Agent milik alat serang otomatis (sqlmap, nikto, nmap, dll).' },
-  login_failed: { label: 'Login Gagal', severity: 'low', info: 'Percobaan masuk dengan email/sandi salah.' },
-  brute_force: { label: 'Brute Force Login', severity: 'high', info: 'Banyak login gagal beruntun dari satu IP — menebak sandi.' },
-  rate_limit: { label: 'Banjir Request', severity: 'medium', info: 'IP melewati batas jumlah request (indikasi DoS/scraping).' },
-  auth_flood: { label: 'Akses Tanpa Izin Beruntun', severity: 'medium', info: 'Banyak request ditolak 401/403 dalam waktu singkat.' },
-  not_found_flood: { label: 'Banjir 404', severity: 'medium', info: 'Banyak request ke alamat yang tidak ada — ciri pemindaian direktori.' },
-  blocked_request: { label: 'Request Diblokir', severity: 'low', info: 'Request dari IP yang sedang diblokir.' },
-  auto_blocked: { label: 'IP Diblokir Otomatis', severity: 'high', info: 'Skor ancaman IP melewati ambang, sistem memblokirnya.' },
-  ssh_failed: { label: 'SSH Login Gagal', severity: 'medium', info: 'Percobaan masuk SSH ke server gagal (dari /var/log/auth.log).' },
-  nginx_attack: { label: 'Serangan di Nginx', severity: 'medium', info: 'Pola serangan terdeteksi di log akses nginx.' },
-  upload_rejected: { label: 'Unggahan Ditolak', severity: 'low', info: 'Unggahan ditolak karena kuota/ukuran storage.' },
-  geo_blocked: { label: 'Diblokir (Negara)', severity: 'low', info: 'Request anonim dari negara yang sedang diblokir.' },
-  honeypot: { label: 'Masuk Honeypot', severity: 'critical', info: 'Menyentuh jalur jebakan yang tidak pernah dipakai pengguna sah — pasti pemindai/penyerang. Langsung diblokir.' },
+  sql_injection: {
+    label: 'SQL Injection', severity: 'critical', info: 'Upaya menyisipkan perintah SQL untuk membaca/merusak database.',
+    apa: 'Penyerang menyisipkan potongan perintah database (mis. \' OR 1=1 --, UNION SELECT) ke alamat atau isian formulir.',
+    tujuan: 'Membaca, mengubah, atau menghapus isi database tanpa izin — misalnya data pengguna dan sandi.',
+    dampak: 'Bila berhasil, isi database bisa bocor atau rusak. Query aplikasi memakai parameter sehingga sisipan semacam ini biasanya tidak dieksekusi.',
+    mitigasi: MITIGASI_WAF,
+    saran: 'Bila pelakunya akun yang sedang login, periksa akun tersebut di tab Log.',
+  },
+  xss: {
+    label: 'Cross-Site Scripting (XSS)', severity: 'high', info: 'Upaya menyisipkan skrip berbahaya ke halaman.',
+    apa: 'Penyerang menyisipkan kode JavaScript (mis. <script>) ke isian atau alamat agar ikut tampil di halaman pengguna lain.',
+    tujuan: 'Mencuri sesi/token login pengguna lain atau menampilkan konten palsu.',
+    dampak: 'Bila tersimpan dan tampil, akun pengguna yang membuka halaman itu bisa diambil alih.',
+    mitigasi: MITIGASI_WAF,
+    saran: 'Bila pelakunya akun login, periksa data yang ia simpan.',
+  },
+  path_traversal: {
+    label: 'Path Traversal', severity: 'critical', info: 'Upaya membaca berkas sistem di luar folder aplikasi (mis. /etc/passwd).',
+    apa: 'Memakai ../ atau alamat berkas sistem (mis. /etc/passwd) untuk keluar dari folder aplikasi.',
+    tujuan: 'Membaca berkas sistem atau konfigurasi server.',
+    dampak: 'Bila berhasil, berkas sensitif server bisa terbaca.',
+    mitigasi: MITIGASI_WAF,
+  },
+  command_injection: {
+    label: 'Command Injection', severity: 'critical', info: 'Upaya menjalankan perintah shell di server.',
+    apa: 'Menyisipkan perintah shell (mis. ; cat, | wget, $(...)) ke isian.',
+    tujuan: 'Menjalankan perintah di server — memasang malware, penambang kripto, atau pintu belakang.',
+    dampak: 'Paling berbahaya: server bisa diambil alih bila berhasil.',
+    mitigasi: MITIGASI_WAF,
+    saran: 'Bila ada kejadian dari akun login, segera periksa akun tersebut.',
+  },
+  scanner: {
+    label: 'Pemindaian Celah', severity: 'medium', info: 'Bot mencari berkas sensitif/CMS umum (.env, wp-admin, phpmyadmin).',
+    apa: 'Bot menelusuri banyak alamat umum (wp-admin, backup.zip, config.php) untuk mencari celah atau berkas yang tertinggal.',
+    tujuan: 'Memetakan teknologi server dan menemukan pintu masuk yang lemah sebelum menyerang.',
+    dampak: 'Biasanya hanya berbuah 404. Berbahaya bila ada berkas cadangan/konfigurasi yang benar-benar tertinggal di folder publik.',
+    mitigasi: 'Dicatat dan menambah skor ancaman IP; bila skor mencapai 30 dalam 10 menit, IP diblokir otomatis 60 menit.',
+    saran: 'Pastikan tidak ada berkas cadangan atau konfigurasi di folder publik.',
+  },
+  bad_bot: {
+    label: 'Alat Peretasan', severity: 'high', info: 'User-Agent milik alat serang otomatis (sqlmap, nikto, nmap, dll).',
+    apa: 'User-Agent milik alat serang otomatis seperti sqlmap, nikto, nmap, atau masscan.',
+    tujuan: 'Memindai celah secara otomatis dan cepat.',
+    dampak: 'Tanda kuat sedang ada upaya serangan terarah.',
+    mitigasi: 'Permintaan anonim ditolak 403 oleh WAF dan skor IP naik; bila berulang, IP diblokir otomatis.',
+  },
+  login_failed: {
+    label: 'Login Gagal', severity: 'low', info: 'Percobaan masuk dengan email/sandi salah.',
+    apa: 'Percobaan masuk dengan email atau sandi yang salah.',
+    tujuan: 'Bisa sekadar salah ketik; bila banyak dari satu IP, menandakan tebakan sandi.',
+    dampak: 'Tidak ada, selama sandi tidak tertebak.',
+    mitigasi: 'Dicatat dan menambah sedikit skor; kegagalan beruntun menjadi Brute Force dan memicu blokir otomatis.',
+    saran: 'Bila akun tertentu sering gagal, minta pemiliknya mengganti sandi.',
+  },
+  brute_force: {
+    label: 'Brute Force Login', severity: 'high', info: 'Banyak login gagal beruntun dari satu IP — menebak sandi.',
+    apa: 'Banyak login gagal beruntun dari satu IP.',
+    tujuan: 'Menebak sandi dengan mencoba banyak kombinasi.',
+    dampak: 'Akun dengan sandi lemah bisa diambil alih.',
+    mitigasi: 'Skor IP naik tinggi sehingga IP diblokir otomatis.',
+    saran: 'Pastikan akun yang diincar memakai sandi kuat.',
+  },
+  rate_limit: {
+    label: 'Banjir Request', severity: 'medium', info: 'IP melewati batas jumlah request (indikasi DoS/scraping).',
+    apa: 'Satu IP mengirim permintaan melebihi batas wajar dalam waktu singkat.',
+    tujuan: 'Membanjiri server (DoS) atau menyedot data (scraping).',
+    dampak: 'Server bisa melambat bagi pengguna lain.',
+    mitigasi: 'Permintaan yang melewati batas dijawab 429 dan skor IP naik; bila berlanjut, IP diblokir otomatis.',
+  },
+  auth_flood: {
+    label: 'Akses Tanpa Izin Beruntun', severity: 'medium', info: 'Banyak request ditolak 401/403 dalam waktu singkat.',
+    apa: 'Banyak permintaan ditolak 401/403 dari IP yang tidak login.',
+    tujuan: 'Mencoba-coba membuka data atau endpoint yang butuh login.',
+    dampak: 'Tidak ada selama penolakan berlaku.',
+    mitigasi: 'Dicatat dan menambah skor; bila berlanjut, IP diblokir otomatis.',
+  },
+  not_found_flood: {
+    label: 'Banjir 404', severity: 'medium', info: 'Banyak request ke alamat yang tidak ada — ciri pemindaian direktori.',
+    apa: 'Banyak permintaan ke alamat yang tidak ada.',
+    tujuan: 'Menebak folder atau berkas tersembunyi (directory brute force).',
+    dampak: 'Biasanya tidak ada; berbahaya bila menemukan berkas yang tertinggal.',
+    mitigasi: 'Dicatat dan menambah skor; bila berlanjut, IP diblokir otomatis.',
+  },
+  blocked_request: {
+    label: 'Request Diblokir', severity: 'low', info: 'Request dari IP yang sedang diblokir.',
+    apa: 'Permintaan dari IP yang sedang ada di daftar blokir.',
+    tujuan: 'Penyerang yang sudah diblokir mencoba lagi.',
+    dampak: 'Tidak ada.',
+    mitigasi: 'Ditolak 403 sebelum menyentuh aplikasi (dicatat paling banyak sekali per menit per IP).',
+  },
+  auto_blocked: {
+    label: 'IP Diblokir Otomatis', severity: 'high', info: 'Skor ancaman IP melewati ambang, sistem memblokirnya.',
+    apa: 'Sistem memblokir IP karena skor ancamannya melewati ambang.',
+    tujuan: '—',
+    dampak: 'Tidak ada; ini adalah tindakan perlindungan.',
+    mitigasi: 'IP diblokir otomatis; semua permintaan ke API ditolak 403 sampai masa blokir habis.',
+    saran: 'Bila ternyata IP kantor atau mitra, buka blokir dan masukkan ke daftar tepercaya.',
+  },
+  ssh_failed: {
+    label: 'SSH Login Gagal', severity: 'medium', info: 'Percobaan masuk SSH ke server gagal (dari /var/log/auth.log).',
+    apa: 'Percobaan login SSH ke server yang gagal (dari /var/log/auth.log).',
+    tujuan: 'Menebak sandi akun server untuk mengambil alih mesin.',
+    dampak: 'Bila tertebak, seluruh server bisa dikuasai.',
+    mitigasi: 'Hanya dicatat: SSH berada di luar jangkauan aplikasi sehingga tidak bisa diblokir dari sini.',
+    saran: 'Pakai login SSH dengan kunci (matikan login sandi) dan pasang fail2ban/ufw; perintahnya tersedia di Pengaturan.',
+  },
+  nginx_attack: {
+    label: 'Serangan di Nginx', severity: 'medium', info: 'Pola serangan terdeteksi di log akses nginx.',
+    apa: 'Pola serangan terlihat di log akses nginx — permintaan ke halaman/berkas statis yang tidak melewati aplikasi.',
+    tujuan: 'Sama dengan jenis serangan yang tertulis di detail.',
+    dampak: 'Halaman statis tidak berisi data rahasia; risikonya kecil.',
+    mitigasi: 'Hanya dicatat: halaman statis dilayani nginx langsung, di luar jangkauan blokir aplikasi. Bila polanya honeypot, IP tetap dimasukkan daftar blokir sehingga permintaannya ke API ditolak.',
+    saran: 'Untuk menolaknya di nginx juga, pasang aturan deny/geo-block di nginx (perintahnya tersedia di Pengaturan).',
+  },
+  upload_rejected: {
+    label: 'Unggahan Ditolak', severity: 'low', info: 'Unggahan ditolak karena kuota/ukuran storage.',
+    apa: 'Unggahan berkas ditolak karena kuota atau ukuran storage.',
+    tujuan: 'Biasanya bukan serangan; bisa juga upaya memenuhi disk.',
+    dampak: 'Tidak ada.',
+    mitigasi: 'Unggahan ditolak sebelum berkas disimpan.',
+    saran: 'Periksa tab Storage bila sering terjadi.',
+  },
+  geo_blocked: {
+    label: 'Diblokir (Negara)', severity: 'low', info: 'Request anonim dari negara yang sedang diblokir.',
+    apa: 'Permintaan anonim dari negara yang sedang Anda blokir.',
+    tujuan: '—',
+    dampak: 'Tidak ada.',
+    mitigasi: 'Ditolak 403 di API. Permintaan pertama dari IP yang lokasinya belum diketahui bisa lolos sampai lokasinya selesai dicari, dan halaman statis di nginx tidak ikut terblokir.',
+  },
+  honeypot: {
+    label: 'Terjebak Honeypot', severity: 'critical', info: 'Meminta alamat jebakan yang tidak pernah dipakai pengguna sah — pasti pemindai otomatis. Langsung diblokir.',
+    apa: 'Honeypot adalah alamat jebakan yang sengaja dipantau, misalnya /.env, /.git/config, /wp-login.php, /phpmyadmin. Alamat-alamat ini tidak ada di aplikasi DPMD, jadi pengguna sah tidak pernah membukanya — yang memintanya pasti pemindai otomatis.',
+    tujuan: 'Mencari berkas rahasia yang tidak sengaja terbuka (kunci database, sandi, token API di .env), repositori kode, atau panel admin CMS yang bisa dibobol.',
+    dampak: 'Tidak ada data yang bocor: berkas yang diminta tidak ada di folder web, jadi permintaan dijawab 404 (tidak ditemukan). Penyerang tidak "masuk" ke server.',
+    mitigasi: 'Permintaan dijawab 404, lalu IP langsung diblokir otomatis 24 jam (1.440 menit) sehingga semua permintaan berikutnya ke API ditolak 403.',
+    saran: 'Tidak perlu tindakan. Bila IP yang sama kembali setelah blokir habis, pertimbangkan blokir permanen.',
+  },
 };
 
 /**

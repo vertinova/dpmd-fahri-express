@@ -193,6 +193,9 @@ const recordEvent = ({
           kategori: 'keamanan',
           title: 'IP diblokir otomatis',
           message: `${i} diblokir ${cfg.auto_block_duration_minutes} menit. ${alasan}`,
+          sebab: alasan,
+          dampak: 'Belum ada tanda serangan berhasil; permintaan berbahaya sudah ditolak.',
+          mitigasi: `IP diblokir otomatis ${cfg.auto_block_duration_minutes} menit; permintaan ke API ditolak 403.`,
         });
         setTimeout(() => alerts.clear(`autoblock:${i}`), 15 * 60000).unref();
       })
@@ -399,6 +402,9 @@ const pindaiSsh = async () => {
       alerts.raise('ssh_bruteforce', {
         level: 'warning', kategori: 'keamanan', title: 'Brute force SSH',
         message: `${total} percobaan login SSH gagal dari ${perIp.size} IP dalam 1 menit terakhir. Pertimbangkan fail2ban/ufw.`,
+        sebab: 'Banyak percobaan login SSH gagal — indikasi penebakan sandi server.',
+        dampak: 'Bila sandi server lemah, server bisa diambil alih.',
+        mitigasi: 'Belum ada mitigasi otomatis: SSH di luar jangkauan aplikasi. Pasang fail2ban/ufw dan login dengan kunci (perintah di Pengaturan).',
       });
     } else {
       alerts.clear('ssh_bruteforce');
@@ -517,8 +523,11 @@ const cekHoneypot = ({ ip, method = null, path, userAgent = null, source = 'app'
       alerts.raise(`honeypot:${i}`, {
         level: 'warning',
         kategori: 'keamanan',
-        title: 'Penyerang masuk honeypot',
-        message: `${i} meminta ${m[0].slice(0, 60)} dan diblokir ${menit} menit.`,
+        title: 'Pemindai terjebak honeypot',
+        message: `${i} meminta ${m[0].slice(0, 60)} — alamat jebakan.`,
+        sebab: 'Alamat itu tidak ada di aplikasi DPMD; hanya pemindai otomatis yang memintanya untuk mencari berkas rahasia.',
+        dampak: 'Tidak ada data yang bocor — permintaan dijawab 404.',
+        mitigasi: `IP diblokir otomatis ${menit} menit; permintaan berikutnya ke API ditolak 403.`,
       });
       setTimeout(() => alerts.clear(`honeypot:${i}`), 15 * 60000).unref();
     })
@@ -596,6 +605,7 @@ const getGeoMap = async ({ range = '24h', visitors = [] } = {}) => {
   const ipPengunjung = visitors.map((v) => bersihkanIp(v.ip)).filter((i) => !ipPrivat(i));
   const lokasi = await geo.resolveMany([...baris.map((b) => bersihkanIp(b.ip_address)), ...ipPengunjung]);
 
+  const blokNegara = store.getConfigSync().security.blocked_countries || [];
   const negara = new Map();
   let tanpaLokasi = 0;
   const attackers = [];
@@ -616,11 +626,12 @@ const getGeoMap = async ({ range = '24h', visitors = [] } = {}) => {
       private: ipPrivat(ip),
       score: skorSaatIni(ip),
       geo: g && g.lat !== null ? g : null,
+      negara_diblokir: !!(g?.cc && blokNegara.includes(g.cc)),
     };
     if (!item.geo) tanpaLokasi += 1;
     attackers.push(item);
     const kode = g?.cc || (item.private ? 'LAN' : '??');
-    const n = negara.get(kode) || { cc: kode, country: g?.country || (item.private ? 'Jaringan internal' : 'Belum diketahui'), events: 0, ips: 0, serius: 0, blocked_ips: 0 };
+    const n = negara.get(kode) || { cc: kode, country: g?.country || (item.private ? 'Jaringan internal' : 'Belum diketahui'), events: 0, ips: 0, serius: 0, blocked_ips: 0, diblokir: blokNegara.includes(kode) };
     n.events += b.n;
     n.ips += 1;
     n.serius += serius;

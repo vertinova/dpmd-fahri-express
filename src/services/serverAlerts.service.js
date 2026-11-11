@@ -58,15 +58,18 @@ const kirimPush = async (peringatan) => {
   }
 };
 
-const raise = (key, { level = 'warning', title, message, value = null, kategori = 'sistem' }) => {
+const raise = (key, { level = 'warning', title, message, value = null, kategori = 'sistem', sebab = null, dampak = null, mitigasi = null }) => {
   const ada = aktif.get(key);
   if (ada) {
     ada.message = message;
     ada.value = value;
     ada.level = level;
+    ada.sebab = sebab;
+    ada.dampak = dampak;
+    ada.mitigasi = mitigasi;
     return ada;
   }
-  const baru = { key, level, title, message, value, kategori, since: new Date() };
+  const baru = { key, level, title, message, value, kategori, sebab, dampak, mitigasi, since: new Date() };
   aktif.set(key, baru);
   riwayat.unshift({ ...baru, status: 'muncul', at: new Date() });
   if (riwayat.length > 200) riwayat.pop();
