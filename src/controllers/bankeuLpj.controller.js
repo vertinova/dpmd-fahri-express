@@ -4,7 +4,7 @@ const logger = require('../utils/logger');
 const path = require('path');
 const fs = require('fs');
 const { KATEGORI_VIDEO, normalisasiDaftarVideo, videoLengkap, keArray } = require('../utils/lpjVideo');
-const { bacaTahun, bacaSts, bentukSts, bentukMonev } = require('../utils/bankeuStsMonev');
+const { bacaTahun, bacaSts, bentukSts } = require('../utils/bankeuSts');
 
 // Bentuk respons video; baris null = belum diisi.
 function bentukDataVideo(tahun, baris) {
@@ -546,7 +546,7 @@ class BankeuLpjController {
 
       // TA 2026+: sertakan link video per desa
       let totalVideoLengkap = 0;
-      let totalStsDesa = 0, totalNominalSts = 0, totalMonevDesa = 0;
+      let totalStsDesa = 0, totalNominalSts = 0;
       if (tahun >= 2026) {
         const videoRows = await prisma.bankeu_lpj_video.findMany({ where: { tahun_anggaran: tahun } });
         const videoMap = {};
@@ -559,19 +559,12 @@ class BankeuLpjController {
           d.video = { dayeuh_pajajaran: keArray(v.dayeuh_pajajaran), infrastruktur: keArray(v.infrastruktur), lengkap };
         });
 
-        // Bukti STS pengembalian dana & hasil monev per desa
-        const [stsRows, monevRows] = await Promise.all([
-          prisma.bankeu_lpj_sts.findMany({ where: { tahun_anggaran: tahun }, orderBy: [{ tanggal_setor: 'desc' }, { id: 'desc' }] }),
-          prisma.bankeu_monev.findMany({ where: { tahun_anggaran: tahun }, orderBy: { created_at: 'desc' }, include: { users: { select: { name: true } } } }),
-        ]);
-        const kelompok = (rows, bentuk) => rows.reduce((m, r) => { const k = String(r.desa_id); (m[k] = m[k] || []).push(bentuk(r)); return m; }, {});
-        const stsMap = kelompok(stsRows, bentukSts);
-        const monevMap = kelompok(monevRows, bentukMonev);
+        // Bukti STS pengembalian dana per desa
+        const stsRows = await prisma.bankeu_lpj_sts.findMany({ where: { tahun_anggaran: tahun }, orderBy: [{ tanggal_setor: 'desc' }, { id: 'desc' }] });
+        const stsMap = stsRows.reduce((m, r) => { const k = String(r.desa_id); (m[k] = m[k] || []).push(bentukSts(r)); return m; }, {});
         Object.values(desaTracker).forEach(d => {
           d.sts = stsMap[String(d.desa_id)] || [];
-          d.monev = monevMap[String(d.desa_id)] || [];
           if (d.sts.length) { totalStsDesa++; totalNominalSts += d.sts.reduce((a, s) => a + s.nominal, 0); }
-          if (d.monev.length) totalMonevDesa++;
         });
       }
 
@@ -580,7 +573,7 @@ class BankeuLpjController {
         data: {
           tahun_anggaran: tahun,
           summary: {
-            ...(tahun >= 2026 ? { total_video_lengkap: totalVideoLengkap, total_sts_desa: totalStsDesa, total_nominal_sts: totalNominalSts, total_monev_desa: totalMonevDesa } : {}),
+            ...(tahun >= 2026 ? { total_video_lengkap: totalVideoLengkap, total_sts_desa: totalStsDesa, total_nominal_sts: totalNominalSts } : {}),
             total_desa: totalDesa,
             total_uploaded: totalUploaded,
             total_belum: totalDesa - totalUploaded,

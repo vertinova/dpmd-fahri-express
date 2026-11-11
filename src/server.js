@@ -399,21 +399,6 @@ app.get('/storage/uploads/bankeu_lpj/:kecamatanId/:desaId/:filename', (req, res)
   }
 });
 
-// Serve hasil monev Bankeu (struktur bersarang kecamatan/desa)
-app.get('/storage/uploads/bankeu_monev/:kecamatanId/:desaId/:filename', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Cross-Origin-Resource-Policy', 'cross-origin');
-  const kecamatanId = path.basename(req.params.kecamatanId);
-  const desaId = path.basename(req.params.desaId);
-  const filename = path.basename(req.params.filename);
-  const filePath = path.join(__dirname, '../storage/uploads/bankeu_monev', kecamatanId, desaId, filename);
-
-  if (fs.existsSync(filePath)) {
-    return res.sendFile(filePath);
-  } else {
-    return res.status(404).json({ success: false, message: 'File tidak ditemukan' });
-  }
-});
 
 // Backward compatibility: serve old flat bankeu LPJ files
 app.get('/storage/uploads/bankeu_lpj/:filename', (req, res) => {
@@ -573,7 +558,6 @@ app.use('/api/dinas/verifikator', verifikatorAksesDesaRoutes); // Verifikator ak
 app.use('/api/verifikator/profile', require('./routes/verifikatorProfile.routes')); // Verifikator profile & TTD
 app.use('/api/kecamatan/bumdes', gerbangOperatorKecamatan('bumdes'), require('./routes/kecamatanBumdes.routes')); // BUMDes di wilayah kecamatan (lihat saja)
 app.use('/api/kecamatan/aparatur-desa', gerbangOperatorKecamatan('aparatur-desa'), require('./routes/kecamatanAparatur.routes')); // Aparatur desa di wilayah kecamatan (lihat saja)
-app.use('/api/kecamatan/bankeu-monev', gerbangOperatorKecamatan('bankeu'), require('./routes/kecamatanBankeuMonev.routes')); // Hasil monev Bankeu per desa (unggah kecamatan, dibaca DPMD)
 // Tim verifikasi Bankeu dipasang di /api/kecamatan/:kecamatanId/bankeu/... — dijaga
 // per segmen numerik supaya prefiks /api/kecamatan yang luas tidak ikut terkunci.
 // (Regex di app.use tidak cocok di Express 4.21 — sudah diuji, jangan dikembalikan.)

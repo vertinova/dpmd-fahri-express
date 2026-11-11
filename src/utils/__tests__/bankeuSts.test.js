@@ -1,4 +1,4 @@
-const { bacaSts, bacaMonev, bentukSts, bentukMonev } = require('../bankeuStsMonev');
+const { bacaSts, bentukSts } = require('../bankeuSts');
 
 const HARI = '2026-11-11';
 const sts = (o = {}) => bacaSts({ tahun_anggaran: '2026', nominal: '1000', tanggal_setor: '2026-11-01', ...o }, HARI);
@@ -29,23 +29,6 @@ describe('bacaSts', () => {
   });
 });
 
-describe('bacaMonev', () => {
-  const ok = (o = {}) => bacaMonev({ tahun_anggaran: '2026', desa_id: '12', ...o });
-
-  test('desa_id kosong atau bukan angka ditolak', () => {
-    expect(ok({ desa_id: '' }).galat).toBeTruthy();
-    expect(ok({ desa_id: 'x' }).galat).toBeTruthy();
-  });
-
-  test('keterangan', () => {
-    expect(ok({ keterangan: 'a'.repeat(501) }).galat).toBeTruthy();
-    expect(ok({ keterangan: '  ' }).data.keterangan).toBeNull();
-  });
-
-  test('sukses: desa_id BigInt', () => {
-    expect(ok().data.desa_id).toBe(12n);
-  });
-});
 
 describe('bentuk respons', () => {
   test('bentukSts: nominal number dan tanggal YYYY-MM-DD', () => {
@@ -55,11 +38,5 @@ describe('bentuk respons', () => {
     });
     expect(r.nominal).toBe(2500000);
     expect(r.tanggal_setor).toBe('2026-11-05');
-  });
-
-  test('bentukMonev: uploaded_by_name dari users, null bila tanpa users', () => {
-    const m = { id: 1n, desa_id: 2n, tahun_anggaran: 2026, nama_file: 'a', file_path: 'p', file_size: 1, keterangan: null, created_at: new Date() };
-    expect(bentukMonev({ ...m, users: { name: 'Budi' } }).uploaded_by_name).toBe('Budi');
-    expect(bentukMonev(m).uploaded_by_name).toBeNull();
   });
 });

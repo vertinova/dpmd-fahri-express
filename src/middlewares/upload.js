@@ -831,7 +831,7 @@ const uploadCctvFoto = multer({
   limits: { fileSize: 8 * 1024 * 1024 }
 });
 
-// STS & monev Bankeu: PDF/JPG/PNG ke folder temp, dipindah controller ke {kecamatan}/{desa}.
+// STS Bankeu: PDF ke folder temp, dipindah controller ke {kecamatan}/{desa}.
 // Nama berkas acak karena berkas Bankeu disajikan lewat URL publik: jangan sampai bisa ditebak.
 const storageBerkasBankeu = (folder, awalan) => multer.diskStorage({
   destination: (req, file, cb) => {
@@ -842,7 +842,6 @@ const storageBerkasBankeu = (folder, awalan) => multer.diskStorage({
   filename: (req, file, cb) => cb(null, `${awalan}_${Date.now()}_${crypto.randomBytes(8).toString('hex')}${path.extname(file.originalname).toLowerCase()}`),
 });
 const uploadBankeuSts = multer({ storage: storageBerkasBankeu('bankeu_lpj', 'sts'), fileFilter: pdfFilter, limits: { fileSize: 10 * 1024 * 1024 } });
-const uploadBankeuMonev = multer({ storage: storageBerkasBankeu('bankeu_monev', 'monev'), fileFilter: documentImageFilter, limits: { fileSize: 25 * 1024 * 1024 } });
 
 module.exports = {
   uploadBumdes,
@@ -872,7 +871,6 @@ module.exports = {
   bankeuPerubahanSignature: uploadBankeuPerubahanSignature.single('file'),
   bankeuLpj: uploadBankeuLpj.array('files', 10),
   bankeuSts: uploadBankeuSts.single('file'),
-  bankeuMonev: uploadBankeuMonev.single('file'),
   bankeuProposal2025: uploadBankeuProposal2025.array('files', 10),
   bantuanProvinsiLpj: uploadBantuanProvinsiLpj.array('files', 10),
   contohProposalUpload: uploadContohProposal.single('file')
