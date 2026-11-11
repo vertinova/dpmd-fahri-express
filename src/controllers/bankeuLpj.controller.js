@@ -4,6 +4,7 @@ const logger = require('../utils/logger');
 const path = require('path');
 const fs = require('fs');
 const { KATEGORI_VIDEO, normalisasiDaftarVideo, videoLengkap, keArray } = require('../utils/lpjVideo');
+const { bacaTahun, bacaSts, bentukSts, bentukMonev } = require('../utils/bankeuStsMonev');
 
 // Bentuk respons video; baris null = belum diisi.
 function bentukDataVideo(tahun, baris) {
@@ -316,6 +317,124 @@ class BankeuLpjController {
   }
 
   /**
+   * Daftar bukti STS pengembalian dana milik desa yang login
+   * GET /api/desa/bankeu-lpj/sts?tahun=2026
+   */
+  async getSts(req, res) {
+    try {
+      const tahun = bacaTahun(req.query.tahun) || 2026;
+      const user = await prisma.users.findUnique({
+        where: { id: BigInt(req.user.id) },
+        select: { desa_id: true }
+      });
+      if (!user || !user.desa_id) {
+        return res.status(403).json({ success: false, message: 'User tidak terkait dengan desa manapun' });
+      }
+      const rows = await prisma.bankeu_lpj_sts.findMany({
+        where: { desa_id: user.desa_id, tahun_anggaran: tahun },
+        orderBy: [{ tanggal_setor: 'desc' }, { id: 'desc' }]
+      });
+      res.json({ success: true, data: rows.map(bentukSts) });
+    } catch (error) {
+      logger.error('Error fetching STS:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengambil data STS' });
+    }
+  }
+
+  /**
+   * Unggah bukti STS (opsional): file + nominal + tanggal setor
+   * POST /api/desa/bankeu-lpj/sts
+   */
+  async uploadSts(req, res) {
+    const file = req.file;
+    const buang = (p) => { try { if (p) fs.unlinkSync(p); } catch (e) {} };
+    let tujuan = null;
+    try {
+      if (!file) {
+        return res.status(400).json({ success: false, message: 'File bukti STS wajib diunggah (PDF, maks. 10 MB)' });
+      }
+      const hasil = bacaSts(req.body);
+      if (hasil.galat) {
+        buang(file.path);
+        return res.status(400).json({ success: false, message: hasil.galat });
+      }
+
+      const user = await prisma.users.findUnique({
+        where: { id: BigInt(req.user.id) },
+        select: { desa_id: true }
+      });
+      if (!user || !user.desa_id) {
+        buang(file.path);
+        return res.status(403).json({ success: false, message: 'User tidak terkait dengan desa manapun' });
+      }
+      const desa = await prisma.desas.findUnique({
+        where: { id: user.desa_id },
+        select: { kecamatan_id: true }
+      });
+      if (!desa || !desa.kecamatan_id) {
+        buang(file.path);
+        return res.status(403).json({ success: false, message: 'Desa tidak terkait dengan kecamatan manapun' });
+      }
+
+      const dir = path.join(__dirname, '../../storage/uploads/bankeu_lpj', String(desa.kecamatan_id), String(user.desa_id));
+      fs.mkdirSync(dir, { recursive: true });
+      tujuan = path.join(dir, file.filename);
+      fs.renameSync(file.path, tujuan);
+
+      const row = await prisma.bankeu_lpj_sts.create({
+        data: {
+          desa_id: user.desa_id,
+          ...hasil.data,
+          nama_file: file.originalname,
+          file_path: `${desa.kecamatan_id}/${user.desa_id}/${file.filename}`,
+          file_size: file.size,
+          uploaded_by: BigInt(req.user.id)
+        }
+      });
+
+      logger.info(`STS Bankeu diunggah: desa_id=${user.desa_id}, tahun=${hasil.data.tahun_anggaran}, nominal=${hasil.data.nominal}, user_id=${req.user.id}`);
+      res.status(201).json({ success: true, data: bentukSts(row) });
+    } catch (error) {
+      buang(file && file.path);
+      buang(tujuan);
+      logger.error('Error uploading STS:', error);
+      res.status(500).json({ success: false, message: 'Gagal mengunggah bukti STS. Silakan coba lagi.' });
+    }
+  }
+
+  /**
+   * Hapus bukti STS milik desa sendiri
+   * DELETE /api/desa/bankeu-lpj/sts/:id
+   */
+  async deleteSts(req, res) {
+    try {
+      const id = String(req.params.id);
+      if (!/^\d+$/.test(id)) {
+        return res.status(404).json({ success: false, message: 'STS tidak ditemukan' });
+      }
+      const user = await prisma.users.findUnique({
+        where: { id: BigInt(req.user.id) },
+        select: { desa_id: true }
+      });
+      if (!user || !user.desa_id) {
+        return res.status(403).json({ success: false, message: 'User tidak terkait dengan desa manapun' });
+      }
+      const row = await prisma.bankeu_lpj_sts.findFirst({ where: { id: BigInt(id), desa_id: user.desa_id } });
+      if (!row) {
+        return res.status(404).json({ success: false, message: 'STS tidak ditemukan' });
+      }
+      await prisma.bankeu_lpj_sts.delete({ where: { id: row.id } });
+      try { fs.unlinkSync(path.join(__dirname, '../../storage/uploads/bankeu_lpj', row.file_path)); } catch (e) {}
+
+      logger.info(`STS Bankeu dihapus: id=${id}, desa_id=${user.desa_id}`);
+      res.json({ success: true });
+    } catch (error) {
+      logger.error('Error deleting STS:', error);
+      res.status(500).json({ success: false, message: 'Gagal menghapus bukti STS' });
+    }
+  }
+
+  /**
    * DPMD/SPKED: Get all LPJ submissions grouped by kecamatan
    * GET /api/dpmd/bankeu-lpj?tahun=2025
    */
@@ -427,6 +546,7 @@ class BankeuLpjController {
 
       // TA 2026+: sertakan link video per desa
       let totalVideoLengkap = 0;
+      let totalStsDesa = 0, totalNominalSts = 0, totalMonevDesa = 0;
       if (tahun >= 2026) {
         const videoRows = await prisma.bankeu_lpj_video.findMany({ where: { tahun_anggaran: tahun } });
         const videoMap = {};
@@ -438,6 +558,21 @@ class BankeuLpjController {
           if (lengkap) totalVideoLengkap++;
           d.video = { dayeuh_pajajaran: keArray(v.dayeuh_pajajaran), infrastruktur: keArray(v.infrastruktur), lengkap };
         });
+
+        // Bukti STS pengembalian dana & hasil monev per desa
+        const [stsRows, monevRows] = await Promise.all([
+          prisma.bankeu_lpj_sts.findMany({ where: { tahun_anggaran: tahun }, orderBy: [{ tanggal_setor: 'desc' }, { id: 'desc' }] }),
+          prisma.bankeu_monev.findMany({ where: { tahun_anggaran: tahun }, orderBy: { created_at: 'desc' }, include: { users: { select: { name: true } } } }),
+        ]);
+        const kelompok = (rows, bentuk) => rows.reduce((m, r) => { const k = String(r.desa_id); (m[k] = m[k] || []).push(bentuk(r)); return m; }, {});
+        const stsMap = kelompok(stsRows, bentukSts);
+        const monevMap = kelompok(monevRows, bentukMonev);
+        Object.values(desaTracker).forEach(d => {
+          d.sts = stsMap[String(d.desa_id)] || [];
+          d.monev = monevMap[String(d.desa_id)] || [];
+          if (d.sts.length) { totalStsDesa++; totalNominalSts += d.sts.reduce((a, s) => a + s.nominal, 0); }
+          if (d.monev.length) totalMonevDesa++;
+        });
       }
 
       res.json({
@@ -445,7 +580,7 @@ class BankeuLpjController {
         data: {
           tahun_anggaran: tahun,
           summary: {
-            ...(tahun >= 2026 ? { total_video_lengkap: totalVideoLengkap } : {}),
+            ...(tahun >= 2026 ? { total_video_lengkap: totalVideoLengkap, total_sts_desa: totalStsDesa, total_nominal_sts: totalNominalSts, total_monev_desa: totalMonevDesa } : {}),
             total_desa: totalDesa,
             total_uploaded: totalUploaded,
             total_belum: totalDesa - totalUploaded,

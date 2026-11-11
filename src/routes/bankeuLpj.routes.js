@@ -21,6 +21,11 @@ router.put('/video', bankeuLpjController.simpanVideo);
 // Upload or replace LPJ file
 router.post('/upload', upload.bankeuLpj, bankeuLpjController.uploadLpj);
 
+// Bukti STS pengembalian dana (opsional)
+router.get('/sts', bankeuLpjController.getSts);
+router.post('/sts', upload.bankeuSts, bankeuLpjController.uploadSts);
+router.delete('/sts/:id', bankeuLpjController.deleteSts);
+
 // Delete LPJ
 router.delete('/:id', bankeuLpjController.deleteLpj);
 

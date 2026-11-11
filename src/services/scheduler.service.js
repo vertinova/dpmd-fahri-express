@@ -9,6 +9,7 @@ const attendanceAwardService = require('./attendanceAward.service');
 const prisma = require('../config/prisma');
 const PushNotificationServiceStatic = require('./pushNotificationService');
 const drivePurgeService = require('./drivePurge.service');
+const { kirimPengingatTugas } = require('./tugasPribadiPengingat.service');
 
 // Status kepegawaian yang wajib absen
 const ABSENSI_REQUIRED_STATUS = [
@@ -65,6 +66,19 @@ class SchedulerService {
         console.log(`🎂 Birthday check done: ${result.birthdayCount || 0} birthdays`);
       } catch (error) {
         console.error('❌ Error sending birthday notifications:', error);
+      }
+    }, {
+      scheduled: true,
+      timezone: "Asia/Jakarta"
+    });
+
+    // Pengingat Daftar Tugas Sekdis pukul 07:05 (07:00 sudah dipakai pengingat jadwal kegiatan)
+    this.jobs.pengingatTugas = cron.schedule('5 7 * * *', async () => {
+      try {
+        const hasil = await kirimPengingatTugas();
+        console.log(`📝 Pengingat tugas: ${hasil.terkirim}/${hasil.pengguna} pengguna`);
+      } catch (error) {
+        console.error('❌ Error pengingat tugas:', error);
       }
     }, {
       scheduled: true,
@@ -128,6 +142,7 @@ class SchedulerService {
     console.log('📅 Morning reminder: Every day at 7:00 AM (WIB)');
     console.log('🌙 Evening reminder: Every day at 9:00 PM (WIB)');
     console.log('🎂 Birthday check: Every day at 7:15 AM (WIB)');
+    console.log('📝 Pengingat Daftar Tugas Sekdis: Every day at 7:05 AM (WIB)');
     console.log('[Attendance Award] Every Monday at 8:00 AM (WIB)');
     console.log('⏰ Absensi reminder: Every minute (checks jam_masuk/jam_pulang from settings)');
   }
