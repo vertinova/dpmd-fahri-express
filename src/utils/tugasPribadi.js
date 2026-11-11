@@ -59,4 +59,35 @@ function susunPengingat(daftar, hari) {
   return { title: `📝 ${judul}`, body: daftar.slice(0, 3).map((t) => `• ${t.judul}`).join('\n') + sisa };
 }
 
-module.exports = { bacaMasukan, bentukTugas, susunPengingat, MAKS_JUDUL };
+const MAKS_JUDUL_CATATAN = 120;
+const MAKS_ISI_CATATAN = 20000;
+
+/**
+ * @param {object} body
+ * @param {boolean} ubah  true untuk PATCH: semua field opsional kecuali `versi`, minimal satu perubahan
+ * @returns {{ data: object, versi?: number } | { galat: string }}
+ */
+function bacaCatatan(body, ubah = false) {
+  const b = body && typeof body === 'object' ? body : {};
+  const data = {};
+  if (b.judul !== undefined) {
+    if (typeof b.judul !== 'string' || b.judul.trim().length > MAKS_JUDUL_CATATAN) return { galat: `Judul maksimal ${MAKS_JUDUL_CATATAN} karakter` };
+    data.judul = b.judul.trim();
+  }
+  if (b.isi !== undefined) {
+    if (typeof b.isi !== 'string' || b.isi.length > MAKS_ISI_CATATAN) return { galat: `Isi catatan maksimal ${MAKS_ISI_CATATAN.toLocaleString('id-ID')} karakter` };
+    data.isi = b.isi;
+  }
+  if (b.disematkan !== undefined) {
+    if (typeof b.disematkan !== 'boolean') return { galat: 'Status sematan harus true/false' };
+    data.disematkan = b.disematkan;
+  }
+  if (!ubah) return { data: { judul: '', isi: '', disematkan: false, ...data } };
+  if (!Number.isInteger(b.versi) || b.versi < 0) return { galat: 'Versi catatan wajib dikirim' };
+  if (Object.keys(data).length === 0) return { galat: 'Tidak ada perubahan' };
+  return { data, versi: b.versi };
+}
+
+const bentukCatatan = (c) => ({ id: c.id, judul: c.judul, isi: c.isi, disematkan: c.disematkan, versi: c.versi, created_at: c.created_at, updated_at: c.updated_at });
+
+module.exports = { bacaMasukan, bentukTugas, susunPengingat, MAKS_JUDUL, bacaCatatan, bentukCatatan };

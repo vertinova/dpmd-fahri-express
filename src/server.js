@@ -485,6 +485,7 @@ app.use('/api/app-settings', require('./routes/appSettings.routes'));
 app.use('/api/settings', require('./routes/settings.routes'));
 app.use('/api/hari-libur', require('./routes/hariLibur.routes')); // Hari libur untuk blokir tanggal merah BA & SP
 app.use('/api/tugas-pribadi', require('./routes/tugasPribadi.routes')); // Daftar tugas pribadi (to-do) per pengguna
+app.use('/api/catatan-pribadi', require('./routes/catatanPribadi.routes')); // Catatan pribadi (Ruang Pribadi) per pengguna
 
 // Printer routes (for thermal printer)
 app.use('/api/printer', require('./routes/printer.routes'));

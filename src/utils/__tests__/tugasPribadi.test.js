@@ -1,4 +1,4 @@
-const { bacaMasukan, bentukTugas, susunPengingat } = require('../tugasPribadi');
+const { bacaMasukan, bentukTugas, susunPengingat, bacaCatatan } =require('../tugasPribadi');
 
 describe('susunPengingat', () => {
 	const t = (judul, ymd) => ({ judul, tanggal_pengingat: new Date(`${ymd}T00:00:00Z`) });
@@ -55,5 +55,33 @@ describe('bentukTugas', () => {
 	it('mengubah tanggal ke YYYY-MM-DD dan menjaga null', () => {
 		expect(bentukTugas({ ...dasar, tanggal_pengingat: new Date('2026-11-12T00:00:00Z') }).tanggal_pengingat).toBe('2026-11-12');
 		expect(bentukTugas({ ...dasar, tanggal_pengingat: null }).tanggal_pengingat).toBeNull();
+	});
+});
+
+describe('bacaCatatan', () => {
+	it('buat kosong: isi bawaan', () => {
+		expect(bacaCatatan({}).data).toEqual({ judul: '', isi: '', disematkan: false });
+	});
+	it('menolak judul 121 karakter dan men-trim judul', () => {
+		expect(bacaCatatan({ judul: 'a'.repeat(121) }).galat).toMatch(/Judul/);
+		expect(bacaCatatan({ judul: '  a  ' }).data.judul).toBe('a');
+	});
+	it('menolak isi 20001 karakter', () => {
+		expect(bacaCatatan({ isi: 'a'.repeat(20001) }).galat).toMatch(/Isi catatan/);
+	});
+	it('menolak disematkan non-boolean', () => {
+		expect(bacaCatatan({ disematkan: 'ya' }).galat).toMatch(/true\/false/);
+	});
+	it('ubah: versi wajib bilangan bulat >= 0', () => {
+		expect(bacaCatatan({ isi: 'a' }, true).galat).toMatch(/^Versi/);
+		expect(bacaCatatan({ isi: 'a', versi: -1 }, true).galat).toMatch(/^Versi/);
+		expect(bacaCatatan({ isi: 'a', versi: '1' }, true).galat).toMatch(/^Versi/);
+	});
+	it('ubah: tanpa perubahan ditolak', () => {
+		expect(bacaCatatan({ versi: 2 }, true).galat).toBe('Tidak ada perubahan');
+	});
+	it('ubah: data parsial + versi', () => {
+		expect(bacaCatatan({ isi: 'a', versi: 3 }, true)).toEqual({ data: { isi: 'a' }, versi: 3 });
+		expect(bacaCatatan({ disematkan: true, versi: 0 }, true).galat).toBeUndefined();
 	});
 });
