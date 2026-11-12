@@ -44,17 +44,17 @@ const bentukTugas = (t) => ({
 });
 
 /**
- * Isi push pengingat pagi dari tugas belum selesai yang tanggal pengingatnya <= hari ini.
- * @param {Array<{judul: string, tanggal_pengingat: Date}>} daftar  urut tanggal naik (yang lewat dulu)
+ * Isi push pengingat dari tugas belum selesai yang tanggal pengingatnya <= hari ini atau kosong.
+ * @param {Array<{judul: string, tanggal_pengingat: Date|null}>} daftar  yang bertanggal (lewat) dulu
  * @param {string} hari  'YYYY-MM-DD' (WIB)
  */
 function susunPengingat(daftar, hari) {
-  const lewat = daftar.filter((t) => t.tanggal_pengingat.toISOString().slice(0, 10) < hari).length;
-  const kini = daftar.length - lewat;
+  // tugas tanpa tanggal pengingat = diingatkan sejak dibuat, tidak pernah "lewat"
+  const lewat = daftar.filter((t) => t.tanggal_pengingat && t.tanggal_pengingat.toISOString().slice(0, 10) < hari).length;
   if (daftar.length === 1) {
-    return { title: lewat ? '📝 Tugas lewat tanggal' : '📝 Pengingat tugas hari ini', body: daftar[0].judul };
+    return { title: lewat ? '📝 Tugas lewat tanggal' : '📝 Tugas belum selesai', body: daftar[0].judul };
   }
-  const judul = [kini && `${kini} tugas hari ini`, lewat && `${lewat} lewat tanggal`].filter(Boolean).join(' · ');
+  const judul = `${daftar.length} tugas belum selesai${lewat ? ` · ${lewat} lewat tanggal` : ''}`;
   const sisa = daftar.length > 3 ? `\n+${daftar.length - 3} lainnya` : '';
   return { title: `📝 ${judul}`, body: daftar.slice(0, 3).map((t) => `• ${t.judul}`).join('\n') + sisa };
 }

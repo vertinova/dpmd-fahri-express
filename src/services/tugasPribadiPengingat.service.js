@@ -10,17 +10,23 @@ const { susunPengingat } = require('../utils/tugasPribadi');
 const PERAN_PENERIMA = 'sekretaris_dinas';
 const hariIniWib = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Jakarta' }).format(new Date());
 
-/** Satu push per pengguna berisi tugas belum selesai yang jatuh tempo hari ini atau sudah lewat. */
-async function kirimPengingatTugas(hari = hariIniWib()) {
+/**
+ * Satu push per pengguna berisi tugas belum selesai yang jatuh tempo hari ini, sudah lewat,
+ * atau tanpa tanggal. Dipanggil berulang tiap beberapa jam sampai tugas dicentang selesai.
+ * @param {{ simpan?: boolean }} opsi  simpan=true juga mencatat ke lonceng (cukup sekali sehari)
+ */
+async function kirimPengingatTugas(hari = hariIniWib(), { simpan = true } = {}) {
   const baris = await prisma.tugas_pribadi.findMany({
     where: {
       selesai: false,
-      tanggal_pengingat: { lte: new Date(`${hari}T00:00:00Z`) },
+      OR: [{ tanggal_pengingat: null }, { tanggal_pengingat: { lte: new Date(`${hari}T00:00:00Z`) } }],
       users: { role: PERAN_PENERIMA, is_active: true },
     },
     select: { user_id: true, judul: true, tanggal_pengingat: true },
     orderBy: [{ tanggal_pengingat: 'asc' }, { created_at: 'asc' }],
   });
+  // MySQL menaruh NULL di depan; yang bertanggal (lewat) didahulukan, sort stabil menjaga urutan tanggal
+  baris.sort((a, b) => Number(!a.tanggal_pengingat) - Number(!b.tanggal_pengingat));
 
   const perPengguna = new Map();
   for (const b of baris) {
@@ -40,7 +46,7 @@ async function kirimPengingatTugas(hari = hariIniWib()) {
     };
     try {
       // simpan di lonceng notifikasi juga, supaya tetap terlihat bila push gagal/izin ditolak
-      await PushNotificationService.storeNotifications([userId], payload);
+      if (simpan) await PushNotificationService.storeNotifications([userId], payload);
       const hasil = await PushNotificationService.sendToUser(Number(userId), payload);
       if (hasil.success) terkirim++;
     } catch (error) {

@@ -3,18 +3,20 @@ const { bacaMasukan, bentukTugas, susunPengingat, bacaCatatan } =require('../tug
 describe('susunPengingat', () => {
 	const t = (judul, ymd) => ({ judul, tanggal_pengingat: new Date(`${ymd}T00:00:00Z`) });
 	it('satu tugas hari ini: judul tugas jadi isi', () => {
-		expect(susunPengingat([t('Rapat', '2026-11-11')], '2026-11-11')).toEqual({ title: '📝 Pengingat tugas hari ini', body: 'Rapat' });
+		expect(susunPengingat([t('Rapat', '2026-11-11')], '2026-11-11')).toEqual({ title: '📝 Tugas belum selesai', body: 'Rapat' });
 	});
 	it('satu tugas lewat', () => {
 		expect(susunPengingat([t('SPJ', '2026-11-08')], '2026-11-11').title).toBe('📝 Tugas lewat tanggal');
 	});
-	it('banyak tugas: hitung hari ini & lewat, maksimal 3 baris', () => {
+	it('banyak tugas: hitung total & lewat, maksimal 3 baris', () => {
 		const r = susunPengingat([t('a', '2026-11-01'), t('b', '2026-11-11'), t('c', '2026-11-11'), t('d', '2026-11-11')], '2026-11-11');
-		expect(r.title).toBe('📝 3 tugas hari ini · 1 lewat tanggal');
+		expect(r.title).toBe('📝 4 tugas belum selesai · 1 lewat tanggal');
 		expect(r.body).toBe('• a\n• b\n• c\n+1 lainnya');
 	});
-	it('hanya yang lewat', () => {
-		expect(susunPengingat([t('a', '2026-11-01'), t('b', '2026-11-02')], '2026-11-11').title).toBe('📝 2 lewat tanggal');
+	it('tugas tanpa tanggal ikut diingatkan dan tidak dihitung lewat', () => {
+		const r = susunPengingat([t('a', '2026-11-01'), { judul: 'b', tanggal_pengingat: null }], '2026-11-11');
+		expect(r.title).toBe('📝 2 tugas belum selesai · 1 lewat tanggal');
+		expect(susunPengingat([{ judul: 'x', tanggal_pengingat: null }], '2026-11-11').title).toBe('📝 Tugas belum selesai');
 	});
 });
 

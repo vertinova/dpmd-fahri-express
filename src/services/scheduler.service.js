@@ -72,10 +72,12 @@ class SchedulerService {
       timezone: "Asia/Jakarta"
     });
 
-    // Pengingat Daftar Tugas Sekdis pukul 07:05 (07:00 sudah dipakai pengingat jadwal kegiatan)
-    this.jobs.pengingatTugas = cron.schedule('5 7 * * *', async () => {
+    // Pengingat Daftar Tugas Sekdis tiap 3 jam 07:05–19:05 WIB sampai tugas dicentang selesai
+    // (07:00 sudah dipakai pengingat jadwal kegiatan). Lonceng hanya dicatat pada putaran pagi.
+    this.jobs.pengingatTugas = cron.schedule('5 7,10,13,16,19 * * *', async () => {
       try {
-        const hasil = await kirimPengingatTugas();
+        const jamWib = Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Asia/Jakarta', hour: '2-digit', hourCycle: 'h23' }).format(new Date()));
+        const hasil = await kirimPengingatTugas(undefined, { simpan: jamWib < 9 });
         console.log(`📝 Pengingat tugas: ${hasil.terkirim}/${hasil.pengguna} pengguna`);
       } catch (error) {
         console.error('❌ Error pengingat tugas:', error);
