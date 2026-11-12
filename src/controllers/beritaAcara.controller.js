@@ -1,6 +1,6 @@
 const beritaAcaraHelper = require('../services/beritaAcaraHelper');
 const beritaAcaraService = require('../services/beritaAcaraService');
-const { sequelize } = require('../models');
+const sequelize = require('../config/database');
 const logger = require('../utils/logger');
 const { checkTanggalMerah } = require('../utils/tanggalMerah');
 const path = require('path');

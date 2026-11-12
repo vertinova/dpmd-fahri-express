@@ -3,7 +3,7 @@
  * Tanggal merah = Sabtu/Minggu (weekend) ATAU terdaftar di tabel hari_libur (libur nasional).
  */
 
-const { sequelize } = require('../models');
+const sequelize = require('../config/database');
 
 const HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 

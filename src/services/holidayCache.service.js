@@ -18,7 +18,7 @@
  * dan tetap dihitung di checkHoliday().
  */
 
-const { sequelize } = require('../models');
+const sequelize = require('../config/database');
 const logger = require('../utils/logger');
 
 // Fallback statis bila tabel hari_libur kosong/belum ter-load (format: MM-DD).

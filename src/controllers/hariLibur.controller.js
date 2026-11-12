@@ -3,7 +3,7 @@
  * Dipakai untuk memblokir pemilihan tanggal merah saat generate BA & SP bankeu.
  */
 
-const { sequelize } = require('../models');
+const sequelize = require('../config/database');
 const { getHariLibur, toYmd } = require('../utils/tanggalMerah');
 const { clearHolidayCache } = require('../services/holidayCache.service');
 const logger = require('../utils/logger');

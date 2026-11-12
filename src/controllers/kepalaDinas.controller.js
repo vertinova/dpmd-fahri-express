@@ -9,7 +9,6 @@ class KepalaDinasController {
     this.getBumdesStats = this.getBumdesStats.bind(this);
     this.getPerjadinStats = this.getPerjadinStats.bind(this);
     this.getTrendData = this.getTrendData.bind(this);
-    this.getMusdesusStats = this.getMusdesusStats.bind(this);
     this.getTrends = this.getTrends.bind(this);
     this.getBumdesList = this.getBumdesList.bind(this);
   }
@@ -53,7 +52,6 @@ class KepalaDinasController {
       });
 
       // Get other statistics
-      const musdesusStats = await this.getMusdesusStats();
       const perjadinStats = await this.getPerjadinStats();
 
       const response = {
@@ -64,7 +62,6 @@ class KepalaDinasController {
             total_pegawai: totalPegawai
           },
           bumdes: bumdesStats,
-          musdesus: musdesusStats,
           perjadin: perjadinStats
         }
       };
@@ -219,94 +216,6 @@ class KepalaDinasController {
           rata_aset: 0,
           total_tenaga_kerja: 0
         }
-      };
-    }
-  }
-
-  // Get Musdesus statistics
-  async getMusdesusStats() {
-    try {
-      const [countResult] = await sequelize.query(`
-        SELECT 
-          COUNT(*) as total,
-          SUM(CASE WHEN status = 'approved' THEN 1 ELSE 0 END) as approved,
-          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending,
-          SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) as rejected,
-          COUNT(DISTINCT desa_id) as total_desa,
-          COUNT(DISTINCT kecamatan_id) as total_kecamatan,
-          SUM(ukuran_file) as total_ukuran_file
-        FROM musdesus
-        WHERE deleted_at IS NULL
-      `);
-      
-      const [statusData] = await sequelize.query(`
-        SELECT 
-          status,
-          COUNT(*) as total
-        FROM musdesus
-        WHERE deleted_at IS NULL
-        GROUP BY status
-      `);
-
-      // Get by kecamatan
-      const [kecamatanData] = await sequelize.query(`
-        SELECT 
-          k.nama_kecamatan as kecamatan,
-          COUNT(m.id) as total
-        FROM musdesus m
-        LEFT JOIN kecamatans k ON m.kecamatan_id = k.id
-        WHERE m.deleted_at IS NULL
-        GROUP BY k.nama_kecamatan
-        ORDER BY total DESC
-        LIMIT 10
-      `);
-
-      // Get monthly trend (last 6 months)
-      const [monthlyData] = await sequelize.query(`
-        SELECT 
-          DATE_FORMAT(created_at, '%Y-%m') as month,
-          COUNT(*) as total
-        FROM musdesus
-        WHERE created_at >= DATE_SUB(NOW(), INTERVAL 6 MONTH)
-          AND deleted_at IS NULL
-        GROUP BY month
-        ORDER BY month ASC
-      `);
-
-      return {
-        total: parseInt(countResult[0].total) || 0,
-        approved: parseInt(countResult[0].approved) || 0,
-        pending: parseInt(countResult[0].pending) || 0,
-        rejected: parseInt(countResult[0].rejected) || 0,
-        total_desa: parseInt(countResult[0].total_desa) || 0,
-        total_kecamatan: parseInt(countResult[0].total_kecamatan) || 0,
-        total_ukuran_mb: (parseFloat(countResult[0].total_ukuran_file) / (1024 * 1024)).toFixed(2),
-        by_status: statusData.map(s => ({
-          status: s.status,
-          total: parseInt(s.total) || 0
-        })),
-        by_kecamatan: kecamatanData.map(k => ({
-          kecamatan: k.kecamatan || 'Tidak Diketahui',
-          total: parseInt(k.total) || 0
-        })),
-        monthly_trend: monthlyData.map(m => ({
-          month: m.month,
-          total: parseInt(m.total) || 0
-        }))
-      };
-    } catch (error) {
-      logger.error('Error getting Musdesus stats:', error);
-      return {
-        total: 0,
-        approved: 0,
-        pending: 0,
-        rejected: 0,
-        total_desa: 0,
-        total_kecamatan: 0,
-        total_ukuran_mb: 0,
-        by_status: [],
-        by_kecamatan: [],
-        monthly_trend: []
       };
     }
   }

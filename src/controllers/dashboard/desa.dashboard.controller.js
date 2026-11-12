@@ -2,7 +2,6 @@
 const fs = require('fs');
 const path = require('path');
 const prisma = require('../../config/prisma');
-const Berita = require('../../models/Berita');
 const { tahunPenyaluran, namaBerkasPenyaluran } = require('../../utils/berkasPenyaluranBankeu');
 
 /**
@@ -188,23 +187,21 @@ function buildBankeuSummary(proposals) {
 
 async function getLatestBerita(limit = 4) {
   try {
-    const latestBerita = await Berita.findAll({
+    return await prisma.berita.findMany({
       where: { status: 'published' },
-      limit,
-      order: [['tanggal_publish', 'DESC'], ['created_at', 'DESC']],
-      attributes: [
-        'id_berita',
-        'slug',
-        'judul',
-        'ringkasan',
-        'kategori',
-        'views',
-        'tanggal_publish',
-        'created_at'
-      ]
+      take: limit,
+      orderBy: [{ tanggal_publish: 'desc' }, { created_at: 'desc' }],
+      select: {
+        id_berita: true,
+        slug: true,
+        judul: true,
+        ringkasan: true,
+        kategori: true,
+        views: true,
+        tanggal_publish: true,
+        created_at: true
+      }
     });
-
-    return latestBerita.map(item => item.toJSON());
   } catch (error) {
     console.error('Error fetching latest berita:', error);
     return [];

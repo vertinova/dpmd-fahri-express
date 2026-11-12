@@ -3,7 +3,7 @@
  * Untuk aggregasi questionnaire, generate QR code, dan history management
  */
 
-const { sequelize } = require('../models');
+const sequelize = require('../config/database');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');

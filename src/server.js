@@ -25,9 +25,6 @@ process.on('uncaughtException', (error) => {
   // Don't exit - let PM2 handle if truly fatal
 });
 
-// Initialize Sequelize models FIRST before any routes
-const { sequelize } = require('./models');
-
 const logger = require('./utils/logger');
 const errorHandler = require('./middlewares/errorHandler');
 // Operator kecamatan: fitur dibatasi per hak akses di titik mount (lihat middleware-nya).
@@ -66,7 +63,6 @@ requiredDirs.forEach(dir => {
 const authRoutes = require('./routes/auth.routes');
 const userRoutes = require('./routes/user.routes');
 const bumdesRoutes = require('./routes/bumdes.routes');
-const musdesusRoutes = require('./routes/musdesus.routes');
 const heroGalleryRoutes = require('./routes/heroGallery.routes');
 const publicRoutes = require('./routes/public.routes');
 const locationRoutes = require('./routes/location.routes');
@@ -517,8 +513,6 @@ app.use('/api/bumdes', bumdesRoutes); // Admin routes
 app.use('/api/public/bumdes', require('./routes/bumdesPublic.routes'));
 // Jelajah Kantor 3D: data kecamatan, kode simpan, penghitung pemakaian.
 app.use('/api/public/jelajah', require('./routes/jelajahPublic.routes'));
-app.use('/api/desa/musdesus', musdesusRoutes);
-app.use('/api/musdesus', musdesusRoutes); // Admin routes
 app.use('/api/desa', desaKelembagaanRoutes); // Desa kelembagaan routes (RW, RT, Posyandu, etc.)
 app.use('/api/desa/aparatur-desa', aparaturDesaRoutes); // Aparatur Desa routes
 app.use('/api/profil-desa', profilDesaRoutes); // Profil Desa routes

@@ -11,7 +11,6 @@ const uploadDirs = [
   'storage/uploads/bumdes_ketahanan_pangan',
   'storage/uploads/bumdes_lampiran',
   'storage/uploads/bumdes_produk',
-  'storage/uploads/musdesus',
   'storage/uploads/perjalanan_dinas',
   'storage/uploads/hero-gallery',
   'storage/uploads/berita',
@@ -54,21 +53,6 @@ const storageBumdes = multer.diskStorage({
   },
   filename: function (req, file, cb) {
     // Generate unique filename with timestamp
-    const timestamp = Date.now();
-    const ext = path.extname(file.originalname);
-    const nameWithoutExt = path.basename(file.originalname, ext);
-    const filename = `${timestamp}_${nameWithoutExt}${ext}`;
-    
-    cb(null, filename);
-  }
-});
-
-// Storage configuration for MUSDESUS
-const storageMusdesus = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'storage/uploads/musdesus');
-  },
-  filename: function (req, file, cb) {
     const timestamp = Date.now();
     const ext = path.extname(file.originalname);
     const nameWithoutExt = path.basename(file.originalname, ext);
@@ -213,14 +197,6 @@ const uploadBumdesProduk = multer({
   storage: multer.memoryStorage(),
   fileFilter: imageFilter,
   limits: { fileSize: 8 * 1024 * 1024 },
-});
-
-const uploadMusdesus = multer({
-  storage: storageMusdesus,
-  fileFilter: fileFilter,
-  limits: {
-    fileSize: parseInt(process.env.MAX_FILE_SIZE) || 5 * 1024 * 1024
-  }
 });
 
 const uploadPerjadinDinas = multer({
@@ -848,7 +824,6 @@ module.exports = {
   uploadBumdesLampiran,
   batasUkuranBumdes,
   uploadBumdesProduk,
-  uploadMusdesus,
   uploadPerjadinDinas,
   uploadHeroGallery,
   uploadBerita,
