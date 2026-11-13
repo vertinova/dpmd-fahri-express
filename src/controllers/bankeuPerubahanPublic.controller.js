@@ -56,6 +56,9 @@ class BankeuPerubahanPublicController {
       // ─── Partisipasi Desa (untuk dashboard core) ──────────────────────
       // "Mengusulkan" pada alur perubahan = proposal sudah diteruskan ke Kecamatan
       // (submitted_to_kecamatan = TRUE), analog dengan "submit ke dinas" di Bankeu Reguler.
+      // Proposal yang dikembalikan ke desa (revisi/tolak Kecamatan, troubleshoot DPMD)
+      // tetap dihitung: status revision/rejected bertahan sampai desa mengirim ulang.
+      // Harus sama dengan hitungPartisipasi() di frontend utils/statistikBankeuPerubahan.js.
       // Hanya Desa (status_pemerintahan = 'desa', bukan kelurahan) yang dihitung.
       const [allDesaList] = await sequelize.query(`
         SELECT d.id, d.nama, k.nama AS kecamatan_nama
@@ -68,7 +71,8 @@ class BankeuPerubahanPublicController {
       const [desaSudahRows] = await sequelize.query(`
         SELECT DISTINCT desa_id
         FROM bankeu_perubahan_proposals
-        WHERE tahun_anggaran = ? AND submitted_to_kecamatan = TRUE
+        WHERE tahun_anggaran = ?
+          AND (submitted_to_kecamatan = TRUE OR status IN ('revision', 'rejected'))
       `, { replacements: [tahun] });
       const desaSudahSet = new Set(desaSudahRows.map(r => Number(r.desa_id)).filter(Boolean));
 
