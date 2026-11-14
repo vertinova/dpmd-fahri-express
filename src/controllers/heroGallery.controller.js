@@ -1,4 +1,5 @@
 const sequelize = require('../config/database');
+const dialek = require('../config/dialek');
 const logger = require('../utils/logger');
 const path = require('path');
 const fs = require('fs');
@@ -13,11 +14,11 @@ exports.getAllGallery = async (req, res) => {
         title,
         image_path,
         is_active,
-        \`order\` as display_order,
+        ${dialek.id('order')} as display_order,
         created_at,
         updated_at
       FROM hero_galleries
-      ORDER BY \`order\` ASC, created_at DESC
+      ORDER BY ${dialek.id('order')} ASC, created_at DESC
     `);
 
     res.json({
@@ -42,10 +43,10 @@ exports.getPublicGallery = async (req, res) => {
         id,
         title,
         image_path,
-        \`order\` as display_order
+        ${dialek.id('order')} as display_order
       FROM hero_galleries
-      WHERE is_active = 1
-      ORDER BY \`order\` ASC
+      WHERE is_active = TRUE
+      ORDER BY ${dialek.id('order')} ASC
     `);
 
     res.json({
@@ -76,8 +77,8 @@ exports.createGallery = async (req, res) => {
     }
 
     const [result] = await sequelize.query(`
-      INSERT INTO hero_galleries (title, image_path, \`order\`, is_active)
-      VALUES (?, ?, ?, 1)
+      INSERT INTO hero_galleries (title, image_path, ${dialek.id('order')}, is_active)
+      VALUES (?, ?, ?, TRUE)
     `, {
       replacements: [title, image_path, display_order || 0]
     });
@@ -167,7 +168,7 @@ exports.updateGallery = async (req, res) => {
 
     await sequelize.query(`
       UPDATE hero_galleries
-      SET title = ?, image_path = ?, \`order\` = ?
+      SET title = ?, image_path = ?, ${dialek.id('order')} = ?
       WHERE id = ?
     `, {
       replacements: [title, image_path, display_order || 0, id]

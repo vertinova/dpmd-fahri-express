@@ -18,6 +18,7 @@ const { monitorEventLoopDelay } = require('perf_hooks');
 const logger = require('../utils/logger');
 const store = require('./serverStore.service');
 const { BACKEND_ROOT } = require('../config/serverManagement');
+const { selang, epochDetik } = require('../config/dialek');
 
 const IS_LINUX = process.platform === 'linux';
 const SAMPLE_MS = 10 * 1000;
@@ -387,7 +388,7 @@ const simpanSnapshot = async () => {
 const bersihkanSnapshot = async () => {
   try {
     await store.execute(
-      `DELETE FROM server_metric_snapshots WHERE created_at < DATE_SUB(NOW(), INTERVAL ${SNAPSHOT_RETENTION_DAYS} DAY)`,
+      `DELETE FROM server_metric_snapshots WHERE created_at < NOW() - ${selang(SNAPSHOT_RETENTION_DAYS, 'DAY')}`,
     );
   } catch { /* tabel mungkin belum ada */ }
 };
@@ -400,15 +401,15 @@ const getHistory = async (rentang = '1h') => {
   const [jam, bucketMenit] = peta[rentang] || peta['24h'];
   await store.ensureTables();
   const baris = await store.query(
-    `SELECT FLOOR(UNIX_TIMESTAMP(created_at) / (? * 60)) * (? * 60) * 1000 AS t,
-            AVG(cpu) AS cpu, AVG(memory) AS memory, AVG(disk) AS disk, AVG(load1) AS load1,
-            AVG(process_mb) AS process_mb, SUM(requests) AS requests, SUM(errors) AS errors,
-            AVG(avg_ms) AS avg_ms, AVG(net_rx) AS rx, AVG(net_tx) AS tx,
-            SUM(attacks) AS attacks, AVG(online) AS online
+    `SELECT FLOOR(${epochDetik('created_at')} / (? * 60)) * (? * 60) * 1000 AS t,
+            ROUND(AVG(cpu), 6) AS cpu, ROUND(AVG(memory), 6) AS memory, ROUND(AVG(disk), 6) AS disk, ROUND(AVG(load1), 6) AS load1,
+            ROUND(AVG(process_mb), 4) AS process_mb, SUM(requests) AS requests, SUM(errors) AS errors,
+            ROUND(AVG(avg_ms), 4) AS avg_ms, ROUND(AVG(net_rx), 4) AS rx, ROUND(AVG(net_tx), 4) AS tx,
+            SUM(attacks) AS attacks, ROUND(AVG(online), 4) AS online
        FROM server_metric_snapshots
-      WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+      WHERE created_at >= NOW() - ${selang(jam, 'HOUR')}
       GROUP BY t ORDER BY t`,
-    bucketMenit, bucketMenit, jam,
+    bucketMenit, bucketMenit,
   );
   return {
     range: rentang,

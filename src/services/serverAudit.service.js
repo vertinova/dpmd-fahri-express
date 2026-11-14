@@ -17,6 +17,7 @@ const store = require('./serverStore.service');
 const metrics = require('./serverMetrics.service');
 const apps = require('./serverApps.service');
 const { BACKEND_ROOT, IP_TEPERCAYA } = require('../config/serverManagement');
+const { selang } = require('../config/dialek');
 
 const IS_LINUX = process.platform === 'linux';
 const CACHE_MS = 60 * 1000;
@@ -247,8 +248,8 @@ const cekSistem = async () => {
 const cekAncaman = async () => {
   try {
     const [r] = await store.query(
-      `SELECT SUM(event_type = 'ssh_failed') AS ssh, SUM(severity = 'critical') AS kritis, COUNT(DISTINCT ip_address) AS ips
-         FROM server_security_events WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)`,
+      `SELECT SUM(CASE WHEN event_type = 'ssh_failed' THEN 1 ELSE 0 END) AS ssh, SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) AS kritis, COUNT(DISTINCT ip_address) AS ips
+         FROM server_security_events WHERE created_at >= NOW() - ${selang(24, 'HOUR')}`,
     );
     const hasil = [];
     if (r?.ssh) {

@@ -11,6 +11,7 @@ const net = require('net');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const store = require('../services/serverStore.service');
+const { selang, gabungTeks } = require('../config/dialek');
 const metrics = require('../services/serverMetrics.service');
 const alerts = require('../services/serverAlerts.service');
 const security = require('../services/serverSecurity.service');
@@ -334,8 +335,8 @@ exports.geoLookup = async (req, res) => {
     const lokasi = await geo.resolveMany([ip], { tunggu: true });
     const [ringkas] = await store.query(
       `SELECT COUNT(*) AS n, MIN(created_at) AS first_seen, MAX(created_at) AS last_seen,
-              GROUP_CONCAT(DISTINCT event_type SEPARATOR ',') AS types
-         FROM server_security_events WHERE ip_address = ? AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)`,
+              ${gabungTeks('event_type', { distinct: true, urut: 'event_type' })} AS types
+         FROM server_security_events WHERE ip_address = ? AND created_at >= NOW() - ${selang(30, 'DAY')}`,
       ip,
     ).catch(() => [{}]);
     const blokir = security.isBlocked(ip);

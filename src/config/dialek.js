@@ -24,8 +24,10 @@ function urutanNilai(kolom, nilai) {
 function gabungTeks(ekspr, { distinct = false, urut = null, pemisah = ',' } = {}, d = DIALEK) {
 	const dist = distinct ? 'DISTINCT ' : '';
 	const o = urut ? ` ORDER BY ${urut}` : '';
+	// PG: ORDER BY pada agregat DISTINCT harus persis sama dengan argumennya (yang di-CAST).
+	const oPg = urut ? ` ORDER BY ${distinct && urut === ekspr ? `CAST(${urut} AS TEXT)` : urut}` : '';
 	return d === 'postgres'
-		? `STRING_AGG(${dist}CAST(${ekspr} AS TEXT), '${pemisah}'${o})`
+		? `STRING_AGG(${dist}CAST(${ekspr} AS TEXT), '${pemisah}'${oPg})`
 		: `GROUP_CONCAT(${dist}${ekspr}${o} SEPARATOR '${pemisah}')`;
 }
 
@@ -47,4 +49,54 @@ function saatBentrok(kunci, kolomPerbarui, d = DIALEK) {
 const sisipAbaikan = (tabel, d = DIALEK) => (d === 'postgres' ? `INSERT INTO ${tabel}` : `INSERT IGNORE INTO ${tabel}`);
 const akhirAbaikan = (d = DIALEK) => (d === 'postgres' ? ' ON CONFLICT DO NOTHING' : '');
 
-module.exports = { DIALEK, selang, urutanNilai, gabungTeks, selisihWaktu, saatBentrok, sisipAbaikan, akhirAbaikan };
+/** Identifier yang wajib dikutip (kata kunci, kolom huruf campur). Nama datang dari kode, bukan pengguna. */
+function id(nama, d = DIALEK) {
+	if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(nama)) throw new Error(`Identifier tidak valid: ${nama}`);
+	return d === 'postgres' ? `"${nama}"` : '`' + nama + '`';
+}
+
+/** YEAR() yang keluar sebagai kolom. BIGINT di PG agar tipe hasil Prisma tetap BigInt seperti MySQL. Di WHERE pakai EXTRACT. */
+const tahunDari = (e, d = DIALEK) => (d === 'postgres' ? `CAST(EXTRACT(YEAR FROM ${e}) AS BIGINT)` : `YEAR(${e})`);
+
+const POLA_WAKTU = { '%Y-%m-%d': 'YYYY-MM-DD', '%Y-%m': 'YYYY-MM', '%H:00': 'HH24:00' };
+/** DATE_FORMAT / TO_CHAR; hanya pola yang dipakai kode. */
+function formatWaktu(e, pola, d = DIALEK) {
+	if (!POLA_WAKTU[pola]) throw new Error(`Pola waktu tidak valid: ${pola}`);
+	return d === 'postgres' ? `TO_CHAR(${e}, '${POLA_WAKTU[pola]}')` : `DATE_FORMAT(${e}, '${pola}')`;
+}
+
+/** UNIX_TIMESTAMP(kolom). Kolom PG = timestamp tanpa zona berisi UTC. */
+const epochDetik = (e, d = DIALEK) => (d === 'postgres' ? `CAST(FLOOR(EXTRACT(EPOCH FROM ${e})) AS BIGINT)` : `UNIX_TIMESTAMP(${e})`);
+
+/** Tanggal WIB dari kolom UTC. Versi MySQL bebas zona sesi (lewat epoch). */
+const tanggalWib = (e, d = DIALEK) => (d === 'postgres'
+	? `DATE(${e} + INTERVAL '7' HOUR)`
+	: `DATE(DATE_ADD('1970-01-01', INTERVAL UNIX_TIMESTAMP(${e}) + 25200 SECOND))`);
+
+/** FIND_IN_SET(nilai, kolom) > 0 untuk tagged template Prisma; mengembalikan Prisma.Sql (nilai = parameter). */
+function adaDiDaftar(nilai, kolom, d = DIALEK) {
+	const { Prisma } = require('@prisma/client');
+	return d === 'postgres'
+		? Prisma.sql`LOWER(${nilai}) = ANY(STRING_TO_ARRAY(LOWER(${Prisma.raw(kolom)}), ','))`
+		: Prisma.sql`FIND_IN_SET(${nilai}, ${Prisma.raw(kolom)}) > 0`;
+}
+
+/** REGEXP tak peka huruf (MySQL _ci). `pola` literal dari kode; kutip tunggal di-escape. */
+const cocokRegex = (kolom, pola, d = DIALEK) => `${kolom} ${d === 'postgres' ? '~*' : 'REGEXP'} '${kutip(pola)}'`;
+
+/** SUM yang langsung ke JSON lewat shim: di PG dikembalikan sebagai string seperti mysql2. */
+const jumlah = (e, d = DIALEK) => (d === 'postgres' ? `CAST(SUM(${e}) AS DECIMAL)` : `SUM(${e})`);
+
+/** ORDER BY kolom nullable: NULL di akhir untuk ASC, di awal untuk DESC (urutan MySQL), sah di dua DB. */
+function urutNull(kolom, arah = 'ASC') {
+	if (!['ASC', 'DESC'].includes(arah)) throw new Error(`Arah urut tidak valid: ${arah}`);
+	return `(${kolom} IS NULL) ${arah === 'ASC' ? 'DESC' : 'ASC'}, ${kolom} ${arah}`;
+}
+
+/** Skema aktif untuk information_schema. */
+const skemaIni = (d = DIALEK) => (d === 'postgres' ? 'CURRENT_SCHEMA()' : 'DATABASE()');
+
+module.exports = {
+	DIALEK, selang, urutanNilai, gabungTeks, selisihWaktu, saatBentrok, sisipAbaikan, akhirAbaikan,
+	id, tahunDari, formatWaktu, epochDetik, tanggalWib, adaDiDaftar, cocokRegex, jumlah, urutNull, skemaIni,
+};

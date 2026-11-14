@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const db = require('../config/database');
+const dialek = require('../config/dialek');
 const publicDashboardController = require('../controllers/publicDashboard.controller');
 
 /**
@@ -39,7 +40,7 @@ router.get('/stats', async (req, res) => {
 router.get('/hero-gallery', async (req, res) => {
   try {
     const [galleries] = await db.query(
-      'SELECT id, title, image_path, `order` as display_order FROM hero_galleries WHERE is_active = 1 ORDER BY `order` ASC'
+      `SELECT id, title, image_path, ${dialek.id('order')} as display_order FROM hero_galleries WHERE is_active = TRUE ORDER BY ${dialek.id('order')} ASC`
     );
 
     res.status(200).json({
@@ -129,7 +130,7 @@ router.get('/pegawai-kantor', async (req, res) => {
              p.jenis_kelamin, p.status_kepegawaian, b.nama AS bidang
       FROM pegawai p
       LEFT JOIN bidangs b ON b.id = p.id_bidang
-      ORDER BY b.id, p.eselon IS NULL, p.eselon, p.nama_pegawai
+      ORDER BY ${dialek.urutNull('b.id', 'ASC')}, p.eselon IS NULL, p.eselon, p.nama_pegawai
     `);
     res.set('Cache-Control', 'public, max-age=600');
     res.status(200).json({ success: true, data: rows });

@@ -45,7 +45,7 @@ class HariLiburController {
       if (existing) {
         // Tanggal sudah ada -> aktifkan kembali & perbarui keterangan (idempotent)
         await sequelize.query(
-          `UPDATE hari_libur SET keterangan = :keterangan, is_active = 1, updated_at = NOW() WHERE id = :id`,
+          `UPDATE hari_libur SET keterangan = :keterangan, is_active = TRUE, updated_at = NOW() WHERE id = :id`,
           { replacements: { keterangan: keterangan.trim(), id: existing.id } }
         );
         clearHolidayCache();
@@ -96,7 +96,7 @@ class HariLiburController {
       }
       if (is_active !== undefined) {
         sets.push('is_active = :is_active');
-        replacements.is_active = is_active ? 1 : 0;
+        replacements.is_active = !!is_active;
       }
 
       if (sets.length === 0) {
@@ -175,7 +175,7 @@ class HariLiburController {
 
         if (existing) {
           await sequelize.query(
-            `UPDATE hari_libur SET keterangan = :keterangan, is_active = 1, updated_at = NOW() WHERE id = :id`,
+            `UPDATE hari_libur SET keterangan = :keterangan, is_active = TRUE, updated_at = NOW() WHERE id = :id`,
             { replacements: { keterangan, id: existing.id } }
           );
           updated++;

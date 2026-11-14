@@ -19,6 +19,7 @@
  */
 
 const sequelize = require('../config/database');
+const { formatWaktu } = require('../config/dialek');
 const logger = require('../utils/logger');
 
 // Fallback statis bila tabel hari_libur kosong/belum ter-load (format: MM-DD).
@@ -63,8 +64,8 @@ let _loading = null; // Promise saat sedang load, untuk hindari load ganda
 async function load() {
   try {
     const rows = await sequelize.query(
-      `SELECT DATE_FORMAT(tanggal, '%Y-%m-%d') AS tanggal, keterangan
-         FROM hari_libur WHERE is_active = 1`,
+      `SELECT ${formatWaktu('tanggal', '%Y-%m-%d')} AS tanggal, keterangan
+         FROM hari_libur WHERE is_active = TRUE`,
       { type: sequelize.QueryTypes.SELECT }
     );
     const map = new Map();

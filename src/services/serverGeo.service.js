@@ -14,6 +14,7 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 const store = require('./serverStore.service');
+const { saatBentrok } = require('../config/dialek');
 
 const TTL_MS = 30 * 24 * 3600 * 1000;
 const MAX_CACHE = 20000;
@@ -150,7 +151,7 @@ const prosesAntrean = async () => {
         // IP reserved/tidak dikenal tetap disimpan supaya tidak ditanyakan terus.
         : { cc: null, country: null, region: null, city: null, lat: null, lon: null, isp: null, org: null, asn: null, proxy: false, hosting: false, t: Date.now() };
       simpanCache(r.query, d);
-      baris.push([r.query, d.cc, d.country, d.region, d.city, d.lat, d.lon, d.isp, d.org, d.asn, d.proxy ? 1 : 0, d.hosting ? 1 : 0]);
+      baris.push([r.query, d.cc, d.country, d.region, d.city, d.lat, d.lon, d.isp, d.org, d.asn, !!d.proxy, !!d.hosting]);
     }
     terakhirGagal = null;
     if (baris.length) {
@@ -158,9 +159,7 @@ const prosesAntrean = async () => {
       await store.execute(
         `INSERT INTO server_ip_geo (ip_address, country_code, country, region, city, lat, lon, isp, org, asn, proxy, hosting)
          VALUES ${baris.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}
-         ON DUPLICATE KEY UPDATE country_code = VALUES(country_code), country = VALUES(country), region = VALUES(region),
-           city = VALUES(city), lat = VALUES(lat), lon = VALUES(lon), isp = VALUES(isp), org = VALUES(org), asn = VALUES(asn),
-           proxy = VALUES(proxy), hosting = VALUES(hosting), updated_at = NOW()`,
+         ${saatBentrok(['ip_address'], ['country_code', 'country', 'region', 'city', 'lat', 'lon', 'isp', 'org', 'asn', 'proxy', 'hosting'])}, updated_at = NOW()`,
         ...baris.flat(),
       ).catch((e) => logger.warn(`[ServerGeo] Gagal menyimpan cache geo: ${e.message}`));
     }

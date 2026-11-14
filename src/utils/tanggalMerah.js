@@ -4,6 +4,7 @@
  */
 
 const sequelize = require('../config/database');
+const { formatWaktu } = require('../config/dialek');
 
 const HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -53,7 +54,7 @@ async function checkTanggalMerah(tanggal) {
   }
 
   const [libur] = await sequelize.query(
-    `SELECT keterangan FROM hari_libur WHERE tanggal = :ymd AND is_active = 1 LIMIT 1`,
+    `SELECT keterangan FROM hari_libur WHERE tanggal = :ymd AND is_active = TRUE LIMIT 1`,
     { replacements: { ymd }, type: sequelize.QueryTypes.SELECT }
   );
 
@@ -70,14 +71,14 @@ async function checkTanggalMerah(tanggal) {
  * @param {number|string} [tahun]
  */
 async function getHariLibur(tahun) {
-  let where = 'is_active = 1';
+  let where = 'is_active = TRUE';
   const replacements = {};
   if (tahun) {
-    where += ' AND YEAR(tanggal) = :tahun';
+    where += ' AND EXTRACT(YEAR FROM tanggal) = :tahun';
     replacements.tahun = tahun;
   }
   return sequelize.query(
-    `SELECT id, DATE_FORMAT(tanggal, '%Y-%m-%d') AS tanggal, keterangan, is_active
+    `SELECT id, ${formatWaktu('tanggal', '%Y-%m-%d')} AS tanggal, keterangan, is_active
      FROM hari_libur WHERE ${where} ORDER BY tanggal ASC`,
     { replacements, type: sequelize.QueryTypes.SELECT }
   );

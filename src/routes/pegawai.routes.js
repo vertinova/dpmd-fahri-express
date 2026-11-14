@@ -21,8 +21,8 @@ router.get('/birthdays/today', auth, async (req, res) => {
       FROM pegawai p
       LEFT JOIN bidangs b ON p.id_bidang = b.id
       LEFT JOIN users u ON u.pegawai_id = p.id_pegawai
-      WHERE MONTH(p.tanggal_lahir) = ${month}
-        AND DAY(p.tanggal_lahir) = ${day}
+      WHERE EXTRACT(MONTH FROM p.tanggal_lahir) = ${month}
+        AND EXTRACT(DAY FROM p.tanggal_lahir) = ${day}
     `;
 
     // Serialize BigInt values

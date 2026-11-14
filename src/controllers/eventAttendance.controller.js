@@ -1,6 +1,7 @@
 const crypto = require('crypto');
 const QRCode = require('qrcode');
 const sequelize = require('../config/database');
+const { formatWaktu } = require('../config/dialek');
 const { getIO } = require('../socket/meeting.socket');
 
 const EVENT_CODE = 'hjb-544-dpmd';
@@ -74,7 +75,7 @@ const ensureTables = async () => {
           DEFAULT_SETTINGS.event_date,
           DEFAULT_SETTINGS.location,
           DEFAULT_SETTINGS.qr_payload,
-          DEFAULT_SETTINGS.is_active ? 1 : 0,
+          !!DEFAULT_SETTINGS.is_active,
         ],
       },
     );
@@ -138,7 +139,7 @@ const getStatsPayload = async () => {
       { replacements: [EVENT_CODE] },
     ).then(([rows]) => rows),
     sequelize.query(
-      `SELECT DATE_FORMAT(created_at, '%H:00') AS hour_label, COUNT(*) AS total
+      `SELECT ${formatWaktu('created_at', '%H:00')} AS hour_label, COUNT(*) AS total
        FROM event_attendances
        WHERE event_code = ? AND DATE(created_at) = ?
        GROUP BY hour_label
@@ -289,7 +290,7 @@ exports.registerAttendance = async (req, res) => {
       stats,
     });
   } catch (error) {
-    if (error?.original?.code === 'ER_DUP_ENTRY') {
+    if (error?.name === 'SequelizeUniqueConstraintError') {
       return res.status(409).json({ success: false, duplicate: true, message: 'Data pengunjung sudah pernah tercatat' });
     }
 
@@ -369,7 +370,7 @@ exports.updateSettings = async (req, res) => {
         next.event_date,
         next.location,
         next.qr_payload,
-        next.is_active ? 1 : 0,
+        !!next.is_active,
         EVENT_CODE,
       ],
     },

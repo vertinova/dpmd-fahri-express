@@ -13,6 +13,7 @@ const path = require('path');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
 const db = require('../config/database');
+const dialek = require('../config/dialek');
 
 const router = express.Router();
 
@@ -52,8 +53,8 @@ router.get('/wilayah', batas(60 * 1000, 60), async (_req, res) => {
   try {
     const [kecamatan] = await db.query(`
       SELECT k.nama,
-             COALESCE(SUM(d.status_pemerintahan = 'desa'), 0) AS desa,
-             COALESCE(SUM(d.status_pemerintahan = 'kelurahan'), 0) AS kelurahan
+             COALESCE(${dialek.jumlah("CASE WHEN d.status_pemerintahan = 'desa' THEN 1 ELSE 0 END")}, 0) AS desa,
+             COALESCE(${dialek.jumlah("CASE WHEN d.status_pemerintahan = 'kelurahan' THEN 1 ELSE 0 END")}, 0) AS kelurahan
       FROM kecamatans k
       LEFT JOIN desas d ON d.kecamatan_id = k.id
       GROUP BY k.id, k.nama
@@ -63,7 +64,7 @@ router.get('/wilayah', batas(60 * 1000, 60), async (_req, res) => {
     const [bumdes] = await db.query(`
       SELECT b.kecamatan, COUNT(DISTINCT b.id) AS bumdes_aktif, COUNT(p.id) AS produk
       FROM bumdes b
-      LEFT JOIN bumdes_produk p ON p.bumdes_id = b.id AND p.is_active = 1
+      LEFT JOIN bumdes_produk p ON p.bumdes_id = b.id AND p.is_active = TRUE
       WHERE b.status = 'aktif'
       GROUP BY b.kecamatan
     `);

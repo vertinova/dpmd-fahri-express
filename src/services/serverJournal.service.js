@@ -14,6 +14,7 @@ const deploy = require('./serverDeploy.service');
 const backup = require('./serverBackup.service');
 const proxmox = require('./serverProxmox.service');
 const { EVENT_TYPES, kategoriTindakan } = require('../config/serverManagement');
+const { selang } = require('../config/dialek');
 
 const MAKS = 300;
 const OTOMATIS_SQL = "event_type IN ('auto_blocked','honeypot')";
@@ -21,6 +22,7 @@ const OTOMATIS_SQL = "event_type IN ('auto_blocked','honeypot')";
 const getJournal = async ({ hours } = {}) => {
   const jam = Math.min(720, Math.max(1, Number(hours) || 168));
   const gte = new Date(Date.now() - jam * 3600e3);
+  const jangka = selang(Math.round(jam), 'HOUR'); // MySQL membulatkan INTERVAL pecahan
   await store.ensureTables();
 
   const whereManual = { module: 'manajemen_server', created_at: { gte } };
@@ -32,9 +34,9 @@ const getJournal = async ({ hours } = {}) => {
       select: { id: true, user_name: true, description: true, entity_name: true, ip_address: true, created_at: true },
     }),
     prisma.activity_logs.count({ where: whereManual }),
-    store.query(`SELECT id, ip_address, event_type, detail, created_at FROM server_security_events WHERE ${OTOMATIS_SQL} AND created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR) ORDER BY created_at DESC LIMIT ${MAKS}`, jam),
-    store.query(`SELECT COUNT(*) AS n FROM server_security_events WHERE ${OTOMATIS_SQL} AND created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)`, jam),
-    store.query('SELECT COUNT(*) AS n FROM server_security_events WHERE blocked = 1 AND created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)', jam),
+    store.query(`SELECT id, ip_address, event_type, detail, created_at FROM server_security_events WHERE ${OTOMATIS_SQL} AND created_at >= NOW() - ${jangka} ORDER BY created_at DESC LIMIT ${MAKS}`),
+    store.query(`SELECT COUNT(*) AS n FROM server_security_events WHERE ${OTOMATIS_SQL} AND created_at >= NOW() - ${jangka}`),
+    store.query(`SELECT COUNT(*) AS n FROM server_security_events WHERE blocked = TRUE AND created_at >= NOW() - ${jangka}`),
     security.listBlocklist().then((l) => l.length).catch(() => 0),
   ]);
 
@@ -82,7 +84,7 @@ const getPosture = async () => {
     }, null),
     aman(async () => {
       await store.ensureTables();
-      const [r] = await store.query('SELECT COUNT(*) AS total, SUM(blocked = 1) AS ditolak FROM server_security_events WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)');
+      const [r] = await store.query(`SELECT COUNT(*) AS total, SUM(CASE WHEN blocked THEN 1 ELSE 0 END) AS ditolak FROM server_security_events WHERE created_at >= NOW() - ${selang(24, 'HOUR')}`);
       return { total: Number(r?.total) || 0, ditolak: Number(r?.ditolak) || 0 };
     }, { total: 0, ditolak: 0 }),
     aman(async () => (await getJournal({ hours: 24 })).ringkasan, null),

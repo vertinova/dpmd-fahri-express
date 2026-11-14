@@ -22,7 +22,7 @@ const net = require('net');
 const logger = require('../utils/logger');
 const store = require('./serverStore.service');
 const alerts = require('./serverAlerts.service');
-const { selang, gabungTeks, saatBentrok } = require('../config/dialek');
+const { selang, gabungTeks, saatBentrok, epochDetik } = require('../config/dialek');
 const geo = require('./serverGeo.service');
 const {
   IP_TEPERCAYA,
@@ -440,7 +440,7 @@ const getSummary = async (rentang = '24h') => {
     store.query(`SELECT severity, COUNT(*) AS n FROM server_security_events WHERE ${where} GROUP BY severity`),
     store.query(`SELECT source, COUNT(*) AS n FROM server_security_events WHERE ${where} GROUP BY source`),
     store.query(
-      `SELECT FLOOR(UNIX_TIMESTAMP(created_at) / ?) * ? * 1000 AS t,
+      `SELECT FLOOR(${epochDetik('created_at')} / ?) * ? * 1000 AS t,
               SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) AS critical, SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS high,
               SUM(CASE WHEN severity = 'medium' THEN 1 ELSE 0 END) AS medium, SUM(CASE WHEN severity = 'low' THEN 1 ELSE 0 END) AS low
          FROM server_security_events WHERE ${where} GROUP BY t ORDER BY t`,

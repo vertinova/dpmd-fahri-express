@@ -1153,7 +1153,7 @@ class PengurusController {
           d.nama       AS desa_nama,
           p.pengurusable_type,
           COUNT(*)     AS total,
-          SUM(CASE WHEN p.imported = 1 THEN 1 ELSE 0 END) AS imported_count
+          SUM(CASE WHEN p.imported = TRUE THEN 1 ELSE 0 END) AS imported_count
         FROM pengurus p
         JOIN desas d ON d.id = p.desa_id
         JOIN kecamatans k ON k.id = d.kecamatan_id
