@@ -7,9 +7,16 @@
  * sesi MySQL `+00:00`, DATETIME dibaca sebagai UTC, DATE sebagai string, cara mengisi
  * replacements, bentuk hasil, transaksi, dan nama galat. Tujuannya: data yang tersimpan dan
  * bentuk respons API tidak berubah sama sekali. Query baru sebaiknya memakai Prisma.
+ *
+ * Bila DATABASE_URL berawalan postgres, driver `pg` dipakai dengan perilaku yang meniru jalur
+ * MySQL di atas: nilai disisipkan sebagai literal, boolean keluar 1/0, BIGINT keluar Number,
+ * DATE keluar string, TIMESTAMP dibaca UTC, INSERT mengembalikan insertId, galat unik/FK
+ * bernama sama, dan galat di dalam transaksi tidak membatalkan seluruh transaksi.
  */
-const mysql = require('mysql2');
+const { DIALEK } = require('./dialek');
 const logger = require('../utils/logger');
+
+const PG = DIALEK === 'postgres';
 
 const QueryTypes = Object.freeze({
   SELECT: 'SELECT', INSERT: 'INSERT', UPDATE: 'UPDATE', BULKUPDATE: 'BULKUPDATE', BULKDELETE: 'BULKDELETE',
@@ -86,6 +93,37 @@ function formatError(err, stack) {
   return new DatabaseError(err, stack);
 }
 
+// Galat pg (SQLSTATE) diberi kode MySQL yang setara agar pemeriksaan lama (`original.code ===
+// 'ER_DUP_ENTRY'`, nama galat Sequelize) tetap berlaku.
+const kolomDariDetail = (detail) => {
+  const m = /Key \((.*?)\)=\(([\s\S]*?)\)/.exec(detail || '');
+  return m ? { kolom: m[1].split(/,\s*/), nilai: m[2] } : { kolom: undefined, nilai: undefined };
+};
+function formatErrorPg(err, stack) {
+  err.sqlState = err.code;
+  if (err.code === '23505') {
+    err.code = 'ER_DUP_ENTRY';
+    err.errno = ER_DUP_ENTRY;
+    const kunci = err.constraint;
+    const fields = { [kunci]: kolomDariDetail(err.detail).nilai };
+    const errors = Object.entries(fields).map(([path, value]) => ({
+      message: `${path} must be unique`, type: 'unique violation', path, value, origin: 'DB',
+      instance: undefined, validatorKey: 'not_unique', validatorName: null, validatorArgs: [],
+    }));
+    return new UniqueConstraintError({ message: 'Validation error', errors, parent: err, fields, stack });
+  }
+  if (err.code === '23503') {
+    const induk = /still referenced/.test(err.detail || '');
+    err.errno = induk ? ER_ROW_IS_REFERENCED : ER_NO_REFERENCED_ROW;
+    err.code = induk ? 'ER_ROW_IS_REFERENCED_2' : 'ER_NO_REFERENCED_ROW_2';
+    return new ForeignKeyConstraintError({
+      parent: err, stack, reltype: induk ? 'parent' : 'child',
+      table: err.table, fields: kolomDariDetail(err.detail).kolom, index: err.constraint,
+    });
+  }
+  return new DatabaseError(err, stack);
+}
+
 // ---------- Escape & replacements (salinan sql-string.js + utils/sql.js Sequelize, dialek mysql) ----------
 const dua = (n) => String(n).padStart(2, '0');
 // Sequelize memformat Date pada replacements memakai zona proses (bukan zona sesi).
@@ -103,9 +141,14 @@ function escape(val) {
     default: break;
   }
   if (val instanceof Date) val = formatTanggal(val);
-  if (Buffer.isBuffer(val)) return `X'${val.toString('hex')}'`;
+  if (Buffer.isBuffer(val)) return PG ? `'\\x${val.toString('hex')}'` : `X'${val.toString('hex')}'`;
   if (Array.isArray(val)) return arrayToList(val);
   if (!val.replace) throw new Error(`Invalid value ${String(val)}`);
+  if (PG) {
+    // standard_conforming_strings aktif: backslash bukan escape, cukup gandakan kutip tunggal.
+    if (val.includes('\0')) throw new Error('Teks mengandung byte NUL yang tidak bisa disimpan di PostgreSQL');
+    return `'${val.replace(/'/g, "''")}'`;
+  }
   val = val.replace(/[\0\n\r\b\t\\'"\x1a]/g, (s) => {
     switch (s) {
       case '\0': return '\\0';
@@ -142,13 +185,16 @@ function injectReplacements(sql, replacements) {
   let dolar = null;
   let diString = false;
   let diKolom = false;
+  let diIdent = false;
   let akhirPotong = 0;
   let komentarBaris = false;
   let komentarBlok = false;
   for (let i = 0; i < sql.length; i++) {
     const c = sql[i];
     if (diKolom) { if (c === '`') diKolom = false; continue; }
-    if (diString) { if (c === "'" && !lolosBackslash(sql, i - 1)) diString = false; continue; }
+    if (diIdent) { if (c === '"') diIdent = false; continue; }
+    // Di PG backslash bukan escape; kutip ganda '' cukup terbaca sebagai tutup lalu buka lagi.
+    if (diString) { if (c === "'" && (PG || !lolosBackslash(sql, i - 1))) diString = false; continue; }
     if (dolar !== null) {
       if (c !== '$') continue;
       const m = sql.slice(i).match(/^\$(?<name>[a-z_][0-9a-z_]*)?(\$)/i);
@@ -158,6 +204,7 @@ function injectReplacements(sql, replacements) {
     if (komentarBaris) { if (c === '\n') komentarBaris = false; continue; }
     if (komentarBlok) { if (c === '*' && sql[i + 1] === '/') komentarBlok = false; continue; }
     if (c === '`') { diKolom = true; continue; }
+    if (PG && c === '"') { diIdent = true; continue; }
     if (c === "'") { diString = true; continue; }
     if (c === '-' && sql.slice(i, i + 3) === '-- ') { komentarBaris = true; continue; }
     if (c === '/' && sql.slice(i, i + 2) === '/*') { komentarBlok = true; continue; }
@@ -197,7 +244,7 @@ function injectReplacements(sql, replacements) {
 
 // ---------- Pool: setelan sama dengan connection-manager Sequelize ----------
 const produksi = process.env.NODE_ENV === 'production';
-const pool = mysql.createPool({
+const pool = PG ? buatPoolPg() : require('mysql2').createPool({
   host: process.env.DB_HOST,
   port: process.env.DB_PORT || 3306,
   user: process.env.DB_USER,
@@ -221,9 +268,92 @@ const pool = mysql.createPool({
   },
 });
 // Sesi MySQL di UTC seperti Sequelize; NOW() dan DEFAULT CURRENT_TIMESTAMP bergantung padanya.
-pool.on('connection', (conn) => { conn.query(`SET time_zone = '${ZONA}'`); });
+if (!PG) pool.on('connection', (conn) => { conn.query(`SET time_zone = '${ZONA}'`); });
 
-const ambilKoneksi = () => new Promise((resolve, reject) => pool.getConnection((e, c) => (e ? reject(e) : resolve(c))));
+function buatPoolPg() {
+  const { Pool, types } = require('pg');
+  // Parser meniru keluaran mysql2 di atas agar bentuk JSON tidak berubah.
+  const tipe = {
+    getTypeParser(oid, format) {
+      if (format !== 'binary') {
+        if (oid === 16) return (v) => (v === 't' ? 1 : 0); // boolean → 1/0 seperti tinyint(1)
+        if (oid === 20) return (v) => { const n = Number(v); return Number.isSafeInteger(n) ? n : v; }; // supportBigNumbers
+        if (oid === 1082) return (v) => v; // DATE tetap string
+        if (oid === 1114) return (v) => new Date(`${v.replace(' ', 'T')}Z`); // TIMESTAMP tanpa zona berisi UTC
+      }
+      return types.getTypeParser(oid, format);
+    },
+  };
+  const p = new Pool({
+    connectionString: String(process.env.DATABASE_URL).split('?')[0],
+    types: tipe,
+    max: produksi ? 30 : 10,
+    idleTimeoutMillis: 10000,
+    // Sesi UTC sejak koneksi dibuka (setara SET time_zone '+00:00' di jalur MySQL).
+    options: '-c TimeZone=UTC',
+  });
+  p.on('connect', (c) => { c.on('error', (e) => logger.error('Koneksi PostgreSQL galat:', e)); });
+  p.on('error', (e) => logger.error('Koneksi PostgreSQL menganggur galat:', e));
+  return p;
+}
+
+const ambilKoneksi = PG
+  ? () => pool.connect()
+  : () => new Promise((resolve, reject) => pool.getConnection((e, c) => (e ? reject(e) : resolve(c))));
+const lepasKoneksi = (c, hancurkan) => {
+  if (PG) c.release(hancurkan ? true : undefined);
+  else if (hancurkan) c.destroy(); else c.release();
+};
+
+// insertId MySQL = AUTO_INCREMENT; di PG diambil lewat RETURNING id bila tabel punya id otomatis.
+const idOtomatis = new Map();
+async function punyaIdOtomatis(tabel) {
+  if (!idOtomatis.has(tabel)) {
+    const r = await pool.query(
+      `SELECT 1 FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1
+         AND column_name = 'id' AND (is_identity = 'YES' OR column_default LIKE 'nextval(%')`,
+      [tabel],
+    );
+    idOtomatis.set(tabel, r.rowCount > 0);
+  }
+  return idOtomatis.get(tabel);
+}
+
+// Menjalankan SQL di pg dan mengembalikan bentuk data mysql2: baris untuk SELECT, header untuk tulis.
+async function jalankanPg(conn, sql) {
+  const sisip = /^insert\s+into\s+[`"]?([a-z0-9_]+)[`"]?/i.exec(sql);
+  const pakaiReturning = !!sisip && !/\breturning\b/i.test(sql) && await punyaIdOtomatis(sisip[1]);
+  const r = await conn.query(pakaiReturning ? `${sql.replace(/;\s*$/, '')} RETURNING id` : sql);
+  const h = Array.isArray(r) ? r[r.length - 1] : r;
+  if (!sisip && h.command === 'SELECT') return h.rows;
+  if (!sisip && h.command !== 'INSERT' && h.command !== 'UPDATE' && h.command !== 'DELETE' && h.fields?.length) return h.rows;
+  return {
+    fieldCount: 0,
+    affectedRows: h.rowCount || 0,
+    insertId: pakaiReturning && h.rows.length ? Number(h.rows[0].id) : 0,
+    info: '',
+    serverStatus: 2,
+    warningStatus: 0,
+    changedRows: h.rowCount || 0,
+  };
+}
+
+// MySQL melanjutkan transaksi setelah satu query galat; PG membatalkannya. SAVEPOINT per query
+// menjaga perilaku MySQL (query galat dibatalkan sendiri, transaksi tetap hidup).
+async function jalankanDiTrxPg(conn, sql, kendali) {
+  if (kendali) return jalankanPg(conn, sql);
+  await conn.query('SAVEPOINT shim_q');
+  try {
+    const d = await jalankanPg(conn, sql);
+    await conn.query('RELEASE SAVEPOINT shim_q');
+    return d;
+  } catch (e) {
+    if (e.code !== '40P01') {
+      try { await conn.query('ROLLBACK TO SAVEPOINT shim_q'); await conn.query('RELEASE SAVEPOINT shim_q'); } catch { /* koneksi putus: galat asli yang dilempar */ }
+    }
+    throw e;
+  }
+}
 
 function bentukHasil(sql, type, opsi, data) {
   let hasil;
@@ -262,20 +392,28 @@ async function query(sql, options = {}) {
   const conn = trx ? trx.connection : await ambilKoneksi();
   const tumpukan = new Error().stack;
   try {
-    const data = await new Promise((resolve, reject) => {
-      conn.query({ sql }, (e, r) => (e ? reject(e) : resolve(r)));
-    });
+    let data;
+    if (!PG) {
+      data = await new Promise((resolve, reject) => {
+        conn.query({ sql }, (e, r) => (e ? reject(e) : resolve(r)));
+      });
+    } else if (trx) {
+      // Antrean per transaksi: SAVEPOINT + query + RELEASE tidak boleh diselingi query lain.
+      data = await trx.antre(() => jalankanDiTrxPg(conn, sql, opsi.completesTransaction));
+    } else {
+      data = await jalankanPg(conn, sql);
+    }
     return bentukHasil(sql, opsi.type, opsi, data);
   } catch (err) {
-    if (trx && err.errno === ER_DEADLOCK) {
+    if (trx && (PG ? err.code === '40P01' : err.errno === ER_DEADLOCK)) {
       try { await trx.rollback(); } catch { /* sama dengan Sequelize: diabaikan */ }
       trx.finished = 'rollback';
     }
     err.sql = sql;
     err.parameters = undefined;
-    throw formatError(err, tumpukan);
+    throw PG ? formatErrorPg(err, tumpukan) : formatError(err, tumpukan);
   } finally {
-    if (!trx) conn.release();
+    if (!trx) lepasKoneksi(conn, false);
   }
 }
 
@@ -285,12 +423,19 @@ class Transaction {
     this.id = `trx-${Date.now()}-${++nomorTrx}`;
     this.connection = null;
     this.finished = undefined;
+    this.antrian = Promise.resolve();
+  }
+
+  antre(fn) {
+    const janji = this.antrian.then(fn, fn);
+    this.antrian = janji.catch(() => {});
+    return janji;
   }
 
   async mulai() {
     this.connection = await ambilKoneksi();
     try {
-      await query('START TRANSACTION;', { transaction: this });
+      await query('START TRANSACTION;', { transaction: this, completesTransaction: true });
     } catch (e) {
       try { await this.rollback(); } finally { throw e; } // eslint-disable-line no-unsafe-finally
     }
@@ -299,7 +444,7 @@ class Transaction {
   lepas(hancurkan) {
     if (!this.connection || this.dilepas) return;
     this.dilepas = true;
-    if (hancurkan) this.connection.destroy(); else this.connection.release();
+    lepasKoneksi(this.connection, hancurkan);
   }
 
   async commit() {
@@ -352,7 +497,7 @@ async function transaction(options, callback) {
 }
 
 const authenticate = () => query('SELECT 1+1 AS result');
-const close = () => new Promise((resolve, reject) => pool.end((e) => (e ? reject(e) : resolve())));
+const close = () => (PG ? pool.end() : new Promise((resolve, reject) => pool.end((e) => (e ? reject(e) : resolve()))));
 
 authenticate()
   .then(() => logger.info('✅ Database connection established successfully'))

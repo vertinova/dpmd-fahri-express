@@ -15,6 +15,7 @@ const zlib = require('zlib');
 const { spawn } = require('child_process');
 const logger = require('../utils/logger');
 const alerts = require('./serverAlerts.service');
+const { DIALEK } = require('../config/dialek');
 
 const DIR = process.env.MYSQL_BACKUP_DIR || '/var/backups/dpmd-mysql';
 const SIMPAN = 7;
@@ -124,15 +125,24 @@ const startMysqlBackup = ({ onSelesai } = {}) => {
     }
   };
 
-  const env = { ...process.env, MYSQL_PWD: process.env.DB_PASSWORD || '' };
-  const dump = spawn(process.env.MYSQLDUMP_BIN || 'mysqldump', [
-    '--no-defaults',
-    `--host=${process.env.DB_HOST || '127.0.0.1'}`,
-    `--port=${process.env.DB_PORT || 3306}`,
-    `--user=${process.env.DB_USER}`,
-    '--single-transaction', '--quick', '--hex-blob', '--no-tablespaces',
-    process.env.DB_NAME,
-  ], { env });
+  let dump;
+  if (DIALEK === 'postgres') {
+    // PostgreSQL: kredensial dari DATABASE_URL, sandi lewat PGPASSWORD.
+    const { bacaKoneksiDatabase, argumenPgDump, envPgDump } = require('../config/backup');
+    let k;
+    try { k = bacaKoneksiDatabase(); } catch (e) { running = false; throw e; }
+    dump = spawn(process.env.PG_DUMP_BIN || 'pg_dump', argumenPgDump(k), { env: envPgDump(k) });
+  } else {
+    const env = { ...process.env, MYSQL_PWD: process.env.DB_PASSWORD || '' };
+    dump = spawn(process.env.MYSQLDUMP_BIN || 'mysqldump', [
+      '--no-defaults',
+      `--host=${process.env.DB_HOST || '127.0.0.1'}`,
+      `--port=${process.env.DB_PORT || 3306}`,
+      `--user=${process.env.DB_USER}`,
+      '--single-transaction', '--quick', '--hex-blob', '--no-tablespaces',
+      process.env.DB_NAME,
+    ], { env });
+  }
 
   keBerkas = fs.createWriteStream(sementara, { mode: 0o600 });
   let kode = null;

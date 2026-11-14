@@ -14,6 +14,7 @@ jest.mock('../gemaAkunPegawai.service', () => ({ cariAkun: jest.fn(), siapkanSet
 jest.mock('../gemaData.service', () => ({
   cariTabel: jest.fn(),
   jalankanKueri: jest.fn(async () => ({ kolom: ['n'], baris: [{ n: 1 }], total: 1 })),
+  namaDialek: () => 'MySQL 8',
 }));
 
 process.env.GEMA_LLM_URL = 'http://llm.test/v1';

@@ -3,15 +3,20 @@
  * Single instance untuk digunakan di seluruh aplikasi
  */
 
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient, Prisma } = require('@prisma/client');
+const { DIALEK } = require('./dialek');
+const { buatEkstensiPg } = require('./prismaPg');
 const logger = require('../utils/logger');
 
 // Buat Prisma Client instance
-const prisma = new PrismaClient({
+const klienDasar = new PrismaClient({
   log: process.env.NODE_ENV === 'development' 
     ? ['info', 'warn', 'error']  // Removed 'query' to reduce log noise
     : ['warn', 'error'],
 });
+
+// Di PostgreSQL perilaku Prisma disamakan dengan MySQL lewat ekstensi; di MySQL client apa adanya.
+const prisma = DIALEK === 'postgres' ? klienDasar.$extends(buatEkstensiPg(Prisma)) : klienDasar;
 
 // Test connection (non-fatal - Prisma will auto-reconnect on first query)
 prisma.$connect()

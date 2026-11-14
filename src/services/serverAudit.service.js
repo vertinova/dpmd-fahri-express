@@ -17,7 +17,7 @@ const store = require('./serverStore.service');
 const metrics = require('./serverMetrics.service');
 const apps = require('./serverApps.service');
 const { BACKEND_ROOT, IP_TEPERCAYA } = require('../config/serverManagement');
-const { selang } = require('../config/dialek');
+const { selang, DIALEK } = require('../config/dialek');
 
 const IS_LINUX = process.platform === 'linux';
 const CACHE_MS = 60 * 1000;
@@ -119,7 +119,31 @@ const cekWeb = async () => {
 
 /* ─────────────────────────── Database ─────────────────────────── */
 
+const cekDatabasePg = async () => {
+  const hasil = [];
+  try {
+    const [[u], [l]] = await Promise.all([
+      store.query('SELECT CURRENT_USER AS u, (SELECT rolsuper FROM pg_roles WHERE rolname = CURRENT_USER) AS su'),
+      store.query("SELECT current_setting('listen_addresses') AS alamat"),
+    ]);
+    const user = String(u?.u || '');
+    hasil.push(u?.su === true || u?.su === 1 || /^postgres$/i.test(user)
+      ? temuan('db_user', 'Database', 'Aplikasi memakai akun superuser PostgreSQL', 'warn', `Terhubung sebagai ${user}. Bila aplikasi dibobol, seluruh server database ikut.`, 'Buat akun khusus dengan hak hanya pada database aplikasi.', "CREATE ROLE dpmd_app LOGIN PASSWORD '<sandi-kuat>';\nGRANT CONNECT ON DATABASE dpmd TO dpmd_app;\nGRANT USAGE ON SCHEMA public TO dpmd_app;\nGRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO dpmd_app;")
+      : temuan('db_user', 'Database', 'Akun database bukan superuser', 'pass', `Terhubung sebagai ${user}.`));
+    const alamat = String(l?.alamat ?? '');
+    if (alamat) {
+      hasil.push(alamat.split(',').map((a) => a.trim()).some((a) => ['0.0.0.0', '*', '::'].includes(a))
+        ? temuan('db_bind', 'Database', 'PostgreSQL mendengarkan semua antarmuka', 'warn', `listen_addresses=${alamat}. Pastikan port 5432 tidak terbuka ke internet dan pg_hba.conf membatasi alamat klien.`, "Set listen_addresses = 'localhost' di postgresql.conf bila aplikasi satu mesin.")
+        : temuan('db_bind', 'Database', 'PostgreSQL hanya lokal', 'pass', `listen_addresses=${alamat}.`));
+    }
+  } catch (error) {
+    hasil.push(temuan('db', 'Database', 'Database tidak bisa diperiksa', 'skip', error.message));
+  }
+  return hasil;
+};
+
 const cekDatabase = async () => {
+  if (DIALEK === 'postgres') return cekDatabasePg();
   const hasil = [];
   try {
     const [[u], bind] = await Promise.all([

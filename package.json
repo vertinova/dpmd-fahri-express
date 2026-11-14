@@ -7,7 +7,7 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "test": "jest",
-    "db:generate": "npx prisma generate",
+    "db:generate": "node scripts/pg/generate-prisma.js",
     "db:push": "npx prisma db push",
     "db:seed": "node scripts/run-seeders.js",
     "db:setup": "npm run db:push && npm run db:generate && npm run db:seed",
@@ -15,7 +15,7 @@
     "rtrw:generate-json": "node scripts/generate-rtrw-json-cache.js",
     "rtrw:generate-json:add": "node scripts/generate-rtrw-json-cache.js --only=add",
     "rtrw:generate-json:bpjs": "node scripts/generate-rtrw-json-cache.js --only=bpjs",
-    "postinstall": "npx prisma generate"
+    "postinstall": "node scripts/pg/generate-prisma.js"
   },
   "keywords": [
     "express",
@@ -47,6 +47,7 @@
     "node-cron": "^4.2.1",
     "pdf-lib": "^1.17.1",
     "pdfkit": "^0.17.2",
+    "pg": "^8.23.1",
     "qrcode": "^1.5.4",
     "sharp": "^0.34.5",
     "socket.io": "^4.8.3",

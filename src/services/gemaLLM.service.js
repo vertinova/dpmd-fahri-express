@@ -309,7 +309,7 @@ const buatAlat = (tangkap, pelaku, jejak = { alat: [], sql: [], panggilan: [] })
 			+ 'HANYA bila alat domain tidak cocok, dan setelah cari_tabel memastikan nama '
 			+ 'tabel dan kolomnya. Bila galat, perbaiki SQL-nya.',
 			{
-				sql: { type: 'string', description: 'satu pernyataan SELECT/WITH MySQL 8, dengan LIMIT' },
+				sql: { type: 'string', description: `satu pernyataan SELECT/WITH ${data.namaDialek()}, dengan LIMIT` },
 				tujuan: { type: 'string', description: 'judul singkat apa yang dicari, untuk judul tabel' },
 			},
 			['sql', 'tujuan'],
@@ -376,7 +376,7 @@ const susunSistem = (kamus) => [
 	'Pesan pengguna kadang membawa "Panduan dari pertanyaan serupa": itu cara memanggil alat yang terbukti tepat. Ikuti bila cocok, abaikan bila tidak. Angkanya tidak pernah dari panduan.',
 	'',
 	'Pakai alat domain (cari_desa, cari_bumdes, dst.) lebih dulu. Hanya bila tidak ada yang cocok,',
-	'pakai cari_tabel lalu kueri_data. Aturan SQL: MySQL 8, ONLY_FULL_GROUP_BY aktif, sebut kolom',
+	`pakai cari_tabel lalu kueri_data. Aturan SQL: ${data.namaDialek() === 'MySQL 8' ? 'MySQL 8, ONLY_FULL_GROUP_BY aktif' : 'PostgreSQL 17, kolom non-agregat wajib di GROUP BY'}, sebut kolom`,
 	'secara eksplisit, jangan SELECT *, hanya SELECT/WITH satu pernyataan, selalu pakai LIMIT.',
 	'',
 	'Soal AKUN PEGAWAI: kamu bisa mencari profil akunnya dan MENYIAPKAN penyetelan ulang sandi ke',

@@ -51,7 +51,8 @@ const REPOS = {
       '/usr/bin/git fetch origin',
       '/usr/bin/git reset --hard origin/main',
       `${NODE_BIN}/npm install --production`,
-      `${NODE_BIN}/npx prisma generate`,
+      // Skema dipilih dari DATABASE_URL di .env (MySQL atau PostgreSQL).
+      `${NODE_BIN}/node /var/www/backend/scripts/pg/generate-prisma.js`,
       `${NODE_BIN}/node /var/www/backend/database-express/auto-migrate.js`,
       // Akun bawaan yang tidak bisa dibuat lewat SQL (sandinya perlu di-hash):
       // dinas pelihat BPKAD & Inspektorat. Skripnya idempoten — kalau akunnya

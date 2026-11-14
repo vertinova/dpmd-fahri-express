@@ -16,6 +16,7 @@ const https = require('https');
 const tls = require('tls');
 const logger = require('../utils/logger');
 const prisma = require('../config/prisma');
+const { DIALEK } = require('../config/dialek');
 const store = require('./serverStore.service');
 const alerts = require('./serverAlerts.service');
 const { SYSTEM_SERVICES } = require('../config/serverManagement');
@@ -353,7 +354,34 @@ const getDatabase = async () => {
   alerts.clear('db:down');
 
   const aman = async (sql) => { try { return await store.query(sql); } catch { return []; } };
-  const [versi, status, variabel, tabel, proses] = await Promise.all([
+  // PostgreSQL: padanan terdekat yang ada; metrik tanpa padanan (Bytes_*, Slow_queries, Com_*, dst.) dibiarkan 0.
+  const kueriPg = [
+    "SELECT 'PostgreSQL ' || current_setting('server_version') AS v, current_database() AS db",
+    `SELECT 'Uptime' AS "Variable_name", FLOOR(EXTRACT(EPOCH FROM now() - pg_postmaster_start_time()))::text AS "Value"
+      UNION ALL SELECT 'Threads_connected', COUNT(*)::text FROM pg_stat_activity WHERE backend_type = 'client backend'
+      UNION ALL SELECT 'Threads_running', COUNT(*)::text FROM pg_stat_activity WHERE backend_type = 'client backend' AND state = 'active' AND pid <> pg_backend_pid()
+      UNION ALL SELECT 'Questions', (xact_commit + xact_rollback)::text FROM pg_stat_database WHERE datname = current_database()
+      UNION ALL SELECT 'Connections', sessions::text FROM pg_stat_database WHERE datname = current_database()
+      UNION ALL SELECT 'Aborted_connects', (sessions_abandoned + sessions_fatal)::text FROM pg_stat_database WHERE datname = current_database()
+      UNION ALL SELECT 'Innodb_buffer_pool_read_requests', (blks_hit + blks_read)::text FROM pg_stat_database WHERE datname = current_database()
+      UNION ALL SELECT 'Innodb_buffer_pool_reads', blks_read::text FROM pg_stat_database WHERE datname = current_database()`,
+    `SELECT 'max_connections' AS "Variable_name", current_setting('max_connections') AS "Value"
+      UNION ALL SELECT 'innodb_buffer_pool_size', pg_size_bytes(current_setting('shared_buffers'))::text
+      UNION ALL SELECT 'long_query_time', CASE WHEN ms < 0 THEN NULL ELSE (ms / 1000.0)::text END FROM (SELECT setting::numeric AS ms FROM pg_settings WHERE name = 'log_min_duration_statement') t
+      UNION ALL SELECT 'slow_query_log', CASE WHEN setting::numeric < 0 THEN 'OFF' ELSE 'ON' END FROM pg_settings WHERE name = 'log_min_duration_statement'
+      UNION ALL SELECT 'version_comment', 'PostgreSQL'
+      UNION ALL SELECT 'character_set_server', current_setting('server_encoding')
+      UNION ALL SELECT 'time_zone', current_setting('TimeZone')`,
+    `SELECT c.relname AS name, 'heap' AS engine, GREATEST(c.reltuples, 0)::bigint AS row_estimate,
+            pg_relation_size(c.oid) AS data_size, pg_indexes_size(c.oid) AS index_size, 0 AS free_size,
+            pg_total_relation_size(c.oid) AS total_size, NULL::timestamp AS updated_at, NULL::timestamp AS created_at
+       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p') ORDER BY total_size DESC`,
+    `SELECT pid AS id, usename AS "user", host(client_addr) AS host, datname AS db, state AS command,
+            FLOOR(EXTRACT(EPOCH FROM now() - query_start))::int AS "time", wait_event AS state, LEFT(query, 300) AS info
+       FROM pg_stat_activity WHERE backend_type = 'client backend' ORDER BY "time" DESC NULLS LAST LIMIT 50`,
+  ];
+  const [versi, status, variabel, tabel, proses] = await Promise.all(DIALEK === 'postgres' ? kueriPg.map(aman) : [
     aman('SELECT VERSION() AS v, DATABASE() AS db'),
     aman(`SHOW GLOBAL STATUS WHERE Variable_name IN ('Uptime','Threads_connected','Threads_running','Questions','Slow_queries','Aborted_connects','Aborted_clients','Connections','Bytes_received','Bytes_sent','Max_used_connections','Innodb_buffer_pool_read_requests','Innodb_buffer_pool_reads','Innodb_row_lock_waits','Com_select','Com_insert','Com_update','Com_delete','Open_tables')`),
     aman(`SHOW VARIABLES WHERE Variable_name IN ('max_connections','innodb_buffer_pool_size','long_query_time','slow_query_log','version_comment','character_set_server','time_zone','wait_timeout')`),

@@ -3,7 +3,8 @@ const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const { ambilAktivitas, catatHalaman, halamanKini } = require('../services/pantauAktivitas');
 const { bisaDitonton } = require('../socket/cermin.socket');
-const { exec } = require('child_process');
+const { exec, execFile } = require('child_process');
+const { DIALEK } = require('../config/dialek');
 const path = require('path');
 const fs = require('fs');
 
@@ -91,7 +92,8 @@ const backupDatabase = async (req, res) => {
   try {
     const dbHost = process.env.DB_HOST || '127.0.0.1';
     const dbPort = process.env.DB_PORT || '3306';
-    const dbName = process.env.DB_NAME || 'dpmd';
+    const pgKon = DIALEK === 'postgres' ? require('../config/backup').bacaKoneksiDatabase() : null;
+    const dbName = pgKon ? pgKon.database : process.env.DB_NAME || 'dpmd';
     const dbUser = process.env.DB_USER || 'root';
     const dbPassword = process.env.DB_PASSWORD || '';
 
@@ -112,15 +114,21 @@ const backupDatabase = async (req, res) => {
     cmd += ` --single-transaction --routines --triggers --add-drop-table ${dbName}`;
 
     await new Promise((resolve, reject) => {
-      exec(cmd, { maxBuffer: 1024 * 1024 * 512 }, (error, stdout, stderr) => {
+      const selesai = (error, stdout, stderr) => {
         if (error) {
-          logger.error('mysqldump error:', error.message);
+          logger.error(`${pgKon ? 'pg_dump' : 'mysqldump'} error:`, error.message);
           return reject(error);
         }
         // Write the dump to file
         fs.writeFileSync(filePath, stdout, 'utf8');
         resolve();
-      });
+      };
+      if (pgKon) {
+        const { jalurMysqldump, argumenPgDump, envPgDump } = require('../config/backup');
+        execFile(jalurMysqldump(), argumenPgDump(pgKon), { env: envPgDump(pgKon), maxBuffer: 1024 * 1024 * 512, windowsHide: true }, selesai);
+      } else {
+        exec(cmd, { maxBuffer: 1024 * 1024 * 512 }, selesai);
+      }
     });
 
     const stats = fs.statSync(filePath);
@@ -155,9 +163,18 @@ const backupDatabase = async (req, res) => {
 const getDatabaseInfo = async (req, res) => {
   try {
     // Get table count and sizes
-    const dbName = process.env.DB_NAME || 'dpmd';
+    const dbName = DIALEK === 'postgres' ? require('../config/backup').bacaKoneksiDatabase().database : process.env.DB_NAME || 'dpmd';
 
-    const tables = await prisma.$queryRawUnsafe(`
+    // PostgreSQL: nama kolom hasil sama dengan versi MySQL di bawah.
+    const tables = DIALEK === 'postgres' ? await prisma.$queryRawUnsafe(`
+      SELECT c.relname AS table_name,
+        GREATEST(c.reltuples, 0)::bigint AS row_count,
+        ROUND(pg_relation_size(c.oid) / 1024.0 / 1024, 2) AS data_size_mb,
+        ROUND(pg_indexes_size(c.oid) / 1024.0 / 1024, 2) AS index_size_mb
+      FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p')
+      ORDER BY pg_relation_size(c.oid) DESC
+    `) : await prisma.$queryRawUnsafe(`
       SELECT 
         table_name AS table_name,
         table_rows AS row_count,

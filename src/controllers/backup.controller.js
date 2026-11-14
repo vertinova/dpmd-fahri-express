@@ -31,11 +31,16 @@ const {
   adalahFoto,
   bacaKoneksiDatabase,
   jalurMysqldump,
+  argumenPgDump,
+  envPgDump,
+  NAMA_ALAT_DUMP,
+  PERINTAH_IMPOR,
   OPSI_ABAIKAN_KONFIG,
   opsiMysqldumpDidukung,
   periksaMysqldump,
   namaBerkasBackup,
 } = require('../config/backup');
+const { DIALEK } = require('../config/dialek');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -108,6 +113,7 @@ const formatUkuran = (byte) => {
  * berhenti sebelum mengeluarkan sebaris SQL pun.
  */
 const jalankanMysqldump = (koneksi, opsiTambahan) => {
+  if (DIALEK === 'postgres') return spawn(jalurMysqldump(), argumenPgDump(koneksi), { env: envPgDump(koneksi), windowsHide: true });
   const argumen = [
     // HARUS pertama — klien MySQL menolak --no-defaults di posisi lain.
     // Lihat OPSI_ABAIKAN_KONFIG di config/backup.js untuk alasannya.
@@ -178,7 +184,7 @@ class BackupController {
           tersedia: alat.tersedia,
           nama: koneksi.database,
           host: koneksi.host,
-          mysqldump: alat.versi,
+          mysqldump: alat.versi, // kunci tetap 'mysqldump' (dibaca frontend); di PostgreSQL berisi versi pg_dump
           catatan: alat.catatan,
         };
       } catch (error) {
@@ -281,14 +287,16 @@ class BackupController {
     });
 
     dump.on('error', (error) => {
-      logger.error('mysqldump gagal dijalankan:', error.message);
+      logger.error(`${NAMA_ALAT_DUMP} gagal dijalankan:`, error.message);
       if (!res.headersSent) {
         res.status(500).json({
           success: false,
           message:
             error.code === 'ENOENT'
-              ? 'mysqldump tidak ditemukan di server. Atur MYSQLDUMP_PATH di .env ke lokasi mysqldump.'
-              : `mysqldump gagal dijalankan: ${error.message}`,
+              ? (DIALEK === 'postgres'
+                ? 'pg_dump tidak ditemukan di server. Atur PG_DUMP_PATH di .env ke lokasi pg_dump.'
+                : 'mysqldump tidak ditemukan di server. Atur MYSQLDUMP_PATH di .env ke lokasi mysqldump.')
+              : `${NAMA_ALAT_DUMP} gagal dijalankan: ${error.message}`,
         });
       } else {
         res.destroy(error);
@@ -321,14 +329,14 @@ class BackupController {
         return;
       }
 
-      logger.error(`mysqldump keluar dengan kode ${kode}: ${galat.trim()}`);
+      logger.error(`${NAMA_ALAT_DUMP} keluar dengan kode ${kode}: ${galat.trim()}`);
       if (!res.headersSent) {
         res.status(500).json({
           success: false,
-          message: `mysqldump gagal (kode ${kode}): ${galat.trim().split('\n').pop() || 'tanpa keterangan'}`,
+          message: `${NAMA_ALAT_DUMP} gagal (kode ${kode}): ${galat.trim().split('\n').pop() || 'tanpa keterangan'}`,
         });
       } else {
-        res.destroy(new Error(`mysqldump gagal di tengah jalan (kode ${kode})`));
+        res.destroy(new Error(`${NAMA_ALAT_DUMP} gagal di tengah jalan (kode ${kode})`));
       }
     });
 
@@ -385,7 +393,7 @@ class BackupController {
         const dump = jalankanMysqldump(koneksi, await opsiMysqldumpDidukung());
         dump.stderr.resume(); // dibuang: galatnya sudah tercermin pada isi .sql yang kosong/terpotong
         dump.on('error', (err) => {
-          logger.error(`mysqldump dalam arsip gagal: ${err.message}`);
+          logger.error(`${NAMA_ALAT_DUMP} dalam arsip gagal: ${err.message}`);
           zip.abort();
           res.destroy(err);
         });
@@ -413,9 +421,11 @@ class BackupController {
         `Jumlah berkas  : ${daftar.length}`,
         '',
         '1. Basis data (bila ada database.sql di arsip ini):',
-        '   mysql -u root -p nama_database < database.sql',
+        `   ${PERINTAH_IMPOR}`,
         '   Buat dulu basis datanya bila belum ada:',
-        '   CREATE DATABASE nama_database CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;',
+        DIALEK === 'postgres'
+          ? '   CREATE DATABASE nama_database ENCODING UTF8;'
+          : '   CREATE DATABASE nama_database CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;',
         '',
         '2. Berkas unggahan:',
         '   Ekstrak arsip ini di folder backend. Isinya sudah memakai struktur',

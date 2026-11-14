@@ -8,6 +8,13 @@
  */
 
 const path = require('path');
+const { DIALEK } = require('./dialek');
+
+const PG = DIALEK === 'postgres';
+/** Nama alat dump yang dipakai, untuk pesan galat/petunjuk. */
+const NAMA_ALAT_DUMP = PG ? 'pg_dump' : 'mysqldump';
+/** Petunjuk impor berkas database.sql. */
+const PERINTAH_IMPOR = PG ? 'psql -U postgres nama_database < database.sql' : 'mysql -u root -p nama_database < database.sql';
 
 /** Akar seluruh berkas unggahan. Semua backup berkas/foto bersumber dari sini. */
 const STORAGE_ROOT = path.join(__dirname, '../../storage');
@@ -66,7 +73,7 @@ const bacaKoneksiDatabase = () => {
 
   return {
     host: url.hostname || '127.0.0.1',
-    port: url.port || '3306',
+    port: url.port || (PG ? '5432' : '3306'),
     user: decodeURIComponent(url.username || 'root'),
     // Kata sandi kosong itu sah (bawaan Laragon), jadi jangan diganti nilai lain.
     password: url.password ? decodeURIComponent(url.password) : '',
@@ -78,7 +85,18 @@ const bacaKoneksiDatabase = () => {
  * Lokasi mysqldump. Di Windows/Laragon ia tidak ada di PATH, sedangkan di VPS
  * biasanya ada — maka jalurnya bisa ditimpa lewat env tanpa mengubah kode.
  */
-const jalurMysqldump = () => process.env.MYSQLDUMP_PATH || 'mysqldump';
+const jalurMysqldump = () => (PG ? process.env.PG_DUMP_PATH || 'pg_dump' : process.env.MYSQLDUMP_PATH || 'mysqldump');
+
+/** Argumen pg_dump (PostgreSQL). Sandi lewat PGPASSWORD (lihat envPgDump), bukan argumen. */
+const argumenPgDump = (k) => ['-h', k.host, '-p', String(k.port), '-U', k.user, '-w', '--no-owner', '--no-privileges', '-Fp', k.database];
+
+/** Env proses pg_dump: sandi hanya terlihat oleh proses anak. */
+const envPgDump = (k) => {
+  const env = { ...process.env };
+  if (k.password) env.PGPASSWORD = k.password;
+  else delete env.PGPASSWORD;
+  return env;
+};
 
 /**
  * Opsi mysqldump yang berguna tapi TIDAK ada di semua varian.
@@ -131,6 +149,7 @@ const namaOpsi = (opsi) => opsi.split('=')[0];
  * kembalikan daftar paling aman yang dikenal SEMUA varian sejak lama.
  */
 const opsiMysqldumpDidukung = async () => {
+  if (PG) return []; // pg_dump: argumen tetap, tanpa probe
   if (cacheOpsiDidukung) return cacheOpsiDidukung;
 
   const { execFile } = require('child_process');
@@ -170,7 +189,7 @@ const periksaMysqldump = () =>
     const { execFile } = require('child_process');
     execFile(
       jalurMysqldump(),
-      [OPSI_ABAIKAN_KONFIG, '--version'],
+      PG ? ['--version'] : [OPSI_ABAIKAN_KONFIG, '--version'],
       { timeout: 10000, windowsHide: true },
       (err, stdout, stderr) => {
         if (!err) {
@@ -180,7 +199,11 @@ const periksaMysqldump = () =>
         resolve({
           tersedia: false,
           versi: null,
-          catatan: takAda
+          catatan: PG
+            ? (takAda
+              ? `pg_dump tidak ditemukan di "${jalurMysqldump()}". Pasang klien PostgreSQL di server, lalu isi PG_DUMP_PATH di .env dengan jalur lengkapnya.`
+              : `pg_dump tidak dapat dijalankan: ${err.message}`)
+            : takAda
             ? `mysqldump tidak ditemukan di "${jalurMysqldump()}". Pasang klien MySQL/MariaDB di server, lalu isi MYSQLDUMP_PATH di .env dengan jalur lengkapnya.`
             : `mysqldump tidak dapat dijalankan: ${err.message}`,
         });
@@ -213,6 +236,10 @@ module.exports = {
   adalahFoto,
   bacaKoneksiDatabase,
   jalurMysqldump,
+  argumenPgDump,
+  envPgDump,
+  NAMA_ALAT_DUMP,
+  PERINTAH_IMPOR,
   OPSI_ABAIKAN_KONFIG,
   opsiMysqldumpDidukung,
   periksaMysqldump,
