@@ -1,4 +1,4 @@
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const { jumlah, urutanNilai, enumTeks } = require('../config/dialek');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
@@ -20,9 +20,9 @@ class BankeuVerificationController {
       const { status, jenis_kegiatan, desa_id, tahun } = req.query;
 
       // Get kecamatan_id from user
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || !users[0].kecamatan_id) {
         return res.status(403).json({
@@ -67,7 +67,7 @@ class BankeuVerificationController {
         replacements.push(desa_id);
       }
 
-      const [proposals] = await sequelize.query(`
+      const proposals = await kueri(`
         SELECT 
           bp.id,
           bp.desa_id,
@@ -121,16 +121,16 @@ class BankeuVerificationController {
         LEFT JOIN kecamatans k ON d.kecamatan_id = k.id
         ${whereClause}
         ORDER BY bp.created_at DESC
-      `, { replacements });
+      `, replacements);
 
       // Fetch kegiatan_list for each proposal (many-to-many)
       for (const proposal of proposals) {
-        const [kegiatan] = await sequelize.query(`
+        const kegiatan = await kueri(`
           SELECT bmk.id, bmk.jenis_kegiatan, bmk.nama_kegiatan, bmk.dinas_terkait
           FROM bankeu_proposal_kegiatan bpk
           JOIN bankeu_master_kegiatan bmk ON bpk.kegiatan_id = bmk.id
           WHERE bpk.proposal_id = ?
-        `, { replacements: [proposal.id] });
+        `, [proposal.id]);
         
         proposal.kegiatan_list = kegiatan;
       }
@@ -170,9 +170,9 @@ class BankeuVerificationController {
       }
 
       // Get kecamatan_id from user
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id, name FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || !users[0].kecamatan_id) {
         return res.status(403).json({
@@ -184,13 +184,13 @@ class BankeuVerificationController {
       const kecamatanId = users[0].kecamatan_id;
 
       // Get proposal
-      const [proposals] = await sequelize.query(`
+      const proposals = await kueri(`
         SELECT bp.*, d.nama as desa_nama, d.kecamatan_id, k.nama as kecamatan_nama
         FROM bankeu_proposals bp
         INNER JOIN desas d ON bp.desa_id = d.id
         INNER JOIN kecamatans k ON d.kecamatan_id = k.id
         WHERE bp.id = ? AND d.kecamatan_id = ?
-      `, { replacements: [id, kecamatanId] });
+      `, [id, kecamatanId]);
 
       if (!proposals || proposals.length === 0) {
         return res.status(404).json({
@@ -209,7 +209,7 @@ class BankeuVerificationController {
       if (action === 'rejected' || action === 'revision') {
         logger.info(`⬅️ Kecamatan returning proposal ${id} to DESA`);
         
-        await sequelize.query(`
+        await jalankan(`
           UPDATE bankeu_proposals
           SET 
             kecamatan_status = ?,
@@ -219,9 +219,7 @@ class BankeuVerificationController {
             submitted_to_kecamatan = FALSE,
             status = ?
           WHERE id = ?
-        `, {
-          replacements: [action, catatan || null, userId, action, id]
-        });
+        `, [action, catatan || null, userId, action, id]);
 
         logger.info(`✅ Proposal ${id} dikembalikan ke Desa dengan status ${action}`);
 
@@ -315,7 +313,7 @@ class BankeuVerificationController {
 
       // NEW FLOW: If approved → Set status approved (JANGAN auto-submit ke DPMD)
       // User harus klik tombol "Kirim DPMD" secara manual untuk batch submit
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_proposals
         SET 
           kecamatan_status = 'approved',
@@ -324,9 +322,7 @@ class BankeuVerificationController {
           kecamatan_verified_at = NOW(),
           status = 'pending'
         WHERE id = ?
-      `, {
-        replacements: [catatan || null, userId, id]
-      });
+      `, [catatan || null, userId, id]);
 
       logger.info(`✅ Kecamatan approved proposal ${id} - Siap dikirim ke DPMD`);
 
@@ -380,9 +376,9 @@ class BankeuVerificationController {
       logger.info(`🔄 KECAMATAN CANCEL APPROVAL - ID: ${id}, User: ${userId}`);
 
       // Get kecamatan_id from user
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id, name FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || !users[0].kecamatan_id) {
         return res.status(403).json({
@@ -394,13 +390,13 @@ class BankeuVerificationController {
       const kecamatanId = users[0].kecamatan_id;
 
       // Get proposal
-      const [proposals] = await sequelize.query(`
+      const proposals = await kueri(`
         SELECT bp.*, d.nama as desa_nama, d.kecamatan_id, k.nama as kecamatan_nama
         FROM bankeu_proposals bp
         INNER JOIN desas d ON bp.desa_id = d.id
         INNER JOIN kecamatans k ON d.kecamatan_id = k.id
         WHERE bp.id = ? AND d.kecamatan_id = ?
-      `, { replacements: [id, kecamatanId] });
+      `, [id, kecamatanId]);
 
       if (!proposals || proposals.length === 0) {
         return res.status(404).json({
@@ -427,7 +423,7 @@ class BankeuVerificationController {
       }
 
       // Reset kecamatan_status ke pending sehingga bisa di-review ulang
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_proposals
         SET 
           kecamatan_status = 'pending',
@@ -438,9 +434,7 @@ class BankeuVerificationController {
           berita_acara_generated_at = NULL,
           surat_pengantar = NULL
         WHERE id = ?
-      `, {
-        replacements: [catatan || 'Persetujuan dibatalkan oleh Kecamatan', id]
-      });
+      `, [catatan || 'Persetujuan dibatalkan oleh Kecamatan', id]);
 
       logger.info(`✅ Proposal ${id} persetujuan dibatalkan - kembali ke status pending`);
 
@@ -597,9 +591,9 @@ class BankeuVerificationController {
       const { tahun } = req.query;
       const tahunFilter = tahun ? parseInt(tahun) : null;
 
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || !users[0].kecamatan_id) {
         return res.status(403).json({
@@ -611,7 +605,7 @@ class BankeuVerificationController {
       const kecamatanId = users[0].kecamatan_id;
 
       // FIXED: Statistics harus filter submitted_to_kecamatan = TRUE agar sinkron dengan proposals list
-      const [stats] = await sequelize.query(`
+      const stats = await kueri(`
         SELECT 
           COUNT(*) as total_proposals,
           ${jumlah("CASE WHEN bp.kecamatan_status IS NULL OR bp.kecamatan_status = 'pending' THEN 1 ELSE 0 END")} as pending,
@@ -627,7 +621,7 @@ class BankeuVerificationController {
         AND d.status_pemerintahan = 'desa'
         AND bp.submitted_to_kecamatan = TRUE
         ${tahunFilter ? 'AND bp.tahun_anggaran = ?' : ''}
-      `, { replacements: tahunFilter ? [kecamatanId, tahunFilter] : [kecamatanId] });
+      `, tahunFilter ? [kecamatanId, tahunFilter] : [kecamatanId]);
 
       res.json({
         success: true,
@@ -666,9 +660,9 @@ class BankeuVerificationController {
       }
 
       // Get user info
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id, name FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || !users[0].kecamatan_id) {
         return res.status(403).json({
@@ -680,11 +674,11 @@ class BankeuVerificationController {
       const kecamatanId = users[0].kecamatan_id;
 
       // Verify desa belongs to kecamatan
-      const [desas] = await sequelize.query(`
+      const desas = await kueri(`
         SELECT d.nama
         FROM desas d
         WHERE d.id = ? AND d.kecamatan_id = ?
-      `, { replacements: [desaId, kecamatanId] });
+      `, [desaId, kecamatanId]);
 
       if (!desas || desas.length === 0) {
         return res.status(404).json({
@@ -715,31 +709,31 @@ class BankeuVerificationController {
       // Update proposals with berita acara path
       if (proposalId) {
         // Update specific proposal
-        await sequelize.query(`
+        await jalankan(`
           UPDATE bankeu_proposals
           SET 
             berita_acara_path = ?,
             berita_acara_generated_at = NOW()
           WHERE id = ?
-        `, { replacements: [filePath, proposalId] });
+        `, [filePath, proposalId]);
       } else if (kegiatanId) {
         // Update only specific kegiatan
-        await sequelize.query(`
+        await jalankan(`
           UPDATE bankeu_proposals
           SET 
             berita_acara_path = ?,
             berita_acara_generated_at = NOW()
           WHERE desa_id = ? AND kegiatan_id = ?
-        `, { replacements: [filePath, desaId, kegiatanId] });
+        `, [filePath, desaId, kegiatanId]);
       } else {
         // Update all proposals for desa
-        await sequelize.query(`
+        await jalankan(`
           UPDATE bankeu_proposals
           SET 
             berita_acara_path = ?,
             berita_acara_generated_at = NOW()
           WHERE desa_id = ?
-        `, { replacements: [filePath, desaId] });
+        `, [filePath, desaId]);
       }
 
       logger.info(`✅ Berita Acara generated for desa ${desaId}${proposalId ? ` proposal ${proposalId}` : kegiatanId ? ` kegiatan ${kegiatanId}` : ''}: ${filePath}`);
@@ -784,9 +778,9 @@ class BankeuVerificationController {
       }
 
       // Get user info
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || !users[0].kecamatan_id) {
         return res.status(403).json({
@@ -798,9 +792,9 @@ class BankeuVerificationController {
       const kecamatanId = users[0].kecamatan_id;
 
       // Verify desa belongs to this kecamatan
-      const [desas] = await sequelize.query(`
+      const desas = await kueri(`
         SELECT * FROM desas WHERE id = ? AND kecamatan_id = ?
-      `, { replacements: [desaId, kecamatanId] });
+      `, [desaId, kecamatanId]);
 
       if (!desas || desas.length === 0) {
         return res.status(404).json({
@@ -810,7 +804,7 @@ class BankeuVerificationController {
       }
 
       // Check if all proposals have been reviewed (no pending kecamatan_status)
-      const [pendingCount] = await sequelize.query(`
+      const pendingCount = await kueri(`
         SELECT COUNT(*) as total
         FROM bankeu_proposals bp
         INNER JOIN desas d ON bp.desa_id = d.id
@@ -818,7 +812,7 @@ class BankeuVerificationController {
           AND bp.tahun_anggaran = ?
           AND bp.submitted_to_kecamatan = TRUE
           AND (bp.kecamatan_status = 'pending' OR bp.kecamatan_status IS NULL)
-      `, { replacements: [desaId, kecamatanId, tahunAnggaran] });
+      `, [desaId, kecamatanId, tahunAnggaran]);
 
       if (pendingCount[0].total > 0) {
         return res.status(400).json({
@@ -828,12 +822,12 @@ class BankeuVerificationController {
       }
 
       // Check if there are any proposals submitted to kecamatan
-      const [totalCount] = await sequelize.query(`
+      const totalCount = await kueri(`
         SELECT COUNT(*) as total
         FROM bankeu_proposals bp
         INNER JOIN desas d ON bp.desa_id = d.id
         WHERE bp.desa_id = ? AND d.kecamatan_id = ? AND bp.tahun_anggaran = ? AND bp.submitted_to_kecamatan = TRUE
-      `, { replacements: [desaId, kecamatanId, tahunAnggaran] });
+      `, [desaId, kecamatanId, tahunAnggaran]);
 
       if (totalCount[0].total === 0) {
         return res.status(400).json({
@@ -868,7 +862,7 @@ class BankeuVerificationController {
 
         // Check if all APPROVED proposals have berita acara
         // Hanya cek proposal yang approved karena hanya mereka yang akan dikirim ke DPMD
-        const [missingBeritaAcara] = await sequelize.query(`
+        const missingBeritaAcara = await kueri(`
           SELECT COUNT(*) as total
           FROM bankeu_proposals bp
           INNER JOIN desas d ON bp.desa_id = d.id
@@ -877,7 +871,7 @@ class BankeuVerificationController {
             AND bp.submitted_to_kecamatan = TRUE
             AND bp.kecamatan_status = 'approved'
             AND (bp.berita_acara_path IS NULL OR bp.berita_acara_path = '')
-        `, { replacements: [desaId, kecamatanId, tahunAnggaran] });
+        `, [desaId, kecamatanId, tahunAnggaran]);
 
         if (missingBeritaAcara[0].total > 0) {
           return res.status(400).json({
@@ -888,7 +882,7 @@ class BankeuVerificationController {
 
         // Check if all APPROVED proposals have surat pengantar kecamatan
         // Hanya cek proposal yang approved karena hanya mereka yang akan dikirim ke DPMD
-        const [missingSuratPengantar] = await sequelize.query(`
+        const missingSuratPengantar = await kueri(`
           SELECT COUNT(*) as total
           FROM bankeu_proposals bp
           INNER JOIN desas d ON bp.desa_id = d.id
@@ -897,7 +891,7 @@ class BankeuVerificationController {
             AND bp.submitted_to_kecamatan = TRUE
             AND bp.kecamatan_status = 'approved'
             AND (bp.surat_pengantar IS NULL OR bp.surat_pengantar = '')
-        `, { replacements: [desaId, kecamatanId, tahunAnggaran] });
+        `, [desaId, kecamatanId, tahunAnggaran]);
 
         if (missingSuratPengantar[0].total > 0) {
           return res.status(400).json({
@@ -907,11 +901,11 @@ class BankeuVerificationController {
         }
         
         // Check surat pengantar dari desa
-        const [suratDesa] = await sequelize.query(`
+        const suratDesa = await kueri(`
           SELECT surat_pengantar, surat_permohonan
           FROM desa_bankeu_surat
           WHERE desa_id = ? AND tahun = ?
-        `, { replacements: [desaId, tahunAnggaran] });
+        `, [desaId, tahunAnggaran]);
 
         if (!suratDesa || suratDesa.length === 0 || !suratDesa[0].surat_pengantar) {
           return res.status(400).json({
@@ -932,12 +926,12 @@ class BankeuVerificationController {
       if (action === 'return') {
         // Kembalikan ke desa: set submitted_to_kecamatan = FALSE
         // Ini memungkinkan desa untuk upload ulang dan submit lagi
-        await sequelize.query(`
+        await jalankan(`
           UPDATE bankeu_proposals
           SET submitted_to_kecamatan = FALSE, submitted_at = NULL
           WHERE desa_id = ? AND tahun_anggaran = ?
             AND desa_id IN (SELECT id FROM desas WHERE kecamatan_id = ?)
-        `, { replacements: [desaId, tahunAnggaran, kecamatanId] });
+        `, [desaId, tahunAnggaran, kecamatanId]);
         
         logger.info(`🔙 ${totalCount[0].total} proposals returned to desa ${desaId} by user ${userId}`);
 
@@ -958,7 +952,7 @@ class BankeuVerificationController {
         });
       } else {
         // Kirim ke DPMD: set submitted_to_dpmd = TRUE dan dpmd_status = pending
-        await sequelize.query(`
+        await jalankan(`
           UPDATE bankeu_proposals
           SET 
             submitted_to_dpmd = TRUE, 
@@ -966,7 +960,7 @@ class BankeuVerificationController {
             dpmd_status = 'pending'
           WHERE desa_id = ? AND tahun_anggaran = ? AND kecamatan_status = 'approved'
             AND desa_id IN (SELECT id FROM desas WHERE kecamatan_id = ?)
-        `, { replacements: [desaId, tahunAnggaran, kecamatanId] });
+        `, [desaId, tahunAnggaran, kecamatanId]);
         
         logger.info(`✅ ${totalCount[0].total} proposals submitted to DPMD from desa ${desaId} by user ${userId}`);
 
@@ -1015,9 +1009,9 @@ class BankeuVerificationController {
       const userId = req.user.id;
 
       // Verify user is from this kecamatan
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || users[0].kecamatan_id != kecamatanId) {
         return res.status(403).json({
@@ -1026,10 +1020,10 @@ class BankeuVerificationController {
         });
       }
 
-      const [config] = await sequelize.query(`
+      const config = await kueri(`
         SELECT * FROM kecamatan_bankeu_config
         WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       // Return empty object if config doesn't exist yet (allow new configs to be created)
       const configData = config.length > 0 ? config[0] : {
@@ -1066,9 +1060,9 @@ class BankeuVerificationController {
       const userId = req.user.id;
 
       // Verify user is from this kecamatan
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || users[0].kecamatan_id != kecamatanId) {
         return res.status(403).json({
@@ -1078,30 +1072,30 @@ class BankeuVerificationController {
       }
 
       // Check if config exists
-      const [existing] = await sequelize.query(`
+      const existing = await kueri(`
         SELECT id FROM kecamatan_bankeu_config
         WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       if (existing.length > 0) {
         // Update
-        await sequelize.query(`
+        await jalankan(`
           UPDATE kecamatan_bankeu_config
           SET nama_camat = ?, nip_camat = ?, jabatan_penandatangan = ?, alamat = ?, telepon = ?, email = ?, website = ?, kode_pos = ?, updated_at = NOW()
           WHERE kecamatan_id = ?
-        `, { replacements: [nama_camat, nip_camat, jabatan_penandatangan || 'Camat', alamat, telepon, email, website, kode_pos, kecamatanId] });
+        `, [nama_camat, nip_camat, jabatan_penandatangan || 'Camat', alamat, telepon, email, website, kode_pos, kecamatanId]);
       } else {
         // Insert
-        await sequelize.query(`
+        await jalankan(`
           INSERT INTO kecamatan_bankeu_config (kecamatan_id, nama_camat, nip_camat, jabatan_penandatangan, alamat, telepon, email, website, kode_pos, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())
-        `, { replacements: [kecamatanId, nama_camat, nip_camat, jabatan_penandatangan || 'Camat', alamat, telepon, email, website, kode_pos] });
+        `, [kecamatanId, nama_camat, nip_camat, jabatan_penandatangan || 'Camat', alamat, telepon, email, website, kode_pos]);
       }
 
-      const [updated] = await sequelize.query(`
+      const updated = await kueri(`
         SELECT * FROM kecamatan_bankeu_config
         WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       res.json({
         success: true,
@@ -1128,9 +1122,9 @@ class BankeuVerificationController {
       const userId = req.user.id;
 
       // Verify user is from this kecamatan
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || users[0].kecamatan_id != kecamatanId) {
         return res.status(403).json({
@@ -1139,11 +1133,11 @@ class BankeuVerificationController {
         });
       }
 
-      const [timVerifikasi] = await sequelize.query(`
+      const timVerifikasi = await kueri(`
         SELECT * FROM tim_verifikasi_kecamatan
         WHERE kecamatan_id = ? AND is_active = TRUE
         ORDER BY ${urutanNilai('jabatan', ['ketua', 'sekretaris', 'anggota'])}, nama ASC
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       res.json({
         success: true,
@@ -1170,9 +1164,9 @@ class BankeuVerificationController {
       const userId = req.user.id;
 
       // Verify user is from this kecamatan
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || users[0].kecamatan_id != kecamatanId) {
         return res.status(403).json({
@@ -1191,10 +1185,10 @@ class BankeuVerificationController {
 
       // Check if ketua already exists (optional validation)
       if (jabatan.toLowerCase() === 'ketua') {
-        const [existing] = await sequelize.query(`
+        const existing = await kueri(`
           SELECT id FROM tim_verifikasi_kecamatan
           WHERE kecamatan_id = ? AND LOWER(jabatan) = 'ketua' AND is_active = TRUE
-        `, { replacements: [kecamatanId] });
+        `, [kecamatanId]);
 
         if (existing.length > 0) {
           return res.status(400).json({
@@ -1204,16 +1198,17 @@ class BankeuVerificationController {
         }
       }
 
-      const [result] = await sequelize.query(`
+      const [result] = await kueri(`
         INSERT INTO tim_verifikasi_kecamatan (kecamatan_id, jabatan, nama, nip, jabatan_label, is_active, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, TRUE, NOW(), NOW())
-      `, { replacements: [kecamatanId, jabatan, nama, nip, jabatan_label || null] });
+        RETURNING id
+      `, [kecamatanId, jabatan, nama, nip, jabatan_label || null]);
 
       res.status(201).json({
         success: true,
         message: 'Anggota tim verifikasi berhasil ditambahkan',
         data: {
-          id: result.insertId,
+          id: result.id,
           kecamatan_id: kecamatanId,
           jabatan,
           nama,
@@ -1242,10 +1237,10 @@ class BankeuVerificationController {
       const userId = req.user.id;
 
       // Get tim data to verify access
-      const [timData] = await sequelize.query(`
+      const timData = await kueri(`
         SELECT kecamatan_id FROM tim_verifikasi_kecamatan
         WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       if (timData.length === 0) {
         return res.status(404).json({
@@ -1257,9 +1252,9 @@ class BankeuVerificationController {
       const kecamatanId = timData[0].kecamatan_id;
 
       // Verify user is from this kecamatan
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || users[0].kecamatan_id != kecamatanId) {
         return res.status(403).json({
@@ -1268,11 +1263,11 @@ class BankeuVerificationController {
         });
       }
 
-      await sequelize.query(`
+      await jalankan(`
         UPDATE tim_verifikasi_kecamatan
         SET is_active = FALSE, updated_at = NOW()
         WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       res.json({
         success: true,
@@ -1305,10 +1300,10 @@ class BankeuVerificationController {
       }
 
       // Get tim data to verify access
-      const [timData] = await sequelize.query(`
+      const timData = await kueri(`
         SELECT kecamatan_id FROM tim_verifikasi_kecamatan
         WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       if (timData.length === 0) {
         fs.unlinkSync(req.file.path);
@@ -1321,9 +1316,9 @@ class BankeuVerificationController {
       const kecamatanId = timData[0].kecamatan_id;
 
       // Verify user is from this kecamatan
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || users[0].kecamatan_id != kecamatanId) {
         fs.unlinkSync(req.file.path);
@@ -1335,11 +1330,11 @@ class BankeuVerificationController {
 
       const filePath = `signatures/${req.file.filename}`;
 
-      await sequelize.query(`
+      await jalankan(`
         UPDATE tim_verifikasi_kecamatan
         SET ttd_path = ?, updated_at = NOW()
         WHERE id = ?
-      `, { replacements: [filePath, id] });
+      `, [filePath, id]);
 
       res.json({
         success: true,
@@ -1376,9 +1371,9 @@ class BankeuVerificationController {
       }
 
       // Verify user is from this kecamatan
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || users[0].kecamatan_id != kecamatanId) {
         fs.unlinkSync(req.file.path);
@@ -1390,16 +1385,16 @@ class BankeuVerificationController {
 
       const filePath = `signatures/${req.file.filename}`;
 
-      await sequelize.query(`
+      await jalankan(`
         UPDATE kecamatan_bankeu_config
         SET logo_path = ?, updated_at = NOW()
         WHERE kecamatan_id = ?
-      `, { replacements: [filePath, kecamatanId] });
+      `, [filePath, kecamatanId]);
 
-      const [updated] = await sequelize.query(`
+      const updated = await kueri(`
         SELECT * FROM kecamatan_bankeu_config
         WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       res.json({
         success: true,
@@ -1436,9 +1431,9 @@ class BankeuVerificationController {
       }
 
       // Verify user is from this kecamatan
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || users[0].kecamatan_id != kecamatanId) {
         fs.unlinkSync(req.file.path);
@@ -1450,16 +1445,16 @@ class BankeuVerificationController {
 
       const filePath = `signatures/${req.file.filename}`;
 
-      await sequelize.query(`
+      await jalankan(`
         UPDATE kecamatan_bankeu_config
         SET ttd_camat_path = ?, updated_at = NOW()
         WHERE kecamatan_id = ?
-      `, { replacements: [filePath, kecamatanId] });
+      `, [filePath, kecamatanId]);
 
-      const [updated] = await sequelize.query(`
+      const updated = await kueri(`
         SELECT * FROM kecamatan_bankeu_config
         WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       res.json({
         success: true,
@@ -1489,9 +1484,9 @@ class BankeuVerificationController {
       const userId = req.user.id;
 
       // Verify user is from this kecamatan
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || users[0].kecamatan_id != kecamatanId) {
         return res.status(403).json({
@@ -1501,10 +1496,10 @@ class BankeuVerificationController {
       }
 
       // Get current signature path
-      const [config] = await sequelize.query(`
+      const config = await kueri(`
         SELECT ttd_camat_path FROM kecamatan_bankeu_config
         WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       // Delete file if exists
       if (config && config[0] && config[0].ttd_camat_path) {
@@ -1515,11 +1510,11 @@ class BankeuVerificationController {
       }
 
       // Update database
-      await sequelize.query(`
+      await jalankan(`
         UPDATE kecamatan_bankeu_config
         SET ttd_camat_path = NULL, updated_at = NOW()
         WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       res.json({
         success: true,
@@ -1562,9 +1557,9 @@ class BankeuVerificationController {
       }
 
       // Verify user is from this kecamatan
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || users[0].kecamatan_id != kecamatanId) {
         fs.unlinkSync(req.file.path);
@@ -1576,16 +1571,16 @@ class BankeuVerificationController {
 
       const filePath = `signatures/${req.file.filename}`;
 
-      await sequelize.query(`
+      await jalankan(`
         UPDATE kecamatan_bankeu_config
         SET stempel_path = ?, updated_at = NOW()
         WHERE kecamatan_id = ?
-      `, { replacements: [filePath, kecamatanId] });
+      `, [filePath, kecamatanId]);
 
-      const [updated] = await sequelize.query(`
+      const updated = await kueri(`
         SELECT * FROM kecamatan_bankeu_config
         WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       res.json({
         success: true,
@@ -1615,9 +1610,9 @@ class BankeuVerificationController {
       const userId = req.user.id;
 
       // Verify user is from this kecamatan
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT kecamatan_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || users[0].kecamatan_id != kecamatanId) {
         return res.status(403).json({
@@ -1627,10 +1622,10 @@ class BankeuVerificationController {
       }
 
       // Get current stempel path
-      const [config] = await sequelize.query(`
+      const config = await kueri(`
         SELECT stempel_path FROM kecamatan_bankeu_config
         WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       // Delete file if exists
       if (config && config[0] && config[0].stempel_path) {
@@ -1641,11 +1636,11 @@ class BankeuVerificationController {
       }
 
       // Update database
-      await sequelize.query(`
+      await jalankan(`
         UPDATE kecamatan_bankeu_config
         SET stempel_path = NULL, updated_at = NOW()
         WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       res.json({
         success: true,

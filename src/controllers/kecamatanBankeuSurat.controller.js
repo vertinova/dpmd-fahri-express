@@ -1,5 +1,5 @@
 // Controller untuk Kecamatan review Surat Pengantar & Surat Permohonan dari Desa
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const { jumlah, urutNull, enumTeks } = require('../config/dialek');
 const logger = require('../utils/logger');
 const fs = require('fs');
@@ -50,10 +50,7 @@ exports.getAllDesaSurat = async (req, res) => {
       ORDER BY ${urutNull('dbs.submitted_at', 'DESC')}, d.nama ASC
     `;
 
-    const suratList = await sequelize.query(suratQuery, {
-      replacements: params,
-      type: sequelize.QueryTypes.SELECT
-    });
+    const suratList = await kueri(suratQuery, params);
 
     // Get proposals for each surat bundle
     const bundleList = await Promise.all(suratList.map(async (surat) => {
@@ -77,10 +74,7 @@ exports.getAllDesaSurat = async (req, res) => {
         ORDER BY bp.created_at DESC
       `;
       
-      const proposals = await sequelize.query(proposalsQuery, {
-        replacements: [surat.desa_id, surat.tahun],
-        type: sequelize.QueryTypes.SELECT
-      });
+      const proposals = await kueri(proposalsQuery, [surat.desa_id, surat.tahun]);
 
       return {
         ...surat,
@@ -135,10 +129,7 @@ exports.getDesaSuratDetail = async (req, res) => {
       WHERE dbs.id = ? AND d.kecamatan_id = ?
     `;
 
-    const [surat] = await sequelize.query(query, {
-      replacements: [id, kecamatan_id],
-      type: sequelize.QueryTypes.SELECT
-    });
+    const [surat] = await kueri(query, [id, kecamatan_id]);
 
     if (!surat) {
       return res.status(404).json({
@@ -195,10 +186,7 @@ exports.reviewSurat = async (req, res) => {
       WHERE dbs.id = ? AND d.kecamatan_id = ?
     `;
 
-    const [surat] = await sequelize.query(checkQuery, {
-      replacements: [id, kecamatan_id],
-      type: sequelize.QueryTypes.SELECT
-    });
+    const [surat] = await kueri(checkQuery, [id, kecamatan_id]);
 
     if (!surat) {
       return res.status(404).json({
@@ -266,14 +254,12 @@ exports.reviewSurat = async (req, res) => {
         WHERE id = ?
       `;
 
-    await sequelize.query(updateQuery, {
-      replacements: [
-        status,
-        reviewer_id,
-        catatan || null,
-        id
-      ]
-    });
+    await jalankan(updateQuery, [
+      status,
+      reviewer_id,
+      catatan || null,
+      id
+    ]);
 
     logger.info(`Kecamatan user ${reviewer_id} ${status} surat desa ID ${id} (Desa: ${surat.nama_desa})`);
 
@@ -321,10 +307,7 @@ exports.getSuratStatistics = async (req, res) => {
       WHERE d.kecamatan_id = ? AND dbs.tahun = ? AND dbs.submitted_to_kecamatan = TRUE
     `;
 
-    const [stats] = await sequelize.query(query, {
-      replacements: [kecamatan_id, tahun],
-      type: sequelize.QueryTypes.SELECT
-    });
+    const [stats] = await kueri(query, [kecamatan_id, tahun]);
 
     res.json({
       success: true,

@@ -1,6 +1,6 @@
 // Controller untuk Surat Pengantar dan Surat Permohonan (per Desa)
 const prisma = require('../config/prisma');
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const path = require('path');
 const fs = require('fs');
 const logger = require('../utils/logger');
@@ -12,16 +12,13 @@ exports.getDesaSurat = async (req, res) => {
 
     logger.info(`📄 Fetch surat desa - Desa ID: ${desaId}, Tahun: ${tahun}`);
 
-    const [surat] = await sequelize.query(`
+    const [surat] = await kueri(`
       SELECT dbs.*, u.name AS reviewer_name
       FROM desa_bankeu_surat dbs
       LEFT JOIN users u ON dbs.kecamatan_reviewed_by = u.id
       WHERE dbs.desa_id = ? AND dbs.tahun = ?
       LIMIT 1
-    `, {
-      replacements: [desaId, tahun],
-      type: sequelize.QueryTypes.SELECT
-    });
+    `, [desaId, tahun]);
 
     if (!surat) {
       return res.json({
@@ -88,14 +85,11 @@ exports.uploadSuratDesa = async (req, res) => {
     const fieldName = jenis === 'pengantar' ? 'surat_pengantar' : 'surat_permohonan';
 
     // Check apakah sudah ada record
-    const [existing] = await sequelize.query(`
+    const [existing] = await kueri(`
       SELECT * FROM desa_bankeu_surat 
       WHERE desa_id = ? AND tahun = ?
       LIMIT 1
-    `, {
-      replacements: [desaId, currentYear],
-      type: sequelize.QueryTypes.SELECT
-    });
+    `, [desaId, currentYear]);
 
     let result;
 
@@ -112,24 +106,21 @@ exports.uploadSuratDesa = async (req, res) => {
         }
       }
 
-      await sequelize.query(`
+      await jalankan(`
         UPDATE desa_bankeu_surat
         SET ${fieldName} = ?, updated_at = NOW()
         WHERE id = ?
-      `, {
-        replacements: [filePath, existing.id]
-      });
+      `, [filePath, existing.id]);
 
       result = { id: existing.id, [fieldName]: filePath };
       logger.info(`✅ Updated surat ${jenis} for desa ${desaId}`);
     } else {
       // Insert new record
-      const [insertResult] = await sequelize.query(`
+      const [{ id: insertResult }] = await kueri(`
         INSERT INTO desa_bankeu_surat (desa_id, tahun, ${fieldName}, created_at, updated_at)
         VALUES (?, ?, ?, NOW(), NOW())
-      `, {
-        replacements: [desaId, currentYear, filePath]
-      });
+        RETURNING id
+      `, [desaId, currentYear, filePath]);
 
       result = { id: insertResult, [fieldName]: filePath };
       logger.info(`✅ Created new surat ${jenis} for desa ${desaId}`);
@@ -181,14 +172,11 @@ exports.submitSuratToKecamatan = async (req, res) => {
     }
 
     // Check surat exists and complete
-    const [surat] = await sequelize.query(`
+    const [surat] = await kueri(`
       SELECT * FROM desa_bankeu_surat 
       WHERE desa_id = ? AND tahun = ?
       LIMIT 1
-    `, {
-      replacements: [desaId, tahun],
-      type: sequelize.QueryTypes.SELECT
-    });
+    `, [desaId, tahun]);
 
     if (!surat) {
       return res.status(400).json({
@@ -212,7 +200,7 @@ exports.submitSuratToKecamatan = async (req, res) => {
     }
 
     // Update status dan reset jika rejected sebelumnya
-    await sequelize.query(`
+    await jalankan(`
       UPDATE desa_bankeu_surat
       SET submitted_to_kecamatan = TRUE, 
           submitted_at = NOW(),
@@ -222,9 +210,7 @@ exports.submitSuratToKecamatan = async (req, res) => {
           kecamatan_catatan = NULL,
           updated_at = NOW()
       WHERE id = ?
-    `, {
-      replacements: [surat.id]
-    });
+    `, [surat.id]);
 
     logger.info(`✅ Surat dikirim ke kecamatan - Desa ID: ${desaId}`);
 
