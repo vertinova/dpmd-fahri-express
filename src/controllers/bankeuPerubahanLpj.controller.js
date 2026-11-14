@@ -30,9 +30,10 @@ class BankeuPerubahanLpjController {
         return res.status(403).json({ success: false, message: 'User tidak terkait dengan desa' });
       }
 
-      let where = 'WHERE desa_id = ?';
+      // Berawalan lpj.: users juga punya desa_id (dulu galat "ambiguous")
+      let where = 'WHERE lpj.desa_id = ?';
       const replacements = [users[0].desa_id];
-      if (tahun) { where += ' AND tahun_anggaran = ?'; replacements.push(parseInt(tahun)); }
+      if (tahun) { where += ' AND lpj.tahun_anggaran = ?'; replacements.push(parseInt(tahun)); }
 
       const [rows] = await sequelize.query(`
         SELECT lpj.*, u.name AS dpmd_verified_by_name

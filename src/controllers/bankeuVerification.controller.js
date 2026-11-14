@@ -52,8 +52,13 @@ class BankeuVerificationController {
         replacements.push(status);
       }
 
+      // Kegiatan proposal ada di tabel relasi (tidak di-JOIN di kueri utama): proposal
+      // lolos bila punya minimal satu kegiatan berjenis itu.
       if (jenis_kegiatan) {
-        whereClause += ` AND ${enumTeks('bmk.jenis_kegiatan')} = ?`;
+        whereClause += ` AND EXISTS (
+          SELECT 1 FROM bankeu_proposal_kegiatan bpk
+          JOIN bankeu_master_kegiatan bmk ON bpk.kegiatan_id = bmk.id
+          WHERE bpk.proposal_id = bp.id AND ${enumTeks('bmk.jenis_kegiatan')} = ?)`;
         replacements.push(jenis_kegiatan);
       }
 
