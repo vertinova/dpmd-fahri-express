@@ -429,7 +429,7 @@ class BankeuPerubahanTimConfigController {
            FROM tim_verifikasi_kecamatan
            WHERE kecamatan_id = ? AND is_active = TRUE
              AND jabatan LIKE 'anggota_%' AND nama IS NOT NULL AND nama != ''
-           ORDER BY ${urutNull('ttd_path', 'DESC')}, nama ASC`,
+           ORDER BY ${urutNull('ttd_path', 'DESC')}, nama ASC, id ASC`,
           [kecamatanId]
         );
 
@@ -497,7 +497,7 @@ class BankeuPerubahanTimConfigController {
          FROM tim_verifikasi_bankeu_perubahan
          WHERE kecamatan_id = ? AND jabatan LIKE 'anggota_%' AND is_active = TRUE
            AND nama IS NOT NULL AND nama != ''
-         ORDER BY ${urutNull('ttd_path', 'DESC')}, nama ASC`,
+         ORDER BY ${urutNull('ttd_path', 'DESC')}, nama ASC, id ASC`,
         [kecamatanId]
       );
       const seen = new Set();

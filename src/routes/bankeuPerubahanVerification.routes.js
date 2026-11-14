@@ -33,7 +33,8 @@ router.get('/statistics', controller.getStatistics);
 
 // Submit ke DPMD per desa (semua proposal approved untuk satu desa)
 router.post('/desa/:desaId/submit-to-dpmd', controller.submitToDpmd);
-router.post('/desa/:desaId/submit-review', controller.submitReview);
+// Langsung ke submitToDpmd: submitReview memakai this, yang hilang bila method dipasang tanpa bind (permintaan macet)
+router.post('/desa/:desaId/submit-review', controller.submitToDpmd);
 
 // Generate Berita Acara per proposal (body: proposalId, kegiatanId, optionalItems, tanggal)
 router.post('/desa/:desaId/berita-acara', beritaAcaraController.generateBeritaAcara);

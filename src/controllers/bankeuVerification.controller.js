@@ -1056,7 +1056,8 @@ class BankeuVerificationController {
   async saveConfig(req, res) {
     try {
       const { kecamatanId } = req.params;
-      const { nama_camat, nip_camat, jabatan_penandatangan, alamat, telepon, email, website, kode_pos } = req.body;
+      // Field yang tidak dikirim jadi NULL (parameter undefined ditolak sqlMentah → dulu 500)
+      const { nama_camat = null, nip_camat = null, jabatan_penandatangan, alamat = null, telepon = null, email = null, website = null, kode_pos = null } = req.body;
       const userId = req.user.id;
 
       // Verify user is from this kecamatan
@@ -1136,7 +1137,7 @@ class BankeuVerificationController {
       const timVerifikasi = await kueri(`
         SELECT * FROM tim_verifikasi_kecamatan
         WHERE kecamatan_id = ? AND is_active = TRUE
-        ORDER BY ${urutanNilai('jabatan', ['ketua', 'sekretaris', 'anggota'])}, nama ASC
+        ORDER BY ${urutanNilai('jabatan', ['ketua', 'sekretaris', 'anggota'])}, nama ASC, id ASC
       `, [kecamatanId]);
 
       res.json({
@@ -1160,7 +1161,7 @@ class BankeuVerificationController {
   async addTimVerifikasi(req, res) {
     try {
       const { kecamatanId } = req.params;
-      const { jabatan, nama, nip, jabatan_label } = req.body;
+      const { jabatan, nama, nip = null, jabatan_label } = req.body;
       const userId = req.user.id;
 
       // Verify user is from this kecamatan

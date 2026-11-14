@@ -491,7 +491,7 @@ class KecamatanBankeuTimConfigController {
           AND t.is_active = TRUE
           AND t.nama IS NOT NULL
           AND t.nama != ''
-        ORDER BY ${urutNull('t.ttd_path', 'DESC')}, t.nama ASC
+        ORDER BY ${urutNull('t.ttd_path', 'DESC')}, t.nama ASC, t.id ASC
       `;
 
       const results = await kueri(query, [kecamatanId]);
