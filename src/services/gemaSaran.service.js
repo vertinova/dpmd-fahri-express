@@ -64,7 +64,6 @@ const susunSaran = (hasil) => {
 		return [
 			'berapa yang berstatus mandiri',
 			'yang berstatus maju berapa',
-			'sebarannya per kecamatan',
 		];
 	}
 
@@ -72,7 +71,6 @@ const susunSaran = (hasil) => {
 		return [
 			'yang sudah berbadan hukum berapa',
 			'yang statusnya aktif saja',
-			'berapa total asetnya',
 		];
 	}
 
@@ -93,11 +91,11 @@ const susunSaran = (hasil) => {
 	}
 
 	if (maksud === 'daftar-kelembagaan') {
-		return ['berapa totalnya', 'bandingkan dengan kecamatan lain', 'yang paling banyak di mana'];
+		return ['berapa totalnya'];
 	}
 
 	if (maksud.startsWith('keuangan') || maksud.startsWith('penyaluran')) {
-		return ['berapa yang sudah cair', 'rinciannya per kecamatan', 'bandingkan dengan sumber dana lain'];
+		return ['berapa yang sudah cair'];
 	}
 
 	if (maksud === 'profil-akun-pegawai' || maksud.startsWith('akun')) {

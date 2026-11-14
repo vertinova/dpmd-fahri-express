@@ -87,7 +87,6 @@ const EJAAN = [
 ];
 
 const betulkanEjaan = (t) => EJAAN.reduce((teks, [pola, ganti]) => teks.replace(pola, ganti), t);
-const punya = (t, kata) => kata.some((k) => t.includes(k));
 
 /**
  * Cocokkan sebagai KATA UTUH, tanpa regex.
@@ -100,22 +99,32 @@ const punya = (t, kata) => kata.some((k) => t.includes(k));
  * "Posyandu". Memecah teks jadi potongan kata menghindari jebakan pelolosan
  * itu sama sekali.
  */
-const kataUtuh = (teks, kata) => {
-	if (kata.includes(' ')) return teks.includes(kata);
-	return teks.split(/[^a-z0-9]+/).includes(kata);
+// Teks dipecah jadi token lalu dibungkus spasi, sehingga kata dan frasa sama-sama
+// dicocokkan di batas kata: "rt" tidak cocok di "persawahan", "kasi" tidak di "berklasifikasi".
+const bungkus = (teks) => ` ${String(teks).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).join(' ')} `;
+const kataUtuh = (teks, kata) => bungkus(teks).includes(bungkus(kata));
+const punya = (t, kata) => {
+	const b = bungkus(t);
+	return kata.some((k) => b.includes(bungkus(k)));
 };
 
 const rupiah = (n) => (n === null || n === undefined ? '—' : `Rp ${nf.format(Math.round(Number(n)))}`);
 
-/** Cocokkan kamus ke dalam kalimat; yang namanya paling panjang menang. */
-const cocokkan = (teks, daftar) => {
-	let terbaik = null;
+/** Semua entri kamus yang cocok pada kunci terpanjang (nama kembar ikut semua). */
+const cocokkanSemua = (teks, daftar) => {
+	const b = bungkus(teks);
+	let panjang = 0;
+	let hasil = [];
 	for (const item of daftar) {
-		if (!teks.includes(item.kunci)) continue;
-		if (!terbaik || item.kunci.length > terbaik.kunci.length) terbaik = item;
+		if (!b.includes(bungkus(item.kunci))) continue;
+		if (item.kunci.length > panjang) { panjang = item.kunci.length; hasil = [item]; }
+		else if (item.kunci.length === panjang) hasil.push(item);
 	}
-	return terbaik;
+	return hasil;
 };
+
+/** Cocokkan kamus ke dalam kalimat; yang namanya paling panjang menang. */
+const cocokkan = (teks, daftar) => cocokkanSemua(teks, daftar)[0] || null;
 
 /* --------------------------------------------------------------- analisis -- */
 
@@ -166,8 +175,17 @@ const analisis = async (teksAsli) => {
 	// Nama desa sering sama dengan nama kecamatannya (Cibinong, Jonggol).
 	// Kalau keduanya cocok pada kata yang sama, yang dipakai kecamatannya —
 	// pertanyaan "di Jonggol" hampir selalu berarti wilayahnya, bukan satu desa.
-	const desaCocok = cocokkan(teks, kamus.desa);
-	const desa = desaCocok && (!kecamatan || desaCocok.kunci !== kecamatan.kunci) ? desaCocok : null;
+	let desaCocok = cocokkanSemua(teks, kamus.desa);
+	if (desaCocok.length && kecamatan && desaCocok[0].kunci === kecamatan.kunci) desaCocok = [];
+	// Nama desa kembar (416 desa, 369 nama unik): kecamatan yang disebut jadi penentu.
+	// Kalau tak tertentukan, jangan menebak — cariJawaban meminta penanya memilih.
+	let desa = desaCocok[0] || null;
+	let desaKembar = null;
+	if (desaCocok.length > 1) {
+		const sekecamatan = kecamatan ? desaCocok.filter((d) => String(d.kecamatan_id) === String(kecamatan.id)) : [];
+		if (sekecamatan.length === 1) desa = sekecamatan[0];
+		else { desa = null; desaKembar = desaCocok; }
+	}
 
 	const nilai = cocokkan(teks, kamus.nilai);
 	const jabatan = cocokkan(teks, kamus.jabatan);
@@ -188,12 +206,13 @@ const analisis = async (teksAsli) => {
 		teks,
 		kecamatan,
 		desa,
+		desaKembar,
 		nilai,
 		jabatan,
 		lembaga,
 		sumberDana,
 		topik,
-		agregasi: punya(teks, ['berapa', 'jumlah', 'total', 'hitung', 'banyaknya']),
+		agregasi: punya(teks, ['berapa', 'jumlah', 'jumlahnya', 'total', 'totalnya', 'hitung', 'banyaknya']),
 		mintaSetelUlang: punya(teks, [
 			'reset password', 'reset sandi', 'setel ulang sandi', 'setel ulang password',
 			'password default', 'sandi default', 'ganti password', 'ubah password',
@@ -278,6 +297,38 @@ const raporKecamatan = async (kec) => {
 				.map((s) => ({ label: s.status_desa, nilai: `${nf.format(s._count.id)} desa` })),
 		],
 		kolom: [], baris: [], total: 0,
+	};
+};
+
+/** Daftar semua desa dalam satu kecamatan, lengkap dengan status pemerintahannya. */
+const daftarDesaKecamatan = async (kec) => {
+	const [desas, profil] = await Promise.all([
+		prisma.desas.findMany({
+			where: { kecamatan_id: kec.id },
+			select: { id: true, nama: true, status_pemerintahan: true },
+			orderBy: { nama: 'asc' },
+		}),
+		prisma.profil_desas.findMany({
+			where: { desas: { kecamatan_id: kec.id } },
+			select: { desa_id: true, status_desa: true },
+		}),
+	]);
+	const statusDesa = new Map(profil.map((p) => [String(p.desa_id), p.status_desa]));
+
+	return {
+		maksud: 'daftar-desa',
+		kalimat: `Kecamatan ${kec.nama} punya ${nf.format(desas.length)} desa.`,
+		kolom: [
+			{ kunci: 'desa', label: 'Desa' },
+			{ kunci: 'pemerintahan', label: 'Pemerintahan' },
+			{ kunci: 'status', label: 'Status' },
+		],
+		baris: desas.map((d) => ({
+			desa: d.nama,
+			pemerintahan: d.status_pemerintahan || '—',
+			status: statusDesa.get(String(d.id)) || '—',
+		})),
+		total: desas.length,
 	};
 };
 
@@ -523,7 +574,7 @@ const daftarBankeu = async (a) => {
 	else if (a.kecamatan) where.desas = { kecamatan_id: a.kecamatan.id };
 
 	// Tahun anggaran ditangkap dari kalimatnya kalau disebut.
-	const tahun = a.teks.match(/(20\d{2})/);
+	const tahun = a.teks.match(/\b(20\d{2})\b/);
 	if (tahun) where.tahun_anggaran = parseInt(tahun[1], 10);
 
 	const [jumlah, baris, perStatus, jumlahAnggaran] = await Promise.all([
@@ -798,12 +849,26 @@ const manusiakan = (hasil) => {
 };
 /** Pilih penangan yang tepat. Mengembalikan jawaban MENTAH, belum digayakan. */
 const cariJawaban = async (a, pelaku = null) => {
+	// Nama desa kembar tanpa kecamatan yang menentukan: tanya balik, jangan menebak.
+	if (a.desaKembar) {
+		const kec = [...new Set(a.desaKembar.map((d) => d.kecamatan).filter(Boolean))];
+		const nama = a.desaKembar[0].nama;
+		const daftarKec = kec.length > 1 ? `${kec.slice(0, -1).join(', ')}, dan ${kec[kec.length - 1]}` : kec.join('');
+		return {
+			maksud: 'desa-kembar',
+			kalimat: `Desa ${nama} ada di Kecamatan ${daftarKec}. Yang mana?`,
+			kolom: [], baris: [], total: 0,
+		};
+	}
+
 	// LAPIS 1 — satu entitas disebut, tanpa topik lain dan tanpa penyaring.
 	// "Cijayanti" atau "profil desa Cijayanti" cukup jadi pertanyaan utuh.
 	const tanpaPenyaring = !a.nilai && !a.jabatan && !a.mintaAktif && !a.mintaBadanHukum;
 	if (a.desa && tanpaPenyaring && (!a.topik || a.topik === 'desa')) return raporDesa(a.desa);
-	if (a.kecamatan && !a.desa && tanpaPenyaring && (!a.topik || a.topik === 'desa') && !a.agregasi) {
-		return raporKecamatan(a.kecamatan);
+	if (a.kecamatan && !a.desa && tanpaPenyaring && (!a.topik || a.topik === 'desa')) {
+		// "desa di kecamatan X" meminta daftar desanya, bukan rapor kecamatan.
+		if (kataUtuh(a.teks, 'desa')) return daftarDesaKecamatan(a.kecamatan);
+		if (!a.agregasi) return raporKecamatan(a.kecamatan);
 	}
 
 	// LAPIS 2 — topik yang dikenali, disaring entitas dan nilai yang disebut.
@@ -813,7 +878,7 @@ const cariJawaban = async (a, pelaku = null) => {
 		const kata = ambilKataCari(a.teks);
 		return a.mintaSetelUlang
 			? siapkanSetelUlangSandi({ kata, pelaku })
-			: cariAkun(kata);
+			: cariAkun(kata, pelaku);
 	}
 	if (a.topik === 'keuangan') return jawabKeuangan(a);
 	if (a.topik === 'bumdes') return daftarBumdes(a);

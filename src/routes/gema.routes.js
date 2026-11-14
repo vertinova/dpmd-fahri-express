@@ -21,6 +21,8 @@ router.use(checkRole(PERAN_INTERNAL_DPMD));
 
 router.get('/kemampuan', controller.kemampuan);
 router.post('/tanya', controller.tanya);
+router.post('/tanya-alir', controller.tanyaAlir);
+router.post('/suara', controller.suara);
 
 // Membuang ingatan percakapan sesi ini. Hanya menyentuh memori proses; tidak
 // ada data yang berubah, jadi tidak perlu izin di luar yang sudah diperiksa.

@@ -60,6 +60,16 @@ const hurufJudul = (t) => String(t || '')
  * @param {object} a hasil analisis: { teks, desa, kecamatan, sumberDana }
  */
 const jawabKeuangan = async (a) => {
+	// Data SIPANDA yang dipakai hanya satu tahun; tahun lain jangan dijawab seolah benar.
+	const tahunDitanya = String(a.teks || '').match(/\b(20\d{2})\b/);
+	if (tahunDitanya && tahunDitanya[1] !== String(SIPANDA_TAHUN)) {
+		return {
+			maksud: 'keuangan-tahun-lain',
+			kalimat: `Data penyaluran yang tersedia hanya TA ${SIPANDA_TAHUN}, jadi belum bisa saya tampilkan untuk tahun ${tahunDitanya[1]}.`,
+			kolom: [], baris: [], total: 0,
+		};
+	}
+
 	let baris;
 	try {
 		baris = await fetchSipandaRows({});
@@ -79,7 +89,13 @@ const jawabKeuangan = async (a) => {
 	const kecil = (v) => String(v || '').toLowerCase();
 	let saring = baris;
 	if (sumber) saring = saring.filter((r) => sumber.cocok(String(r.sumber_dana || '')));
-	if (a.desa) saring = saring.filter((r) => kecil(r.desa) === kecil(a.desa.nama));
+	if (a.desa) {
+		saring = saring.filter((r) => kecil(r.desa) === kecil(a.desa.nama));
+		// Nama desa kembar: bila barisnya tersebar di >1 kecamatan, pasangkan dengan kecamatannya.
+		if (a.desa.kecamatan && new Set(saring.map((r) => kecil(r.kecamatan))).size > 1) {
+			saring = saring.filter((r) => kecil(r.kecamatan) === kecil(a.desa.kecamatan));
+		}
+	}
 	else if (a.kecamatan) saring = saring.filter((r) => kecil(r.kecamatan) === kecil(a.kecamatan.nama));
 
 	if (!saring.length) {

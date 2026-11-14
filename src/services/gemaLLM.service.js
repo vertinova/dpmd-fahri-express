@@ -8,57 +8,55 @@
  * sendiri, setelah pengguna menekan tombol di layar.
  *
  * Model hanya mengerjakan dua hal — memilih alat mana yang dipanggil dengan
- * penyaring apa, dan merangkai satu kalimat yang enak diucapkan. Seluruh angka
- * dan baris tabel yang sampai ke pengguna diambil langsung dari hasil alat,
- * yaitu langsung dari basis data. Kalau model mengarang angka di kalimatnya,
- * tabel di bawahnya akan langsung membantah — dan itu memang disengaja.
+ * penyaring apa, dan merangkai kalimat yang enak diucapkan. Seluruh angka dan
+ * baris tabel yang sampai ke pengguna diambil langsung dari hasil alat, yaitu
+ * langsung dari basis data. Kalau model mengarang angka di kalimatnya, tabel di
+ * bawahnya akan langsung membantah — dan itu memang disengaja.
  *
- * Alatnya bukan barang baru: persis penangan yang sudah dipakai mesin
- * deterministik di gemaMesin.service.js. Jadi tidak ada dua jalur yang bisa
- * menyimpang, dan mematikan lapis ini tidak menghilangkan kemampuan apa pun.
+ * Alat domain adalah penangan yang sama dengan mesin deterministik di
+ * gemaMesin.service.js. Dua alat tambahan (cari_tabel, kueri_data) memberi akses
+ * baca SQL terkurasi lewat gemaData.service.js untuk pertanyaan di luar alat domain.
  *
- * KAPAN AKTIF. Hanya bila ANTHROPIC_API_KEY diisi. Tanpa kunci, berkas ini
- * diam sepenuhnya dan Gema memakai mesin deterministik — tidak ada satu byte
- * pun yang meninggalkan server. Itu bukan kebetulan: data desa, aparatur, dan
- * keuangan di sini bukan milik kami untuk dikirim ke layanan luar, jadi
- * pengirimannya harus berupa keputusan sadar yang ditulis di berkas .env.
- *
- * APA YANG DIKIRIM saat aktif: pertanyaan penggunanya, dan hasil alat yang
- * dipanggil (yang memang berisi data desa). Yang TIDAK dikirim: seluruh isi
- * basis data — model hanya melihat apa yang dikembalikan alat yang ia panggil.
+ * KAPAN AKTIF. Hanya bila GEMA_LLM_URL diisi — server llama-server milik sendiri
+ * (OpenAI-compatible), jadi data tidak keluar dari jaringan DPMD. Tanpa itu Gema
+ * memakai mesin deterministik.
  */
 
-const { betaTool } = require('@anthropic-ai/sdk/helpers/beta/json-schema');
 const logger = require('../utils/logger');
 const mesin = require('./gemaMesin.service');
 const { muatKamus } = require('./gemaKamus.service');
 const akun = require('./gemaAkunPegawai.service');
+const data = require('./gemaData.service');
 const percakapan = require('./gemaPercakapan.service');
 const { susunSaran } = require('./gemaSaran.service');
+const { ringkasKatalog } = require('../config/gemaKatalog');
 
-const MODEL = 'claude-opus-5';
+const MODEL = process.env.GEMA_LLM_MODEL || 'gemma-4-26b-a4b';
+const MAKS_PUTARAN = 6;
+const TIMEOUT_PUTARAN_MS = 60 * 1000;
 
-/** Klien dibuat sekali, dan hanya kalau kuncinya memang ada. */
-let klien = null;
-
-const tersedia = () => Boolean(process.env.ANTHROPIC_API_KEY);
-
-const ambilKlien = () => {
-	if (klien) return klien;
-	if (!tersedia()) return null;
-	const Anthropic = require('@anthropic-ai/sdk');
-	const Kelas = Anthropic.default || Anthropic;
-	klien = new Kelas();
-	return klien;
-};
+const tersedia = () => Boolean(process.env.GEMA_LLM_URL);
 
 /* ------------------------------------------------------------------- alat -- */
 
+const alat = (name, description, properties, required, run) => ({
+	definisi: {
+		type: 'function',
+		function: {
+			name,
+			description,
+			parameters: { type: 'object', properties, required, additionalProperties: false },
+		},
+	},
+	run,
+});
+
 /**
- * Hasil alat terakhir ditangkap di sini, lalu dipakai membangun jawaban akhir.
+ * Hasil alat ditangkap di `tangkap`, lalu dipakai membangun jawaban akhir.
  * Tabel yang dilihat pengguna berasal dari SINI, bukan dari karangan model.
+ * @returns {{ definisi: object[], peta: Object<string, Function> }}
  */
-const buatAlat = (tangkap, pelaku) => {
+const buatAlat = (tangkap, pelaku, jejak = { alat: [], sql: [] }) => {
 	const catat = (hasil) => {
 		tangkap.push(hasil);
 		// Yang dikirim balik ke model diringkas: ia butuh tahu ADA APA dan
@@ -75,51 +73,43 @@ const buatAlat = (tangkap, pelaku) => {
 		});
 	};
 
-	return [
-		betaTool({
-			name: 'cari_desa',
-			description:
-				'Cari desa menurut status desa (Mandiri/Maju/Berkembang), klasifikasi '
-				+ '(Swakarya/Swasembada/Swadaya), tipologi (Persawahan/Perkebunan/dll), '
-				+ 'dan/atau kecamatan. Pakai untuk pertanyaan tentang daftar desa.',
-			inputSchema: {
-				type: 'object',
-				properties: {
-					status_desa: { type: 'string', description: 'mis. Mandiri, Maju, Berkembang' },
-					klasifikasi: { type: 'string', description: 'mis. Swakarya, Swasembada, Swadaya' },
-					tipologi: { type: 'string', description: 'mis. Persawahan, Perkebunan, Perikanan' },
-					kecamatan: { type: 'string', description: 'nama kecamatan' },
-				},
-				additionalProperties: false,
+	const daftar = [
+		alat(
+			'cari_desa',
+			'Cari desa menurut status desa (Mandiri/Maju/Berkembang), klasifikasi '
+			+ '(Swakarya/Swasembada/Swadaya), tipologi (Persawahan/Perkebunan/dll), '
+			+ 'dan/atau kecamatan. Pakai untuk pertanyaan tentang daftar desa.',
+			{
+				status_desa: { type: 'string', description: 'mis. Mandiri, Maju, Berkembang' },
+				klasifikasi: { type: 'string', description: 'mis. Swakarya, Swasembada, Swadaya' },
+				tipologi: { type: 'string', description: 'mis. Persawahan, Perkebunan, Perikanan' },
+				kecamatan: { type: 'string', description: 'nama kecamatan' },
 			},
-			run: async (input) => {
+			[],
+			async (input) => {
 				const bagian = [
 					input.status_desa ? `desa berstatus ${input.status_desa}` : '',
 					input.klasifikasi ? `desa ${input.klasifikasi}` : '',
 					input.tipologi ? `tipologi ${input.tipologi}` : '',
-					input.kecamatan ? `di kecamatan ${input.kecamatan}` : '',
+					input.kecamatan ? `desa di kecamatan ${input.kecamatan}` : '',
 				].filter(Boolean).join(' ');
 				return catat(await mesin.jawab(bagian || 'desa'));
 			},
-		}),
+		),
 
-		betaTool({
-			name: 'cari_bumdes',
-			description:
-				'Cari BUM Desa. Bisa disaring status aktif, sudah terbit badan hukum, '
-				+ 'kecamatan, atau desa tertentu. Kalau hasilnya tinggal SATU, yang kembali '
-				+ 'adalah profil lengkapnya: direktur, NIB, NPWP, aset, omset, dan PADes.',
-			inputSchema: {
-				type: 'object',
-				properties: {
-					kecamatan: { type: 'string' },
-					desa: { type: 'string' },
-					hanya_aktif: { type: 'boolean' },
-					hanya_berbadan_hukum: { type: 'boolean' },
-				},
-				additionalProperties: false,
+		alat(
+			'cari_bumdes',
+			'Cari BUM Desa. Bisa disaring status aktif, sudah terbit badan hukum, '
+			+ 'kecamatan, atau desa tertentu. Kalau hasilnya tinggal SATU, yang kembali '
+			+ 'adalah profil lengkapnya: direktur, NIB, NPWP, aset, omset, dan PADes.',
+			{
+				kecamatan: { type: 'string' },
+				desa: { type: 'string' },
+				hanya_aktif: { type: 'boolean' },
+				hanya_berbadan_hukum: { type: 'boolean' },
 			},
-			run: async (input) => {
+			[],
+			async (input) => {
 				const bagian = [
 					'bumdes',
 					input.hanya_aktif ? 'aktif' : '',
@@ -129,25 +119,21 @@ const buatAlat = (tangkap, pelaku) => {
 				].filter(Boolean).join(' ');
 				return catat(await mesin.jawab(bagian));
 			},
-		}),
+		),
 
-		betaTool({
-			name: 'cari_aparatur',
-			description:
-				'Cari aparatur desa. Bisa disaring jabatan (mis. KEPALA DESA, SEKRETARIS '
-				+ 'DESA, Anggota BPD, KAUR KEUANGAN), kecamatan, atau desa. Kalau hasilnya '
-				+ 'tinggal SATU orang, yang kembali adalah profil lengkapnya: NIPD, tempat '
-				+ 'dan tanggal lahir, pendidikan, SK pengangkatan, BPJS, dan berkasnya.',
-			inputSchema: {
-				type: 'object',
-				properties: {
-					jabatan: { type: 'string' },
-					kecamatan: { type: 'string' },
-					desa: { type: 'string' },
-				},
-				additionalProperties: false,
+		alat(
+			'cari_aparatur',
+			'Cari aparatur desa. Bisa disaring jabatan (mis. KEPALA DESA, SEKRETARIS '
+			+ 'DESA, Anggota BPD, KAUR KEUANGAN), kecamatan, atau desa. Kalau hasilnya '
+			+ 'tinggal SATU orang, yang kembali adalah profil lengkapnya: NIPD, tempat '
+			+ 'dan tanggal lahir, pendidikan, SK pengangkatan, BPJS, dan berkasnya.',
+			{
+				jabatan: { type: 'string' },
+				kecamatan: { type: 'string' },
+				desa: { type: 'string' },
 			},
-			run: async (input) => {
+			[],
+			async (input) => {
 				const bagian = [
 					input.jabatan || 'aparatur',
 					input.kecamatan ? `di kecamatan ${input.kecamatan}` : '',
@@ -155,38 +141,30 @@ const buatAlat = (tangkap, pelaku) => {
 				].filter(Boolean).join(' ');
 				return catat(await mesin.jawab(bagian));
 			},
-		}),
+		),
 
-		betaTool({
-			name: 'rapor_wilayah',
-			description:
-				'Ambil rapor lengkap satu desa atau satu kecamatan: status, klasifikasi, '
-				+ 'tipologi, penduduk, kepala desa, jumlah aparatur, BUM Desa, produk hukum. '
-				+ 'Pakai kalau pertanyaannya tentang SATU wilayah tertentu.',
-			inputSchema: {
-				type: 'object',
-				properties: {
-					nama: { type: 'string', description: 'nama desa atau kecamatan' },
-					jenis: { type: 'string', enum: ['desa', 'kecamatan'] },
-				},
-				required: ['nama'],
-				additionalProperties: false,
+		alat(
+			'rapor_wilayah',
+			'Ambil rapor lengkap satu desa atau satu kecamatan: status, klasifikasi, '
+			+ 'tipologi, penduduk, kepala desa, jumlah aparatur, BUM Desa, produk hukum. '
+			+ 'Pakai kalau pertanyaannya tentang SATU wilayah tertentu.',
+			{
+				nama: { type: 'string', description: 'nama desa atau kecamatan' },
+				jenis: { type: 'string', enum: ['desa', 'kecamatan'] },
 			},
-			run: async (input) => {
+			['nama'],
+			async (input) => {
 				const awalan = input.jenis === 'kecamatan' ? 'kecamatan ' : '';
 				return catat(await mesin.jawab(`${awalan}${input.nama}`));
 			},
-		}),
+		),
 
-		betaTool({
-			name: 'cari_produk_hukum',
-			description: 'Cari produk hukum desa (Perdes, Perkades, SK Kades), bisa disaring desa atau kecamatan.',
-			inputSchema: {
-				type: 'object',
-				properties: { desa: { type: 'string' }, kecamatan: { type: 'string' } },
-				additionalProperties: false,
-			},
-			run: async (input) => {
+		alat(
+			'cari_produk_hukum',
+			'Cari produk hukum desa (Perdes, Perkades, SK Kades), bisa disaring desa atau kecamatan.',
+			{ desa: { type: 'string' }, kecamatan: { type: 'string' } },
+			[],
+			async (input) => {
 				const bagian = [
 					'produk hukum',
 					input.desa ? `desa ${input.desa}` : '',
@@ -194,24 +172,20 @@ const buatAlat = (tangkap, pelaku) => {
 				].filter(Boolean).join(' ');
 				return catat(await mesin.jawab(bagian));
 			},
-		}),
+		),
 
-		betaTool({
-			name: 'cari_bantuan_keuangan',
-			description:
-				'Cari usulan Bantuan Keuangan (Bankeu) desa: judul kegiatan, anggaran yang '
-				+ 'diusulkan, dan tahap verifikasinya. Bisa disaring desa, kecamatan, dan '
-				+ 'tahun anggaran.',
-			inputSchema: {
-				type: 'object',
-				properties: {
-					desa: { type: 'string' },
-					kecamatan: { type: 'string' },
-					tahun: { type: 'integer', description: 'tahun anggaran, mis. 2025' },
-				},
-				additionalProperties: false,
+		alat(
+			'cari_bantuan_keuangan',
+			'Cari usulan Bantuan Keuangan (Bankeu) desa: judul kegiatan, anggaran yang '
+			+ 'diusulkan, dan tahap verifikasinya. Bisa disaring desa, kecamatan, dan '
+			+ 'tahun anggaran.',
+			{
+				desa: { type: 'string' },
+				kecamatan: { type: 'string' },
+				tahun: { type: 'integer', description: 'tahun anggaran, mis. 2025' },
 			},
-			run: async (input) => {
+			[],
+			async (input) => {
 				const bagian = [
 					'bantuan keuangan',
 					input.desa ? `desa ${input.desa}` : '',
@@ -220,27 +194,22 @@ const buatAlat = (tangkap, pelaku) => {
 				].filter(Boolean).join(' ');
 				return catat(await mesin.jawab(bagian));
 			},
-		}),
+		),
 
-		betaTool({
-			name: 'cari_kelembagaan',
-			description:
-				'Cari lembaga kemasyarakatan desa. Sebutkan salah satu: posyandu, rt, rw, '
-				+ 'lpm, pkk, karang taruna, satlinmas. Bisa disaring desa atau kecamatan.',
-			inputSchema: {
-				type: 'object',
-				properties: {
-					lembaga: {
-						type: 'string',
-						enum: ['posyandu', 'rt', 'rw', 'lpm', 'pkk', 'karang taruna', 'satlinmas'],
-					},
-					desa: { type: 'string' },
-					kecamatan: { type: 'string' },
+		alat(
+			'cari_kelembagaan',
+			'Cari lembaga kemasyarakatan desa. Sebutkan salah satu: posyandu, rt, rw, '
+			+ 'lpm, pkk, karang taruna, satlinmas. Bisa disaring desa atau kecamatan.',
+			{
+				lembaga: {
+					type: 'string',
+					enum: ['posyandu', 'rt', 'rw', 'lpm', 'pkk', 'karang taruna', 'satlinmas'],
 				},
-				required: ['lembaga'],
-				additionalProperties: false,
+				desa: { type: 'string' },
+				kecamatan: { type: 'string' },
 			},
-			run: async (input) => {
+			['lembaga'],
+			async (input) => {
 				const bagian = [
 					input.lembaga,
 					input.desa ? `di desa ${input.desa}` : '',
@@ -248,28 +217,24 @@ const buatAlat = (tangkap, pelaku) => {
 				].filter(Boolean).join(' ');
 				return catat(await mesin.jawab(bagian));
 			},
-		}),
+		),
 
-		betaTool({
-			name: 'cari_penyaluran_dana',
-			description:
-				'Penyaluran dana desa dari SIPANDA: ADD, Dana Desa (DD), BHPRD, Bankeu '
-				+ 'Akselerasi, dan Bantuan Provinsi (BP). Menjawab berapa totalnya, berapa '
-				+ 'yang sudah cair, dan sebarannya. Bisa disaring desa atau kecamatan.',
-			inputSchema: {
-				type: 'object',
-				properties: {
-					sumber_dana: {
-						type: 'string',
-						enum: ['ADD', 'DD', 'BHPRD', 'BANKEU', 'BP'],
-						description: 'kosongkan untuk melihat semua sumber sekaligus',
-					},
-					desa: { type: 'string' },
-					kecamatan: { type: 'string' },
+		alat(
+			'cari_penyaluran_dana',
+			'Penyaluran dana desa dari SIPANDA: ADD, Dana Desa (DD), BHPRD, Bankeu '
+			+ 'Akselerasi, dan Bantuan Provinsi (BP). Menjawab berapa totalnya, berapa '
+			+ 'yang sudah cair, dan sebarannya. Bisa disaring desa atau kecamatan.',
+			{
+				sumber_dana: {
+					type: 'string',
+					enum: ['ADD', 'DD', 'BHPRD', 'BANKEU', 'BP'],
+					description: 'kosongkan untuk melihat semua sumber sekaligus',
 				},
-				additionalProperties: false,
+				desa: { type: 'string' },
+				kecamatan: { type: 'string' },
 			},
-			run: async (input) => {
+			[],
+			async (input) => {
 				const sebutan = {
 					ADD: 'add', DD: 'dana desa', BHPRD: 'bhprd',
 					BANKEU: 'bankeu', BP: 'bantuan provinsi',
@@ -282,135 +247,232 @@ const buatAlat = (tangkap, pelaku) => {
 				].filter(Boolean).join(' ');
 				return catat(await mesin.jawab(bagian));
 			},
-		}),
+		),
 
-		betaTool({
-			name: 'cari_akun_pegawai',
-			description:
-				'Cari profil AKUN PEGAWAI DPMD (bukan aparatur desa) menurut nama, email, '
-				+ 'atau NIP. Kalau ketemu satu, yang kembali profil lengkapnya: peran, '
-				+ 'bidang, jabatan, NIP, status akun, dan apakah sandinya masih sandi '
-				+ 'default. Pakai untuk pertanyaan tentang akun aplikasi milik pegawai.',
-			inputSchema: {
-				type: 'object',
-				properties: {
-					kata: { type: 'string', description: 'nama, email, atau NIP pegawai' },
-				},
-				required: ['kata'],
-				additionalProperties: false,
-			},
-			run: async (input) => catat(await akun.cariAkun(String(input.kata || ''))),
-		}),
+		alat(
+			'cari_akun_pegawai',
+			'Cari profil AKUN PEGAWAI DPMD (bukan aparatur desa) menurut nama, email, '
+			+ 'atau NIP. Kalau ketemu satu, yang kembali profil lengkapnya: peran, '
+			+ 'bidang, jabatan, NIP, status akun, dan apakah sandinya masih sandi '
+			+ 'default. Pakai untuk pertanyaan tentang akun aplikasi milik pegawai.',
+			{ kata: { type: 'string', description: 'nama, email, atau NIP pegawai' } },
+			['kata'],
+			async (input) => catat(await akun.cariAkun(String(input.kata || ''), pelaku)),
+		),
 
-		betaTool({
-			name: 'siapkan_setel_ulang_sandi',
-			description:
-				'SIAPKAN penyetelan ulang sandi akun pegawai ke sandi default. Alat ini '
-				+ 'TIDAK mengubah apa pun — ia hanya mencari akunnya dan menyiapkan '
-				+ 'konfirmasi yang harus ditekan pengguna di layar. Kalau yang cocok lebih '
-				+ 'dari satu, yang kembali daftarnya supaya penanya mempersempit. Setelah '
-				+ 'memanggil alat ini, katakan bahwa konfirmasinya menunggu ditekan; JANGAN '
-				+ 'pernah mengatakan sandinya sudah diganti.',
-			inputSchema: {
-				type: 'object',
-				properties: {
-					kata: { type: 'string', description: 'nama atau email pegawai yang sandinya disetel ulang' },
-				},
-				required: ['kata'],
-				additionalProperties: false,
-			},
-			run: async (input) => catat(await akun.siapkanSetelUlangSandi({
+		alat(
+			'siapkan_setel_ulang_sandi',
+			'SIAPKAN penyetelan ulang sandi akun pegawai ke sandi default. Alat ini '
+			+ 'TIDAK mengubah apa pun — ia hanya mencari akunnya dan menyiapkan '
+			+ 'konfirmasi yang harus ditekan pengguna di layar. Kalau yang cocok lebih '
+			+ 'dari satu, yang kembali daftarnya supaya penanya mempersempit. Setelah '
+			+ 'memanggil alat ini, katakan bahwa konfirmasinya menunggu ditekan; JANGAN '
+			+ 'pernah mengatakan sandinya sudah diganti.',
+			{ kata: { type: 'string', description: 'nama atau email pegawai yang sandinya disetel ulang' } },
+			['kata'],
+			async (input) => catat(await akun.siapkanSetelUlangSandi({
 				kata: String(input.kata || ''),
 				pelaku,
 			})),
-		}),
+		),
 
-		betaTool({
-			name: 'cari_apa_saja',
-			description:
-				'Cari satu kata ke seluruh nama di sistem sekaligus: nama desa, nama BUM '
-				+ 'Desa, nama aparatur, judul peraturan. Pakai kalau alat lain tidak cocok, '
-				+ 'atau kalau yang dicari sebuah nama orang.',
-			inputSchema: {
-				type: 'object',
-				properties: { kata: { type: 'string' } },
-				required: ['kata'],
-				additionalProperties: false,
+		alat(
+			'cari_apa_saja',
+			'Cari satu kata ke seluruh nama di sistem sekaligus: nama desa, nama BUM '
+			+ 'Desa, nama aparatur, judul peraturan. Pakai kalau alat lain tidak cocok, '
+			+ 'atau kalau yang dicari sebuah nama orang.',
+			{ kata: { type: 'string' } },
+			['kata'],
+			async (input) => catat(await mesin.pencarianMenyeluruh(String(input.kata || ''))),
+		),
+
+		alat(
+			'cari_tabel',
+			'Cari tabel basis data yang relevan dengan kata kunci (nama tabel, kolom, '
+			+ 'atau istilah). Dipakai HANYA bila alat domain tidak cocok, sebelum kueri_data. '
+			+ 'Hasilnya nama tabel beserta kolomnya.',
+			{ kata_kunci: { type: 'string' } },
+			['kata_kunci'],
+			async (input) => {
+				try {
+					return JSON.stringify(await data.cariTabel(String(input.kata_kunci || '')));
+				} catch (e) {
+					return JSON.stringify({ galat: e.message });
+				}
 			},
-			run: async (input) => catat(await mesin.pencarianMenyeluruh(String(input.kata || ''))),
-		}),
+		),
+
+		alat(
+			'kueri_data',
+			'Jalankan SATU kueri SQL baca-saja (SELECT/WITH) ke basis data DPMD. Dipakai '
+			+ 'HANYA bila alat domain tidak cocok, dan setelah cari_tabel memastikan nama '
+			+ 'tabel dan kolomnya. Bila galat, perbaiki SQL-nya.',
+			{
+				sql: { type: 'string', description: 'satu pernyataan SELECT/WITH MySQL 8, dengan LIMIT' },
+				tujuan: { type: 'string', description: 'judul singkat apa yang dicari, untuk judul tabel' },
+			},
+			['sql', 'tujuan'],
+			async (input) => {
+				const sql = String(input.sql || '');
+				jejak.sql.push(sql.slice(0, 500));
+				let hasil;
+				try {
+					hasil = await data.jalankanKueri(sql);
+				} catch (e) {
+					// Galat SQL dikembalikan ke model supaya ia bisa memperbaiki kuerinya.
+					return JSON.stringify({ galat: e.message });
+				}
+				if (hasil.galat) return JSON.stringify({ galat: hasil.galat });
+
+				const tujuan = String(input.tujuan || 'Hasil kueri');
+				tangkap.push({
+					maksud: 'kueri-data',
+					kalimat: tujuan,
+					judul: tujuan,
+					kolom: hasil.kolom,
+					baris: hasil.baris.slice(0, 200),
+					total: hasil.total,
+				});
+				return JSON.stringify({ kolom: hasil.kolom, baris: hasil.baris.slice(0, 50), total: hasil.total }).slice(0, 6000);
+			},
+		),
 	];
+
+	return {
+		definisi: daftar.map((a) => a.definisi),
+		peta: Object.fromEntries(daftar.map((a) => [a.definisi.function.name, a.run])),
+	};
 };
 
 /* ---------------------------------------------------------------- perintah -- */
 
-const susunSistem = (kamus, pelaku = null) => [
-	'Kamu Gema, asisten suara untuk pegawai DPMD Kabupaten Bogor.',
-	pelaku?.name ? `Yang sedang berbicara denganmu: ${pelaku.name}${pelaku.role ? ` (${pelaku.role})` : ''}.` : null,
+const tanggalIndonesia = () => new Date().toLocaleDateString('id-ID', {
+	timeZone: 'Asia/Jakarta', weekday: 'long', day: 'numeric', month: 'long', year: 'numeric',
+});
+
+/**
+ * SELURUHNYA STATIS (sama untuk semua penanya) supaya cache prefix llama-server
+ * dipakai lintas pertanyaan dan lintas pengguna. Tanggal & penanya ada di
+ * pesan pengguna (lihat pesanPengguna). Di CPU, ±2.500 token prompt dingin = ±30 dtk.
+ */
+const susunSistem = (kamus) => [
+	'Kamu Gema, asisten suara untuk pegawai DPMD Kabupaten Bogor. Santai seperti rekan kerja.',
 	'',
-	'ATURAN PALING PENTING: kamu TIDAK BOLEH menyebut angka atau nama yang tidak',
-	'datang dari hasil alat. Kalau alat mengembalikan 66, katakan 66. Jangan',
-	'pernah memperkirakan, membulatkan, atau mengarang. Kalau alat tidak',
-	'menemukan apa-apa, katakan tidak ada — itu jawaban yang benar.',
+	'Jawabanmu akan DIUCAPKAN: satu sampai tiga kalimat, tanpa markdown, tanpa poin-poin, tanpa emoji.',
+	'Sebut angka inti dan satu-dua contoh atau keterangan yang membuatnya berarti. Tabel sudah',
+	'tampil sendiri di layar, jangan dibacakan. DILARANG menutup dengan basa-basi seperti',
+	'"Ada lagi yang bisa Gema bantu?".',
 	'',
-	'INI PERCAKAPAN, BUKAN DERET PERTANYAAN LEPAS. Riwayat giliran sebelumnya',
-	'ada di hadapanmu, termasuk hasil alat yang sudah kamu panggil. Pakai:',
-	'- "yang", "-nya", "itu", "tadi" merujuk ke hal yang baru saja dibahas.',
-	'  "Berapa yang mandiri?" sesudah bicara Kecamatan Jonggol berarti desa',
-	'  mandiri DI JONGGOL — jangan tanya balik hal yang sudah jelas dari konteks',
-	'- "bandingkan dengan Cibungbulang" berarti panggil alat lagi untuk',
-	'  Cibungbulang, lalu sandingkan dengan angka yang sudah kamu dapat',
-	'- kalau pertanyaan lanjutan bisa dijawab dari hasil alat yang SUDAH ada di',
-	'  riwayat, jawab langsung tanpa memanggil alat lagi',
-	'- kalau rujukannya benar-benar tidak jelas ("bagaimana dengan yang itu?"',
-	'  tanpa apa pun sebelumnya), tanya balik SATU kalimat pendek, jangan menebak',
+	'ATURAN PALING PENTING: angka dan nama HANYA boleh datang dari hasil alat. Jangan memperkirakan,',
+	'membulatkan, atau mengarang. Kalau alat tidak menemukan apa-apa atau ada yang kosong, katakan',
+	'jujur bahwa datanya tidak ada.',
 	'',
-	'BOLEH MEMANGGIL BEBERAPA ALAT dalam satu giliran, dan itu memang',
-	'diharapkan untuk pertanyaan yang butuh lebih dari satu potong data:',
-	'perbandingan dua wilayah, atau "profil desa X sekalian aparaturnya".',
-	'Panggil sebanyak yang perlu sampai kamu benar-benar bisa menjawab.',
+	'Ini percakapan: "yang", "-nya", "itu", "tadi" merujuk ke hal yang baru dibahas. Kalau jawabannya',
+	'ADA di hasil alat sebelumnya, jawab langsung; kalau tidak, WAJIB panggil alat lagi dengan',
+	'penyaring dari konteks. Kalau rujukannya tidak jelas, tanya balik satu kalimat.',
+	'Tiap pesan pengguna diawali [tanggal hari ini · nama penanya]; itu keterangan, bukan pertanyaan.',
+	'Boleh memanggil beberapa alat dalam satu giliran (mis. membandingkan dua wilayah).',
 	'',
-	'Jawabanmu akan DIUCAPKAN dengan suara, jadi:',
-	'- bicara santai seperti rekan kerja, bukan seperti mesin. Boleh mengawali',
-	'  dengan "Oke", "Nah", atau "Siap", dan sesekali menawarkan bantuan lanjutan',
-	'- sebutkan CONTOH isi datanya, bukan cuma jumlahnya. "Ada 66 desa" kurang',
-	'  berguna; "ada 66, di antaranya Cijayanti dan Ragajaya" jauh lebih hidup',
-	'- DUA SAMPAI EMPAT KALIMAT. Sebut angka intinya, lalu satu keterangan yang',
-	'  membuatnya berarti: perbandingan, bagian terbesarnya, atau yang menonjol.',
-	'  "Ada 66 desa mandiri dari 435, jadi sekitar seperenam" jauh lebih berguna',
-	'  daripada "ada 66 desa mandiri". Angka pembandingnya pun harus dari alat',
-	'- kalau alat mengembalikan profil satu orang atau satu objek, sebutkan tiga',
-	'  sampai empat hal yang paling penting (nama, jabatan, desa, status), bukan',
-	'  satu — sisa rinciannya memang sudah tampil lengkap di layar',
-	'- kalau ada yang KOSONG atau BELUM TERDATA di hasil alat, sebutkan. Data',
-	'  yang bolong itu justru yang paling perlu diketahui pegawai',
-	'- jangan membacakan daftar panjang; tabelnya sudah tampil sendiri di layar',
-	'- angka besar diucapkan wajar: "satu koma dua miliar", bukan "1200000000"',
-	'- tanpa markdown, tanpa poin-poin, tanpa emoji, tanpa singkatan yang aneh',
-	'  diucapkan (tulis "BUM Desa", bukan "BUMDes.")',
+	'Pakai alat domain (cari_desa, cari_bumdes, dst.) lebih dulu. Hanya bila tidak ada yang cocok,',
+	'pakai cari_tabel lalu kueri_data. Aturan SQL: MySQL 8, ONLY_FULL_GROUP_BY aktif, sebut kolom',
+	'secara eksplisit, jangan SELECT *, hanya SELECT/WITH satu pernyataan, selalu pakai LIMIT.',
 	'',
-	'KALAU PERTANYAANNYA KABUR ("data desa dong"), jangan langsung menyemburkan',
-	'seluruh daftar. Sebut apa yang kamu punya dan tawarkan dua atau tiga cara',
-	'mempersempit dalam satu kalimat.',
+	'Soal AKUN PEGAWAI: kamu bisa mencari profil akunnya dan MENYIAPKAN penyetelan ulang sandi ke',
+	'sandi default. Menyiapkan bukan berarti sudah terjadi: sandinya baru berubah setelah pengguna',
+	'menekan tombol konfirmasi di layar. Jangan pernah bilang sandinya sudah diganti; bilang',
+	'konfirmasinya menunggu ditekan. Kalau yang cocok lebih dari satu, minta nama lengkap atau email.',
 	'',
-	'Soal AKUN PEGAWAI: kamu bisa mencari profil akunnya, dan bisa MENYIAPKAN',
-	'penyetelan ulang sandi ke sandi default. Menyiapkan bukan berarti sudah',
-	'terjadi — sandinya baru berubah setelah pengguna menekan tombol konfirmasi',
-	'di layar. Jadi jangan pernah bilang sandinya sudah diganti; bilang',
-	'konfirmasinya menunggu ditekan. Kalau yang cocok lebih dari satu orang,',
-	'minta penanya menyebut nama lengkap atau emailnya, jangan menebak.',
+	'Di luar data DPMD (cuaca, berita, hal umum), jawab ringan bahwa kamu belum bisa dan masih',
+	'dikembangkan tim IT DPMD.',
 	'',
-	'Kalau pertanyaannya di luar data DPMD (cuaca, berita, hal umum), jawab',
-	'dengan ringan bahwa kamu belum bisa dan masih dikembangkan tim IT DPMD —',
-	'jangan kaku, jangan minta maaf berlebihan.',
+	'PENGENALAN SUARA SERING MELESET: "Cijayanti" jadi "Ci Jayanti", "Bojong Koneng" jadi "Bojong',
+	'Konen". Kalau sebuah kata terdengar seperti nama wilayah tapi tidak persis, coba alat pencarian',
+	'dengan ejaan terdekat sebelum menyerah.',
 	'',
-	'PENGENALAN SUARA SERING MELESET. Nama desa dan kecamatan kerap terdengar',
-	'salah tipis: "Cijayanti" jadi "Ci Jayanti", "Bojong Koneng" jadi "Bojong',
-	'Konen". Kalau sebuah kata terdengar seperti nama wilayah tapi tidak persis,',
-	'coba alat pencarian dengan ejaan terdekat sebelum menyerah.',
+	'Tabel tersedia dan istilah:',
+	ringkasKatalog(),
 	'',
 	`Kabupaten Bogor punya ${kamus.kecamatan.length} kecamatan dan ${kamus.desa.length} desa/kelurahan terdata.`,
-].filter((b) => b !== null).join('\n');
+].join('\n');
+
+/** Pesan pengguna dengan keterangan dinamis di depannya; disimpan apa adanya agar riwayat tetap jadi prefix. */
+const pesanPengguna = (teks, pelaku) => {
+	const siapa = pelaku?.name ? ` · ${pelaku.name}${pelaku.role ? ` (${pelaku.role})` : ''}` : '';
+	return { role: 'user', content: `[${tanggalIndonesia()}${siapa}]\n${teks}` };
+};
+
+/* ------------------------------------------------------------------- aliran -- */
+
+/**
+ * Parser SSE gaya OpenAI. Murni terhadap `response.body` (aliran web).
+ * @returns {Promise<{ teks: string, toolCalls: {id, name, arguments}[] }>}
+ */
+const bacaAliran = async (response, { onToken } = {}) => {
+	const dekoder = new TextDecoder();
+	const calls = [];
+	let teks = '';
+	let sisa = '';
+
+	const proses = (baris) => {
+		const b = baris.trim();
+		if (!b.startsWith('data:')) return;
+		const isi = b.slice(5).trim();
+		if (!isi || isi === '[DONE]') return;
+		let delta;
+		try { delta = JSON.parse(isi).choices?.[0]?.delta; } catch { return; }
+		if (!delta) return;
+		// delta.reasoning_content sengaja diabaikan.
+		if (delta.content) {
+			teks += delta.content;
+			onToken?.(delta.content);
+		}
+		for (const tc of delta.tool_calls || []) {
+			const c = (calls[tc.index ?? 0] ||= { id: '', name: '', arguments: '' });
+			if (tc.id) c.id = tc.id;
+			if (tc.function?.name) c.name += tc.function.name;
+			if (tc.function?.arguments) c.arguments += tc.function.arguments;
+		}
+	};
+
+	for await (const potong of response.body) {
+		sisa += typeof potong === 'string' ? potong : dekoder.decode(potong, { stream: true });
+		const baris = sisa.split('\n');
+		sisa = baris.pop();
+		baris.forEach(proses);
+	}
+	proses(sisa);
+
+	return { teks, toolCalls: calls.filter(Boolean) };
+};
+
+/** Satu putaran: POST ke llama-server, baca alirannya. Timeout digabung dengan signal pemanggil. */
+const satuPutaran = async (messages, tools, { onToken, signal }) => {
+	const kontrol = new AbortController();
+	const batal = () => kontrol.abort();
+	const timer = setTimeout(batal, TIMEOUT_PUTARAN_MS);
+	if (signal?.aborted) batal();
+	else signal?.addEventListener('abort', batal, { once: true });
+
+	try {
+		const headers = { 'Content-Type': 'application/json' };
+		if (process.env.GEMA_LLM_KEY) headers.Authorization = `Bearer ${process.env.GEMA_LLM_KEY}`;
+		const response = await fetch(`${process.env.GEMA_LLM_URL.replace(/\/$/, '')}/chat/completions`, {
+			method: 'POST',
+			headers,
+			// Penalaran Gemma dimatikan: di CPU ia menambah ±150 token (±15 dtk) per putaran.
+			body: JSON.stringify({
+				model: MODEL, messages, tools, temperature: 0.2, max_tokens: 600, stream: true,
+				chat_template_kwargs: { enable_thinking: false },
+			}),
+			signal: kontrol.signal,
+		});
+		if (!response.ok) throw new Error(`Server model membalas ${response.status}`);
+		return await bacaAliran(response, { onToken });
+	} finally {
+		clearTimeout(timer);
+		signal?.removeEventListener('abort', batal);
+	}
+};
 
 /**
  * Jawab lewat model bahasa. Melempar bila gagal — pemanggilnya yang memutuskan
@@ -419,73 +481,82 @@ const susunSistem = (kamus, pelaku = null) => [
  *
  * @param {string} teks   kalimat penanya
  * @param {object} pelaku identitas penanya, untuk pemeriksaan izin
- * @param {string} sesi   id percakapan dari peramban; tanpa ini tiap
- *                        pertanyaan berdiri sendiri dan Gema tidak bisa
- *                        menjawab "kalau yang maju berapa?"
+ * @param {string} sesi   id percakapan dari peramban; tanpa ini tiap pertanyaan berdiri sendiri
+ * @param {object} opsi   { onToken(potongan), onReset(), signal, jejak:{alat:[],sql:[]} }
  */
-const jawabDenganModel = async (teks, pelaku = null, sesi = null) => {
-	const c = ambilKlien();
-	if (!c) throw new Error('ANTHROPIC_API_KEY belum diisi');
+const jawabDenganModel = async (teks, pelaku = null, sesi = null, opsi = {}) => {
+	if (!tersedia()) throw new Error('GEMA_LLM_URL belum diisi');
+	const { onToken, onReset, signal } = opsi;
+	const jejak = opsi.jejak || { alat: [], sql: [] };
 
 	const tangkap = [];
 	const kamus = await muatKamus();
+	const { definisi, peta } = buatAlat(tangkap, pelaku, jejak);
 
-	// Riwayat giliran sebelumnya — lengkap dengan blok tool_use dan tool_result,
-	// bukan cuma teksnya. Model jadi ingat alat mana yang sudah ia panggil dan
-	// apa hasilnya, sehingga angka di giliran kedua tetap angka yang sama.
 	const sebelumnya = percakapan.ambil(pelaku?.id, sesi);
+	const tanya = pesanPengguna(teks, pelaku);
+	const riwayat = [...sebelumnya, tanya];
+	const sistem = { role: 'system', content: susunSistem(kamus) };
 
-	// Runner dipegang sebagai objek, bukan langsung di-await, karena setelah
-	// selesai kita perlu membaca runner.params.messages — larik pesan yang sudah
-	// bertambah sepanjang giliran ini — untuk disimpan sebagai riwayat.
-	const runner = c.beta.messages.toolRunner({
-		model: MODEL,
-		max_tokens: 4000,
-		// Adaptif dengan effort sedang. 'low' membuatnya sering puas dengan satu
-		// panggilan alat dan satu kalimat pendek; 'medium' cukup untuk merangkai
-		// dua-tiga alat pada pertanyaan perbandingan tanpa membuat jawaban suara
-		// terasa lama menunggu.
-		thinking: { type: 'adaptive' },
-		output_config: { effort: 'medium' },
-		betas: ['server-side-fallback-2026-07-01'],
-		fallbacks: 'default',
-		// Cukup untuk pertanyaan yang butuh beberapa alat, tapi tetap berbatas:
-		// gelung alat yang tak pernah berhenti berarti pengguna menunggu di depan
-		// mikrofon tanpa tahu sampai kapan.
-		max_iterations: 10,
-		system: susunSistem(kamus, pelaku),
-		tools: buatAlat(tangkap, pelaku),
-		messages: [...sebelumnya, { role: 'user', content: teks }],
-	});
+	let kalimat = null;
+	for (let putaran = 0; putaran < MAKS_PUTARAN; putaran += 1) {
+		let adaToken = false;
+		const hasil = await satuPutaran([sistem, ...riwayat], definisi, {
+			signal,
+			onToken: (t) => { adaToken = true; onToken?.(t); },
+		});
 
-	const pesanAkhir = await runner;
+		if (!hasil.toolCalls.length) {
+			kalimat = hasil.teks.trim();
+			riwayat.push({ role: 'assistant', content: hasil.teks });
+			break;
+		}
 
-	const kalimat = (pesanAkhir.content || [])
-		.filter((b) => b.type === 'text')
-		.map((b) => b.text)
-		.join(' ')
-		.trim();
+		// Teks yang sempat tampil di putaran ini hanyalah pembuka sebelum alat; tarik kembali.
+		if (adaToken) onReset?.();
+		riwayat.push({
+			role: 'assistant',
+			content: hasil.teks || null,
+			tool_calls: hasil.toolCalls.map((c, i) => ({
+				id: c.id || `call_${putaran}_${i}`,
+				type: 'function',
+				function: { name: c.name, arguments: c.arguments },
+			})),
+		});
 
-	// Tabelnya dari hasil alat TERAKHIR, bukan dari model. Kalau model menjawab
-	// tanpa memanggil alat sama sekali (mis. pertanyaan di luar cakupan), tidak
-	// ada tabel — dan itu memang seharusnya.
-	const terakhir = tangkap[tangkap.length - 1] || null;
-
-	if (pesanAkhir.stop_reason === 'refusal') {
-		throw new Error('Permintaan ditolak penyaring keamanan model');
+		for (const [i, c] of hasil.toolCalls.entries()) {
+			jejak.alat.push(c.name);
+			let isi;
+			const jalankan = peta[c.name];
+			if (!jalankan) {
+				isi = JSON.stringify({ galat: 'alat tidak ada' });
+			} else {
+				let args = null;
+				try { args = JSON.parse(c.arguments || '{}'); } catch { /* argumen rusak */ }
+				if (!args || typeof args !== 'object') {
+					isi = JSON.stringify({ galat: 'argumen tidak valid' });
+				} else {
+					try {
+						isi = await jalankan(args);
+					} catch (e) {
+						logger.error(`Gema: alat ${c.name} gagal:`, e.message);
+						isi = JSON.stringify({ galat: e.message });
+					}
+				}
+			}
+			riwayat.push({ role: 'tool', tool_call_id: c.id || `call_${putaran}_${i}`, content: isi });
+		}
 	}
 
-	// Riwayat disimpan HANYA setelah giliran ini benar-benar selesai. Menyimpan
-	// di tengah jalan berisiko meninggalkan blok tool_use tanpa tool_result
-	// pasangannya, dan permintaan berikutnya akan ditolak API mentah-mentah.
-	//
-	// params.messages DIAMBIL APA ADANYA, tanpa menambahkan pesanAkhir sendiri.
-	// Runner sudah mendorong tiap balasan asisten ke sana sebelum berhenti, jadi
-	// menambahkannya lagi berarti mencatatnya dua kali — dan salinan kedua itu
-	// masih membawa blok tool_use yang tool_result-nya sudah lewat, yang akan
-	// membuat permintaan berikutnya ditolak API.
+	if (kalimat === null) throw new Error(`Model belum menjawab setelah ${MAKS_PUTARAN} putaran`);
+
+	// Tabelnya dari hasil alat TERAKHIR, bukan dari model.
+	const terakhir = tangkap[tangkap.length - 1] || null;
+
+	// Disimpan utuh persis seperti dikirim (hanya-bertambah): riwayat yang disunting belakangan
+	// mengubah prefix dan memaksa CPU memproses ulang ratusan token.
 	try {
-		percakapan.simpan(pelaku?.id, sesi, [...runner.params.messages]);
+		percakapan.simpan(pelaku?.id, sesi, riwayat);
 	} catch (e) {
 		// Gagal mengingat tidak boleh menggagalkan jawaban yang sudah jadi.
 		logger.error('Gema: gagal menyimpan riwayat percakapan:', e.message);
@@ -499,15 +570,11 @@ const jawabDenganModel = async (teks, pelaku = null, sesi = null) => {
 		kolom: terakhir?.kolom || [],
 		baris: terakhir?.baris || [],
 		total: terakhir?.total || 0,
-		// Usulan lanjutan diturunkan dari hasil, bukan dikarang model: usulan
-		// karangan bisa menunjuk kemampuan yang tidak ada.
+		// Usulan lanjutan diturunkan dari hasil, bukan dikarang model.
 		saran: terakhir?.saran?.length ? terakhir.saran : susunSaran(terakhir),
-		// Tiket konfirmasi (mis. setel ulang sandi) harus sampai ke layar —
-		// tanpa ini tombolnya tidak pernah muncul dan aksinya tidak bisa selesai.
+		// Tiket konfirmasi (mis. setel ulang sandi) harus sampai ke layar.
 		konfirmasi: terakhir?.konfirmasi,
 		ditenagai: 'model',
-		// Dipakai halaman depan untuk menunjukkan bahwa Gema masih ingat
-		// konteksnya, dan kapan tombol "mulai percakapan baru" ada gunanya.
 		giliran: percakapan.jumlahGiliran(pelaku?.id, sesi),
 	};
 };
@@ -523,17 +590,49 @@ const lengkapiMesin = (hasil, ditenagai) => ({
 });
 
 /** Jawab lewat model bila tersedia; kalau gagal, kembali ke mesin deterministik. */
-const jawab = async (teks, pelaku = null, sesi = null) => {
+const jawab = async (teks, pelaku = null, sesi = null, opsi = {}) => {
 	if (!tersedia()) return lengkapiMesin(await mesin.jawab(teks, pelaku), 'mesin');
 
 	try {
-		return await jawabDenganModel(teks, pelaku, sesi);
+		return await jawabDenganModel(teks, pelaku, sesi, opsi);
 	} catch (error) {
-		// Gagal memanggil model TIDAK BOLEH berarti Gema bisu. Mesin
-		// deterministik tetap menjawab, hanya dengan pemahaman yang lebih kaku.
+		// Pemanggil sudah pergi: tidak ada gunanya menjawab lagi.
+		if (opsi.signal?.aborted) throw error;
+		// Gagal memanggil model TIDAK BOLEH berarti Gema bisu.
 		logger.error('Gema: model bahasa gagal, jatuh ke mesin deterministik:', error.message);
 		return lengkapiMesin(await mesin.jawab(teks, pelaku), 'mesin-cadangan');
 	}
 };
 
-module.exports = { jawab, jawabDenganModel, tersedia, MODEL };
+/**
+ * Panaskan cache prompt (sistem + alat) llama-server, supaya
+ * penanya pertama setelah server dinyalakan ulang tidak menunggu ±30 dtk.
+ * Saat sudah hangat biayanya ±1 dtk CPU, jadi aman diulang berkala.
+ */
+const panaskan = async () => {
+	if (!tersedia()) return;
+	try {
+		const kamus = await muatKamus();
+		const { definisi } = buatAlat([], null);
+		const headers = { 'Content-Type': 'application/json' };
+		if (process.env.GEMA_LLM_KEY) headers.Authorization = `Bearer ${process.env.GEMA_LLM_KEY}`;
+		const body = JSON.stringify({
+			model: MODEL,
+			messages: [{ role: 'system', content: susunSistem(kamus) }, { role: 'user', content: 'halo' }],
+			tools: definisi, max_tokens: 1, chat_template_kwargs: { enable_thinking: false },
+		});
+		const url = `${process.env.GEMA_LLM_URL.replace(/\/$/, '')}/chat/completions`;
+		// Satu permintaan cukup: cache prompt llama-server dibagi antar slot. Berurutan, bukan
+		// paralel, supaya tidak berebut CPU dengan penanya sungguhan.
+		await fetch(url, { method: 'POST', headers, body, signal: AbortSignal.timeout(120000) }).then((r) => r.text());
+	} catch (e) {
+		logger.warn(`Gema: pemanasan model gagal: ${e.message}`);
+	}
+};
+
+if (tersedia() && !process.env.JEST_WORKER_ID) {
+	setTimeout(panaskan, 15000).unref?.();
+	setInterval(panaskan, 10 * 60 * 1000).unref?.();
+}
+
+module.exports = { jawab, jawabDenganModel, tersedia, bacaAliran, panaskan, MODEL };

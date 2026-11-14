@@ -129,8 +129,9 @@ const KATA_PERINTAH = [
  * "reset password akun pegawai Budi Santoso" -> "budi santoso".
  */
 const ambilKataCari = (kalimat) => {
-	let sisa = String(kalimat || '').toLowerCase();
-	for (const kata of KATA_PERINTAH) sisa = sisa.split(kata).join(' ');
+	// Dibuang hanya sebagai kata utuh: "staf" tidak boleh memotong "Mustafa".
+	let sisa = ` ${String(kalimat || '').toLowerCase().replace(/\s+/g, ' ')} `;
+	for (const kata of KATA_PERINTAH) sisa = sisa.split(` ${kata} `).join('  ');
 	return sisa.replace(/\s+/g, ' ').trim();
 };
 
@@ -155,18 +156,21 @@ const masihSandiDefault = async (hash) => {
 
 /* ------------------------------------------------------------- pencarian -- */
 
-const cariAkunMentah = async (kata) => {
+const cariAkunMentah = async (kata, { luas = true } = {}) => {
 	const q = String(kata || '').trim();
 	if (q.length < 2) return [];
 
 	return prisma.users.findMany({
 		where: {
 			role: { in: PERAN_AKUN_PEGAWAI },
-			OR: [
-				{ name: { contains: q } },
-				{ email: { contains: q } },
-				{ pegawai: { nip: { contains: q } } },
-			],
+			// Pencarian lewat email/NIP hanya untuk yang boleh melihat keduanya.
+			OR: luas
+				? [
+					{ name: { contains: q } },
+					{ email: { contains: q } },
+					{ pegawai: { nip: { contains: q } } },
+				]
+				: [{ name: { contains: q } }],
 		},
 		select: PILIH_AKUN,
 		orderBy: { name: 'asc' },
@@ -174,9 +178,29 @@ const cariAkunMentah = async (kata) => {
 	});
 };
 
-const profilAkun = async (akun) => {
+const profilAkun = async (akun, lengkap = false) => {
 	const p = akun.pegawai;
 	const bidang = await namaBidang(akun);
+	if (!lengkap) {
+		// Peran biasa hanya melihat identitas kerja; data pribadi dan keamanan akun disembunyikan.
+		return {
+			maksud: 'akun-pegawai-profil',
+			judul: akun.name,
+			kalimat:
+				`${akun.name}, ${sebutPeran(akun.role)}${bidang ? ` di ${bidang}` : ''}`
+				+ `${p?.jabatan ? `, ${p.jabatan}` : ''}. Akunnya ${akun.is_active ? 'aktif' : 'nonaktif'}.`,
+			rincian: [
+				{ label: 'Nama', nilai: teks(akun.name) },
+				{ label: 'Peran', nilai: sebutPeran(akun.role) },
+				{ label: 'Bidang', nilai: teks(bidang) },
+				{ label: 'Jabatan', nilai: teks(p?.jabatan) },
+				{ label: 'Status akun', nilai: akun.is_active ? 'Aktif' : 'Nonaktif' },
+			],
+			kolom: [],
+			baris: [],
+			total: 1,
+		};
+	}
 	const sandiDefault = await masihSandiDefault(akun.password);
 
 	return {
@@ -216,12 +240,12 @@ const profilAkun = async (akun) => {
 	};
 };
 
-const daftarAkun = async (daftar, kata) => {
+const daftarAkun = async (daftar, kata, lengkap = false) => {
 	const baris = [];
 	for (const akun of daftar) {
 		baris.push({
 			nama: akun.name,
-			email: akun.email,
+			email: lengkap ? akun.email : '—',
 			peran: sebutPeran(akun.role),
 			bidang: teks(await namaBidang(akun)),
 			jabatan: teks(akun.pegawai?.jabatan),
@@ -258,16 +282,18 @@ const kosong = (kalimat) => ({
  * Cari profil akun pegawai. Satu hasil menjadi profil lengkap; banyak hasil
  * menjadi daftar supaya penanya bisa mempersempit.
  */
-const cariAkun = async (kata) => {
+const cariAkun = async (kata, pelaku = null) => {
+	// Detail sensitif hanya untuk peran yang boleh menyetel ulang sandi lewat Gema.
+	const lengkap = !!pelaku && bolehSetelSandiSuara(pelaku.role);
 	const q = String(kata || '').trim();
 	if (q.length < 2) {
 		return kosong('Sebutkan nama, email, atau NIP pegawainya ya, minimal dua huruf.');
 	}
 
-	const daftar = await cariAkunMentah(q);
+	const daftar = await cariAkunMentah(q, { luas: lengkap });
 	if (!daftar.length) return kosong(`Tidak ada akun pegawai yang cocok dengan "${q}".`);
-	if (daftar.length === 1) return profilAkun(daftar[0]);
-	return daftarAkun(daftar, q);
+	if (daftar.length === 1) return profilAkun(daftar[0], lengkap);
+	return daftarAkun(daftar, q, lengkap);
 };
 
 /* -------------------------------------------------- setel ulang sandi (2 langkah) -- */
@@ -301,7 +327,7 @@ const siapkanSetelUlangSandi = async ({ kata, pelaku }) => {
 	if (!daftar.length) return kosong(`Tidak ada akun pegawai yang cocok dengan "${q}", jadi tidak ada yang saya setel ulang.`);
 
 	if (daftar.length > 1) {
-		const banyak = await daftarAkun(daftar, q);
+		const banyak = await daftarAkun(daftar, q, true);
 		return {
 			...banyak,
 			kalimat: `Ada ${daftar.length} akun yang cocok dengan "${q}". Sebutkan lebih spesifik — nama lengkap atau emailnya — biar saya tidak salah orang.`,
@@ -309,7 +335,7 @@ const siapkanSetelUlangSandi = async ({ kata, pelaku }) => {
 	}
 
 	const target = daftar[0];
-	const profil = await profilAkun(target);
+	const profil = await profilAkun(target, true);
 
 	buangYangKedaluwarsa();
 	const token = crypto.randomBytes(24).toString('hex');
@@ -405,7 +431,7 @@ const jalankanSetelUlangSandi = async ({ token, pelaku, req }) => {
 		userAgent: req ? ActivityLogger.getUserAgentFromRequest(req) : null,
 	});
 
-	const profil = await profilAkun({ ...target, password: null });
+	const profil = await profilAkun({ ...target, password: null }, true);
 
 	return {
 		...profil,

@@ -9,7 +9,7 @@
  * ditulis lengkap dari nol, dan itu persis lawan dari mengobrol.
  *
  * Yang disimpan BUKAN cuma teksnya, melainkan seluruh larik pesan yang dipakai
- * model — termasuk blok tool_use dan tool_result. Itu penting: model jadi ingat
+ * model (format OpenAI) — termasuk tool_calls dan pesan role 'tool'. Itu penting: model jadi ingat
  * ALAT MANA yang sudah ia panggil dan APA hasilnya, sehingga pertanyaan
  * lanjutan bisa dijawab tanpa mengulang pencarian yang sama, dan angka yang
  * disebut di giliran kedua tetap angka yang sama dengan giliran pertama.
@@ -36,11 +36,12 @@ const UMUR_MS = 30 * 60 * 1000;
  * Berapa GILIRAN PENGGUNA terakhir yang dipertahankan.
  *
  * Dipotong per giliran, bukan per pesan, karena satu giliran bisa berisi
- * beberapa pesan yang tidak boleh terpisah: blok tool_use di pesan asisten
- * WAJIB diikuti tool_result di pesan berikutnya. Memotong di tengah pasangan
- * itu membuat API menolak seluruh permintaan.
+ * beberapa pesan yang tidak boleh terpisah: tool_calls di pesan asisten
+ * WAJIB diikuti pesan role 'tool' pasangannya. Memotong di tengah pasangan
+ * itu membuat server model menolak seluruh permintaan. Nilainya kecil (6)
+ * supaya prompt tetap ringan di model lokal.
  */
-const GILIRAN_DISIMPAN = 10;
+const GILIRAN_DISIMPAN = 6;
 
 /** Batas jumlah percakapan hidup, supaya memori tidak tumbuh tanpa batas. */
 const MAKS_PERCAKAPAN = 500;
@@ -68,24 +69,24 @@ const sapu = () => {
 /**
  * Apakah pesan ini awal sebuah giliran pengguna?
  *
- * Giliran pengguna yang sebenarnya berisi teks biasa. Pesan peran 'user' yang
- * isinya blok tool_result BUKAN giliran baru — itu balasan alat di tengah
- * giliran yang sama, dan memotong di situ akan memisahkannya dari tool_use
- * pasangannya.
+ * Giliran pengguna yang sebenarnya berisi teks biasa. Pesan role 'tool' BUKAN
+ * giliran baru — itu balasan alat di tengah giliran yang sama.
  */
-const awalGiliran = (pesan) => {
-	if (!pesan || pesan.role !== 'user') return false;
-	if (typeof pesan.content === 'string') return true;
-	if (!Array.isArray(pesan.content)) return false;
-	return pesan.content.every((b) => b?.type === 'text');
-};
+const awalGiliran = (pesan) => pesan?.role === 'user' && typeof pesan.content === 'string';
 
-/** Sisakan beberapa giliran terakhir saja, dipotong tepat di batas giliran. */
+/**
+ * Sisakan beberapa giliran terakhir saja, dipotong tepat di batas giliran.
+ * Hasil alat dari giliran lama dikosongkan: angkanya sudah terucap di jawaban
+ * asisten, dan baris mentahnya hanya menggemukkan prompt.
+ */
 const pangkas = (pesan) => {
 	const awal = [];
 	pesan.forEach((p, i) => { if (awalGiliran(p)) awal.push(i); });
+	// Riwayat hanya-bertambah agar cache prefix llama-server terpakai; isi lama TIDAK disunting
+	// (hasil alat lama dibutuhkan model supaya tidak mengarang angka di pertanyaan lanjutan).
+	// Bila lewat batas, dipangkas sekaligus ke separuhnya: cache rusak sekali per beberapa giliran.
 	if (awal.length <= GILIRAN_DISIMPAN) return pesan;
-	return pesan.slice(awal[awal.length - GILIRAN_DISIMPAN]);
+	return pesan.slice(awal[awal.length - Math.ceil(GILIRAN_DISIMPAN / 2)]);
 };
 
 /** Ambil riwayat pesan sebuah sesi. Selalu larik — kosong bila belum ada. */
