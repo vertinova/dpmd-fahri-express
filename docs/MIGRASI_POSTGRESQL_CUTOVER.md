@@ -1,8 +1,12 @@
 # Runbook cutover MySQL → PostgreSQL (backend DPMD)
 
-Dokumen ini untuk tim IT yang menjalankan perpindahan basis data produksi. Kode backend sudah
-berjalan di kedua dialek: dialek dipilih dari `DATABASE_URL` di `.env` (`mysql://…` atau
-`postgresql://…`). Selama `.env` masih MySQL, perilaku aplikasi sama persis dengan sebelumnya.
+> **Status: SELESAI.** Produksi berjalan di PostgreSQL 17 sejak 14 Nov 2026 20:56 WIB. Setelah itu
+> kode backend dijadikan PostgreSQL + Prisma saja: dukungan MySQL, shim `config/database.js`, dan alat
+> migrasi (`buat-skema-pg.js`, `salin-data.js`, `cek-skema.js`) dihapus. Dokumen ini disimpan sebagai
+> catatan; alat yang dirujuk masih ada di riwayat git (commit `554ca00`). Kembali ke MySQL berarti
+> men-deploy commit lama itu dan memindahkan data baru secara manual.
+
+Dokumen ini untuk tim IT yang menjalankan perpindahan basis data produksi.
 
 ## Ringkasan
 
@@ -156,11 +160,11 @@ Di CT 100, dari `/var/www/backend` (kode versi dua dialek sudah ter-deploy):
 - Kolom `INT UNSIGNED` di SQL mentah (mis. `file_size` proposal di halaman dinas) keluar sebagai
   angka di PostgreSQL, bukan teks; frontend memprosesnya secara aritmetika sehingga tidak berdampak.
 
-## Berkas terkait
+## Berkas terkait (keadaan sekarang)
 
-- `prisma/postgres/schema.prisma`, `prisma/postgres/baseline.sql` — dibangkitkan oleh
-  `scripts/pg/buat-skema-pg.js` dari `prisma/schema.prisma` + skema MySQL. Jangan disunting manual.
-- `scripts/pg/cek-skema.js` — pembanding skema MySQL vs PG.
-- `scripts/pg/salin-data.js` — penyalin + verifikasi checksum (`--hanya-verifikasi` untuk cek ulang).
-- `scripts/pg/generate-prisma.js` — memilih skema Prisma dari `DATABASE_URL`.
-- `src/config/dialek.js`, `src/config/database.js`, `src/config/prismaPg.js` — lapisan dua dialek.
+- `prisma/schema.prisma` — skema Prisma PostgreSQL (satu-satunya); `prisma/baseline.sql` — DDL awal
+  untuk DB kosong. Perubahan skema berikutnya lewat berkas SQL PostgreSQL di `migrations/`.
+- `scripts/pg/generate-prisma.js` — `prisma generate` (dipanggil webhook deploy & postinstall).
+- `scripts/pg/alih-pemilik.sql` — alihkan kepemilikan objek ke role `dpmd` setelah memulihkan dump.
+- `src/config/sqlMentah.js` — SQL mentah lewat Prisma (`kueri`/`jalankan`); `src/config/prismaPg.js` —
+  ekstensi Prisma (literal, pencarian tak peka huruf, urutan stabil); `src/config/dialek.js` — penulis SQL.
