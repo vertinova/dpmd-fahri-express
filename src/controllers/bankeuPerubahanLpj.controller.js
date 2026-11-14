@@ -1,4 +1,4 @@
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const { jumlah, enumTeks } = require('../config/dialek');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
@@ -25,7 +25,7 @@ class BankeuPerubahanLpjController {
       const userId = req.user.id;
       const { tahun } = req.query;
 
-      const [users] = await sequelize.query(`SELECT desa_id FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT desa_id FROM users WHERE id = ?`, [userId]);
       if (!users[0]?.desa_id) {
         return res.status(403).json({ success: false, message: 'User tidak terkait dengan desa' });
       }
@@ -35,13 +35,13 @@ class BankeuPerubahanLpjController {
       const replacements = [users[0].desa_id];
       if (tahun) { where += ' AND lpj.tahun_anggaran = ?'; replacements.push(parseInt(tahun)); }
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT lpj.*, u.name AS dpmd_verified_by_name
         FROM bankeu_perubahan_lpj lpj
         LEFT JOIN users u ON lpj.dpmd_verified_by = u.id
         ${where}
         ORDER BY lpj.created_at DESC
-      `, { replacements });
+      `, replacements);
 
       res.json({ success: true, data: rows });
     } catch (error) {
@@ -63,7 +63,7 @@ class BankeuPerubahanLpjController {
         return res.status(400).json({ success: false, message: 'File LPJ wajib diupload' });
       }
 
-      const [users] = await sequelize.query(`SELECT desa_id FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT desa_id FROM users WHERE id = ?`, [userId]);
       if (!users[0]?.desa_id) {
         cleanupFiles(req);
         return res.status(403).json({ success: false, message: 'User tidak terkait dengan desa' });
@@ -89,18 +89,16 @@ class BankeuPerubahanLpjController {
         }
 
         const relativePath = `bankeu-perubahan/lpj/desa_${desaId}/${newFilename}`;
-        const [result] = await sequelize.query(`
+        const [{ id: insertId }] = await kueri(`
           INSERT INTO bankeu_perubahan_lpj
             (desa_id, tahun_anggaran, nama_file, file_path, file_size, keterangan, status, uploaded_by)
           VALUES (?, ?, ?, ?, ?, ?, 'pending', ?)
-        `, {
-          replacements: [
-            desaId, tahunValue, file.originalname, relativePath, file.size,
-            keterangan || null, userId
-          ]
-        });
+          RETURNING id
+        `, [
+          desaId, tahunValue, file.originalname, relativePath, file.size,
+          keterangan || null, userId
+        ]);
 
-        const insertId = result?.insertId || result;
         inserted.push({ id: insertId, nama_file: file.originalname, file_path: relativePath });
       }
 
@@ -139,12 +137,12 @@ class BankeuPerubahanLpjController {
       const { id } = req.params;
       const userId = req.user.id;
 
-      const [users] = await sequelize.query(`SELECT desa_id FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT desa_id FROM users WHERE id = ?`, [userId]);
       if (!users[0]?.desa_id) return res.status(403).json({ success: false, message: 'Akses ditolak' });
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT id, desa_id, file_path, status FROM bankeu_perubahan_lpj WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       if (!rows.length) return res.status(404).json({ success: false, message: 'LPJ tidak ditemukan' });
       if (Number(rows[0].desa_id) !== Number(users[0].desa_id)) {
@@ -160,7 +158,7 @@ class BankeuPerubahanLpjController {
         if (fs.existsSync(filePath)) { try { fs.unlinkSync(filePath); } catch (e) {} }
       }
 
-      await sequelize.query(`DELETE FROM bankeu_perubahan_lpj WHERE id = ?`, { replacements: [id] });
+      await jalankan(`DELETE FROM bankeu_perubahan_lpj WHERE id = ?`, [id]);
 
       res.json({ success: true, message: 'LPJ dihapus' });
     } catch (error) {
@@ -185,7 +183,7 @@ class BankeuPerubahanLpjController {
       if (status) { where += ` AND ${enumTeks('lpj.status')} = ?`; replacements.push(status); }
       if (desa_id) { where += ' AND lpj.desa_id = ?'; replacements.push(desa_id); }
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT lpj.*, d.nama AS desa_nama, k.nama AS kecamatan_nama,
                u.name AS uploaded_by_name, uv.name AS dpmd_verified_by_name
         FROM bankeu_perubahan_lpj lpj
@@ -195,7 +193,7 @@ class BankeuPerubahanLpjController {
         LEFT JOIN users uv ON lpj.dpmd_verified_by = uv.id
         ${where}
         ORDER BY lpj.created_at DESC
-      `, { replacements });
+      `, replacements);
 
       res.json({ success: true, data: rows });
     } catch (error) {
@@ -218,22 +216,22 @@ class BankeuPerubahanLpjController {
         return res.status(400).json({ success: false, message: 'Status tidak valid (verified/rejected/revision)' });
       }
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT lpj.id, lpj.nama_file, d.nama AS desa_nama
         FROM bankeu_perubahan_lpj lpj
         INNER JOIN desas d ON lpj.desa_id = d.id
         WHERE lpj.id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       if (!rows.length) return res.status(404).json({ success: false, message: 'LPJ tidak ditemukan' });
 
-      const [users] = await sequelize.query(`SELECT name FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT name FROM users WHERE id = ?`, [userId]);
 
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_perubahan_lpj
         SET status = ?, dpmd_catatan = ?, dpmd_verified_by = ?, dpmd_verified_at = NOW(), updated_at = NOW()
         WHERE id = ?
-      `, { replacements: [status, catatan || null, userId, id] });
+      `, [status, catatan || null, userId, id]);
 
       ActivityLogger.log({
         userId,
@@ -270,7 +268,7 @@ class BankeuPerubahanLpjController {
       const replacements = [];
       if (tahun) { where += ' AND tahun_anggaran = ?'; replacements.push(parseInt(tahun)); }
 
-      const [stats] = await sequelize.query(`
+      const stats = await kueri(`
         SELECT
           COUNT(*) AS total_files,
           COUNT(DISTINCT desa_id) AS total_desa,
@@ -280,7 +278,7 @@ class BankeuPerubahanLpjController {
           ${jumlah("CASE WHEN status = 'revision' THEN 1 ELSE 0 END")} AS revision
         FROM bankeu_perubahan_lpj
         ${where}
-      `, { replacements });
+      `, replacements);
 
       res.json({ success: true, data: stats[0] || {} });
     } catch (error) {

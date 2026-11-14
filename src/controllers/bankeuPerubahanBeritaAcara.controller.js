@@ -1,4 +1,4 @@
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const { cocokRegex } = require('../config/dialek');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
@@ -31,27 +31,27 @@ function getPosisiLabel(posisi) {
 }
 
 async function ensureUserKecamatan(userId) {
-  const [users] = await sequelize.query(`SELECT id, kecamatan_id, name FROM users WHERE id = ?`, { replacements: [userId] });
+  const users = await kueri(`SELECT id, kecamatan_id, name FROM users WHERE id = ?`, [userId]);
   if (!users[0]?.kecamatan_id) return null;
   return users[0];
 }
 
 async function loadProposal(proposalId) {
-  const [rows] = await sequelize.query(`
+  const rows = await kueri(`
     SELECT bp.*, d.nama AS desa_nama, d.kecamatan_id AS desa_kecamatan_id, k.nama AS kecamatan_nama
     FROM bankeu_perubahan_proposals bp
     INNER JOIN desas d ON bp.desa_id = d.id
     LEFT JOIN kecamatans k ON d.kecamatan_id = k.id
     WHERE bp.id = ?
     LIMIT 1
-  `, { replacements: [proposalId] });
+  `, [proposalId]);
   return rows[0] || null;
 }
 
 const JABATAN_ORDER = { ketua: 1, sekretaris: 2, anggota_1: 3, anggota_2: 4, anggota_3: 5 };
 
 async function loadActiveTim(kecamatanId, proposalId) {
-  const [rows] = await sequelize.query(`
+  const rows = await kueri(`
     SELECT id, jabatan, jabatan_label, nama, nip, ttd_path, proposal_id
     FROM tim_verifikasi_bankeu_perubahan
     WHERE kecamatan_id = ?
@@ -68,7 +68,7 @@ async function loadActiveTim(kecamatanId, proposalId) {
         ELSE 6
       END,
       id ASC
-  `, { replacements: [kecamatanId, proposalId] });
+  `, [kecamatanId, proposalId]);
 
   // Dedupe per jabatan: satu posisi bisa punya baris ganda (proposal_id NULL = shared
   // dan proposal_id = X = khusus proposal). Tanpa dedupe, posisi yang sama bisa
@@ -86,50 +86,50 @@ async function loadActiveTim(kecamatanId, proposalId) {
 }
 
 async function loadConfig(kecamatanId) {
-  const [rows] = await sequelize.query(`
+  const rows = await kueri(`
     SELECT * FROM kecamatan_bankeu_perubahan_config WHERE kecamatan_id = ?
-  `, { replacements: [kecamatanId] });
+  `, [kecamatanId]);
   return rows[0] || null;
 }
 
 async function loadQuestionnaires(proposalId) {
-  const [rows] = await sequelize.query(`
+  const rows = await kueri(`
     SELECT q.*, t.jabatan AS posisi, t.nama AS tim_nama
     FROM bankeu_perubahan_questionnaires q
     LEFT JOIN tim_verifikasi_bankeu_perubahan t ON q.tim_verifikasi_id = t.id
     WHERE q.proposal_id = ?
-  `, { replacements: [proposalId] });
+  `, [proposalId]);
   return rows;
 }
 
 async function updateProposalQuisionerFlag(proposalId) {
   // Set quisioner_completed = TRUE if all active tim members have submitted questionnaire
-  const [rows] = await sequelize.query(`
+  const rows = await kueri(`
     SELECT bp.id, bp.kecamatan_id
     FROM bankeu_perubahan_proposals bp
     WHERE bp.id = ?
-  `, { replacements: [proposalId] });
+  `, [proposalId]);
   if (!rows.length) return;
   const kecamatanId = rows[0].kecamatan_id;
 
-  const [timRows] = await sequelize.query(`
+  const timRows = await kueri(`
     SELECT COUNT(*) AS total FROM tim_verifikasi_bankeu_perubahan
     WHERE kecamatan_id = ? AND is_active = TRUE
       AND ${cocokRegex('jabatan', '^(ketua|sekretaris|anggota_[0-9]+)$')}
       AND (proposal_id IS NULL OR proposal_id = ?)
-  `, { replacements: [kecamatanId, proposalId] });
+  `, [kecamatanId, proposalId]);
   const totalTim = Number(timRows[0].total);
 
-  const [qRows] = await sequelize.query(`
+  const qRows = await kueri(`
     SELECT COUNT(*) AS total FROM bankeu_perubahan_questionnaires
     WHERE proposal_id = ? AND status IN ('submitted','draft')
-  `, { replacements: [proposalId] });
+  `, [proposalId]);
   const submittedQ = Number(qRows[0].total);
 
   const completed = totalTim > 0 && submittedQ >= totalTim;
-  await sequelize.query(`
+  await jalankan(`
     UPDATE bankeu_perubahan_proposals SET quisioner_completed = ?, updated_at = NOW() WHERE id = ?
-  `, { replacements: [completed, proposalId] });
+  `, [completed, proposalId]);
 }
 
 class BankeuPerubahanBeritaAcaraController {
@@ -375,13 +375,13 @@ class BankeuPerubahanBeritaAcaraController {
       try { fileSize = fs.statSync(filePath).size; } catch (e) {}
 
       // Determine version (increment)
-      const [verRows] = await sequelize.query(`
+      const verRows = await kueri(`
         SELECT COALESCE(berita_acara_version, 0) AS v FROM bankeu_perubahan_proposals WHERE id = ?
-      `, { replacements: [proposalId] });
+      `, [proposalId]);
       const nextVersion = (Number(verRows[0]?.v) || 0) + 1;
 
       // Update proposal
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_perubahan_proposals
         SET berita_acara_path = ?,
             berita_acara_generated_at = NOW(),
@@ -389,7 +389,7 @@ class BankeuPerubahanBeritaAcaraController {
             berita_acara_version = ?,
             updated_at = NOW()
         WHERE id = ?
-      `, { replacements: [relPath, qrCode, nextVersion, proposalId] });
+      `, [relPath, qrCode, nextVersion, proposalId]);
 
       ActivityLogger.log({
         userId: user.id,
@@ -510,14 +510,14 @@ class BankeuPerubahanBeritaAcaraController {
       await new Promise(resolve => writeStream.on('finish', resolve));
 
       // Update proposal
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_perubahan_proposals
         SET surat_pengantar_kecamatan_path = ?,
             surat_pengantar_kecamatan_nomor = ?,
             surat_pengantar_kecamatan_generated_at = NOW(),
             updated_at = NOW()
         WHERE id = ?
-      `, { replacements: [relPath, nomor_surat, proposalId] });
+      `, [relPath, nomor_surat, proposalId]);
 
       ActivityLogger.log({
         userId: user.id,

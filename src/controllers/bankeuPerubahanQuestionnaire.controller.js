@@ -1,4 +1,4 @@
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const { updateProposalQuisionerFlag } = require('./bankeuPerubahanBeritaAcara.controller');
@@ -38,7 +38,7 @@ async function resolveTimIdFromVerifierId(verifier_id, proposalId) {
   }
   query += ` ORDER BY id ASC LIMIT 1`;
 
-  const [rows] = await sequelize.query(query, { replacements });
+  const rows = await kueri(query, replacements);
   return rows[0]?.id || null;
 }
 
@@ -53,13 +53,13 @@ class BankeuPerubahanQuestionnaireController {
       const userId = req.user.id;
 
       // Validasi user-kecamatan ↔ proposal-kecamatan
-      const [users] = await sequelize.query(`SELECT kecamatan_id FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT kecamatan_id FROM users WHERE id = ?`, [userId]);
       const userKecId = users[0]?.kecamatan_id;
 
-      const [proposalRows] = await sequelize.query(`
+      const proposalRows = await kueri(`
         SELECT bp.id, d.kecamatan_id FROM bankeu_perubahan_proposals bp
         INNER JOIN desas d ON bp.desa_id = d.id WHERE bp.id = ?
-      `, { replacements: [proposalId] });
+      `, [proposalId]);
       if (!proposalRows.length) {
         return res.status(404).json({ success: false, message: 'Proposal tidak ditemukan' });
       }
@@ -84,11 +84,11 @@ class BankeuPerubahanQuestionnaireController {
         replacements.push(verifier_type);
       }
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT * FROM bankeu_perubahan_questionnaires
         WHERE ${whereClause}
         ORDER BY updated_at DESC LIMIT 1
-      `, { replacements });
+      `, replacements);
 
       if (!rows.length) {
         return res.json({ success: true, data: null, message: 'Quisioner belum diisi' });
@@ -123,14 +123,14 @@ class BankeuPerubahanQuestionnaireController {
       }
 
       // Validasi user-kecamatan
-      const [users] = await sequelize.query(`SELECT kecamatan_id, name FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT kecamatan_id, name FROM users WHERE id = ?`, [userId]);
       const userKecId = users[0]?.kecamatan_id;
       if (!userKecId) return res.status(403).json({ success: false, message: 'User tidak terkait dengan kecamatan' });
 
-      const [proposalRows] = await sequelize.query(`
+      const proposalRows = await kueri(`
         SELECT bp.id, bp.judul_proposal, d.kecamatan_id FROM bankeu_perubahan_proposals bp
         INNER JOIN desas d ON bp.desa_id = d.id WHERE bp.id = ?
-      `, { replacements: [proposalId] });
+      `, [proposalId]);
       if (!proposalRows.length) return res.status(404).json({ success: false, message: 'Proposal tidak ditemukan' });
       if (Number(proposalRows[0].kecamatan_id) !== Number(userKecId)) {
         return res.status(403).json({ success: false, message: 'Proposal bukan dari kecamatan Anda' });
@@ -143,12 +143,12 @@ class BankeuPerubahanQuestionnaireController {
       }
       // Jika tidak ada verifier_id, ambil ketua kecamatan ini sebagai default
       if (!timId) {
-        const [ketuaRows] = await sequelize.query(`
+        const ketuaRows = await kueri(`
           SELECT id FROM tim_verifikasi_bankeu_perubahan
           WHERE kecamatan_id = ? AND jabatan = 'ketua' AND is_active = TRUE
             AND (proposal_id IS NULL OR proposal_id = ?)
           ORDER BY id ASC LIMIT 1
-        `, { replacements: [userKecId, proposalId] });
+        `, [userKecId, proposalId]);
         timId = ketuaRows[0]?.id || null;
       }
       if (!timId) {
@@ -167,38 +167,39 @@ class BankeuPerubahanQuestionnaireController {
       };
 
       // Check existing
-      const [existing] = await sequelize.query(`
+      const existing = await kueri(`
         SELECT id FROM bankeu_perubahan_questionnaires
         WHERE proposal_id = ? AND tim_verifikasi_id = ?
         LIMIT 1
-      `, { replacements: [proposalId, timId] });
+      `, [proposalId, timId]);
 
       let resultId;
       if (existing.length) {
         resultId = existing[0].id;
-        await sequelize.query(`
+        await jalankan(`
           UPDATE bankeu_perubahan_questionnaires
           SET q1=?, q2=?, q3=?, q4=?, q5=?, q6=?, q7=?, q8=?, q9=?, q10=?, q11=?, q12=?,
               overall_notes=?, status='submitted', submitted_at=NOW(), updated_at=NOW()
           WHERE id=?
-        `, { replacements: [
+        `, [
           fields.q1, fields.q2, fields.q3, fields.q4, fields.q5, fields.q6,
           fields.q7, fields.q8, fields.q9, fields.q10, fields.q11, fields.q12,
           fields.overall_notes, resultId,
-        ] });
+        ]);
       } else {
-        const [insertResult] = await sequelize.query(`
+        const [{ id: insertResult }] = await kueri(`
           INSERT INTO bankeu_perubahan_questionnaires
           (proposal_id, tim_verifikasi_id, verifikasi_type,
            q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12,
            overall_notes, status, submitted_at, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'submitted', NOW(), NOW(), NOW())
-        `, { replacements: [
+          RETURNING id
+        `, [
           proposalId, timId, verifier_type,
           fields.q1, fields.q2, fields.q3, fields.q4, fields.q5, fields.q6,
           fields.q7, fields.q8, fields.q9, fields.q10, fields.q11, fields.q12,
           fields.overall_notes,
-        ] });
+        ]);
         resultId = insertResult;
       }
 
