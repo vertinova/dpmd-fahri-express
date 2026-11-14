@@ -7,8 +7,21 @@ const { PrismaClient, Prisma } = require('@prisma/client');
 const { buatEkstensiPg } = require('./prismaPg');
 const logger = require('../utils/logger');
 
+// Satu pool untuk seluruh aplikasi. Dulu shim SQL punya pool 30 koneksi sendiri; bawaan Prisma
+// (2×CPU+1) terlalu kecil untuk menggantikannya. Bisa ditimpa lewat connection_limit di DATABASE_URL.
+const urlDb = (() => {
+  try {
+    const u = new URL(process.env.DATABASE_URL);
+    if (!u.searchParams.has('connection_limit')) u.searchParams.set('connection_limit', '30');
+    return u.toString();
+  } catch {
+    return undefined; // DATABASE_URL kosong/rusak: biarkan Prisma melaporkan galatnya sendiri
+  }
+})();
+
 // Buat Prisma Client instance
 const klienDasar = new PrismaClient({
+  ...(urlDb && { datasourceUrl: urlDb }),
   log: process.env.NODE_ENV === 'development' 
     ? ['info', 'warn', 'error']  // Removed 'query' to reduce log noise
     : ['warn', 'error'],
