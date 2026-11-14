@@ -4,7 +4,6 @@
  */
 
 const { PrismaClient, Prisma } = require('@prisma/client');
-const { DIALEK } = require('./dialek');
 const { buatEkstensiPg } = require('./prismaPg');
 const logger = require('../utils/logger');
 
@@ -15,8 +14,8 @@ const klienDasar = new PrismaClient({
     : ['warn', 'error'],
 });
 
-// Di PostgreSQL perilaku Prisma disamakan dengan MySQL lewat ekstensi; di MySQL client apa adanya.
-const prisma = DIALEK === 'postgres' ? klienDasar.$extends(buatEkstensiPg(Prisma)) : klienDasar;
+// Ekstensi PG: literal untuk SQL mentah, pencarian tak peka huruf, urutan stabil (lihat prismaPg.js).
+const prisma = klienDasar.$extends(buatEkstensiPg(Prisma));
 
 // Test connection (non-fatal - Prisma will auto-reconnect on first query)
 prisma.$connect()

@@ -16,7 +16,6 @@ const https = require('https');
 const tls = require('tls');
 const logger = require('../utils/logger');
 const prisma = require('../config/prisma');
-const { DIALEK } = require('../config/dialek');
 const store = require('./serverStore.service');
 const alerts = require('./serverAlerts.service');
 const { SYSTEM_SERVICES } = require('../config/serverManagement');
@@ -381,16 +380,7 @@ const getDatabase = async () => {
             FLOOR(EXTRACT(EPOCH FROM now() - query_start))::int AS "time", wait_event AS state, LEFT(query, 300) AS info
        FROM pg_stat_activity WHERE backend_type = 'client backend' ORDER BY "time" DESC NULLS LAST LIMIT 50`,
   ];
-  const [versi, status, variabel, tabel, proses] = await Promise.all(DIALEK === 'postgres' ? kueriPg.map(aman) : [
-    aman('SELECT VERSION() AS v, DATABASE() AS db'),
-    aman(`SHOW GLOBAL STATUS WHERE Variable_name IN ('Uptime','Threads_connected','Threads_running','Questions','Slow_queries','Aborted_connects','Aborted_clients','Connections','Bytes_received','Bytes_sent','Max_used_connections','Innodb_buffer_pool_read_requests','Innodb_buffer_pool_reads','Innodb_row_lock_waits','Com_select','Com_insert','Com_update','Com_delete','Open_tables')`),
-    aman(`SHOW VARIABLES WHERE Variable_name IN ('max_connections','innodb_buffer_pool_size','long_query_time','slow_query_log','version_comment','character_set_server','time_zone','wait_timeout')`),
-    aman(`SELECT TABLE_NAME AS name, ENGINE AS engine, TABLE_ROWS AS row_estimate,
-                 DATA_LENGTH AS data_size, INDEX_LENGTH AS index_size, DATA_FREE AS free_size,
-                 (DATA_LENGTH + INDEX_LENGTH) AS total_size, UPDATE_TIME AS updated_at, CREATE_TIME AS created_at
-            FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() ORDER BY total_size DESC`),
-    aman('SELECT ID AS id, USER AS user, HOST AS host, DB AS db, COMMAND AS command, TIME AS time, STATE AS state, LEFT(INFO, 300) AS info FROM information_schema.PROCESSLIST ORDER BY TIME DESC LIMIT 50'),
-  ]);
+  const [versi, status, variabel, tabel, proses] = await Promise.all(kueriPg.map(aman));
 
   const st = Object.fromEntries(status.map((r) => [r.Variable_name, Number(r.Value)]));
   const vr = Object.fromEntries(variabel.map((r) => [r.Variable_name, r.Value]));

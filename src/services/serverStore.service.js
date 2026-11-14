@@ -7,18 +7,14 @@
  * pemantau sebaiknya tidak ikut mati karena urusan skema.
  */
 
-const fs = require('fs');
-const path = require('path');
 const prisma = require('../config/prisma');
-const { DIALEK } = require('../config/dialek');
 const logger = require('../utils/logger');
-const { CONFIG_KEY, DEFAULT_CONFIG, BACKEND_ROOT } = require('../config/serverManagement');
+const { CONFIG_KEY, DEFAULT_CONFIG } = require('../config/serverManagement');
 
 let cachedConfig = null;
 let cachedAt = 0;
 const CONFIG_TTL_MS = 30 * 1000;
 
-let tablesReady = null;
 
 /** BigInt/Decimal dari $queryRaw → angka biasa supaya aman di-JSON-kan. */
 const normalisasi = (baris) =>
@@ -34,28 +30,6 @@ const normalisasi = (baris) =>
 
 const query = async (sql, ...params) => normalisasi(await prisma.$queryRawUnsafe(sql, ...params));
 const execute = (sql, ...params) => prisma.$executeRawUnsafe(sql, ...params);
-
-/** Buat tabel server_* bila belum ada (isi sama dengan berkas migrasi). */
-const ensureTables = () => {
-  if (!tablesReady) {
-    tablesReady = (async () => {
-      if (DIALEK === 'postgres') return; // tabel server_* sudah ada di baseline PostgreSQL
-      const berkas = path.join(BACKEND_ROOT, 'migrations/20260928_create_server_management.sql');
-      const sql = fs.readFileSync(berkas, 'utf8')
-        .split('\n')
-        .filter((baris) => !baris.trim().startsWith('--'))
-        .join('\n');
-      for (const perintah of sql.split(';').map((s) => s.trim()).filter(Boolean)) {
-        await execute(perintah);
-      }
-    })().catch((error) => {
-      tablesReady = null; // coba lagi di pemanggilan berikutnya
-      logger.warn(`[ServerManagement] Gagal menyiapkan tabel: ${error.message}`);
-      throw error;
-    });
-  }
-  return tablesReady;
-};
 
 const gabung = (bawaan, tersimpan) => {
   if (!tersimpan || typeof tersimpan !== 'object' || Array.isArray(tersimpan)) return bawaan;
@@ -106,4 +80,4 @@ const saveConfig = async (perubahan, userId) => {
   return baru;
 };
 
-module.exports = { query, execute, ensureTables, getConfig, getConfigSync, saveConfig, normalisasi };
+module.exports = { query, execute, getConfig, getConfigSync, saveConfig, normalisasi };

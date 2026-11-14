@@ -1,4 +1,5 @@
 const logger = require('../utils/logger');
+const { galatUnik } = require('../config/sqlMentah');
 
 const errorHandler = (err, req, res, next) => {
   logger.error({
@@ -9,27 +10,11 @@ const errorHandler = (err, req, res, next) => {
     ip: req.ip
   });
 
-  // Sequelize validation error
-  if (err.name === 'SequelizeValidationError') {
-    return res.status(400).json({
-      success: false,
-      message: 'Validation error',
-      errors: err.errors.map(e => ({
-        field: e.path,
-        message: e.message
-      }))
-    });
-  }
-
-  // Sequelize unique constraint error
-  if (err.name === 'SequelizeUniqueConstraintError') {
+  // Pelanggaran unik (Prisma ORM P2002 / SQL mentah 23505)
+  if (galatUnik(err)) {
     return res.status(409).json({
       success: false,
-      message: 'Resource already exists',
-      errors: err.errors.map(e => ({
-        field: e.path,
-        message: e.message
-      }))
+      message: 'Resource already exists'
     });
   }
 

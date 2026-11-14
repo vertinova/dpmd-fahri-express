@@ -14,7 +14,7 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 const store = require('./serverStore.service');
-const { saatBentrok, DIALEK } = require('../config/dialek');
+const { saatBentrok } = require('../config/dialek');
 
 const TTL_MS = 30 * 24 * 3600 * 1000;
 const MAX_CACHE = 20000;
@@ -26,7 +26,6 @@ const cache = new Map(); // ip → { cc, country, region, city, lat, lon, isp, o
 const antrean = new Set();
 let sibuk = false;
 let jedaSampai = 0;
-let tabelSiap = null;
 let terakhirGagal = null;
 
 const privat = (ip) => {
@@ -39,35 +38,6 @@ const privat = (ip) => {
 };
 
 const aktif = () => store.getConfigSync().security?.geo_lookup !== false;
-
-const siapkanTabel = () => {
-  if (!tabelSiap && DIALEK === 'postgres') tabelSiap = Promise.resolve(); // tabel sudah ada di baseline PostgreSQL
-  if (!tabelSiap) {
-    tabelSiap = store.execute(`
-      CREATE TABLE IF NOT EXISTS server_ip_geo (
-        ip_address VARCHAR(45) NOT NULL,
-        country_code CHAR(2) NULL,
-        country VARCHAR(80) NULL,
-        region VARCHAR(120) NULL,
-        city VARCHAR(120) NULL,
-        lat DECIMAL(8,4) NULL,
-        lon DECIMAL(8,4) NULL,
-        isp VARCHAR(200) NULL,
-        org VARCHAR(200) NULL,
-        asn VARCHAR(200) NULL,
-        proxy TINYINT(1) NOT NULL DEFAULT 0,
-        hosting TINYINT(1) NOT NULL DEFAULT 0,
-        updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (ip_address),
-        KEY idx_sig_cc (country_code)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`)
-      .catch((error) => {
-        tabelSiap = null;
-        throw error;
-      });
-  }
-  return tabelSiap;
-};
 
 const dariBaris = (b) => ({
   cc: b.country_code || null,
@@ -97,7 +67,6 @@ const muatDariDb = async (ips) => {
   const kurang = ips.filter((ip) => !segar(cache.get(ip)));
   if (!kurang.length) return;
   try {
-    await siapkanTabel();
     for (let i = 0; i < kurang.length; i += 500) {
       const potong = kurang.slice(i, i + 500);
       const baris = await store.query(
@@ -156,7 +125,6 @@ const prosesAntrean = async () => {
     }
     terakhirGagal = null;
     if (baris.length) {
-      await siapkanTabel();
       await store.execute(
         `INSERT INTO server_ip_geo (ip_address, country_code, country, region, city, lat, lon, isp, org, asn, proxy, hosting)
          VALUES ${baris.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ')}

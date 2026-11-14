@@ -370,7 +370,6 @@ const simpanSnapshot = async () => {
   try { serangan = require('./serverSecurity.service').ambilHitunganSnapshot(); } catch { /* opsional */ }
 
   try {
-    await store.ensureTables();
     await store.execute(
       `INSERT INTO server_metric_snapshots
         (cpu, memory, disk, load1, process_mb, requests, errors, avg_ms, net_rx, net_tx, attacks, online)
@@ -399,7 +398,6 @@ const getHistory = async (rentang = '1h') => {
 
   const peta = { '6h': [6, 5], '24h': [24, 10], '7d': [168, 60], '30d': [720, 240] };
   const [jam, bucketMenit] = peta[rentang] || peta['24h'];
-  await store.ensureTables();
   const baris = await store.query(
     `SELECT FLOOR(${epochDetik('created_at')} / (? * 60)) * (? * 60) * 1000 AS t,
             ROUND(AVG(cpu), 6) AS cpu, ROUND(AVG(memory), 6) AS memory, ROUND(AVG(disk), 6) AS disk, ROUND(AVG(load1), 6) AS load1,
@@ -457,7 +455,7 @@ const start = () => {
   setInterval(() => ambilSampel().catch((e) => logger.warn(`[ServerMetrics] ${e.message}`)), SAMPLE_MS).unref();
   setInterval(() => simpanSnapshot(), SNAPSHOT_MS).unref();
   setInterval(() => bersihkanSnapshot(), 6 * 60 * 60 * 1000).unref();
-  store.ensureTables().then(bersihkanSnapshot).catch(() => {});
+  bersihkanSnapshot().catch(() => {});
 };
 
 module.exports = {

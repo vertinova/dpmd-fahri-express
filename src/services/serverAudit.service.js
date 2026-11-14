@@ -17,7 +17,7 @@ const store = require('./serverStore.service');
 const metrics = require('./serverMetrics.service');
 const apps = require('./serverApps.service');
 const { BACKEND_ROOT, IP_TEPERCAYA } = require('../config/serverManagement');
-const { selang, DIALEK } = require('../config/dialek');
+const { selang } = require('../config/dialek');
 
 const IS_LINUX = process.platform === 'linux';
 const CACHE_MS = 60 * 1000;
@@ -119,7 +119,7 @@ const cekWeb = async () => {
 
 /* ─────────────────────────── Database ─────────────────────────── */
 
-const cekDatabasePg = async () => {
+const cekDatabase = async () => {
   const hasil = [];
   try {
     const [[u], [l]] = await Promise.all([
@@ -135,34 +135,6 @@ const cekDatabasePg = async () => {
       hasil.push(alamat.split(',').map((a) => a.trim()).some((a) => ['0.0.0.0', '*', '::'].includes(a))
         ? temuan('db_bind', 'Database', 'PostgreSQL mendengarkan semua antarmuka', 'warn', `listen_addresses=${alamat}. Pastikan port 5432 tidak terbuka ke internet dan pg_hba.conf membatasi alamat klien.`, "Set listen_addresses = 'localhost' di postgresql.conf bila aplikasi satu mesin.")
         : temuan('db_bind', 'Database', 'PostgreSQL hanya lokal', 'pass', `listen_addresses=${alamat}.`));
-    }
-  } catch (error) {
-    hasil.push(temuan('db', 'Database', 'Database tidak bisa diperiksa', 'skip', error.message));
-  }
-  return hasil;
-};
-
-const cekDatabase = async () => {
-  if (DIALEK === 'postgres') return cekDatabasePg();
-  const hasil = [];
-  try {
-    const [[u], bind] = await Promise.all([
-      store.query('SELECT CURRENT_USER() AS u'),
-      store.query("SHOW VARIABLES WHERE Variable_name IN ('bind_address','skip_networking','local_infile','max_connections')"),
-    ]);
-    const v = Object.fromEntries(bind.map((b) => [b.Variable_name, b.Value]));
-    const user = String(u?.u || '');
-    hasil.push(/^root@/i.test(user)
-      ? temuan('db_user', 'Database', 'Aplikasi memakai akun root MySQL', 'warn', `Terhubung sebagai ${user}. Bila aplikasi dibobol, seluruh server database ikut.`, 'Buat akun khusus dengan hak hanya pada database aplikasi.', "CREATE USER 'dpmd_app'@'127.0.0.1' IDENTIFIED BY '<sandi-kuat>';\nGRANT SELECT, INSERT, UPDATE, DELETE, CREATE, ALTER, INDEX, DROP ON dpmd.* TO 'dpmd_app'@'127.0.0.1';")
-      : temuan('db_user', 'Database', 'Akun database bukan root', 'pass', `Terhubung sebagai ${user}.`));
-    const alamat = v.bind_address;
-    if (alamat !== undefined) {
-      hasil.push(['0.0.0.0', '*', '::'].includes(alamat) && v.skip_networking !== 'ON'
-        ? temuan('db_bind', 'Database', 'MySQL mendengarkan semua antarmuka', 'warn', `bind_address=${alamat}. Pastikan port 3306 tidak terbuka ke internet.`, 'Set bind-address = 127.0.0.1 di my.cnf bila aplikasi satu mesin.')
-        : temuan('db_bind', 'Database', 'MySQL hanya lokal', 'pass', `bind_address=${alamat}.`));
-    }
-    if (v.local_infile === 'ON') {
-      hasil.push(temuan('db_infile', 'Database', 'local_infile aktif', 'warn', 'LOAD DATA LOCAL bisa dipakai penyerang SQL injection untuk membaca berkas.', 'Matikan: local_infile = 0 di my.cnf.'));
     }
   } catch (error) {
     hasil.push(temuan('db', 'Database', 'Database tidak bisa diperiksa', 'skip', error.message));

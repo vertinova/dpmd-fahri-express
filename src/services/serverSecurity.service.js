@@ -75,7 +75,6 @@ const diWhitelist = (ip) => {
 
 const muatBlokir = async () => {
   try {
-    await store.ensureTables();
     const baris = await store.query(
       'SELECT ip_address, reason, auto, expires_at FROM server_ip_blocklist WHERE expires_at IS NULL OR expires_at > NOW()',
     );
@@ -103,7 +102,6 @@ const blockIp = async ({ ip, reason, minutes = null, auto = false, by = null }) 
   const i = bersihkanIp(ip);
   if (!net.isIP(i)) throw new Error('Alamat IP tidak valid');
   const expires = minutes ? new Date(Date.now() + minutes * 60000) : null;
-  await store.ensureTables();
   await store.execute(
     `INSERT INTO server_ip_blocklist (ip_address, reason, auto, expires_at, created_by)
      VALUES (?, ?, ?, ?, ?)
@@ -126,7 +124,6 @@ const catatHitBlokir = (ip) => {
 };
 
 const listBlocklist = async () => {
-  await store.ensureTables();
   const baris = await store.query(
     `SELECT id, ip_address, reason, auto, hits, expires_at, created_by, created_at,
             (expires_at IS NOT NULL AND expires_at <= NOW()) AS expired
@@ -207,7 +204,6 @@ const flush = async () => {
   if (!antrean.length) return;
   const batch = antrean.splice(0, 500);
   try {
-    await store.ensureTables();
     const tanda = batch.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
     const nilai = batch.flatMap((e) => [
       e.ip, e.type, e.severity, e.source, e.method, e.path, e.ua, e.userId, e.detail, e.blocked, e.at,
@@ -430,7 +426,6 @@ const RENTANG = { '1h': 1, '24h': 24, '7d': 168, '30d': 720 };
 
 const getSummary = async (rentang = '24h') => {
   await flush();
-  await store.ensureTables();
   const jam = RENTANG[rentang] || 24;
   const bucket = jam <= 24 ? 3600 : 86400;
   const where = `created_at >= NOW() - ${selang(jam, 'HOUR')}`;
@@ -541,7 +536,6 @@ const cekHoneypot = ({ ip, method = null, path, userAgent = null, source = 'app'
  */
 const getTimeline = async (range = '24h') => {
   await flush();
-  await store.ensureTables();
   const jam = RENTANG[range] || 24;
   let baris = [];
   try {
@@ -587,7 +581,6 @@ const negaraDiblokir = (ip) => {
  */
 const getGeoMap = async ({ range = '24h', visitors = [] } = {}) => {
   await flush();
-  await store.ensureTables();
   const jam = RENTANG[range] || 24;
   const baris = await store.query(
     `SELECT ip_address, COUNT(*) AS n, MAX(created_at) AS last_seen,
@@ -652,7 +645,6 @@ const getGeoMap = async ({ range = '24h', visitors = [] } = {}) => {
 
 const listEvents = async ({ page = 1, limit = 50, type, severity, ip, source, q, range = '7d', since_id: sejakId }) => {
   await flush();
-  await store.ensureTables();
   const syarat = [`created_at >= NOW() - ${selang(RENTANG[range] || 168, 'HOUR')}`];
   const nilai = [];
   if (sejakId && Number(sejakId) > 0) { syarat.push('id > ?'); nilai.push(Number(sejakId)); }

@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Hanya untuk uji lokal: membangkitkan client PG terpisah ke <tujuan>/client tanpa menyentuh client MySQL.
+// Hanya untuk uji lokal: membangkitkan client ke <tujuan>/client tanpa menyentuh client di node_modules.
 //   node scripts/pg/generate-prisma-uji.js <folderTujuan>
 const fs = require('fs');
 const path = require('path');
@@ -10,7 +10,7 @@ if (!tujuan) { console.error('pakai: generate-prisma-uji.js <folderTujuan>'); pr
 const ROOT = path.resolve(__dirname, '..', '..');
 const dest = path.resolve(tujuan);
 fs.mkdirSync(dest, { recursive: true });
-const skema = fs.readFileSync(path.join(ROOT, 'prisma', 'postgres', 'schema.prisma'), 'utf8')
+const skema = fs.readFileSync(path.join(ROOT, 'prisma', 'schema.prisma'), 'utf8')
   .replace(/(generator client \{[^}]*?)\n\}/, `$1\n  output = ${JSON.stringify(path.join(dest, 'client').split(path.sep).join('/'))}\n}`);
 if (!skema.includes('output =')) { console.error('blok generator tidak ditemukan'); process.exit(1); }
 const f = path.join(dest, 'schema.prisma');

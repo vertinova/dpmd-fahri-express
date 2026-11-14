@@ -1,22 +1,13 @@
 /**
- * Menyiapkan skema Helpdesk saat server start: menjalankan
- * migrations/20261102_create_helpdesk.sql (semua pernyataannya idempoten) lalu
- * mengisi kategori, FAQ, dan pengaturan awal.
- *
- * Dijalankan di startup — bukan hanya lewat run-migrations — supaya deploy
- * tidak bergantung pada langkah migrasi manual; fitur yang tabelnya belum ada
- * hanya akan membalas 500 tanpa kabar.
+ * Mengisi kategori, FAQ, dan pengaturan awal Helpdesk saat server start
+ * (tabelnya sudah ada di baseline PostgreSQL).
  *
  * Kategori & FAQ bawaan HANYA diisi saat tabel masih kosong, supaya yang diubah
  * atau dihapus petugas tidak muncul kembali setiap restart.
  */
-const fs = require('fs');
-const path = require('path');
 const Helpdesk = require('./helpdesk.service');
 const logger = require('../utils/logger');
-const { sisipAbaikan, akhirAbaikan, DIALEK } = require('../config/dialek');
-
-const BERKAS = path.join(__dirname, '..', '..', 'migrations', '20261102_create_helpdesk.sql');
+const { sisipAbaikan, akhirAbaikan } = require('../config/dialek');
 
 /* [nama, slug, deskripsi, ikon, tingkat awal, bidang, kata kunci] — urutan = urutan tampil.
    Tingkat awal 'kecamatan' dipakai untuk urusan yang memang diverifikasi
@@ -94,18 +85,8 @@ const PENGATURAN_BAWAAN = [
 	['dpmd_profil', ''],
 ];
 
-/** Pernyataan SQL dari berkas migrasi; komentar baris dibuang dulu. */
-function pernyataan() {
-	return fs.readFileSync(BERKAS, 'utf8')
-		.split('\n').filter((b) => !b.trim().startsWith('--')).join('\n')
-		.split(';').map((s) => s.trim()).filter(Boolean);
-}
-
 async function siapkanHelpdesk() {
 	try {
-		// PostgreSQL: tabel sudah ada di baseline, DDL MySQL dilewati (seed tetap jalan).
-		if (DIALEK !== 'postgres') for (const sql of pernyataan()) await Helpdesk.q(sql);
-
 		for (const [k, v] of PENGATURAN_BAWAAN) {
 			await Helpdesk.q(`${sisipAbaikan('helpdesk_settings')} (setting_key, setting_value) VALUES (?, ?)${akhirAbaikan()}`, [k, v]);
 		}

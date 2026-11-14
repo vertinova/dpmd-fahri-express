@@ -16,10 +16,9 @@
 //  3. `rts.jumlah_jiwa` / `jumlah_kk` hampir seluruhnya kosong (±1% terisi),
 //     jadi tidak dijadikan output — hanya dilaporkan tingkat keterisiannya.
 const prisma = require('../config/prisma');
-const { DIALEK } = require('../config/dialek');
 
 // Di PG tiap tabel punya tipe enum sendiri; UNION butuh tipe yang sama.
-const teks = (kolom) => (DIALEK === 'postgres' ? `CAST(${kolom} AS TEXT)` : kolom);
+const teks = (kolom) => `CAST(${kolom} AS TEXT)`;
 
 // ============================================================
 // Jenis lembaga

@@ -23,7 +23,6 @@ const getJournal = async ({ hours } = {}) => {
   const jam = Math.min(720, Math.max(1, Number(hours) || 168));
   const gte = new Date(Date.now() - jam * 3600e3);
   const jangka = selang(Math.round(jam), 'HOUR'); // MySQL membulatkan INTERVAL pecahan
-  await store.ensureTables();
 
   const whereManual = { module: 'manajemen_server', created_at: { gte } };
   const [manual, jumlahManual, otomatis, [jmlOto], [ditolak], blokirAktif] = await Promise.all([
@@ -83,7 +82,6 @@ const getPosture = async () => {
       return a ? { grade: a.grade, score: a.score, at: a.at } : null;
     }, null),
     aman(async () => {
-      await store.ensureTables();
       const [r] = await store.query(`SELECT COUNT(*) AS total, SUM(CASE WHEN blocked THEN 1 ELSE 0 END) AS ditolak FROM server_security_events WHERE created_at >= NOW() - ${selang(24, 'HOUR')}`);
       return { total: Number(r?.total) || 0, ditolak: Number(r?.ditolak) || 0 };
     }, { total: 0, ditolak: 0 }),
