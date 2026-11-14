@@ -3,10 +3,13 @@
  * Dipakai untuk memblokir pemilihan tanggal merah saat generate BA & SP bankeu.
  */
 
-const sequelize = require('../config/database');
-const { getHariLibur, toYmd } = require('../utils/tanggalMerah');
+const prisma = require('../config/prisma');
+const { getHariLibur, toYmd, keTanggalDb } = require('../utils/tanggalMerah');
 const { clearHolidayCache } = require('../services/holidayCache.service');
 const logger = require('../utils/logger');
+
+const idAngka = (v) => { const n = Number.parseInt(v, 10); return Number.isInteger(n) ? n : null; };
+const pembuat = (req) => (req.user?.id ? Number(req.user.id) : null);
 
 class HariLiburController {
   /**
@@ -37,25 +40,22 @@ class HariLiburController {
         return res.status(400).json({ success: false, message: 'Tanggal dan keterangan wajib diisi' });
       }
 
-      const [existing] = await sequelize.query(
-        `SELECT id, is_active FROM hari_libur WHERE tanggal = :ymd LIMIT 1`,
-        { replacements: { ymd }, type: sequelize.QueryTypes.SELECT }
-      );
+      const existing = await prisma.hari_libur.findUnique({ where: { tanggal: keTanggalDb(ymd) }, select: { id: true } });
 
       if (existing) {
         // Tanggal sudah ada -> aktifkan kembali & perbarui keterangan (idempotent)
-        await sequelize.query(
-          `UPDATE hari_libur SET keterangan = :keterangan, is_active = TRUE, updated_at = NOW() WHERE id = :id`,
-          { replacements: { keterangan: keterangan.trim(), id: existing.id } }
-        );
+        await prisma.hari_libur.update({
+          where: { id: existing.id },
+          data: { keterangan: keterangan.trim(), is_active: true, updated_at: new Date() },
+        });
         clearHolidayCache();
         return res.json({ success: true, message: 'Hari libur diperbarui', data: { id: existing.id, tanggal: ymd, keterangan: keterangan.trim() } });
       }
 
-      const [id] = await sequelize.query(
-        `INSERT INTO hari_libur (tanggal, keterangan, created_by) VALUES (:ymd, :keterangan, :createdBy)`,
-        { replacements: { ymd, keterangan: keterangan.trim(), createdBy: req.user?.id || null } }
-      );
+      const { id } = await prisma.hari_libur.create({
+        data: { tanggal: keTanggalDb(ymd), keterangan: keterangan.trim(), created_by: pembuat(req) },
+        select: { id: true },
+      });
 
       clearHolidayCache();
       res.status(201).json({ success: true, message: 'Hari libur ditambahkan', data: { id, tanggal: ymd, keterangan: keterangan.trim() } });
@@ -70,43 +70,33 @@ class HariLiburController {
    */
   async update(req, res) {
     try {
-      const { id } = req.params;
+      const id = idAngka(req.params.id);
       const { tanggal, keterangan, is_active } = req.body;
 
-      const [existing] = await sequelize.query(
-        `SELECT id FROM hari_libur WHERE id = :id LIMIT 1`,
-        { replacements: { id }, type: sequelize.QueryTypes.SELECT }
-      );
+      const existing = id === null ? null : await prisma.hari_libur.findUnique({ where: { id }, select: { id: true } });
       if (!existing) {
         return res.status(404).json({ success: false, message: 'Hari libur tidak ditemukan' });
       }
 
-      const sets = [];
-      const replacements = { id };
+      const data = {};
       if (tanggal !== undefined) {
         const ymd = toYmd(tanggal);
         if (!ymd) return res.status(400).json({ success: false, message: 'Format tanggal tidak valid' });
-        sets.push('tanggal = :tanggal');
-        replacements.tanggal = ymd;
+        data.tanggal = keTanggalDb(ymd);
       }
       if (keterangan !== undefined) {
         if (!keterangan.trim()) return res.status(400).json({ success: false, message: 'Keterangan tidak boleh kosong' });
-        sets.push('keterangan = :keterangan');
-        replacements.keterangan = keterangan.trim();
+        data.keterangan = keterangan.trim();
       }
       if (is_active !== undefined) {
-        sets.push('is_active = :is_active');
-        replacements.is_active = !!is_active;
+        data.is_active = !!is_active;
       }
 
-      if (sets.length === 0) {
+      if (Object.keys(data).length === 0) {
         return res.status(400).json({ success: false, message: 'Tidak ada data yang diperbarui' });
       }
 
-      await sequelize.query(
-        `UPDATE hari_libur SET ${sets.join(', ')}, updated_at = NOW() WHERE id = :id`,
-        { replacements }
-      );
+      await prisma.hari_libur.update({ where: { id }, data: { ...data, updated_at: new Date() } });
 
       clearHolidayCache();
       res.json({ success: true, message: 'Hari libur diperbarui' });
@@ -168,22 +158,16 @@ class HariLiburController {
         const summary = Array.isArray(val.summary) ? val.summary.join(', ') : (val.summary || '');
         const keterangan = String(summary || 'Libur Nasional').trim().slice(0, 255);
 
-        const [existing] = await sequelize.query(
-          `SELECT id FROM hari_libur WHERE tanggal = :ymd LIMIT 1`,
-          { replacements: { ymd }, type: sequelize.QueryTypes.SELECT }
-        );
+        const existing = await prisma.hari_libur.findUnique({ where: { tanggal: keTanggalDb(ymd) }, select: { id: true } });
 
         if (existing) {
-          await sequelize.query(
-            `UPDATE hari_libur SET keterangan = :keterangan, is_active = TRUE, updated_at = NOW() WHERE id = :id`,
-            { replacements: { keterangan, id: existing.id } }
-          );
+          await prisma.hari_libur.update({
+            where: { id: existing.id },
+            data: { keterangan, is_active: true, updated_at: new Date() },
+          });
           updated++;
         } else {
-          await sequelize.query(
-            `INSERT INTO hari_libur (tanggal, keterangan, created_by) VALUES (:ymd, :keterangan, :createdBy)`,
-            { replacements: { ymd, keterangan, createdBy: req.user?.id || null } }
-          );
+          await prisma.hari_libur.create({ data: { tanggal: keTanggalDb(ymd), keterangan, created_by: pembuat(req) } });
           inserted++;
         }
       }
@@ -207,11 +191,8 @@ class HariLiburController {
    */
   async remove(req, res) {
     try {
-      const { id } = req.params;
-      const result = await sequelize.query(
-        `DELETE FROM hari_libur WHERE id = :id`,
-        { replacements: { id } }
-      );
+      const id = idAngka(req.params.id);
+      if (id !== null) await prisma.hari_libur.deleteMany({ where: { id } });
       clearHolidayCache();
       res.json({ success: true, message: 'Hari libur dihapus' });
     } catch (error) {

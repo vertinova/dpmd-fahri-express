@@ -3,8 +3,7 @@
  * Tanggal merah = Sabtu/Minggu (weekend) ATAU terdaftar di tabel hari_libur (libur nasional).
  */
 
-const sequelize = require('../config/database');
-const { formatWaktu } = require('../config/dialek');
+const prisma = require('../config/prisma');
 
 const HARI = ['Minggu', 'Senin', 'Selasa', 'Rabu', 'Kamis', 'Jumat', 'Sabtu'];
 
@@ -26,6 +25,10 @@ function toYmd(tanggal) {
   const dd = String(d.getDate()).padStart(2, '0');
   return `${yyyy}-${mm}-${dd}`;
 }
+
+/** 'YYYY-MM-DD' <-> Date kolom DATE Prisma (tengah malam UTC, tanpa geser zona). */
+const keTanggalDb = (ymd) => new Date(`${ymd}T00:00:00Z`);
+const dariTanggalDb = (d) => d.toISOString().slice(0, 10);
 
 /**
  * Apakah tanggal jatuh di akhir pekan (Sabtu/Minggu).
@@ -53,10 +56,10 @@ async function checkTanggalMerah(tanggal) {
     return { merah: true, alasan: `Hari ${HARI[day]} (akhir pekan)`, tanggal: ymd };
   }
 
-  const [libur] = await sequelize.query(
-    `SELECT keterangan FROM hari_libur WHERE tanggal = :ymd AND is_active = TRUE LIMIT 1`,
-    { replacements: { ymd }, type: sequelize.QueryTypes.SELECT }
-  );
+  const libur = await prisma.hari_libur.findFirst({
+    where: { tanggal: keTanggalDb(ymd), is_active: true },
+    select: { keterangan: true },
+  });
 
   if (libur) {
     return { merah: true, alasan: `Hari libur: ${libur.keterangan}`, tanggal: ymd };
@@ -71,17 +74,16 @@ async function checkTanggalMerah(tanggal) {
  * @param {number|string} [tahun]
  */
 async function getHariLibur(tahun) {
-  let where = 'is_active = TRUE';
-  const replacements = {};
-  if (tahun) {
-    where += ' AND EXTRACT(YEAR FROM tanggal) = :tahun';
-    replacements.tahun = tahun;
-  }
-  return sequelize.query(
-    `SELECT id, ${formatWaktu('tanggal', '%Y-%m-%d')} AS tanggal, keterangan, is_active
-     FROM hari_libur WHERE ${where} ORDER BY tanggal ASC`,
-    { replacements, type: sequelize.QueryTypes.SELECT }
-  );
+  const where = { is_active: true };
+  const t = parseInt(tahun, 10);
+  if (Number.isInteger(t)) where.tanggal = { gte: keTanggalDb(`${t}-01-01`), lt: keTanggalDb(`${t + 1}-01-01`) };
+  const rows = await prisma.hari_libur.findMany({
+    where,
+    select: { id: true, tanggal: true, keterangan: true, is_active: true },
+    orderBy: { tanggal: 'asc' },
+  });
+  // Bentuk JSON lama dipertahankan: tanggal 'YYYY-MM-DD', is_active 1/0
+  return rows.map((r) => ({ id: r.id, tanggal: dariTanggalDb(r.tanggal), keterangan: r.keterangan, is_active: r.is_active ? 1 : 0 }));
 }
 
-module.exports = { checkTanggalMerah, getHariLibur, isWeekend, toYmd };
+module.exports = { checkTanggalMerah, getHariLibur, isWeekend, toYmd, keTanggalDb, dariTanggalDb };

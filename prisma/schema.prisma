@@ -3975,3 +3975,14 @@ model cctv_events {
   @@index([type], map: "idx_cctv_events_type")
   @@index([severity], map: "idx_cctv_events_severity")
 }
+
+/// Hari libur nasional / cuti bersama (tanggal merah). updated_at diisi DB (ON UPDATE).
+model hari_libur {
+  id         Int       @id @default(autoincrement())
+  tanggal    DateTime  @unique(map: "uq_hari_libur_tanggal") @db.Date
+  keterangan String    @db.VarChar(255)
+  is_active  Boolean   @default(true)
+  created_by Int?
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+  updated_at DateTime? @default(now()) @db.Timestamp(0)
+}

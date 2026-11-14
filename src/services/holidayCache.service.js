@@ -18,8 +18,7 @@
  * dan tetap dihitung di checkHoliday().
  */
 
-const sequelize = require('../config/database');
-const { formatWaktu } = require('../config/dialek');
+const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 
 // Fallback statis bila tabel hari_libur kosong/belum ter-load (format: MM-DD).
@@ -63,13 +62,12 @@ let _loading = null; // Promise saat sedang load, untuk hindari load ganda
 
 async function load() {
   try {
-    const rows = await sequelize.query(
-      `SELECT ${formatWaktu('tanggal', '%Y-%m-%d')} AS tanggal, keterangan
-         FROM hari_libur WHERE is_active = TRUE`,
-      { type: sequelize.QueryTypes.SELECT }
-    );
+    const rows = await prisma.hari_libur.findMany({
+      where: { is_active: true },
+      select: { tanggal: true, keterangan: true },
+    });
     const map = new Map();
-    for (const r of rows) map.set(r.tanggal, r.keterangan);
+    for (const r of rows) map.set(r.tanggal.toISOString().slice(0, 10), r.keterangan);
     _byDate = map;
     _loadedAt = Date.now();
   } catch (e) {
