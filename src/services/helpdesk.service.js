@@ -14,6 +14,7 @@
  */
 const crypto = require('crypto');
 const sequelize = require('../config/database');
+const { selang, urutanNilai, selisihWaktu, saatBentrok } = require('../config/dialek');
 
 const TINGKAT = ['kecamatan', 'bidang', 'dpmd'];
 const STATUS_TIKET = ['baru', 'diproses', 'dijawab', 'selesai'];
@@ -55,7 +56,7 @@ async function semuaKategori({ hanyaAktif = false } = {}) {
 	const rows = await q(
 		`SELECT c.*, b.nama AS bidang_nama
 		   FROM helpdesk_categories c LEFT JOIN bidangs b ON b.id = c.bidang_id
-		  ${hanyaAktif ? 'WHERE c.is_active = 1' : ''}
+		  ${hanyaAktif ? 'WHERE c.is_active = TRUE' : ''}
 		  ORDER BY c.sort_order, c.id`
 	);
 	return rows.map(aktif);
@@ -89,7 +90,7 @@ async function hapusKategori(id) {
 		[id, id]
 	);
 	if (Number(r.dipakai) > 0) {
-		await q('UPDATE helpdesk_categories SET is_active = 0 WHERE id = ?', [id]);
+		await q('UPDATE helpdesk_categories SET is_active = FALSE WHERE id = ?', [id]);
 		return 'dinonaktifkan';
 	}
 	await q('DELETE FROM helpdesk_categories WHERE id = ?', [id]);
@@ -115,7 +116,7 @@ function faqUntuk(login) {
 	return q(
 		`SELECT f.id, f.category_id, f.question, f.answer, f.keywords, f.action_label, f.action_url, f.hits
 		   FROM helpdesk_faqs f JOIN helpdesk_categories c ON c.id = f.category_id
-		  WHERE f.is_active = 1 AND c.is_active = 1 AND f.audience IN ('semua', ?)`,
+		  WHERE f.is_active = TRUE AND c.is_active = TRUE AND f.audience IN ('semua', ?)`,
 		[login ? 'akun' : 'publik']
 	);
 }
@@ -169,7 +170,7 @@ async function catatChat({ userId, kategoriId, pertanyaan, terjawab, sumber, faq
 async function nilaiJawaban(logId, membantu) {
 	const r = await q(
 		`UPDATE helpdesk_chat_logs SET helpful = ?
-		  WHERE id = ? AND helpful IS NULL AND created_at >= DATE_SUB(NOW(), INTERVAL 1 DAY)`,
+		  WHERE id = ? AND helpful IS NULL AND created_at >= NOW() - ${selang(1, 'DAY')}`,
 		[membantu ? 1 : 0, logId]
 	);
 	return r.affectedRows > 0;
@@ -184,23 +185,23 @@ function pertanyaanTakTerjawab({ bidangId = null, batas = 150 } = {}) {
 		   FROM helpdesk_chat_logs l
 		   LEFT JOIN helpdesk_categories c ON c.id = l.category_id
 		   LEFT JOIN helpdesk_faqs f ON f.id = l.faq_id
-		  WHERE (l.answered = 0 OR l.helpful = 0) AND l.reviewed = 0
+		  WHERE (l.answered = FALSE OR l.helpful = FALSE) AND l.reviewed = FALSE
 		    ${bidangId ? 'AND c.bidang_id = ?' : ''}
 		  ORDER BY l.id DESC LIMIT ?`,
 		[...(bidangId ? [bidangId] : []), batas]
 	);
 }
 
-const tandaiLogDitinjau = (ids) => q('UPDATE helpdesk_chat_logs SET reviewed = 1 WHERE id IN (?)', [ids]);
+const tandaiLogDitinjau = (ids) => q('UPDATE helpdesk_chat_logs SET reviewed = TRUE WHERE id IN (?)', [ids]);
 
 async function ringkasanChat(hari = 30) {
 	const r = await satu(
-		`SELECT COUNT(*) AS total, COALESCE(SUM(answered), 0) AS terjawab,
-		        COALESCE(SUM(source = 'ai'), 0) AS lewat_ai, COALESCE(SUM(source = 'faq'), 0) AS lewat_faq,
-		        COALESCE(SUM(source = 'akun'), 0) AS lewat_akun, COALESCE(SUM(source = 'data'), 0) AS lewat_data,
-		        COALESCE(SUM(helpful = 1), 0) AS membantu, COALESCE(SUM(helpful = 0), 0) AS tidak_membantu
-		   FROM helpdesk_chat_logs WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)`,
-		[hari]
+		`SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN answered = TRUE THEN 1 ELSE 0 END), 0) AS terjawab,
+		        COALESCE(SUM(CASE WHEN source = 'ai' THEN 1 ELSE 0 END), 0) AS lewat_ai, COALESCE(SUM(CASE WHEN source = 'faq' THEN 1 ELSE 0 END), 0) AS lewat_faq,
+		        COALESCE(SUM(CASE WHEN source = 'akun' THEN 1 ELSE 0 END), 0) AS lewat_akun, COALESCE(SUM(CASE WHEN source = 'data' THEN 1 ELSE 0 END), 0) AS lewat_data,
+		        COALESCE(SUM(CASE WHEN helpful = TRUE THEN 1 ELSE 0 END), 0) AS membantu,
+		        COALESCE(SUM(CASE WHEN helpful = FALSE THEN 1 ELSE 0 END), 0) AS tidak_membantu
+		   FROM helpdesk_chat_logs WHERE created_at >= NOW() - ${selang(hari, 'DAY')}`
 	);
 	return Object.fromEntries(Object.entries(r).map(([k, v]) => [k, Number(v)]));
 }
@@ -216,7 +217,7 @@ async function simpanPengaturan(data) {
 	for (const [k, v] of Object.entries(data)) {
 		await q(
 			`INSERT INTO helpdesk_settings (setting_key, setting_value) VALUES (?, ?)
-			 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+			 ${saatBentrok(['setting_key'], ['setting_value'])}`,
 			[k, v == null ? '' : String(v)]
 		);
 	}
@@ -268,7 +269,7 @@ function petugas(tingkat, { kecamatanId, bidangId } = {}) {
 		if (!kecamatanId) return Promise.resolve([]);
 		return q(
 			`SELECT id, name, no_hp FROM users
-			  WHERE role = 'kecamatan' AND kecamatan_id = ? AND is_active = 1
+			  WHERE role = 'kecamatan' AND kecamatan_id = ? AND is_active = TRUE
 			  ORDER BY operator_kecamatan, (TRIM(COALESCE(no_hp, '')) <> '') DESC, id`,
 			[kecamatanId]
 		);
@@ -277,14 +278,14 @@ function petugas(tingkat, { kecamatanId, bidangId } = {}) {
 		if (!bidangId) return Promise.resolve([]);
 		return q(
 			`SELECT id, name, no_hp FROM users
-			  WHERE bidang_id = ? AND role IN (?) AND is_active = 1
-			  ORDER BY FIELD(role, 'kepala_bidang', 'ketua_tim', 'pegawai', 'bendahara'), id`,
+			  WHERE bidang_id = ? AND role IN (?) AND is_active = TRUE
+			  ORDER BY ${urutanNilai('role', ['kepala_bidang', 'ketua_tim', 'pegawai', 'bendahara'])}, id`,
 			[bidangId, PERAN_STAF_BIDANG]
 		);
 	}
 	return q(
-		`SELECT id, name, no_hp FROM users WHERE role IN (?) AND is_active = 1
-		  ORDER BY FIELD(role, 'sekretaris_dinas', 'superadmin'), id`,
+		`SELECT id, name, no_hp FROM users WHERE role IN (?) AND is_active = TRUE
+		  ORDER BY ${urutanNilai('role', ['sekretaris_dinas', 'superadmin'])}, id`,
 		[PERAN_DPMD_PUSAT]
 	);
 }
@@ -421,7 +422,7 @@ async function daftarTiket(cakupan, { status, tingkat, bidang, prioritas, cari }
 	return q(
 		`SELECT ${KOLOM_TIKET} ${JOIN_TIKET}
 		  WHERE ${where.join(' AND ')}
-		  ORDER BY FIELD(t.status, 'baru', 'diproses', 'dijawab', 'selesai'), t.priority = 'tinggi' DESC, t.last_message_at DESC
+		  ORDER BY ${urutanNilai('t.status', ['baru', 'diproses', 'dijawab', 'selesai'])}, t.priority = 'tinggi' DESC, t.last_message_at DESC
 		  LIMIT 300`,
 		p
 	);
@@ -443,28 +444,28 @@ async function statistik(cakupan, hari = 30) {
 	const [ringkas, kategori, tren, tertunda] = await Promise.all([
 		satu(
 			`SELECT COUNT(*) AS total,
-			        COALESCE(SUM(t.status = 'baru'), 0) AS baru, COALESCE(SUM(t.status = 'diproses'), 0) AS diproses,
-			        COALESCE(SUM(t.status = 'dijawab'), 0) AS dijawab, COALESCE(SUM(t.status = 'selesai'), 0) AS selesai,
-			        COALESCE(SUM(t.priority = 'tinggi' AND t.status <> 'selesai'), 0) AS mendesak,
-			        AVG(TIMESTAMPDIFF(MINUTE, t.created_at, t.first_response_at)) AS menit_tanggap,
-			        AVG(t.rating) AS rating, COALESCE(SUM(t.rating IS NOT NULL), 0) AS jumlah_rating
-			   ${dasar} AND t.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)`,
-			[...param, hari]
+			        COALESCE(SUM(CASE WHEN t.status = 'baru' THEN 1 ELSE 0 END), 0) AS baru, COALESCE(SUM(CASE WHEN t.status = 'diproses' THEN 1 ELSE 0 END), 0) AS diproses,
+			        COALESCE(SUM(CASE WHEN t.status = 'dijawab' THEN 1 ELSE 0 END), 0) AS dijawab, COALESCE(SUM(CASE WHEN t.status = 'selesai' THEN 1 ELSE 0 END), 0) AS selesai,
+			        COALESCE(SUM(CASE WHEN t.priority = 'tinggi' AND t.status <> 'selesai' THEN 1 ELSE 0 END), 0) AS mendesak,
+			        AVG(${selisihWaktu('MINUTE', 't.created_at', 't.first_response_at')}) AS menit_tanggap,
+			        AVG(t.rating) AS rating, COALESCE(SUM(CASE WHEN t.rating IS NOT NULL THEN 1 ELSE 0 END), 0) AS jumlah_rating
+			   ${dasar} AND t.created_at >= NOW() - ${selang(hari, 'DAY')}`,
+			param
 		),
 		q(
 			`SELECT COALESCE(c.name, 'Tanpa kategori') AS nama, COUNT(*) AS jumlah
 			   FROM helpdesk_tickets t LEFT JOIN helpdesk_categories c ON c.id = t.category_id
-			  WHERE ${sql} AND t.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY)
+			  WHERE ${sql} AND t.created_at >= NOW() - ${selang(hari, 'DAY')}
 			  GROUP BY c.name ORDER BY jumlah DESC LIMIT 6`,
-			[...param, hari]
+			param
 		),
 		q(
 			`SELECT DATE(t.created_at) AS tanggal, COUNT(*) AS jumlah
-			   ${dasar} AND t.created_at >= DATE_SUB(CURDATE(), INTERVAL 13 DAY)
+			   ${dasar} AND t.created_at >= CURRENT_DATE - ${selang(13, 'DAY')}
 			  GROUP BY DATE(t.created_at) ORDER BY tanggal`,
 			param
 		),
-		satu(`SELECT COUNT(*) AS n ${dasar} AND t.status = 'baru' AND t.last_message_at <= DATE_SUB(NOW(), INTERVAL 24 HOUR)`, param),
+		satu(`SELECT COUNT(*) AS n ${dasar} AND t.status = 'baru' AND t.last_message_at <= NOW() - ${selang(24, 'HOUR')}`, param),
 	]);
 	const angka = Object.fromEntries(Object.entries(ringkas).map(([k, v]) => [k, v == null ? null : Number(v)]));
 	return {
@@ -522,13 +523,13 @@ async function nilaiTiket(id, rating, catatan) {
 function tiketPerluPengingat() {
 	return q(
 		`SELECT t.id, t.code, t.subject, t.reporter_name, t.target_level, t.bidang_id, t.kecamatan_id, t.handled_by,
-		        TIMESTAMPDIFF(HOUR, t.last_message_at, NOW()) AS jam_menunggu, k.nama AS kecamatan_nama, b.nama AS bidang_nama
+		        ${selisihWaktu('HOUR', 't.last_message_at', 'NOW()')} AS jam_menunggu, k.nama AS kecamatan_nama, b.nama AS bidang_nama
 		   FROM helpdesk_tickets t
 		   LEFT JOIN kecamatans k ON k.id = t.kecamatan_id
 		   LEFT JOIN bidangs b ON b.id = t.bidang_id
 		  WHERE t.status = 'baru'
-		    AND t.last_message_at <= DATE_SUB(NOW(), INTERVAL 24 HOUR)
-		    AND (t.reminded_at IS NULL OR t.reminded_at <= DATE_SUB(NOW(), INTERVAL 24 HOUR))
+		    AND t.last_message_at <= NOW() - ${selang(24, 'HOUR')}
+		    AND (t.reminded_at IS NULL OR t.reminded_at <= NOW() - ${selang(24, 'HOUR')})
 		  ORDER BY t.last_message_at
 		  LIMIT 200`
 	);

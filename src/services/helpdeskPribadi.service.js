@@ -84,7 +84,7 @@ async function jawabBankeu(akun) {
 	if (akun.role === 'kecamatan') {
 		const r = await Helpdesk.satu(
 			`SELECT COUNT(*) AS n, MAX(tahun_anggaran) AS tahun FROM bankeu_perubahan_proposals
-			  WHERE kecamatan_id = ? AND submitted_to_kecamatan = 1 AND COALESCE(kecamatan_status, 'pending') IN ('pending', 'in_review')`,
+			  WHERE kecamatan_id = ? AND submitted_to_kecamatan = TRUE AND COALESCE(kecamatan_status, 'pending') IN ('pending', 'in_review')`,
 			[akun.kecamatan_id]
 		);
 		return {
@@ -138,9 +138,9 @@ async function jawabBankeu(akun) {
 async function jawabAparatur(akun) {
 	const r = await Helpdesk.satu(
 		`SELECT COUNT(*) AS total,
-		        COALESCE(SUM(status_verifikasi = 'terverifikasi'), 0) AS terverifikasi,
-		        COALESCE(SUM(status_verifikasi = 'ditolak'), 0) AS ditolak,
-		        COALESCE(SUM(status_verifikasi IS NULL OR status_verifikasi = ''), 0) AS belum
+		        COALESCE(SUM(CASE WHEN status_verifikasi = 'terverifikasi' THEN 1 ELSE 0 END), 0) AS terverifikasi,
+		        COALESCE(SUM(CASE WHEN status_verifikasi = 'ditolak' THEN 1 ELSE 0 END), 0) AS ditolak,
+		        COALESCE(SUM(CASE WHEN status_verifikasi IS NULL OR status_verifikasi = '' THEN 1 ELSE 0 END), 0) AS belum
 		   FROM aparatur_desa WHERE desa_id = ? AND status = 'Aktif'`,
 		[akun.desa_id]
 	);

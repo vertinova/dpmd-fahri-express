@@ -12,6 +12,7 @@ const Helpdesk = require('../services/helpdesk.service');
 const Bot = require('../services/helpdeskBot.service');
 const { dataRelevan, lupakanSimpanan } = require('../services/helpdeskPengetahuan.service');
 const Pribadi = require('../services/helpdeskPribadi.service');
+const { urutanNilai } = require('../config/dialek');
 const Jembatan = require('../services/helpdeskJembatan.service');
 const PushNotificationService = require('../services/pushNotificationService');
 const logger = require('../utils/logger');
@@ -915,8 +916,8 @@ exports.kelolaData = async (req, res) => {
 				program_akun: c.tingkat === 'dpmd' ? await Jembatan.daftarProgramPic() : [],
 				calon_pic: c.tingkat === 'dpmd' ? await Helpdesk.q(
 					`SELECT u.id, u.name, u.role, u.bidang_id, b.nama AS bidang FROM users u LEFT JOIN bidangs b ON b.id = u.bidang_id
-					  WHERE u.is_active = 1 AND u.role IN ('superadmin','kepala_dinas','sekretaris_dinas','kepala_bidang','ketua_tim','pegawai','bendahara')
-					  ORDER BY u.bidang_id, FIELD(u.role, 'kepala_bidang', 'ketua_tim', 'pegawai', 'bendahara'), u.name`,
+					  WHERE u.is_active = TRUE AND u.role IN ('superadmin','kepala_dinas','sekretaris_dinas','kepala_bidang','ketua_tim','pegawai','bendahara')
+					  ORDER BY u.bidang_id, ${urutanNilai('u.role', ['kepala_bidang', 'ketua_tim', 'pegawai', 'bendahara'])}, u.name`,
 				) : [],
 			},
 		});

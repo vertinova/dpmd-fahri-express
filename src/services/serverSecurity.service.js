@@ -22,6 +22,7 @@ const net = require('net');
 const logger = require('../utils/logger');
 const store = require('./serverStore.service');
 const alerts = require('./serverAlerts.service');
+const { selang, gabungTeks, saatBentrok } = require('../config/dialek');
 const geo = require('./serverGeo.service');
 const {
   IP_TEPERCAYA,
@@ -106,8 +107,7 @@ const blockIp = async ({ ip, reason, minutes = null, auto = false, by = null }) 
   await store.execute(
     `INSERT INTO server_ip_blocklist (ip_address, reason, auto, expires_at, created_by)
      VALUES (?, ?, ?, ?, ?)
-     ON DUPLICATE KEY UPDATE reason = VALUES(reason), auto = VALUES(auto), expires_at = VALUES(expires_at),
-       created_by = VALUES(created_by), created_at = NOW()`,
+     ${saatBentrok(['ip_address'], ['reason', 'auto', 'expires_at', 'created_by'])}, created_at = NOW()`,
     i, String(reason || '').slice(0, 500), auto ? 1 : 0, expires, by,
   );
   blokir.set(i, { reason, auto, expires_at: expires });
@@ -433,35 +433,33 @@ const getSummary = async (rentang = '24h') => {
   await store.ensureTables();
   const jam = RENTANG[rentang] || 24;
   const bucket = jam <= 24 ? 3600 : 86400;
-  const where = 'created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)';
+  const where = `created_at >= NOW() - ${selang(jam, 'HOUR')}`;
 
   const [perTipe, perSeverity, perSumber, timeline, topIp, topPath, total] = await Promise.all([
-    store.query(`SELECT event_type, COUNT(*) AS n, COUNT(DISTINCT ip_address) AS ips FROM server_security_events WHERE ${where} GROUP BY event_type ORDER BY n DESC`, jam),
-    store.query(`SELECT severity, COUNT(*) AS n FROM server_security_events WHERE ${where} GROUP BY severity`, jam),
-    store.query(`SELECT source, COUNT(*) AS n FROM server_security_events WHERE ${where} GROUP BY source`, jam),
+    store.query(`SELECT event_type, COUNT(*) AS n, COUNT(DISTINCT ip_address) AS ips FROM server_security_events WHERE ${where} GROUP BY event_type ORDER BY n DESC`),
+    store.query(`SELECT severity, COUNT(*) AS n FROM server_security_events WHERE ${where} GROUP BY severity`),
+    store.query(`SELECT source, COUNT(*) AS n FROM server_security_events WHERE ${where} GROUP BY source`),
     store.query(
       `SELECT FLOOR(UNIX_TIMESTAMP(created_at) / ?) * ? * 1000 AS t,
-              SUM(severity = 'critical') AS critical, SUM(severity = 'high') AS high,
-              SUM(severity = 'medium') AS medium, SUM(severity = 'low') AS low
+              SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) AS critical, SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS high,
+              SUM(CASE WHEN severity = 'medium' THEN 1 ELSE 0 END) AS medium, SUM(CASE WHEN severity = 'low' THEN 1 ELSE 0 END) AS low
          FROM server_security_events WHERE ${where} GROUP BY t ORDER BY t`,
-      bucket, bucket, jam,
+      bucket, bucket,
     ),
     store.query(
       `SELECT ip_address, COUNT(*) AS n, MAX(created_at) AS last_seen, MIN(created_at) AS first_seen,
-              SUM(severity IN ('critical','high')) AS serius,
-              GROUP_CONCAT(DISTINCT event_type ORDER BY event_type SEPARATOR ',') AS types,
-              GROUP_CONCAT(DISTINCT source SEPARATOR ',') AS sources
+              SUM(CASE WHEN severity IN ('critical','high') THEN 1 ELSE 0 END) AS serius,
+              ${gabungTeks('event_type', { distinct: true, urut: 'event_type' })} AS types,
+              ${gabungTeks('source', { distinct: true, urut: 'source' })} AS sources
          FROM server_security_events WHERE ${where} AND event_type NOT IN ('blocked_request')
         GROUP BY ip_address ORDER BY serius DESC, n DESC LIMIT 20`,
-      jam,
     ),
     store.query(
       `SELECT path, COUNT(*) AS n FROM server_security_events
         WHERE ${where} AND path IS NOT NULL AND event_type NOT IN ('login_failed','blocked_request')
         GROUP BY path ORDER BY n DESC LIMIT 15`,
-      jam,
     ),
-    store.query(`SELECT COUNT(*) AS n, COUNT(DISTINCT ip_address) AS ips FROM server_security_events WHERE ${where}`, jam),
+    store.query(`SELECT COUNT(*) AS n, COUNT(DISTINCT ip_address) AS ips FROM server_security_events WHERE ${where}`),
   ]);
 
   const sev = Object.fromEntries(perSeverity.map((r) => [r.severity, r.n]));
@@ -552,11 +550,10 @@ const getTimeline = async (range = '24h') => {
               g.lat, g.lon, g.country_code AS cc
          FROM server_security_events e
          JOIN server_ip_geo g ON g.ip_address = e.ip_address
-        WHERE e.created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)
+        WHERE e.created_at >= NOW() - ${selang(jam, 'HOUR')}
           AND e.event_type NOT IN ('blocked_request', 'geo_blocked')
           AND g.lat IS NOT NULL
         ORDER BY e.id DESC LIMIT 6000`,
-      jam,
     );
   } catch (error) {
     // Tabel geo belum ada (belum pernah ada lookup) → replay kosong.
@@ -594,13 +591,12 @@ const getGeoMap = async ({ range = '24h', visitors = [] } = {}) => {
   const jam = RENTANG[range] || 24;
   const baris = await store.query(
     `SELECT ip_address, COUNT(*) AS n, MAX(created_at) AS last_seen,
-            SUM(severity = 'critical') AS critical, SUM(severity = 'high') AS high,
-            GROUP_CONCAT(DISTINCT event_type ORDER BY event_type SEPARATOR ',') AS types,
-            GROUP_CONCAT(DISTINCT source SEPARATOR ',') AS sources
+            SUM(CASE WHEN severity = 'critical' THEN 1 ELSE 0 END) AS critical, SUM(CASE WHEN severity = 'high' THEN 1 ELSE 0 END) AS high,
+            ${gabungTeks('event_type', { distinct: true, urut: 'event_type' })} AS types,
+            ${gabungTeks('source', { distinct: true, urut: 'source' })} AS sources
        FROM server_security_events
-      WHERE created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR) AND event_type <> 'blocked_request'
-      GROUP BY ip_address ORDER BY (SUM(severity IN ('critical','high')) * 10 + COUNT(*)) DESC LIMIT 400`,
-    jam,
+      WHERE created_at >= NOW() - ${selang(jam, 'HOUR')} AND event_type <> 'blocked_request'
+      GROUP BY ip_address ORDER BY (SUM(CASE WHEN severity IN ('critical','high') THEN 1 ELSE 0 END) * 10 + COUNT(*)) DESC LIMIT 400`,
   );
   const ipPengunjung = visitors.map((v) => bersihkanIp(v.ip)).filter((i) => !ipPrivat(i));
   const lokasi = await geo.resolveMany([...baris.map((b) => bersihkanIp(b.ip_address)), ...ipPengunjung]);
@@ -657,8 +653,8 @@ const getGeoMap = async ({ range = '24h', visitors = [] } = {}) => {
 const listEvents = async ({ page = 1, limit = 50, type, severity, ip, source, q, range = '7d', since_id: sejakId }) => {
   await flush();
   await store.ensureTables();
-  const syarat = ['created_at >= DATE_SUB(NOW(), INTERVAL ? HOUR)'];
-  const nilai = [RENTANG[range] || 168];
+  const syarat = [`created_at >= NOW() - ${selang(RENTANG[range] || 168, 'HOUR')}`];
+  const nilai = [];
   if (sejakId && Number(sejakId) > 0) { syarat.push('id > ?'); nilai.push(Number(sejakId)); }
   if (type) { syarat.push('event_type = ?'); nilai.push(type); }
   if (severity) { syarat.push('severity = ?'); nilai.push(severity); }
@@ -682,9 +678,9 @@ const listEvents = async ({ page = 1, limit = 50, type, severity, ip, source, q,
 
 const bersihkanLama = async () => {
   try {
-    const hari = Math.max(1, Number(store.getConfigSync().security.retention_days) || 30);
-    await store.execute(`DELETE FROM server_security_events WHERE created_at < DATE_SUB(NOW(), INTERVAL ${hari} DAY)`);
-    await store.execute('DELETE FROM server_ip_blocklist WHERE auto = 1 AND expires_at IS NOT NULL AND expires_at < DATE_SUB(NOW(), INTERVAL 7 DAY)');
+    const hari = Math.round(Math.max(1, Number(store.getConfigSync().security.retention_days) || 30));
+    await store.execute(`DELETE FROM server_security_events WHERE created_at < NOW() - ${selang(hari, 'DAY')}`);
+    await store.execute(`DELETE FROM server_ip_blocklist WHERE auto = TRUE AND expires_at IS NOT NULL AND expires_at < NOW() - ${selang(7, 'DAY')}`);
   } catch { /* tabel belum siap */ }
 };
 

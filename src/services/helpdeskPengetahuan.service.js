@@ -12,6 +12,7 @@
  * sedang tidak tersedia.
  */
 const Helpdesk = require('./helpdesk.service');
+const { urutanNilai } = require('../config/dialek');
 
 const SIMPAN_MS = 5 * 60 * 1000;
 const simpanan = new Map();
@@ -47,8 +48,8 @@ async function profilDpmd() {
 			Helpdesk.daftarBidang(),
 			Helpdesk.q(
 				`SELECT u.name, u.role, b.nama AS bidang FROM users u LEFT JOIN bidangs b ON b.id = u.bidang_id
-				  WHERE u.is_active = 1 AND u.role IN ('kepala_dinas', 'sekretaris_dinas', 'kepala_bidang')
-				  ORDER BY FIELD(u.role, 'kepala_dinas', 'sekretaris_dinas', 'kepala_bidang'), u.bidang_id`
+				  WHERE u.is_active = TRUE AND u.role IN ('kepala_dinas', 'sekretaris_dinas', 'kepala_bidang')
+				  ORDER BY ${urutanNilai('u.role', ['kepala_dinas', 'sekretaris_dinas', 'kepala_bidang'])}, u.bidang_id`
 			),
 		]);
 		const baris = [`${set.dpmd_nama || 'DPMD Kabupaten Bogor'} — Dinas Pemberdayaan Masyarakat dan Desa Kabupaten Bogor.`];
