@@ -1,4 +1,4 @@
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const dialek = require('../config/dialek');
 const logger = require('../utils/logger');
 const path = require('path');
@@ -8,7 +8,7 @@ const ActivityLogger = require('../utils/activityLogger');
 // Get all gallery items (admin)
 exports.getAllGallery = async (req, res) => {
   try {
-    const [galleries] = await sequelize.query(`
+    const galleries = await kueri(`
       SELECT 
         id,
         title,
@@ -38,7 +38,7 @@ exports.getAllGallery = async (req, res) => {
 // Get public gallery (only active items)
 exports.getPublicGallery = async (req, res) => {
   try {
-    const [galleries] = await sequelize.query(`
+    const galleries = await kueri(`
       SELECT 
         id,
         title,
@@ -76,18 +76,15 @@ exports.createGallery = async (req, res) => {
       });
     }
 
-    const [result] = await sequelize.query(`
+    const [inserted] = await kueri(`
       INSERT INTO hero_galleries (title, image_path, ${dialek.id('order')}, is_active)
-      VALUES (?, ?, ?, TRUE)
-    `, {
-      replacements: [title, image_path, display_order || 0]
-    });
+      VALUES (?, ?, ?, TRUE) RETURNING id
+    `, [title, image_path, display_order || 0]);
+    const result = inserted.id;
 
-    const [newGallery] = await sequelize.query(`
+    const newGallery = await kueri(`
       SELECT * FROM hero_galleries WHERE id = ?
-    `, {
-      replacements: [result]
-    });
+    `, [result]);
 
     logger.info(`✅ Hero gallery created: ${title}`);
 
@@ -139,11 +136,9 @@ exports.updateGallery = async (req, res) => {
     const { title, display_order } = req.body;
 
     // Get existing gallery
-    const [existing] = await sequelize.query(`
+    const existing = await kueri(`
       SELECT * FROM hero_galleries WHERE id = ?
-    `, {
-      replacements: [id]
-    });
+    `, [id]);
 
     if (!existing || existing.length === 0) {
       return res.status(404).json({
@@ -166,19 +161,15 @@ exports.updateGallery = async (req, res) => {
       image_path = `hero-gallery/${req.file.filename}`;
     }
 
-    await sequelize.query(`
+    await jalankan(`
       UPDATE hero_galleries
       SET title = ?, image_path = ?, ${dialek.id('order')} = ?
       WHERE id = ?
-    `, {
-      replacements: [title, image_path, display_order || 0, id]
-    });
+    `, [title, image_path, display_order || 0, id]);
 
-    const [updated] = await sequelize.query(`
+    const updated = await kueri(`
       SELECT * FROM hero_galleries WHERE id = ?
-    `, {
-      replacements: [id]
-    });
+    `, [id]);
 
     logger.info(`✅ Hero gallery updated: ${id}`);
 
@@ -230,11 +221,9 @@ exports.deleteGallery = async (req, res) => {
     const { id } = req.params;
 
     // Get gallery to delete image file
-    const [gallery] = await sequelize.query(`
+    const gallery = await kueri(`
       SELECT * FROM hero_galleries WHERE id = ?
-    `, {
-      replacements: [id]
-    });
+    `, [id]);
 
     if (!gallery || gallery.length === 0) {
       return res.status(404).json({
@@ -252,11 +241,9 @@ exports.deleteGallery = async (req, res) => {
     }
 
     // Delete from database
-    await sequelize.query(`
+    await jalankan(`
       DELETE FROM hero_galleries WHERE id = ?
-    `, {
-      replacements: [id]
-    });
+    `, [id]);
 
     logger.info(`✅ Hero gallery deleted: ${id}`);
 
@@ -296,19 +283,15 @@ exports.toggleStatus = async (req, res) => {
   try {
     const { id } = req.params;
 
-    await sequelize.query(`
+    await jalankan(`
       UPDATE hero_galleries
       SET is_active = NOT is_active
       WHERE id = ?
-    `, {
-      replacements: [id]
-    });
+    `, [id]);
 
-    const [updated] = await sequelize.query(`
+    const updated = await kueri(`
       SELECT * FROM hero_galleries WHERE id = ?
-    `, {
-      replacements: [id]
-    });
+    `, [id]);
 
     if (!updated || updated.length === 0) {
       return res.status(404).json({

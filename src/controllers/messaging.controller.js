@@ -1,5 +1,5 @@
 const prisma = require('../config/prisma');
-const sequelize = require('../config/database');
+const { kueri } = require('../config/sqlMentah');
 const PushNotificationService = require('../services/pushNotification.service');
 const { getIO } = require('../socket/meeting.socket');
 const path = require('path');
@@ -233,17 +233,17 @@ async function buildReferenceLabel(refType, refId) {
 			if (proposal) return `Proposal Bankeu ${proposal.tahun_anggaran} - ${proposal.desas?.nama || ''}`;
 		}
 		if (refType === 'helpdesk') {
-			const [rows] = await sequelize.query('SELECT code, reporter_name, subject FROM helpdesk_tickets WHERE id = ? LIMIT 1', { replacements: [Number(refId)] });
+			const rows = await kueri('SELECT code, reporter_name, subject FROM helpdesk_tickets WHERE id = ? LIMIT 1', [Number(refId)]);
 			if (rows[0]) return `Helpdesk ${rows[0].code} · ${rows[0].reporter_name}`;
 		}
 		if (refType === 'bantuan_provinsi_lpj') {
-			const [rows] = await sequelize.query(`
+			const rows = await kueri(`
 				SELECT lpj.tahun_anggaran, d.nama AS desa_nama
 				FROM bantuan_provinsi_lpj lpj
 				LEFT JOIN desas d ON lpj.desa_id = d.id
 				WHERE lpj.id = ?
 				LIMIT 1
-			`, { replacements: [refId] });
+			`, [refId]);
 			if (rows[0]) return `LPJ Bantuan Provinsi ${rows[0].tahun_anggaran} - ${rows[0].desa_nama || ''}`;
 		}
 	} catch (e) { console.error('buildReferenceLabel error:', e.message); }

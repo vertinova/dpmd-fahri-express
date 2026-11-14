@@ -10,12 +10,12 @@
  * wilayah dan tahun diganti placeholder, dan angka selalu dari hasil alat.
  * Memori tidak boleh membuat Gema gagal; semua galat DB ditelan.
  *
- * SQL di sini sengaja portabel (MySQL 8 & PostgreSQL 17): tanpa ANY_VALUE,
- * tanpa aritmetika INTERVAL, tanpa NOW(); waktu dihitung di JS.
+ * SQL di sini sengaja sederhana: tanpa ANY_VALUE, tanpa aritmetika INTERVAL,
+ * tanpa NOW(); waktu dihitung di JS.
  */
 
 const crypto = require('crypto');
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const logger = require('../utils/logger');
 
 const HARI_MS = 24 * 60 * 60 * 1000;
@@ -33,14 +33,22 @@ const bersihkan = (teks) => String(teks || '')
 	.replace(/\s+/g, ' ')
 	.trim();
 
-/** Kueri mentah; SELECT -> array baris, tulis -> { affectedRows, insertId }. */
+/** Kueri mentah; SELECT -> array baris, INSERT -> { insertId }, tulis lain -> { affectedRows }. Parameter array dijabarkan untuk IN (?). */
 const q = async (sql, replacements = []) => {
-	const [hasil, meta] = await sequelize.query(sql, { replacements });
-	if (Array.isArray(hasil)) return hasil;
-	return {
-		insertId: typeof hasil === 'number' ? hasil : undefined,
-		affectedRows: typeof meta === 'number' ? meta : meta?.affectedRows ?? 0,
-	};
+	const params = [];
+	let i = 0;
+	const s = sql.replace(/\?/g, () => {
+		const v = replacements[i++];
+		if (Array.isArray(v)) { params.push(...v); return v.map(() => '?').join(', '); }
+		params.push(v);
+		return '?';
+	});
+	if (/^\s*(SELECT|WITH)\b/i.test(s)) return kueri(s, params);
+	if (/^\s*INSERT\b/i.test(s)) {
+		const baris = await kueri(`${s} RETURNING id`, params);
+		return { insertId: baris[0]?.id, affectedRows: baris.length };
+	}
+	return { insertId: undefined, affectedRows: await jalankan(s, params) };
 };
 
 /* ------------------------------------------------------------------- pola -- */

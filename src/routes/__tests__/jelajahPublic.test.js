@@ -8,7 +8,7 @@ const dirData = fs.mkdtempSync(path.join(os.tmpdir(), 'jelajah-'));
 process.env.JELAJAH_DATA_DIR = dirData;
 
 const mockQuery = jest.fn();
-jest.mock('../../config/database', () => ({ query: (...a) => mockQuery(...a) }));
+jest.mock('../../config/sqlMentah', () => ({ kueri: (...a) => mockQuery(...a) }));
 
 const app = express();
 app.use(express.json({ limit: '10mb' }));
@@ -73,8 +73,8 @@ describe('penghitung', () => {
 describe('data kecamatan', () => {
   test('menggabungkan bumdes walau penulisan kecamatan berbeda', async () => {
     mockQuery
-      .mockResolvedValueOnce([[{ nama: 'Cibinong', desa: '5', kelurahan: '7' }, { nama: 'Tenjo', desa: '9', kelurahan: '0' }]])
-      .mockResolvedValueOnce([[{ kecamatan: 'CIBINONG', bumdes_aktif: 2, produk: 3 }, { kecamatan: 'cibinong ', bumdes_aktif: 1, produk: 0 }]]);
+      .mockResolvedValueOnce([{ nama: 'Cibinong', desa: '5', kelurahan: '7' }, { nama: 'Tenjo', desa: '9', kelurahan: '0' }])
+      .mockResolvedValueOnce([{ kecamatan: 'CIBINONG', bumdes_aktif: 2, produk: 3 }, { kecamatan: 'cibinong ', bumdes_aktif: 1, produk: 0 }]);
     const { body } = await request(app).get('/j/wilayah');
     expect(body.data).toEqual([
       { nama: 'Cibinong', desa: 5, kelurahan: 7, bumdes_aktif: 3, produk: 3 },

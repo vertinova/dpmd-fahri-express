@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../config/database');
+const { kueri } = require('../config/sqlMentah');
 const dialek = require('../config/dialek');
 const publicDashboardController = require('../controllers/publicDashboard.controller');
 
@@ -11,7 +11,7 @@ const publicDashboardController = require('../controllers/publicDashboard.contro
  */
 router.get('/stats', async (req, res) => {
   try {
-    const [results] = await db.query(`
+    const results = await kueri(`
       SELECT 
         (SELECT COUNT(*) FROM kecamatans) as kecamatan,
         (SELECT COUNT(*) FROM desas WHERE status_pemerintahan = 'desa') as desa,
@@ -39,7 +39,7 @@ router.get('/stats', async (req, res) => {
  */
 router.get('/hero-gallery', async (req, res) => {
   try {
-    const [galleries] = await db.query(
+    const galleries = await kueri(
       `SELECT id, title, image_path, ${dialek.id('order')} as display_order FROM hero_galleries WHERE is_active = TRUE ORDER BY ${dialek.id('order')} ASC`
     );
 
@@ -64,7 +64,7 @@ router.get('/hero-gallery', async (req, res) => {
  */
 router.get('/landing-stats', async (req, res) => {
   try {
-    const [results] = await db.query(`
+    const results = await kueri(`
       SELECT
         (SELECT COUNT(*) FROM desas WHERE status_pemerintahan = 'desa') AS total_desa,
         (SELECT COUNT(*) FROM bumdes WHERE status = 'aktif') AS bumdes_aktif,
@@ -125,7 +125,7 @@ router.get('/sipanda', publicDashboardController.getSipandaDashboard);
  */
 router.get('/pegawai-kantor', async (req, res) => {
   try {
-    const [rows] = await db.query(`
+    const rows = await kueri(`
       SELECT p.nama_pegawai AS nama, p.jabatan, p.sub_bidang, p.unit_kerja, p.eselon,
              p.jenis_kelamin, p.status_kepegawaian, b.nama AS bidang
       FROM pegawai p

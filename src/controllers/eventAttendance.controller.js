@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const QRCode = require('qrcode');
-const sequelize = require('../config/database');
+const { kueri, jalankan, galatUnik } = require('../config/sqlMentah');
 const { formatWaktu, DIALEK } = require('../config/dialek');
 const { getIO } = require('../socket/meeting.socket');
 
@@ -22,7 +22,7 @@ const ensureTables = async () => {
   if (initialized) return;
 
   // PostgreSQL: kedua tabel sudah ada di baseline, DDL MySQL dilewati.
-  if (DIALEK !== 'postgres') await sequelize.query(`
+  if (DIALEK !== 'postgres') await jalankan(`
     CREATE TABLE IF NOT EXISTS event_attendance_settings (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       event_code VARCHAR(80) NOT NULL UNIQUE,
@@ -38,7 +38,7 @@ const ensureTables = async () => {
   `);
 
   // PostgreSQL: kedua tabel sudah ada di baseline, DDL MySQL dilewati.
-  if (DIALEK !== 'postgres') await sequelize.query(`
+  if (DIALEK !== 'postgres') await jalankan(`
     CREATE TABLE IF NOT EXISTS event_attendances (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       event_code VARCHAR(80) NOT NULL,
@@ -60,26 +60,24 @@ const ensureTables = async () => {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
-  const [rows] = await sequelize.query(
+  const rows = await kueri(
     'SELECT id FROM event_attendance_settings WHERE event_code = ? LIMIT 1',
-    { replacements: [EVENT_CODE] },
+    [EVENT_CODE],
   );
 
   if (!rows.length) {
-    await sequelize.query(
+    await jalankan(
       `INSERT INTO event_attendance_settings
         (event_code, event_name, event_date, location, qr_payload, is_active)
        VALUES (?, ?, ?, ?, ?, ?)`,
-      {
-        replacements: [
-          DEFAULT_SETTINGS.event_code,
-          DEFAULT_SETTINGS.event_name,
-          DEFAULT_SETTINGS.event_date,
-          DEFAULT_SETTINGS.location,
-          DEFAULT_SETTINGS.qr_payload,
-          !!DEFAULT_SETTINGS.is_active,
-        ],
-      },
+      [
+        DEFAULT_SETTINGS.event_code,
+        DEFAULT_SETTINGS.event_name,
+        DEFAULT_SETTINGS.event_date,
+        DEFAULT_SETTINGS.location,
+        DEFAULT_SETTINGS.qr_payload,
+        !!DEFAULT_SETTINGS.is_active,
+      ],
     );
   }
 
@@ -97,10 +95,10 @@ const getClientIp = (req) =>
 
 const getSettingsRow = async () => {
   await ensureTables();
-  const [rows] = await sequelize.query(
-    `SELECT event_code, event_name, event_date, location, qr_payload, is_active
+  const rows = await kueri(
+    `SELECT event_code, event_name, TO_CHAR(event_date, 'YYYY-MM-DD') AS event_date, location, qr_payload, is_active
      FROM event_attendance_settings WHERE event_code = ? LIMIT 1`,
-    { replacements: [EVENT_CODE] },
+    [EVENT_CODE],
   );
 
   return rows[0] || DEFAULT_SETTINGS;
@@ -123,39 +121,39 @@ const getStatsPayload = async () => {
   const today = new Date().toISOString().slice(0, 10);
 
   const [[totalRow], [todayRow], categoryRows, hourlyRows, latestRows] = await Promise.all([
-    sequelize.query(
+    kueri(
       'SELECT COUNT(*) AS total FROM event_attendances WHERE event_code = ?',
-      { replacements: [EVENT_CODE] },
-    ).then(([rows]) => rows),
-    sequelize.query(
+      [EVENT_CODE],
+    ),
+    kueri(
       'SELECT COUNT(*) AS total FROM event_attendances WHERE event_code = ? AND DATE(created_at) = ?',
-      { replacements: [EVENT_CODE, today] },
-    ).then(([rows]) => rows),
-    sequelize.query(
+      [EVENT_CODE, today],
+    ),
+    kueri(
       `SELECT CASE WHEN category = 'lainnya' THEN COALESCE(custom_category, 'lainnya') ELSE category END AS label,
               COUNT(*) AS total
        FROM event_attendances
        WHERE event_code = ?
        GROUP BY label
        ORDER BY total DESC`,
-      { replacements: [EVENT_CODE] },
-    ).then(([rows]) => rows),
-    sequelize.query(
+      [EVENT_CODE],
+    ),
+    kueri(
       `SELECT ${formatWaktu('created_at', '%H:00')} AS hour_label, COUNT(*) AS total
        FROM event_attendances
        WHERE event_code = ? AND DATE(created_at) = ?
        GROUP BY hour_label
        ORDER BY hour_label ASC`,
-      { replacements: [EVENT_CODE, today] },
-    ).then(([rows]) => rows),
-    sequelize.query(
+      [EVENT_CODE, today],
+    ),
+    kueri(
       `SELECT id, event_code, full_name, origin, category, custom_category, device_id, created_at
        FROM event_attendances
        WHERE event_code = ?
        ORDER BY created_at DESC
        LIMIT 8`,
-      { replacements: [EVENT_CODE] },
-    ).then(([rows]) => rows),
+      [EVENT_CODE],
+    ),
   ]);
 
   return {
@@ -237,12 +235,12 @@ exports.registerAttendance = async (req, res) => {
       .update(`${EVENT_CODE}|${normalizeKey(fullName)}|${normalizeKey(origin)}`)
       .digest('hex');
 
-    const [existing] = await sequelize.query(
+    const existing = await kueri(
       `SELECT id, event_code, full_name, origin, category, custom_category, device_id, created_at
        FROM event_attendances
        WHERE event_code = ? AND duplicate_hash = ?
        LIMIT 1`,
-      { replacements: [EVENT_CODE, duplicateHash] },
+      [EVENT_CODE, duplicateHash],
     );
 
     if (existing.length) {
@@ -254,31 +252,29 @@ exports.registerAttendance = async (req, res) => {
       });
     }
 
-    const [result] = await sequelize.query(
+    const [{ id: result }] = await kueri(
       `INSERT INTO event_attendances
         (event_code, full_name, origin, category, custom_category, duplicate_hash, scan_payload, device_id, user_agent, ip_address)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      {
-        replacements: [
-          EVENT_CODE,
-          fullName,
-          origin,
-          category,
-          customCategory,
-          duplicateHash,
-          scanPayload || settings.qr_payload,
-          deviceId || null,
-          req.get('user-agent') || null,
-          getClientIp(req),
-        ],
-      },
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id`,
+      [
+        EVENT_CODE,
+        fullName,
+        origin,
+        category,
+        customCategory,
+        duplicateHash,
+        scanPayload || settings.qr_payload,
+        deviceId || null,
+        req.get('user-agent') || null,
+        getClientIp(req),
+      ],
     );
 
-    const [createdRows] = await sequelize.query(
+    const createdRows = await kueri(
       `SELECT id, event_code, full_name, origin, category, custom_category, device_id, created_at
        FROM event_attendances
        WHERE id = ?`,
-      { replacements: [result] },
+      [result],
     );
     const attendance = formatAttendance(createdRows[0]);
     const stats = await getStatsPayload();
@@ -292,7 +288,7 @@ exports.registerAttendance = async (req, res) => {
       stats,
     });
   } catch (error) {
-    if (error?.name === 'SequelizeUniqueConstraintError') {
+    if (galatUnik(error)) {
       return res.status(409).json({ success: false, duplicate: true, message: 'Data pengunjung sudah pernah tercatat' });
     }
 
@@ -321,17 +317,17 @@ exports.getAttendances = async (req, res) => {
   }
 
   const whereSql = where.join(' AND ');
-  const [rows] = await sequelize.query(
+  const rows = await kueri(
     `SELECT id, event_code, full_name, origin, category, custom_category, device_id, created_at
      FROM event_attendances
      WHERE ${whereSql}
      ORDER BY created_at DESC
      LIMIT ? OFFSET ?`,
-    { replacements: [...replacements, limit, offset] },
+    [...replacements, limit, offset],
   );
-  const [countRows] = await sequelize.query(
+  const countRows = await kueri(
     `SELECT COUNT(*) AS total FROM event_attendances WHERE ${whereSql}`,
-    { replacements },
+    replacements,
   );
 
   res.json({
@@ -362,20 +358,18 @@ exports.updateSettings = async (req, res) => {
     is_active: req.body.is_active === undefined ? current.is_active : Boolean(req.body.is_active),
   };
 
-  await sequelize.query(
+  await jalankan(
     `UPDATE event_attendance_settings
      SET event_name = ?, event_date = ?, location = ?, qr_payload = ?, is_active = ?
      WHERE event_code = ?`,
-    {
-      replacements: [
-        next.event_name,
-        next.event_date,
-        next.location,
-        next.qr_payload,
-        !!next.is_active,
-        EVENT_CODE,
-      ],
-    },
+    [
+      next.event_name,
+      next.event_date,
+      next.location,
+      next.qr_payload,
+      !!next.is_active,
+      EVENT_CODE,
+    ],
   );
 
   const updated = await getSettingsRow();

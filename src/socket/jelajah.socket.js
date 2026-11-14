@@ -131,9 +131,9 @@ const normalKec = (s) => String(s).toLowerCase().replace(/[^a-z]/g, '');
 const rujukan = { pegawai: new Set(), kecamatan: new Map() };
 async function muatRujukan() {
   try {
-    const db = require('../config/database');
-    const [pegawai] = await db.query('SELECT nama_pegawai AS nama FROM pegawai');
-    const [kecamatan] = await db.query('SELECT nama FROM kecamatans');
+    const { kueri } = require('../config/sqlMentah');
+    const pegawai = await kueri('SELECT nama_pegawai AS nama FROM pegawai');
+    const kecamatan = await kueri('SELECT nama FROM kecamatans');
     rujukan.pegawai = new Set(pegawai.flatMap(({ nama }) => {
       const k = kunciNama(nama || '');
       return k ? [k, k.slice(0, 24).trim()] : []; // nama tamu dipotong 24 huruf

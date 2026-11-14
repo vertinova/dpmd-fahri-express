@@ -13,6 +13,7 @@ const Bot = require('../services/helpdeskBot.service');
 const { dataRelevan, lupakanSimpanan } = require('../services/helpdeskPengetahuan.service');
 const Pribadi = require('../services/helpdeskPribadi.service');
 const { urutanNilai } = require('../config/dialek');
+const { galatUnik } = require('../config/sqlMentah');
 const Jembatan = require('../services/helpdeskJembatan.service');
 const PushNotificationService = require('../services/pushNotificationService');
 const logger = require('../utils/logger');
@@ -947,7 +948,7 @@ exports.simpanKategori = async (req, res) => {
 		});
 		return res.json({ success: true, message: 'Kategori disimpan', data: { id } });
 	} catch (err) {
-		if (err?.original?.code === 'ER_DUP_ENTRY' || err?.parent?.code === 'ER_DUP_ENTRY') {
+		if (galatUnik(err)) {
 			return res.status(400).json({ success: false, message: 'Slug kategori sudah dipakai' });
 		}
 		return gagal(res, 'simpan kategori', err);

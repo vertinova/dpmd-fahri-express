@@ -7,13 +7,14 @@
  * dicari saat itu juga dari tabel users, jadi pergantian pegawai atau nomor HP
  * tidak perlu disalin ke tabel helpdesk.
  *
- * Skema: migrations/20261102_create_helpdesk.sql. Kueri memakai sequelize.query
- * mentah dengan placeholder `?` (array di-expand menjadi daftar untuk IN (?)).
- * Koneksi Sequelize ber-zona +00:00, jadi semua DATETIME helpdesk tersimpan UTC
+ * Skema: migrations/20261102_create_helpdesk.sql. Kueri memakai SQL mentah (sqlMentah)
+ * dengan placeholder `?` (array di-expand menjadi daftar untuk IN (?)).
+ * Zona waktu koneksi UTC, jadi semua DATETIME helpdesk tersimpan UTC
  * dan sampai ke browser sebagai ISO yang benar.
  */
 const crypto = require('crypto');
-const sequelize = require('../config/database');
+const prisma = require('../config/prisma');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const { selang, urutanNilai, selisihWaktu, saatBentrok } = require('../config/dialek');
 
 const TINGKAT = ['kecamatan', 'bidang', 'dpmd'];
@@ -24,19 +25,34 @@ const BIDANG_SEKRETARIAT = 2;
 const PERAN_STAF_BIDANG = ['kepala_bidang', 'ketua_tim', 'pegawai', 'bendahara'];
 const PERAN_DPMD_PUSAT = ['superadmin', 'sekretaris_dinas'];
 
+/** Jabarkan parameter array menjadi `?, ?, ?` (untuk IN (?)); kembalikan [sql, params] datar. */
+function jabarkan(sql, params) {
+	const datar = [];
+	let i = 0;
+	const hasil = sql.replace(/\?/g, () => {
+		const v = params[i++];
+		if (Array.isArray(v)) { datar.push(...v); return v.map(() => '?').join(', '); }
+		datar.push(v);
+		return '?';
+	});
+	return [hasil, datar];
+}
+
 /**
  * Kueri mentah dengan hasil seragam ala mysql2: SELECT -> array baris; tulis ->
- * { insertId, affectedRows }. Sequelize sendiri mengembalikan bentuk berbeda
- * menurut awalan SQL (INSERT INTO -> [insertId, affectedRows], UPDATE ->
- * [undefined, affectedRows], lainnya -> [header, header]).
+ * { insertId, affectedRows }. `transaction` = klien transaksi Prisma (opsional).
  */
 async function q(sql, params = [], transaction) {
-	const [hasil, meta] = await sequelize.query(sql, { replacements: params, transaction });
-	if (Array.isArray(hasil) || (hasil && typeof hasil === 'object')) return hasil;
-	return {
-		insertId: typeof hasil === 'number' ? hasil : undefined,
-		affectedRows: typeof meta === 'number' ? meta : meta?.affectedRows ?? 0,
-	};
+	const [s, p] = jabarkan(sql, params);
+	if (/^\s*(SELECT|WITH)\b/i.test(s)) return kueri(s, p, transaction);
+	return { insertId: undefined, affectedRows: await jalankan(s, p, transaction) };
+}
+
+/** INSERT ke tabel ber-kolom id: kembalikan { insertId, affectedRows }. */
+async function sisip(sql, params = [], transaction) {
+	const [s, p] = jabarkan(sql, params);
+	const baris = await kueri(`${s} RETURNING id`, p, transaction);
+	return { insertId: baris[0].id, affectedRows: baris.length };
 }
 const satu = async (sql, params, t) => (await q(sql, params, t))[0] || null;
 
@@ -73,7 +89,7 @@ async function simpanKategori(id, d) {
 		);
 		return id;
 	}
-	const r = await q(
+	const r = await sisip(
 		`INSERT INTO helpdesk_categories (name, slug, description, icon, target_level, bidang_id, keywords, sort_order, is_active)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nilai
@@ -140,7 +156,7 @@ async function simpanFaq(id, d, userId) {
 		);
 		return id;
 	}
-	const r = await q(
+	const r = await sisip(
 		`INSERT INTO helpdesk_faqs (category_id, question, answer, keywords, audience, action_label, action_url, is_active, updated_by)
 		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		nilai
@@ -158,7 +174,7 @@ async function tambahHitFaq(ids) {
 /* ── Log chat ────────────────────────────────────────────────────────────── */
 
 async function catatChat({ userId, kategoriId, pertanyaan, terjawab, sumber, faqId }) {
-	const r = await q(
+	const r = await sisip(
 		`INSERT INTO helpdesk_chat_logs (user_id, category_id, question, answered, source, faq_id)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
 		[userId || null, kategoriId || null, String(pertanyaan).slice(0, 1000), !!terjawab, sumber, faqId || null]
@@ -347,7 +363,7 @@ const kodeTiket = () => {
 };
 
 async function buatTiket(d, pesanAwal) {
-	return sequelize.transaction(async (t) => {
+	return prisma.$transaction(async (t) => {
 		let id;
 		let code;
 		/* Kode acak 6 heksa per hari; tabrakan sangat jarang tapi tetap ditangani. */
@@ -355,7 +371,7 @@ async function buatTiket(d, pesanAwal) {
 			code = kodeTiket();
 			const ada = await satu('SELECT id FROM helpdesk_tickets WHERE code = ?', [code], t);
 			if (ada) continue;
-			const r = await q(
+			const r = await sisip(
 				`INSERT INTO helpdesk_tickets (code, category_id, target_level, bidang_id, kecamatan_id, desa_id, user_id,
 				   reporter_name, reporter_whatsapp, subject, priority)
 				 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -460,7 +476,8 @@ async function statistik(cakupan, hari = 30) {
 			param
 		),
 		q(
-			`SELECT DATE(t.created_at) AS tanggal, COUNT(*) AS jumlah
+			// TO_CHAR: Prisma mengeluarkan kolom DATE sebagai Date; respons lama 'YYYY-MM-DD'.
+			`SELECT TO_CHAR(DATE(t.created_at), 'YYYY-MM-DD') AS tanggal, COUNT(*) AS jumlah
 			   ${dasar} AND t.created_at >= CURRENT_DATE - ${selang(13, 'DAY')}
 			  GROUP BY DATE(t.created_at) ORDER BY tanggal`,
 			param

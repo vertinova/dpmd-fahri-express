@@ -12,7 +12,7 @@ const fs = require('fs');
 const path = require('path');
 const express = require('express');
 const rateLimit = require('express-rate-limit');
-const db = require('../config/database');
+const { kueri } = require('../config/sqlMentah');
 const dialek = require('../config/dialek');
 
 const router = express.Router();
@@ -51,7 +51,7 @@ const normalKec = (s) => String(s).toLowerCase().replace(/[^a-z]/g, '');
 
 router.get('/wilayah', batas(60 * 1000, 60), async (_req, res) => {
   try {
-    const [kecamatan] = await db.query(`
+    const kecamatan = await kueri(`
       SELECT k.nama,
              COALESCE(${dialek.jumlah("CASE WHEN d.status_pemerintahan = 'desa' THEN 1 ELSE 0 END")}, 0) AS desa,
              COALESCE(${dialek.jumlah("CASE WHEN d.status_pemerintahan = 'kelurahan' THEN 1 ELSE 0 END")}, 0) AS kelurahan
@@ -61,7 +61,7 @@ router.get('/wilayah', batas(60 * 1000, 60), async (_req, res) => {
       ORDER BY k.nama
     `);
     // bumdes.kecamatan berupa teks bebas, jadi dicocokkan setelah dinormalkan
-    const [bumdes] = await db.query(`
+    const bumdes = await kueri(`
       SELECT b.kecamatan, COUNT(DISTINCT b.id) AS bumdes_aktif, COUNT(p.id) AS produk
       FROM bumdes b
       LEFT JOIN bumdes_produk p ON p.bumdes_id = b.id AND p.is_active = TRUE

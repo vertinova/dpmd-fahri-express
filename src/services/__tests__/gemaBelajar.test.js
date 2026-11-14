@@ -1,9 +1,9 @@
 /** Memori pengalaman Gema: pola, pemolaan panggilan, contoh, catat. Database di-mock. */
 
-jest.mock('../../config/database', () => ({ query: jest.fn() }));
+jest.mock('../../config/sqlMentah', () => ({ kueri: jest.fn(), jalankan: jest.fn() }));
 jest.mock('../../utils/logger', () => ({ warn: jest.fn(), info: jest.fn(), error: jest.fn() }));
 
-const sequelize = require('../../config/database');
+const { kueri, jalankan } = require('../../config/sqlMentah');
 const b = require('../gemaBelajar.service');
 
 const kamus = {
@@ -49,16 +49,15 @@ describe('polakanPanggilan / isiPanggilan', () => {
 });
 
 describe('contohUntuk', () => {
-  beforeEach(() => { sequelize.query.mockReset(); b.segarkanPaksa(); });
+  beforeEach(() => { kueri.mockReset(); jalankan.mockReset().mockResolvedValue(0); b.segarkanPaksa(); });
 
   test('baris layak dipakai dengan nama wilayah baru', async () => {
-    sequelize.query
-      .mockResolvedValueOnce([[]]) // DELETE
-      .mockResolvedValueOnce([[{ tanda: 't1', pola: 'berapa posyandu di kecamatan {kecamatan}', id_wakil: 7 }]])
-      .mockResolvedValueOnce([[{
+    kueri
+      .mockResolvedValueOnce([{ tanda: 't1', pola: 'berapa posyandu di kecamatan {kecamatan}', id_wakil: 7 }])
+      .mockResolvedValueOnce([{
         id: 7,
         panggilan: JSON.stringify([{ nama: 'cari_kelembagaan', argumen: { lembaga: 'posyandu', kecamatan: '{kecamatan}' } }]),
-      }]]);
+      }]);
     const hasil = await b.contohUntuk('berapa posyandu di kecamatan Ciawi', kamus);
     expect(hasil).toContain('Panduan dari pertanyaan serupa');
     expect(hasil).toContain('cari_kelembagaan {"lembaga":"posyandu","kecamatan":"Ciawi"}');
@@ -68,15 +67,16 @@ describe('contohUntuk', () => {
   });
 
   test('database melempar -> string kosong', async () => {
-    sequelize.query.mockRejectedValue(new Error('mati'));
+    kueri.mockRejectedValue(new Error('mati'));
+    jalankan.mockRejectedValue(new Error('mati'));
     expect(await b.contohUntuk('berapa posyandu di kecamatan Ciawi', kamus)).toBe('');
   });
 });
 
 describe('catat', () => {
-  beforeEach(() => sequelize.query.mockReset().mockResolvedValue([5, 1]));
+  beforeEach(() => kueri.mockReset().mockResolvedValue([{ id: 5 }]));
   const dasar = { pelaku: { id: 1 }, sesi: 's', teks: 'profil desa Cijayanti', durasi_ms: 10, kamus };
-  const param = () => sequelize.query.mock.calls[0][1].replacements;
+  const param = () => kueri.mock.calls[0][1];
 
   test('panggilan sensitif tidak disimpan', async () => {
     const id = await b.catat({
@@ -92,14 +92,14 @@ describe('catat', () => {
     const jejak = { panggilan: [{ nama: 'cari_desa', argumen: { nama: 'Cijayanti' } }] };
     await b.catat({ ...dasar, hasil: { ditenagai: 'mesin', total: 1 }, jejak });
     expect(param()[5]).toBeNull();
-    sequelize.query.mockClear();
+    kueri.mockClear();
     await b.catat({ ...dasar, hasil: { ditenagai: 'model', total: 1 }, jejak });
     expect(param()[5]).toContain('{desa}');
     expect(param()[6]).toHaveLength(40);
   });
 
   test('galat DB -> null', async () => {
-    sequelize.query.mockRejectedValue(new Error('x'));
+    kueri.mockRejectedValue(new Error('x'));
     expect(await b.catat({ ...dasar, hasil: { ditenagai: 'mesin' }, jejak: {} })).toBeNull();
   });
 });
