@@ -91,6 +91,10 @@ describe('tanpaPekaHuruf', () => {
 		const w = { name: 'A', email: { equals: '%@x.id' }, role: { in: ['A'] }, no_hp: { not: 'x' }, avatar: { gt: 'a' } };
 		expect(tanpaPekaHuruf('users', w, dmmf)).toEqual(w);
 	});
+	test('not: { contains } disuntik mode di luar not', () => {
+		expect(tanpaPekaHuruf('users', { name: { not: { contains: 'kades' } } }, dmmf))
+			.toEqual({ name: { not: { contains: 'kades' }, ...ins } });
+	});
 	test('mode yang sudah ada tidak ditimpa', () => {
 		expect(tanpaPekaHuruf('users', { name: { contains: 'a', mode: 'default' } }, dmmf)).toEqual({ name: { contains: 'a', mode: 'default' } });
 	});

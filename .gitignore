@@ -80,6 +80,7 @@ database-express/seeders/*-data.json
 *.sql
 !migrations/*.sql
 !prisma/postgres/*.sql
+!scripts/pg/*.sql
 !scripts/bumdes-import/*.sql
 *.tmp
 

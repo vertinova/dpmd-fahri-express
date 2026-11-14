@@ -12,7 +12,7 @@ const { execFileSync } = require('child_process');
 
 const [mysqlUrl, pgUrl, dumpPath] = process.argv.slice(2);
 if (!mysqlUrl || !pgUrl) { console.error('pakai: cek-skema.js <mysqlUrl> <pgUrl> [dump.sql]'); process.exit(2); }
-const PSQL = process.env.PSQL || 'C:/laragon/bin/postgresql/postgresql-16.4/bin/psql.exe';
+const PSQL = process.env.PSQL || (process.platform === 'win32' ? 'C:/laragon/bin/postgresql/postgresql-16.4/bin/psql.exe' : 'psql');
 
 function psqlJson(sql) {
   const u = new URL(pgUrl);

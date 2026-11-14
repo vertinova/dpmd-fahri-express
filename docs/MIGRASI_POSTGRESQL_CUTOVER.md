@@ -55,9 +55,11 @@ Setelah cutover, migrasi baru ditulis dalam SQL PostgreSQL.
    sudo -u postgres createdb -T template0 -E UTF8 --locale-provider=icu --icu-locale=und --locale=C.UTF-8 -O dpmd <nama_db>
    sudo -u postgres psql -c "ALTER DATABASE <nama_db> SET timezone TO 'UTC'"
    sudo -u postgres psql -v ON_ERROR_STOP=1 -d <nama_db> -f /var/www/backend/prisma/postgres/baseline.sql
-   sudo -u postgres psql -d <nama_db> -c "REASSIGN OWNED BY postgres TO dpmd" # hanya objek di DB ini
+   sudo -u postgres psql -v ON_ERROR_STOP=1 -Atd <nama_db> -f /var/www/backend/scripts/pg/alih-pemilik.sql   # harus mencetak milik_postgres_sisa=0
    ```
-   Catatan: `REASSIGN OWNED` dijalankan di dalam DB `<nama_db>`; ekstensi citext tetap milik postgres, itu wajar.
+   Catatan: `REASSIGN OWNED BY postgres` ditolak PostgreSQL (objek milik superuser bawaan), maka
+   pemilik dialihkan per objek. Ekstensi citext dan operatornya tetap milik postgres, itu wajar.
+   Berkas di `/var/www/backend` (atau `/root`) tidak terbaca user postgres: salin dulu ke `/tmp`.
 5. Di CT 100 pasang klien PG 17 (untuk backup pg_dump dan psql): `apt install -y postgresql-client-17`
    (repo PGDG yang sama), lalu isi `PG_DUMP_PATH=/usr/lib/postgresql/17/bin/pg_dump` dan
    `PG_DUMP_BIN=/usr/lib/postgresql/17/bin/pg_dump` di `.env` backend (belum dipakai sebelum cutover).
@@ -100,8 +102,7 @@ Di CT 100, dari `/var/www/backend` (kode versi dua dialek sudah ter-deploy):
    Pengaturan tampil 0): `sudo -u postgres psql -d dpmd -c "ANALYZE"`.
 5. Hak akses peran aplikasi dan Gema:
    ```sql
-   -- di DB dpmd sebagai postgres
-   REASSIGN OWNED BY postgres TO dpmd;
+   -- di DB dpmd sebagai postgres (pemilik tabel sudah dpmd sejak butir 4 via alih-pemilik.sql)
    GRANT CONNECT ON DATABASE dpmd TO gema_ro;
    GRANT USAGE ON SCHEMA public TO gema_ro;
    ```

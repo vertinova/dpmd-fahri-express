@@ -190,7 +190,9 @@ function tanpaPekaHuruf(namaModel, where, dmmf) {
 		if (k === 'AND' || k === 'OR' || k === 'NOT') {
 			hasil[k] = tanpaPekaHuruf(namaModel, v, dmmf);
 		} else if (f && f.kind === 'scalar' && f.type === 'String') {
-			hasil[k] = adalahObjek(v) && !('mode' in v) && OP_PENCARIAN.some((o) => o in v) ? { ...v, mode: 'insensitive' } : v;
+			// `not: { contains }` juga: Prisma menolak mode di dalam not, tetapi mode di luar ikut berlaku ke not.
+			const cari = (o) => adalahObjek(o) && OP_PENCARIAN.some((x) => x in o);
+			hasil[k] = adalahObjek(v) && !('mode' in v) && (cari(v) || cari(v.not)) ? { ...v, mode: 'insensitive' } : v;
 		} else if (f && f.kind === 'object' && adalahObjek(v)) {
 			if (OP_RELASI.some((o) => o in v)) {
 				hasil[k] = {};

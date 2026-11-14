@@ -6132,3 +6132,26 @@ ALTER TABLE "bankeu_proposal_kegiatan" ADD COLUMN "updated_at" timestamp(0) DEFA
 ALTER TABLE "user_totp" ADD COLUMN "kode_cadangan" citext;
 ALTER TABLE "video_meeting_participants" ALTER COLUMN "hand_raised" SET NOT NULL;
 ALTER TABLE "video_meeting_participants" ALTER COLUMN "on_stage" SET NOT NULL;
+
+-- Tabel di luar skema Prisma yang ada di MySQL produksi (dipertahankan agar salinan data setara).
+-- bankeu_monev: sisa fitur monev yang dibatalkan 11 Nov 2026 (migrations/20261111_create_bankeu_sts_monev.sql), tidak dipakai kode.
+-- Ditulis tangan: ikut ditambahkan lagi bila baseline dibangkitkan ulang dengan buat-skema-pg.js.
+CREATE TABLE "bankeu_monev" (
+    "id" BIGSERIAL NOT NULL,
+    "desa_id" BIGINT NOT NULL,
+    "tahun_anggaran" INTEGER NOT NULL,
+    "nama_file" CITEXT NOT NULL,
+    "file_path" CITEXT NOT NULL,
+    "file_size" INTEGER,
+    "keterangan" CITEXT,
+    "uploaded_by" BIGINT NOT NULL,
+    "created_at" TIMESTAMP(0) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "bankeu_monev_pkey" PRIMARY KEY ("id")
+);
+CREATE INDEX "idx_bankeu_monev_desa_tahun" ON "bankeu_monev"("desa_id", "tahun_anggaran");
+CREATE INDEX "fk_bankeu_monev_user" ON "bankeu_monev"("uploaded_by");
+ALTER TABLE "bankeu_monev" ADD CONSTRAINT "fk_bankeu_monev_desa" FOREIGN KEY ("desa_id") REFERENCES "desas"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "bankeu_monev" ADD CONSTRAINT "fk_bankeu_monev_user" FOREIGN KEY ("uploaded_by") REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE;
+ALTER TABLE "bankeu_monev" ADD CONSTRAINT "bankeu_monev_nama_file_len" CHECK (char_length("nama_file") <= 255);
+ALTER TABLE "bankeu_monev" ADD CONSTRAINT "bankeu_monev_file_path_len" CHECK (char_length("file_path") <= 500);
+ALTER TABLE "bankeu_monev" ADD CONSTRAINT "bankeu_monev_keterangan_len" CHECK (char_length("keterangan") <= 500);

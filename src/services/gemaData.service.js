@@ -25,6 +25,8 @@ const ambilPool = () => {
 			max: 3,
 			// Batas 5 detik dan baca-saja di tingkat sesi (padanan MAX_EXECUTION_TIME MySQL).
 			options: '-c statement_timeout=5000 -c default_transaction_read_only=on',
+			// COUNT/BIGINT jadi angka seperti mysql2 (pg bawaan: teks)
+			types: { getTypeParser: (oid, f) => (oid === 20 && f !== 'binary' ? (v) => { const n = Number(v); return Number.isSafeInteger(n) ? n : v; } : require('pg').types.getTypeParser(oid, f)) },
 		})
 		: require('mysql2/promise').createPool({ uri: process.env.GEMA_DB_URL, connectionLimit: 3 });
 	return pool;
