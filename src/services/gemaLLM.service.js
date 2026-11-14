@@ -25,6 +25,7 @@
 const logger = require('../utils/logger');
 const mesin = require('./gemaMesin.service');
 const { muatKamus } = require('./gemaKamus.service');
+const belajar = require('./gemaBelajar.service');
 const akun = require('./gemaAkunPegawai.service');
 const data = require('./gemaData.service');
 const percakapan = require('./gemaPercakapan.service');
@@ -56,7 +57,7 @@ const alat = (name, description, properties, required, run) => ({
  * Tabel yang dilihat pengguna berasal dari SINI, bukan dari karangan model.
  * @returns {{ definisi: object[], peta: Object<string, Function> }}
  */
-const buatAlat = (tangkap, pelaku, jejak = { alat: [], sql: [] }) => {
+const buatAlat = (tangkap, pelaku, jejak = { alat: [], sql: [], panggilan: [] }) => {
 	const catat = (hasil) => {
 		tangkap.push(hasil);
 		// Yang dikirim balik ke model diringkas: ia butuh tahu ADA APA dan
@@ -372,6 +373,7 @@ const susunSistem = (kamus) => [
 	'penyaring dari konteks. Kalau rujukannya tidak jelas, tanya balik satu kalimat.',
 	'Tiap pesan pengguna diawali [tanggal hari ini · nama penanya]; itu keterangan, bukan pertanyaan.',
 	'Boleh memanggil beberapa alat dalam satu giliran (mis. membandingkan dua wilayah).',
+	'Pesan pengguna kadang membawa "Panduan dari pertanyaan serupa": itu cara memanggil alat yang terbukti tepat. Ikuti bila cocok, abaikan bila tidak. Angkanya tidak pernah dari panduan.',
 	'',
 	'Pakai alat domain (cari_desa, cari_bumdes, dst.) lebih dulu. Hanya bila tidak ada yang cocok,',
 	'pakai cari_tabel lalu kueri_data. Aturan SQL: MySQL 8, ONLY_FULL_GROUP_BY aktif, sebut kolom',
@@ -396,9 +398,10 @@ const susunSistem = (kamus) => [
 ].join('\n');
 
 /** Pesan pengguna dengan keterangan dinamis di depannya; disimpan apa adanya agar riwayat tetap jadi prefix. */
-const pesanPengguna = (teks, pelaku) => {
+const pesanPengguna = (teks, pelaku, contoh = '') => {
 	const siapa = pelaku?.name ? ` · ${pelaku.name}${pelaku.role ? ` (${pelaku.role})` : ''}` : '';
-	return { role: 'user', content: `[${tanggalIndonesia()}${siapa}]\n${teks}` };
+	const kepala = `[${tanggalIndonesia()}${siapa}]`;
+	return { role: 'user', content: contoh ? `${kepala}\n${contoh}\nPertanyaan: ${teks}` : `${kepala}\n${teks}` };
 };
 
 /* ------------------------------------------------------------------- aliran -- */
@@ -482,19 +485,20 @@ const satuPutaran = async (messages, tools, { onToken, signal }) => {
  * @param {string} teks   kalimat penanya
  * @param {object} pelaku identitas penanya, untuk pemeriksaan izin
  * @param {string} sesi   id percakapan dari peramban; tanpa ini tiap pertanyaan berdiri sendiri
- * @param {object} opsi   { onToken(potongan), onReset(), signal, jejak:{alat:[],sql:[]} }
+ * @param {object} opsi   { onToken(potongan), onReset(), signal, jejak:{alat:[],sql:[],panggilan:[]} }
  */
 const jawabDenganModel = async (teks, pelaku = null, sesi = null, opsi = {}) => {
 	if (!tersedia()) throw new Error('GEMA_LLM_URL belum diisi');
 	const { onToken, onReset, signal } = opsi;
-	const jejak = opsi.jejak || { alat: [], sql: [] };
+	const jejak = opsi.jejak || { alat: [], sql: [], panggilan: [] };
 
 	const tangkap = [];
 	const kamus = await muatKamus();
 	const { definisi, peta } = buatAlat(tangkap, pelaku, jejak);
 
 	const sebelumnya = percakapan.ambil(pelaku?.id, sesi);
-	const tanya = pesanPengguna(teks, pelaku);
+	const contoh = await belajar.contohUntuk(teks, kamus);
+	const tanya = pesanPengguna(teks, pelaku, contoh);
 	const riwayat = [...sebelumnya, tanya];
 	const sistem = { role: 'system', content: susunSistem(kamus) };
 
@@ -533,6 +537,7 @@ const jawabDenganModel = async (teks, pelaku = null, sesi = null, opsi = {}) => 
 			} else {
 				let args = null;
 				try { args = JSON.parse(c.arguments || '{}'); } catch { /* argumen rusak */ }
+					if (args && typeof args === 'object') jejak.panggilan?.push({ nama: c.name, argumen: args });
 				if (!args || typeof args !== 'object') {
 					isi = JSON.stringify({ galat: 'argumen tidak valid' });
 				} else {

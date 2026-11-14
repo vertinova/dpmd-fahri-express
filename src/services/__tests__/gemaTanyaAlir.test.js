@@ -7,6 +7,8 @@ jest.mock('../gemaLLM.service', () => ({
   }),
   tersedia: () => true,
 }));
+jest.mock('../gemaBelajar.service', () => ({ catat: jest.fn(async () => null) }));
+jest.mock('../gemaKamus.service', () => ({ muatKamus: jest.fn(async () => ({ kecamatan: [], desa: [] })) }));
 jest.mock('../gemaAkunPegawai.service', () => ({ jalankanSetelUlangSandi: jest.fn() }));
 
 const { EventEmitter } = require('events');

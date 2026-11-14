@@ -32,6 +32,8 @@ const { keUcapan } = require('../services/gemaUcapan.service');
 const { jalankanSetelUlangSandi } = require('../services/gemaAkunPegawai.service');
 const { bolehSetelSandiSuara } = require('../config/akunStaf');
 const percakapan = require('../services/gemaPercakapan.service');
+const belajar = require('../services/gemaBelajar.service');
+const { muatKamus } = require('../services/gemaKamus.service');
 const logger = require('../utils/logger');
 
 /** Contoh yang ditawarkan di halaman depan. */
@@ -65,11 +67,17 @@ const pelakuDari = (req) => ({
 /** Jawab sambil mengumpulkan jejak alat/SQL, lalu tulis satu baris audit. */
 const jawabDanCatat = async (teks, req, sesi, opsi = {}) => {
 	const pelaku = pelakuDari(req);
-	const jejak = { alat: [], sql: [] };
+	const jejak = { alat: [], sql: [], panggilan: [] };
 	const mulai = Date.now();
 	let hasil;
 	try {
 		hasil = await jawab(teks, pelaku, sesi, { ...opsi, jejak });
+		// Memori pengalaman: gagal mencatat tidak boleh menggagalkan jawaban.
+		const kamus = await muatKamus().catch(() => null);
+		const id = await belajar.catat({
+			pelaku, sesi, teks, hasil, jejak, durasi_ms: Date.now() - mulai, kamus,
+		});
+		if (id) hasil.id_tanya = id;
 		return hasil;
 	} finally {
 		logger.info(JSON.stringify({
@@ -310,4 +318,32 @@ const kemampuan = (req, res) => {
 	});
 };
 
-module.exports = { tanya, tanyaAlir, suara, konfirmasi, kemampuan, lupakan, CONTOH };
+/** POST /api/gema/nilai  { id, nilai } — jempol untuk jawaban milik sendiri. */
+const nilai = async (req, res) => {
+	const id = Number(req.body?.id);
+	const n = Number(req.body?.nilai);
+	if (!Number.isInteger(id) || id <= 0 || ![1, -1, 0].includes(n)) {
+		return res.status(400).json({ success: false, message: 'id atau nilai tidak valid' });
+	}
+	try {
+		if (!(await belajar.nilai(id, req.user.id, n))) {
+			return res.status(404).json({ success: false, message: 'Pertanyaan tidak ditemukan' });
+		}
+		return res.json({ success: true });
+	} catch (error) {
+		logger.error('Gema gagal menyimpan nilai:', error);
+		return res.status(500).json({ success: false, message: 'Gagal menyimpan nilai' });
+	}
+};
+
+/** GET /api/gema/pembelajaran — ringkasan memori pengalaman (tanpa identitas penanya). */
+const pembelajaran = async (req, res) => {
+	try {
+		return res.json({ success: true, data: await belajar.statistik() });
+	} catch (error) {
+		logger.error('Gema gagal membaca statistik:', error);
+		return res.status(500).json({ success: false, message: 'Gagal membaca statistik' });
+	}
+};
+
+module.exports = { nilai, pembelajaran, tanya, tanyaAlir, suara, konfirmasi, kemampuan, lupakan, CONTOH };

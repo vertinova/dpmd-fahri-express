@@ -31,4 +31,14 @@ router.post('/lupakan', controller.lupakan);
 // Langkah kedua tindakan yang mengubah data; memeriksa izinnya sendiri.
 router.post('/konfirmasi', controller.konfirmasi);
 
+// Penilaian jawaban (hanya milik penanya sendiri; dicek di SQL).
+router.post('/nilai', controller.nilai);
+
+// Ringkasan belajar mandiri, hanya untuk pimpinan.
+router.get(
+	'/pembelajaran',
+	checkRole(['superadmin', 'kepala_dinas', 'sekretaris_dinas']),
+	controller.pembelajaran,
+);
+
 module.exports = router;

@@ -9,6 +9,7 @@ jest.mock('../gemaMesin.service', () => ({
 jest.mock('../gemaKamus.service', () => ({
   muatKamus: jest.fn(async () => ({ kecamatan: [{}], desa: [{}, {}] })),
 }));
+jest.mock('../gemaBelajar.service', () => ({ contohUntuk: jest.fn(async () => '') }));
 jest.mock('../gemaAkunPegawai.service', () => ({ cariAkun: jest.fn(), siapkanSetelUlangSandi: jest.fn() }));
 jest.mock('../gemaData.service', () => ({
   cariTabel: jest.fn(),
