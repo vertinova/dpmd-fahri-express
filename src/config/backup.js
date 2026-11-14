@@ -8,13 +8,11 @@
  */
 
 const path = require('path');
-const { DIALEK } = require('./dialek');
 
-const PG = DIALEK === 'postgres';
 /** Nama alat dump yang dipakai, untuk pesan galat/petunjuk. */
-const NAMA_ALAT_DUMP = PG ? 'pg_dump' : 'mysqldump';
+const NAMA_ALAT_DUMP = 'pg_dump';
 /** Petunjuk impor berkas database.sql. */
-const PERINTAH_IMPOR = PG ? 'psql -U postgres nama_database < database.sql' : 'mysql -u root -p nama_database < database.sql';
+const PERINTAH_IMPOR = 'psql -U postgres nama_database < database.sql';
 
 /** Akar seluruh berkas unggahan. Semua backup berkas/foto bersumber dari sini. */
 const STORAGE_ROOT = path.join(__dirname, '../../storage');
@@ -73,7 +71,7 @@ const bacaKoneksiDatabase = () => {
 
   return {
     host: url.hostname || '127.0.0.1',
-    port: url.port || (PG ? '5432' : '3306'),
+    port: url.port || '5432',
     user: decodeURIComponent(url.username || 'root'),
     // Kata sandi kosong itu sah (bawaan Laragon), jadi jangan diganti nilai lain.
     password: url.password ? decodeURIComponent(url.password) : '',
@@ -82,10 +80,10 @@ const bacaKoneksiDatabase = () => {
 };
 
 /**
- * Lokasi mysqldump. Di Windows/Laragon ia tidak ada di PATH, sedangkan di VPS
+ * Lokasi pg_dump. Di Windows/Laragon ia tidak ada di PATH, sedangkan di VPS
  * biasanya ada — maka jalurnya bisa ditimpa lewat env tanpa mengubah kode.
  */
-const jalurMysqldump = () => (PG ? process.env.PG_DUMP_PATH || 'pg_dump' : process.env.MYSQLDUMP_PATH || 'mysqldump');
+const jalurPgDump = () => process.env.PG_DUMP_PATH || 'pg_dump';
 
 /** Argumen pg_dump (PostgreSQL). Sandi lewat PGPASSWORD (lihat envPgDump), bukan argumen. */
 const argumenPgDump = (k) => ['-h', k.host, '-p', String(k.port), '-U', k.user, '-w', '--no-owner', '--no-privileges', '-Fp', k.database];
@@ -99,97 +97,20 @@ const envPgDump = (k) => {
 };
 
 /**
- * Opsi mysqldump yang berguna tapi TIDAK ada di semua varian.
- *
- * `--set-gtid-purged` hanya dikenal mysqldump bawaan MySQL; mysqldump bawaan
- * MariaDB menolaknya dengan "unknown option" dan gagal seketika. `--events`,
- * `--no-tablespaces`, dan `--column-statistics` juga berbeda-beda antar versi.
- * Karena server produksi bisa memakai varian mana pun, opsi-opsi ini disaring
- * dulu terhadap keluaran `mysqldump --help` alih-alih dipasang membabi buta.
- */
-const OPSI_OPSIONAL = [
-  '--single-transaction',
-  '--quick',
-  '--routines',
-  '--triggers',
-  '--events',
-  '--no-tablespaces',
-  '--set-gtid-purged=OFF',
-  '--default-character-set=utf8mb4',
-  // Penyeimbang --no-defaults: nilai ini biasanya diatur lewat my.cnf, dan
-  // tanpa itu satu baris berisi lampiran besar bisa melampaui batas bawaan.
-  '--max-allowed-packet=512M',
-];
-
-/**
- * WAJIB menjadi argumen PERTAMA — klien MySQL menolaknya di posisi lain.
- *
- * mysqldump membaca my.cnf/.my.cnf dan memuat grup [client] serta [mysqldump].
- * Grup [client] dipakai bersama klien `mysql`, yang mengenal opsi seperti
- * `database=...`; mysqldump TIDAK mengenalnya dan berhenti dengan
- * "unknown variable 'database=...'" — bahkan untuk sekadar --version.
- * Itu persis yang terjadi di server produksi.
- *
- * Aman diabaikan karena seluruh yang dibutuhkan sudah dikirim eksplisit:
- * host, port, dan user lewat argumen, sandi lewat MYSQL_PWD. Yang hilang
- * hanyalah setelan tuning dari my.cnf, dan yang benar-benar penting di
- * antaranya (--max-allowed-packet) dipasang sendiri di atas.
- */
-const OPSI_ABAIKAN_KONFIG = '--no-defaults';
-
-// Hasil probe dicache: `mysqldump --help` dipanggil sekali per proses, bukan
-// setiap kali seseorang menekan tombol unduh.
-let cacheOpsiDidukung = null;
-
-const namaOpsi = (opsi) => opsi.split('=')[0];
-
-/**
- * Tanya mysqldump opsi apa saja yang ia kenal, lalu kembalikan hanya yang
- * didukung. Bila probe gagal (mysqldump tidak ada, atau --help tak terbaca),
- * kembalikan daftar paling aman yang dikenal SEMUA varian sejak lama.
- */
-const opsiMysqldumpDidukung = async () => {
-  if (PG) return []; // pg_dump: argumen tetap, tanpa probe
-  if (cacheOpsiDidukung) return cacheOpsiDidukung;
-
-  const { execFile } = require('child_process');
-  const bantuan = await new Promise((resolve) => {
-    execFile(
-      jalurMysqldump(),
-      [OPSI_ABAIKAN_KONFIG, '--help'],
-      { maxBuffer: 4 * 1024 * 1024, windowsHide: true },
-      (err, stdout, stderr) => resolve(err && !stdout ? '' : `${stdout || ''}${stderr || ''}`),
-    );
-  });
-
-  if (!bantuan) {
-    // Probe gagal. Jangan menebak: pakai opsi yang sudah ada di MySQL 5.x
-    // maupun MariaDB sejak lama. Kalau mysqldump-nya memang tidak ada,
-    // kegagalan sebenarnya akan muncul saat dump dijalankan, dengan pesan
-    // yang jauh lebih jelas daripada "unknown option".
-    cacheOpsiDidukung = ['--single-transaction', '--quick', '--routines', '--triggers'];
-    return cacheOpsiDidukung;
-  }
-
-  cacheOpsiDidukung = OPSI_OPSIONAL.filter((opsi) => bantuan.includes(namaOpsi(opsi)));
-  return cacheOpsiDidukung;
-};
-
-/**
- * Periksa apakah mysqldump benar-benar bisa dijalankan, DAN kembalikan versinya.
+ * Periksa apakah pg_dump benar-benar bisa dijalankan, DAN kembalikan versinya.
  *
  * Dipanggil saat halaman backup dibuka, bukan saat tombol ditekan. Alasannya:
  * unduhan berjalan lewat navigasi peramban, sehingga badan respons galat tidak
- * pernah sampai ke JavaScript halaman — kalau mysqldump tidak ada, yang terjadi
+ * pernah sampai ke JavaScript halaman — kalau pg_dump tidak ada, yang terjadi
  * hanyalah unduhan gagal tanpa keterangan. Memeriksanya di awal membuat
  * penyebabnya terbaca sebelum siapa pun menunggu sia-sia.
  */
-const periksaMysqldump = () =>
+const periksaPgDump = () =>
   new Promise((resolve) => {
     const { execFile } = require('child_process');
     execFile(
-      jalurMysqldump(),
-      PG ? ['--version'] : [OPSI_ABAIKAN_KONFIG, '--version'],
+      jalurPgDump(),
+      ['--version'],
       { timeout: 10000, windowsHide: true },
       (err, stdout, stderr) => {
         if (!err) {
@@ -199,13 +120,9 @@ const periksaMysqldump = () =>
         resolve({
           tersedia: false,
           versi: null,
-          catatan: PG
-            ? (takAda
-              ? `pg_dump tidak ditemukan di "${jalurMysqldump()}". Pasang klien PostgreSQL di server, lalu isi PG_DUMP_PATH di .env dengan jalur lengkapnya.`
-              : `pg_dump tidak dapat dijalankan: ${err.message}`)
-            : takAda
-            ? `mysqldump tidak ditemukan di "${jalurMysqldump()}". Pasang klien MySQL/MariaDB di server, lalu isi MYSQLDUMP_PATH di .env dengan jalur lengkapnya.`
-            : `mysqldump tidak dapat dijalankan: ${err.message}`,
+          catatan: takAda
+            ? `pg_dump tidak ditemukan di "${jalurPgDump()}". Pasang klien PostgreSQL di server, lalu isi PG_DUMP_PATH di .env dengan jalur lengkapnya.`
+            : `pg_dump tidak dapat dijalankan: ${err.message}`,
         });
       },
     );
@@ -235,13 +152,11 @@ module.exports = {
   JENIS_BACKUP,
   adalahFoto,
   bacaKoneksiDatabase,
-  jalurMysqldump,
+  jalurPgDump,
   argumenPgDump,
   envPgDump,
   NAMA_ALAT_DUMP,
   PERINTAH_IMPOR,
-  OPSI_ABAIKAN_KONFIG,
-  opsiMysqldumpDidukung,
-  periksaMysqldump,
+  periksaPgDump,
   namaBerkasBackup,
 };

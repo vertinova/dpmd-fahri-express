@@ -2,7 +2,7 @@
  * Pencadangan sistem untuk superadmin.
  *
  * Empat jenis, semuanya dialirkan (stream) langsung ke unduhan peramban:
- *   database → .sql hasil mysqldump, tinggal diimpor di localhost
+ *   database → .sql hasil pg_dump, tinggal diimpor di localhost
  *   berkas   → .zip berisi dokumen di storage/ (PDF, Office, dsb)
  *   foto     → .zip berisi gambar di storage/
  *   semua    → .zip berisi ketiganya sekaligus
@@ -30,17 +30,14 @@ const {
   JENIS_BACKUP,
   adalahFoto,
   bacaKoneksiDatabase,
-  jalurMysqldump,
+  jalurPgDump,
   argumenPgDump,
   envPgDump,
   NAMA_ALAT_DUMP,
   PERINTAH_IMPOR,
-  OPSI_ABAIKAN_KONFIG,
-  opsiMysqldumpDidukung,
-  periksaMysqldump,
+  periksaPgDump,
   namaBerkasBackup,
 } = require('../config/backup');
-const { DIALEK } = require('../config/dialek');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -105,38 +102,9 @@ const formatUkuran = (byte) => {
   return `${nilai.toFixed(nilai >= 100 ? 0 : 1)} ${satuan[i]}`;
 };
 
-/**
- * Jalankan mysqldump dan kembalikan prosesnya. Sandi lewat env, bukan argumen.
- *
- * Opsi tambahannya hasil probe (lihat config/backup.js): mysqldump MySQL dan
- * MariaDB tidak mengenal opsi yang sama persis, dan satu opsi asing membuatnya
- * berhenti sebelum mengeluarkan sebaris SQL pun.
- */
-const jalankanMysqldump = (koneksi, opsiTambahan) => {
-  if (DIALEK === 'postgres') return spawn(jalurMysqldump(), argumenPgDump(koneksi), { env: envPgDump(koneksi), windowsHide: true });
-  const argumen = [
-    // HARUS pertama — klien MySQL menolak --no-defaults di posisi lain.
-    // Lihat OPSI_ABAIKAN_KONFIG di config/backup.js untuk alasannya.
-    OPSI_ABAIKAN_KONFIG,
-    `--host=${koneksi.host}`,
-    `--port=${koneksi.port}`,
-    `--user=${koneksi.user}`,
-    // --single-transaction: tidak mengunci tabel, aplikasi tetap melayani.
-    // --quick: baris dialirkan, tidak ditampung dulu di memori mysqldump.
-    // --no-tablespaces: tanpa ini mysqldump 8 menuntut hak PROCESS.
-    ...opsiTambahan,
-    koneksi.database,
-  ];
-
-  // Sandi TIDAK boleh lewat argumen (`-p...`): argumen proses terbaca oleh
-  // siapa pun yang bisa menjalankan `ps`/Task Manager di server yang sama.
-  // MYSQL_PWD hanya terlihat oleh proses anak ini sendiri.
-  const env = { ...process.env };
-  if (koneksi.password) env.MYSQL_PWD = koneksi.password;
-  else delete env.MYSQL_PWD;
-
-  return spawn(jalurMysqldump(), argumen, { env, windowsHide: true });
-};
+/** Jalankan pg_dump dan kembalikan prosesnya. Sandi lewat env (PGPASSWORD), bukan argumen. */
+const jalankanPgDump = (koneksi) =>
+  spawn(jalurPgDump(), argumenPgDump(koneksi), { env: envPgDump(koneksi), windowsHide: true });
 
 const catatAksi = (req, jenis, keterangan) => {
   ActivityLogger.log({
@@ -179,7 +147,7 @@ class BackupController {
       let database;
       try {
         const koneksi = bacaKoneksiDatabase();
-        const alat = await periksaMysqldump();
+        const alat = await periksaPgDump();
         database = {
           tersedia: alat.tersedia,
           nama: koneksi.database,
@@ -188,7 +156,7 @@ class BackupController {
           catatan: alat.catatan,
         };
       } catch (error) {
-        // DATABASE_URL sendiri bermasalah — mysqldump tidak relevan lagi.
+        // DATABASE_URL sendiri bermasalah — pg_dump tidak relevan lagi.
         database = { tersedia: false, mysqldump: null, catatan: error.message };
       }
 
@@ -271,14 +239,14 @@ class BackupController {
     }
   }
 
-  /** database → .sql mentah, langsung dari mysqldump. */
+  /** database → .sql mentah, langsung dari pg_dump. */
   async alirkanDatabase(req, res) {
     const koneksi = bacaKoneksiDatabase();
     const namaBerkas = namaBerkasBackup('database', 'sql');
 
-    const dump = jalankanMysqldump(koneksi, await opsiMysqldumpDidukung());
+    const dump = jalankanPgDump(koneksi);
 
-    // Kumpulkan stderr: kalau mysqldump gagal SEBELUM mengeluarkan sebaris SQL,
+    // Kumpulkan stderr: kalau pg_dump gagal SEBELUM mengeluarkan sebaris SQL,
     // pesannya inilah satu-satunya keterangan yang berguna bagi pengguna.
     let galat = '';
     dump.stderr.on('data', (potongan) => {
@@ -293,9 +261,7 @@ class BackupController {
           success: false,
           message:
             error.code === 'ENOENT'
-              ? (DIALEK === 'postgres'
-                ? 'pg_dump tidak ditemukan di server. Atur PG_DUMP_PATH di .env ke lokasi pg_dump.'
-                : 'mysqldump tidak ditemukan di server. Atur MYSQLDUMP_PATH di .env ke lokasi mysqldump.')
+              ? 'pg_dump tidak ditemukan di server. Atur PG_DUMP_PATH di .env ke lokasi pg_dump.'
               : `${NAMA_ALAT_DUMP} gagal dijalankan: ${error.message}`,
         });
       } else {
@@ -304,7 +270,7 @@ class BackupController {
     });
 
     // Header baru dipasang setelah byte pertama benar-benar keluar. Kalau
-    // dipasang lebih awal, kegagalan mysqldump (sandi salah, database tidak ada)
+    // dipasang lebih awal, kegagalan pg_dump (sandi salah, database tidak ada)
     // akan terunduh sebagai berkas .sql berisi pesan galat — tampak berhasil.
     let sudahMulai = false;
     dump.stdout.once('data', (potongan) => {
@@ -340,7 +306,7 @@ class BackupController {
       }
     });
 
-    // Pengguna membatalkan unduhan: hentikan mysqldump, jangan biarkan ia
+    // Pengguna membatalkan unduhan: hentikan pg_dump, jangan biarkan ia
     // menghabiskan koneksi basis data untuk hasil yang tak lagi dibaca siapa pun.
     res.on('close', () => {
       if (!dump.killed && dump.exitCode === null) dump.kill();
@@ -390,7 +356,7 @@ class BackupController {
     if (jenis === 'semua') {
       try {
         const koneksi = bacaKoneksiDatabase();
-        const dump = jalankanMysqldump(koneksi, await opsiMysqldumpDidukung());
+        const dump = jalankanPgDump(koneksi);
         dump.stderr.resume(); // dibuang: galatnya sudah tercermin pada isi .sql yang kosong/terpotong
         dump.on('error', (err) => {
           logger.error(`${NAMA_ALAT_DUMP} dalam arsip gagal: ${err.message}`);
@@ -423,9 +389,7 @@ class BackupController {
         '1. Basis data (bila ada database.sql di arsip ini):',
         `   ${PERINTAH_IMPOR}`,
         '   Buat dulu basis datanya bila belum ada:',
-        DIALEK === 'postgres'
-          ? '   CREATE DATABASE nama_database ENCODING UTF8;'
-          : '   CREATE DATABASE nama_database CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;',
+        '   CREATE DATABASE nama_database ENCODING UTF8;',
         '',
         '2. Berkas unggahan:',
         '   Ekstrak arsip ini di folder backend. Isinya sudah memakai struktur',

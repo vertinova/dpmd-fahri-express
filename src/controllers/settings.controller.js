@@ -3,8 +3,7 @@ const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const { ambilAktivitas, catatHalaman, halamanKini } = require('../services/pantauAktivitas');
 const { bisaDitonton } = require('../socket/cermin.socket');
-const { exec, execFile } = require('child_process');
-const { DIALEK } = require('../config/dialek');
+const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 
@@ -90,12 +89,9 @@ const changePassword = async (req, res) => {
  */
 const backupDatabase = async (req, res) => {
   try {
-    const dbHost = process.env.DB_HOST || '127.0.0.1';
-    const dbPort = process.env.DB_PORT || '3306';
-    const pgKon = DIALEK === 'postgres' ? require('../config/backup').bacaKoneksiDatabase() : null;
-    const dbName = pgKon ? pgKon.database : process.env.DB_NAME || 'dpmd';
-    const dbUser = process.env.DB_USER || 'root';
-    const dbPassword = process.env.DB_PASSWORD || '';
+    const { jalurPgDump, argumenPgDump, envPgDump, bacaKoneksiDatabase } = require('../config/backup');
+    const pgKon = bacaKoneksiDatabase();
+    const dbName = pgKon.database;
 
     const backupDir = path.join(__dirname, '../../storage/backups');
     if (!fs.existsSync(backupDir)) {
@@ -106,29 +102,17 @@ const backupDatabase = async (req, res) => {
     const filename = `backup_${dbName}_${timestamp}.sql`;
     const filePath = path.join(backupDir, filename);
 
-    // Build mysqldump command
-    let cmd = `mysqldump -h ${dbHost} -P ${dbPort} -u ${dbUser}`;
-    if (dbPassword) {
-      cmd += ` -p${dbPassword}`;
-    }
-    cmd += ` --single-transaction --routines --triggers --add-drop-table ${dbName}`;
-
     await new Promise((resolve, reject) => {
       const selesai = (error, stdout, stderr) => {
         if (error) {
-          logger.error(`${pgKon ? 'pg_dump' : 'mysqldump'} error:`, error.message);
+          logger.error('pg_dump error:', error.message);
           return reject(error);
         }
         // Write the dump to file
         fs.writeFileSync(filePath, stdout, 'utf8');
         resolve();
       };
-      if (pgKon) {
-        const { jalurMysqldump, argumenPgDump, envPgDump } = require('../config/backup');
-        execFile(jalurMysqldump(), argumenPgDump(pgKon), { env: envPgDump(pgKon), maxBuffer: 1024 * 1024 * 512, windowsHide: true }, selesai);
-      } else {
-        exec(cmd, { maxBuffer: 1024 * 1024 * 512 }, selesai);
-      }
+      execFile(jalurPgDump(), argumenPgDump(pgKon), { env: envPgDump(pgKon), maxBuffer: 1024 * 1024 * 512, windowsHide: true }, selesai);
     });
 
     const stats = fs.statSync(filePath);
@@ -163,10 +147,9 @@ const backupDatabase = async (req, res) => {
 const getDatabaseInfo = async (req, res) => {
   try {
     // Get table count and sizes
-    const dbName = DIALEK === 'postgres' ? require('../config/backup').bacaKoneksiDatabase().database : process.env.DB_NAME || 'dpmd';
+    const dbName = require('../config/backup').bacaKoneksiDatabase().database;
 
-    // PostgreSQL: nama kolom hasil sama dengan versi MySQL di bawah.
-    const tables = DIALEK === 'postgres' ? await prisma.$queryRawUnsafe(`
+    const tables = await prisma.$queryRawUnsafe(`
       SELECT c.relname AS table_name,
         GREATEST(c.reltuples, 0)::bigint AS row_count,
         ROUND(pg_relation_size(c.oid) / 1024.0 / 1024, 2) AS data_size_mb,
@@ -174,16 +157,7 @@ const getDatabaseInfo = async (req, res) => {
       FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
       WHERE n.nspname = current_schema() AND c.relkind IN ('r', 'p')
       ORDER BY pg_relation_size(c.oid) DESC
-    `) : await prisma.$queryRawUnsafe(`
-      SELECT 
-        table_name AS table_name,
-        table_rows AS row_count,
-        ROUND(data_length / 1024 / 1024, 2) AS data_size_mb,
-        ROUND(index_length / 1024 / 1024, 2) AS index_size_mb
-      FROM information_schema.tables 
-      WHERE table_schema = ?
-      ORDER BY data_length DESC
-    `, dbName);
+    `);
 
     const totalRows = tables.reduce((sum, t) => sum + Number(t.row_count || 0), 0);
     const totalSize = tables.reduce((sum, t) => sum + Number(t.data_size_mb || 0) + Number(t.index_size_mb || 0), 0);

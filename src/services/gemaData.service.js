@@ -14,38 +14,24 @@ const TERLARANG = /INTO\s+(OUTFILE|DUMPFILE)|FOR\s+(UPDATE|SHARE|NO\s+KEY\s+UPDA
 let pool = null;
 
 const tersedia = () => Boolean(process.env.GEMA_DB_URL);
-// Dialek mengikuti GEMA_DB_URL sendiri (user baca-saja terpisah dari DATABASE_URL).
-const pakaiPg = () => /^postgres/i.test(process.env.GEMA_DB_URL || '');
 
 const ambilPool = () => {
 	if (pool) return pool;
-	pool = pakaiPg()
-		? new (require('pg').Pool)({
-			connectionString: String(process.env.GEMA_DB_URL).split('?')[0],
-			max: 3,
-			// Batas 5 detik dan baca-saja di tingkat sesi (padanan MAX_EXECUTION_TIME MySQL).
-			options: '-c statement_timeout=5000 -c default_transaction_read_only=on',
-			// COUNT/BIGINT jadi angka seperti mysql2 (pg bawaan: teks)
-			types: { getTypeParser: (oid, f) => (oid === 20 && f !== 'binary' ? (v) => { const n = Number(v); return Number.isSafeInteger(n) ? n : v; } : require('pg').types.getTypeParser(oid, f)) },
-		})
-		: require('mysql2/promise').createPool({ uri: process.env.GEMA_DB_URL, connectionLimit: 3 });
+	pool = new (require('pg').Pool)({
+		connectionString: String(process.env.GEMA_DB_URL).split('?')[0],
+		max: 3,
+		// Batas 5 detik dan baca-saja di tingkat sesi.
+		options: '-c statement_timeout=5000 -c default_transaction_read_only=on',
+		// COUNT/BIGINT jadi angka (pg bawaan: teks)
+		types: { getTypeParser: (oid, f) => (oid === 20 && f !== 'binary' ? (v) => { const n = Number(v); return Number.isSafeInteger(n) ? n : v; } : require('pg').types.getTypeParser(oid, f)) },
+	});
 	return pool;
 };
 
 /** Satu kueri ke pool Gema; hasil diseragamkan jadi { rows, fields }. */
 const kueri = async (sql) => {
-	if (pakaiPg()) {
-		const r = await ambilPool().query(sql);
-		return { rows: r.rows, fields: r.fields };
-	}
-	const koneksi = await ambilPool().getConnection();
-	try {
-		await koneksi.query('SET SESSION MAX_EXECUTION_TIME=5000');
-		const [rows, fields] = await koneksi.query(sql);
-		return { rows, fields };
-	} finally {
-		koneksi.release();
-	}
+	const r = await ambilPool().query(sql);
+	return { rows: r.rows, fields: r.fields };
 };
 
 /** Murni: kembalikan { ok:true, sql } atau { ok:false, alasan }. */
@@ -92,7 +78,7 @@ let cacheSampai = 0;
 const muatKolom = async () => {
 	if (cacheKolom && Date.now() < cacheSampai) return cacheKolom;
 	const { rows } = await kueri(
-		`SELECT table_name AS t, column_name AS c FROM information_schema.columns WHERE table_schema = ${pakaiPg() ? 'current_schema()' : 'DATABASE()'}`,
+		`SELECT table_name AS t, column_name AS c FROM information_schema.columns WHERE table_schema = current_schema()`,
 	);
 	const peta = {};
 	for (const { t, c } of rows) (peta[t] ||= []).push(c);
@@ -131,7 +117,4 @@ const cariTabel = async (kata) => {
 	}));
 };
 
-/** Nama dialek untuk prompt model ('PostgreSQL 17' / 'MySQL 8'). */
-const namaDialek = () => (pakaiPg() ? 'PostgreSQL 17' : 'MySQL 8');
-
-module.exports = { validasiKueri, jalankanKueri, cariTabel, tersedia, namaDialek };
+module.exports = { validasiKueri, jalankanKueri, cariTabel, tersedia };

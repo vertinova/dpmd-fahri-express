@@ -24,7 +24,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const mysql = require('mysql2/promise');
 const { PETA, KOLOM_DIPERTAHANKAN, PETA_BADAN_HUKUM, BADAN_HUKUM_KOSONG } = require('./mapping');
 const { bacaAngka } = require('../../src/config/bumdesFields');
 
@@ -49,11 +48,11 @@ if (!['gabung', 'timpa'].includes(MODE)) {
 // ------------------------------------------------------------------- DDL ----
 const cetakDDL = () => {
   const baru = PETA.filter((p) => p.ddl);
-  console.log('-- Kolom baru untuk tabel `bumdes`, diturunkan dari mapping.js.');
+  console.log('-- Kolom baru untuk tabel "bumdes", diturunkan dari mapping.js.');
   console.log(`-- ${baru.length} kolom. Jalankan SEKALI, setelah backup.`);
-  console.log('ALTER TABLE `bumdes`');
+  console.log('ALTER TABLE "bumdes"');
   console.log(
-    baru.map((p) => `  ADD COLUMN \`${p.col}\` ${p.ddl} NULL`).join(',\n') + ';'
+    baru.map((p) => `  ADD COLUMN "${p.col}" ${p.ddl} NULL`).join(',\n') + ';'
   );
 };
 
@@ -133,27 +132,6 @@ const bacaEnv = (file) => {
   return out;
 };
 
-const konfigDB = (env) => {
-  if (env.DATABASE_URL) {
-    // connection_limit dsb. milik Prisma; mysql2 tidak mengenalnya -> dibuang.
-    const u = new URL(env.DATABASE_URL);
-    return {
-      host: u.hostname,
-      port: Number(u.port || 3306),
-      user: decodeURIComponent(u.username),
-      password: decodeURIComponent(u.password),
-      database: u.pathname.replace(/^\//, ''),
-    };
-  }
-  return {
-    host: env.DB_HOST || '127.0.0.1',
-    port: Number(env.DB_PORT || 3306),
-    user: env.DB_USER,
-    password: env.DB_PASSWORD || '',
-    database: env.DB_NAME,
-  };
-};
-
 // ------------------------------------------------------------------ main ----
 const main = async () => {
   if (!CSV_PATH) {
@@ -168,39 +146,48 @@ const main = async () => {
   console.log(`baris   : ${data.length}`);
   console.log(`mode    : ${MODE}${DRY_RUN ? ' (DRY RUN — tidak menulis)' : ''}`);
 
+  // DATABASE_URL dari berkas .env target; Prisma baru dimuat setelah env terpasang.
   const env = bacaEnv(ENV_PATH);
-  const conn = await mysql.createConnection({ ...konfigDB(env), multipleStatements: false });
-  console.log(`database: ${konfigDB(env).database} @ ${konfigDB(env).host}`);
+  if (!env.DATABASE_URL) {
+    console.error(`DATABASE_URL tidak ada di ${ENV_PATH}`);
+    process.exit(1);
+  }
+  process.env.DATABASE_URL = env.DATABASE_URL;
+  const prisma = require('../../src/config/prisma');
+  const { kueri, jalankan } = require('../../src/config/sqlMentah');
+  const dbUrl = new URL(env.DATABASE_URL);
+  console.log(`database: ${dbUrl.pathname.replace(/^\//, '')} @ ${dbUrl.hostname}`);
 
   // Kolom yang benar-benar ada di tabel sekarang — penjaga kalau ALTER belum jalan.
-  const [kolomDB] = await conn.query(
-    'SELECT COLUMN_NAME FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?',
-    ['bumdes']
+  const kolomDB = await prisma.$queryRawUnsafe(
+    "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = 'bumdes'"
   );
-  const adaKolom = new Set(kolomDB.map((r) => r.COLUMN_NAME));
+  const adaKolom = new Set(kolomDB.map((r) => r.column_name));
   const belumAda = PETA.filter((p) => !adaKolom.has(p.col)).map((p) => p.col);
   if (belumAda.length) {
     console.error(`\nBATAL: ${belumAda.length} kolom belum ada di tabel bumdes.`);
     console.error('Jalankan dulu ALTER TABLE dari: node import-bumdes.js --print-ddl');
     console.error('Kolom kurang: ' + belumAda.join(', '));
-    await conn.end();
+    await prisma.$disconnect();
     process.exit(1);
   }
 
   // Peta desa: kode tanpa titik -> {id, kode asli, nama desa, nama kecamatan}
   // Hanya DESA. Kelurahan tidak punya BUM Desa; kalau ikut dipetakan, baris
   // kelurahan di sheet masuk sebagai BUMDes ke-417 (Kel. Cibinong, 2026-10-23).
-  const [desas] = await conn.query(
-    `SELECT d.id, d.kode, d.nama AS nama_desa, k.nama AS nama_kecamatan
-     FROM desas d JOIN kecamatans k ON k.id = d.kecamatan_id
-     WHERE d.status_pemerintahan = 'desa'`
-  );
+  const desas = (
+    await prisma.desas.findMany({
+      where: { status_pemerintahan: 'desa' },
+      select: { id: true, kode: true, nama: true, kecamatans: { select: { nama: true } } },
+    })
+  ).map((d) => ({ id: d.id, kode: d.kode, nama_desa: d.nama, nama_kecamatan: d.kecamatans.nama }));
   const petaDesa = new Map(
     desas.map((d) => [String(d.kode).replace(/\./g, ''), d])
   );
 
   // Baris bumdes yang sudah ada, dikunci pada kode tanpa titik.
-  const [adaRows] = await conn.query('SELECT * FROM bumdes');
+  // SQL mentah: nama kolom harus persis nama kolom tabel (lama[p.col]), bukan nama field Prisma.
+  const adaRows = await kueri('SELECT * FROM bumdes');
   const petaAda = new Map(
     adaRows.map((r) => [String(r.kode_desa || '').replace(/\./g, ''), r])
   );
@@ -213,9 +200,8 @@ const main = async () => {
   let selDiisi = 0;
   let selDikosongkan = 0;
 
-  if (!DRY_RUN) await conn.beginTransaction();
-
-  try {
+  // Seluruh penulisan dalam satu transaksi (db = klien transaksi); dry-run memakai klien biasa.
+  const proses = async (db) => {
     for (const r of data) {
       const kodePolos = (r[2] || '').trim();
       const desa = petaDesa.get(kodePolos);
@@ -289,36 +275,41 @@ const main = async () => {
       // Kolom path dokumen & relasi produk hukum: tidak pernah ditulis.
       for (const k of KOLOM_DIPERTAHANKAN) delete nilai[k];
 
-      const kolom = Object.keys(nilai);
       if (lama) {
         if (!DRY_RUN) {
-          await conn.execute(
-            `UPDATE bumdes SET ${kolom.map((k) => `\`${k}\` = ?`).join(', ')}, updated_at = NOW() WHERE id = ?`,
-            [...kolom.map((k) => nilai[k]), lama.id]
+          const kolom = Object.keys(nilai);
+          await jalankan(
+            `UPDATE bumdes SET ${kolom.map((k) => `"${k}" = ?`).join(', ')}, updated_at = NOW() WHERE id = ?`,
+            [...kolom.map((k) => nilai[k]), lama.id],
+            db
           );
         }
         jmlUpdate++;
       } else {
         if (!nilai.namabumdesa) nilai.namabumdesa = `BUM DESA ${desa.nama_desa}`;
         if (!nilai.status) nilai.status = 'aktif';
-        const k2 = Object.keys(nilai);
         if (!DRY_RUN) {
-          await conn.execute(
-            `INSERT INTO bumdes (${k2.map((k) => `\`${k}\``).join(', ')}, created_at, updated_at)
+          const k2 = Object.keys(nilai);
+          await jalankan(
+            `INSERT INTO bumdes (${k2.map((k) => `"${k}"`).join(', ')}, created_at, updated_at)
              VALUES (${k2.map(() => '?').join(', ')}, NOW(), NOW())`,
-            k2.map((k) => nilai[k])
+            k2.map((k) => nilai[k]),
+            db
           );
         }
         jmlInsert++;
       }
     }
+  };
 
-    if (!DRY_RUN) await conn.commit();
+  try {
+    // timeout panjang: ratusan baris melewati batas bawaan transaksi interaktif (5 dtk).
+    if (DRY_RUN) await proses(prisma);
+    else await prisma.$transaction(proses, { maxWait: 30000, timeout: 600000 });
   } catch (err) {
-    if (!DRY_RUN) await conn.rollback();
     console.error('\nGAGAL — transaksi dibatalkan, database tidak berubah.');
     console.error(err.message);
-    await conn.end();
+    await prisma.$disconnect();
     process.exit(1);
   }
 
@@ -343,9 +334,10 @@ const main = async () => {
     tanpaDesa.slice(0, 20).forEach((t) => console.log(`   ${t.kode}  ${t.nama}`));
   }
 
-  const [[cek]] = await conn.query(
-    'SELECT COUNT(*) AS total, SUM(desa_id IS NULL) AS tanpa_desa_id FROM bumdes'
-  );
+  const cek = {
+    total: await prisma.bumdes.count(),
+    tanpa_desa_id: await prisma.bumdes.count({ where: { desa_id: null } }),
+  };
 
   console.log('\n---------------- RINGKASAN ----------------');
   console.log(`baris diperbarui : ${jmlUpdate}`);
@@ -356,7 +348,7 @@ const main = async () => {
   console.log(`desa_id kosong   : ${cek.tanpa_desa_id}`);
   if (DRY_RUN) console.log('\nDRY RUN — tidak ada perubahan yang ditulis.');
 
-  await conn.end();
+  await prisma.$disconnect();
 };
 
 // Diekspos untuk pengujian pembacaan nilai tanpa perlu koneksi database.
