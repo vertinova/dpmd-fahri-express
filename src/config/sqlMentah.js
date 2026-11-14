@@ -22,13 +22,31 @@ const rapikan = (baris) => baris.map((b) => {
   return o;
 });
 
+// Seperti shim lama: parameter undefined adalah galat (bukan NULL diam-diam); array harus dijabarkan jadi ?, ?, ?.
+function periksa(params) {
+  params.forEach((p, i) => {
+    if (p === undefined) throw new Error(`Parameter SQL ke-${i + 1} undefined`);
+    if (Array.isArray(p)) throw new Error(`Parameter SQL ke-${i + 1} berupa array; jabarkan menjadi ?, ?, ?`);
+  });
+  return params;
+}
+
 /** SELECT, atau INSERT/UPDATE ... RETURNING → array baris. */
-const kueri = async (sql, params = [], db = prisma) => rapikan(await db.$queryRawUnsafe(sql, ...params));
+const kueri = async (sql, params = [], db = prisma) => rapikan(await db.$queryRawUnsafe(sql, ...periksa(params)));
 
 /** INSERT/UPDATE/DELETE tanpa RETURNING → jumlah baris terdampak. */
-const jalankan = (sql, params = [], db = prisma) => db.$executeRawUnsafe(sql, ...params);
+const jalankan = async (sql, params = [], db = prisma) => db.$executeRawUnsafe(sql, ...periksa(params));
+
+/** Dilempar di dalam prisma.$transaction untuk membatalkan transaksi lalu membalas dengan status/body ini. */
+class BatalTrx extends Error {
+  constructor(status, body) {
+    super('Transaksi dibatalkan');
+    this.status = status;
+    this.body = body;
+  }
+}
 
 /** Pelanggaran unik, baik dari ORM (P2002) maupun SQL mentah (P2010 berkode 23505). */
 const galatUnik = (e) => e?.code === 'P2002' || (e?.code === 'P2010' && e?.meta?.code === '23505');
 
-module.exports = { kueri, jalankan, galatUnik, rapikan };
+module.exports = { kueri, jalankan, galatUnik, rapikan, BatalTrx };
