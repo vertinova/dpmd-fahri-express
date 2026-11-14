@@ -3986,3 +3986,224 @@ model hari_libur {
   created_at DateTime? @default(now()) @db.Timestamp(0)
   updated_at DateTime? @default(now()) @db.Timestamp(0)
 }
+
+model migration_history {
+  id       Int      @id @default(autoincrement())
+  filename String   @unique(map: "filename") @db.Citext
+  ran_at   DateTime @default(now()) @db.Timestamp(0)
+
+  @@map("_migration_history")
+}
+
+model event_attendance_settings {
+  id         BigInt    @id @default(autoincrement())
+  event_code String    @unique(map: "event_code") @db.Citext
+  event_name String    @db.Citext
+  event_date DateTime? @db.Date
+  location   String?   @db.Citext
+  qr_payload String    @db.Citext
+  is_active  Boolean   @default(true)
+  created_at DateTime? @default(now()) @db.Timestamp(0)
+  updated_at DateTime? @default(now()) @db.Timestamp(0)
+}
+
+model event_attendances {
+  id              BigInt    @id @default(autoincrement())
+  event_code      String    @db.Citext
+  full_name       String    @db.Citext
+  origin          String    @db.Citext
+  category        String    @db.Citext
+  custom_category String?   @db.Citext
+  duplicate_hash  String    @db.Citext
+  scan_payload    String?   @db.Citext
+  device_id       String?   @db.Citext
+  user_agent      String?   @db.Citext
+  ip_address      String?   @db.Citext
+  created_at      DateTime? @default(now()) @db.Timestamp(0)
+  updated_at      DateTime? @default(now()) @db.Timestamp(0)
+
+  @@unique([event_code, duplicate_hash], map: "unique_event_visitor")
+  @@index([event_code, category], map: "idx_event_category")
+  @@index([event_code, created_at], map: "idx_event_created")
+}
+
+model gema_pertanyaan {
+  id         BigInt    @id @default(autoincrement())
+  user_id    BigInt?
+  sesi       String?   @db.Citext
+  teks       String    @db.Citext
+  pola       String    @db.Citext
+  ditenagai  String    @db.Citext
+  panggilan  Json?
+  tanda      String?   @db.Citext
+  kalimat    String?   @db.Citext
+  total      Int       @default(0)
+  durasi_ms  Int       @default(0)
+  nilai      Int       @default(0) @db.SmallInt
+  dinilai_at DateTime? @db.Timestamp(0)
+  created_at DateTime  @default(now()) @db.Timestamp(0)
+
+  @@index([created_at], map: "idx_gema_pertanyaan_created")
+  @@index([tanda], map: "idx_gema_pertanyaan_tanda")
+  @@index([user_id, created_at], map: "idx_gema_pertanyaan_user_created")
+}
+
+model helpdesk_categories {
+  id           Int      @id @default(autoincrement())
+  name         String   @db.Citext
+  slug         String   @unique(map: "uq_helpdesk_kat_slug") @db.Citext
+  description  String?  @db.Citext
+  icon         String   @default("tanya") @db.Citext
+  target_level String   @default("dpmd") @db.Citext
+  bidang_id    Int?
+  keywords     String?  @db.Citext
+  sort_order   Int      @default(0)
+  is_active    Boolean  @default(true)
+  created_at   DateTime @default(now()) @db.Timestamp(0)
+  updated_at   DateTime @default(now()) @db.Timestamp(0)
+}
+
+model helpdesk_chat_logs {
+  id          Int      @id @default(autoincrement())
+  user_id     BigInt?
+  category_id Int?
+  question    String   @db.Citext
+  answered    Boolean  @default(false)
+  source      String   @default("none") @db.Citext
+  faq_id      Int?
+  helpful     Boolean?
+  reviewed    Boolean  @default(false)
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+
+  @@index([answered, reviewed, created_at], map: "idx_helpdesk_log_review")
+}
+
+model helpdesk_faqs {
+  id           Int      @id @default(autoincrement())
+  category_id  Int
+  question     String   @db.Citext
+  answer       String   @db.Citext
+  keywords     String?  @db.Citext
+  audience     String   @default("semua") @db.Citext
+  action_label String?  @db.Citext
+  action_url   String?  @db.Citext
+  hits         Int      @default(0)
+  is_active    Boolean  @default(true)
+  updated_by   BigInt?
+  created_at   DateTime @default(now()) @db.Timestamp(0)
+  updated_at   DateTime @default(now()) @db.Timestamp(0)
+
+  @@index([category_id, is_active], map: "idx_helpdesk_faq_kat")
+}
+
+model helpdesk_messages {
+  id          Int      @id @default(autoincrement())
+  ticket_id   Int
+  sender_type String   @db.Citext
+  sender_id   BigInt?
+  sender_name String?  @db.Citext
+  body        String   @db.Citext
+  created_at  DateTime @default(now()) @db.Timestamp(0)
+
+  @@index([ticket_id, id], map: "idx_helpdesk_msg_ticket")
+}
+
+model helpdesk_settings {
+  setting_key   String   @id @db.Citext
+  setting_value String?  @db.Citext
+  updated_at    DateTime @default(now()) @db.Timestamp(0)
+}
+
+model helpdesk_tickets {
+  id                Int       @id @default(autoincrement())
+  code              String    @unique(map: "uq_helpdesk_ticket_code") @db.Citext
+  category_id       Int?
+  target_level      String    @db.Citext
+  bidang_id         Int?
+  kecamatan_id      Int?
+  desa_id           BigInt?
+  user_id           BigInt?
+  reporter_name     String    @db.Citext
+  reporter_whatsapp String?   @db.Citext
+  subject           String    @db.Citext
+  status            String    @default("baru") @db.Citext
+  priority          String    @default("normal") @db.Citext
+  handled_by        BigInt?
+  first_response_at DateTime? @db.Timestamp(0)
+  rating            Int?      @db.SmallInt
+  rating_note       String?   @db.Citext
+  last_message_at   DateTime  @default(now()) @db.Timestamp(0)
+  reminded_at       DateTime? @db.Timestamp(0)
+  created_at        DateTime  @default(now()) @db.Timestamp(0)
+  updated_at        DateTime  @default(now()) @db.Timestamp(0)
+
+  @@index([target_level, bidang_id, kecamatan_id, status], map: "idx_helpdesk_ticket_tujuan")
+  @@index([user_id], map: "idx_helpdesk_ticket_user")
+}
+
+model server_ip_blocklist {
+  id         Int       @id @default(autoincrement())
+  ip_address String    @unique(map: "uq_sib_ip") @db.Citext
+  reason     String?   @db.Citext
+  auto       Boolean   @default(false)
+  hits       Int       @default(0)
+  expires_at DateTime? @db.Timestamp(0)
+  created_by String?   @db.Citext
+  created_at DateTime  @default(now()) @db.Timestamp(0)
+}
+
+model server_ip_geo {
+  ip_address   String   @id @db.Citext
+  country_code String?  @db.Citext
+  country      String?  @db.Citext
+  region       String?  @db.Citext
+  city         String?  @db.Citext
+  lat          Decimal? @db.Decimal(8, 4)
+  lon          Decimal? @db.Decimal(8, 4)
+  isp          String?  @db.Citext
+  org          String?  @db.Citext
+  asn          String?  @db.Citext
+  proxy        Boolean  @default(false)
+  hosting      Boolean  @default(false)
+  updated_at   DateTime @default(now()) @db.Timestamp(0)
+
+  @@index([country_code], map: "idx_sig_cc")
+}
+
+model server_metric_snapshots {
+  id         BigInt   @id @default(autoincrement())
+  cpu        Decimal? @db.Decimal(5, 2)
+  memory     Decimal? @db.Decimal(5, 2)
+  disk       Decimal? @db.Decimal(5, 2)
+  load1      Decimal? @db.Decimal(8, 2)
+  process_mb Int?
+  requests   Int?
+  errors     Int?
+  avg_ms     Int?
+  net_rx     BigInt?
+  net_tx     BigInt?
+  attacks    Int?
+  online     Int?
+  created_at DateTime @default(now()) @db.Timestamp(0)
+
+  @@index([created_at], map: "idx_sms_created")
+}
+
+model server_security_events {
+  id         BigInt   @id @default(autoincrement())
+  ip_address String   @db.Citext
+  event_type String   @db.Citext
+  severity   String   @default("low") @db.Citext
+  source     String   @default("app") @db.Citext
+  method     String?  @db.Citext
+  path       String?  @db.Citext
+  user_agent String?  @db.Citext
+  user_id    BigInt?
+  detail     String?  @db.Citext
+  blocked    Boolean  @default(false)
+  created_at DateTime @default(now()) @db.Timestamp(0)
+
+  @@index([created_at], map: "idx_sse_created")
+  @@index([ip_address], map: "idx_sse_ip")
+  @@index([event_type], map: "idx_sse_type")
+}
