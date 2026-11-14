@@ -1,4 +1,5 @@
 const sequelize = require('../config/database');
+const { jumlah, urutanNilai, enumTeks } = require('../config/dialek');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
@@ -47,12 +48,12 @@ class BankeuVerificationController {
       }
 
       if (status) {
-        whereClause += ' AND bp.status = ?';
+        whereClause += ` AND ${enumTeks('bp.status')} = ?`;
         replacements.push(status);
       }
 
       if (jenis_kegiatan) {
-        whereClause += ' AND bmk.jenis_kegiatan = ?';
+        whereClause += ` AND ${enumTeks('bmk.jenis_kegiatan')} = ?`;
         replacements.push(jenis_kegiatan);
       }
 
@@ -608,12 +609,12 @@ class BankeuVerificationController {
       const [stats] = await sequelize.query(`
         SELECT 
           COUNT(*) as total_proposals,
-          SUM(CASE WHEN bp.kecamatan_status IS NULL OR bp.kecamatan_status = 'pending' THEN 1 ELSE 0 END) as pending,
-          SUM(CASE WHEN bp.kecamatan_status = 'approved' THEN 1 ELSE 0 END) as verified,
-          SUM(CASE WHEN bp.kecamatan_status = 'rejected' THEN 1 ELSE 0 END) as rejected,
-          SUM(CASE WHEN bp.kecamatan_status = 'revision' THEN 1 ELSE 0 END) as revision,
-          SUM(CASE WHEN bmk.jenis_kegiatan = 'infrastruktur' THEN 1 ELSE 0 END) as infrastruktur,
-          SUM(CASE WHEN bmk.jenis_kegiatan = 'non_infrastruktur' THEN 1 ELSE 0 END) as non_infrastruktur
+          ${jumlah("CASE WHEN bp.kecamatan_status IS NULL OR bp.kecamatan_status = 'pending' THEN 1 ELSE 0 END")} as pending,
+          ${jumlah("CASE WHEN bp.kecamatan_status = 'approved' THEN 1 ELSE 0 END")} as verified,
+          ${jumlah("CASE WHEN bp.kecamatan_status = 'rejected' THEN 1 ELSE 0 END")} as rejected,
+          ${jumlah("CASE WHEN bp.kecamatan_status = 'revision' THEN 1 ELSE 0 END")} as revision,
+          ${jumlah("CASE WHEN bmk.jenis_kegiatan = 'infrastruktur' THEN 1 ELSE 0 END")} as infrastruktur,
+          ${jumlah("CASE WHEN bmk.jenis_kegiatan = 'non_infrastruktur' THEN 1 ELSE 0 END")} as non_infrastruktur
         FROM bankeu_proposals bp
         INNER JOIN desas d ON bp.desa_id = d.id
         INNER JOIN bankeu_master_kegiatan bmk ON bp.kegiatan_id = bmk.id
@@ -927,11 +928,11 @@ class BankeuVerificationController {
         // Kembalikan ke desa: set submitted_to_kecamatan = FALSE
         // Ini memungkinkan desa untuk upload ulang dan submit lagi
         await sequelize.query(`
-          UPDATE bankeu_proposals bp
-          INNER JOIN desas d ON bp.desa_id = d.id
-          SET bp.submitted_to_kecamatan = FALSE, bp.submitted_at = NULL
-          WHERE bp.desa_id = ? AND d.kecamatan_id = ? AND bp.tahun_anggaran = ?
-        `, { replacements: [desaId, kecamatanId, tahunAnggaran] });
+          UPDATE bankeu_proposals
+          SET submitted_to_kecamatan = FALSE, submitted_at = NULL
+          WHERE desa_id = ? AND tahun_anggaran = ?
+            AND desa_id IN (SELECT id FROM desas WHERE kecamatan_id = ?)
+        `, { replacements: [desaId, tahunAnggaran, kecamatanId] });
         
         logger.info(`🔙 ${totalCount[0].total} proposals returned to desa ${desaId} by user ${userId}`);
 
@@ -953,14 +954,14 @@ class BankeuVerificationController {
       } else {
         // Kirim ke DPMD: set submitted_to_dpmd = TRUE dan dpmd_status = pending
         await sequelize.query(`
-          UPDATE bankeu_proposals bp
-          INNER JOIN desas d ON bp.desa_id = d.id
+          UPDATE bankeu_proposals
           SET 
-            bp.submitted_to_dpmd = TRUE, 
-            bp.submitted_to_dpmd_at = NOW(),
-            bp.dpmd_status = 'pending'
-          WHERE bp.desa_id = ? AND d.kecamatan_id = ? AND bp.tahun_anggaran = ? AND bp.kecamatan_status = 'approved'
-        `, { replacements: [desaId, kecamatanId, tahunAnggaran] });
+            submitted_to_dpmd = TRUE, 
+            submitted_to_dpmd_at = NOW(),
+            dpmd_status = 'pending'
+          WHERE desa_id = ? AND tahun_anggaran = ? AND kecamatan_status = 'approved'
+            AND desa_id IN (SELECT id FROM desas WHERE kecamatan_id = ?)
+        `, { replacements: [desaId, tahunAnggaran, kecamatanId] });
         
         logger.info(`✅ ${totalCount[0].total} proposals submitted to DPMD from desa ${desaId} by user ${userId}`);
 
@@ -1136,7 +1137,7 @@ class BankeuVerificationController {
       const [timVerifikasi] = await sequelize.query(`
         SELECT * FROM tim_verifikasi_kecamatan
         WHERE kecamatan_id = ? AND is_active = TRUE
-        ORDER BY FIELD(jabatan, 'ketua', 'sekretaris', 'anggota'), nama ASC
+        ORDER BY ${urutanNilai('jabatan', ['ketua', 'sekretaris', 'anggota'])}, nama ASC
       `, { replacements: [kecamatanId] });
 
       res.json({

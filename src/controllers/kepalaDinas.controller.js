@@ -192,7 +192,8 @@ class KepalaDinasController {
           total_aset: parseFloat(financialAgg._sum.NilaiAset) || 0,
           total_omzet: parseFloat(financialAgg._sum.Omset2024) || 0,
           total_laba: parseFloat(financialAgg._sum.Laba2024) || 0,
-          rata_aset: parseFloat(financialAgg._avg.NilaiAset) || 0,
+          // 6 desimal seperti AVG DECIMAL MySQL; AVG PG membawa lebih banyak digit.
+          rata_aset: Math.round((parseFloat(financialAgg._avg.NilaiAset) || 0) * 1e6) / 1e6,
           total_tenaga_kerja: parseInt(financialAgg._sum.TotalTenagaKerja) || 0
         }
       };

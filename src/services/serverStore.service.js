@@ -10,6 +10,7 @@
 const fs = require('fs');
 const path = require('path');
 const prisma = require('../config/prisma');
+const { DIALEK } = require('../config/dialek');
 const logger = require('../utils/logger');
 const { CONFIG_KEY, DEFAULT_CONFIG, BACKEND_ROOT } = require('../config/serverManagement');
 
@@ -38,6 +39,7 @@ const execute = (sql, ...params) => prisma.$executeRawUnsafe(sql, ...params);
 const ensureTables = () => {
   if (!tablesReady) {
     tablesReady = (async () => {
+      if (DIALEK === 'postgres') return; // tabel server_* sudah ada di baseline PostgreSQL
       const berkas = path.join(BACKEND_ROOT, 'migrations/20260928_create_server_management.sql');
       const sql = fs.readFileSync(berkas, 'utf8')
         .split('\n')

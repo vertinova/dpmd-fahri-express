@@ -1,4 +1,5 @@
 const sequelize = require('../config/database');
+const { urutanNilai, urutNull } = require('../config/dialek');
 
 /**
  * Controller for Bankeu Verification Questionnaire (13 Item Checklist)
@@ -134,8 +135,9 @@ class BankeuQuestionnaireController {
             WHEN 'kecamatan' THEN 1
             WHEN 'kecamatan_tim' THEN 2
             WHEN 'dinas' THEN 3
+            ELSE 0
           END,
-          tv.jabatan
+          ${urutNull('tv.jabatan', 'ASC')}
       `, {
         replacements: { proposalId },
         type: sequelize.QueryTypes.SELECT
@@ -256,19 +258,19 @@ class BankeuQuestionnaireController {
       });
 
       const questionData = {
-        q1: q1 ? 1 : 0,
-        q2: q2 ? 1 : 0,
-        q3: q3 ? 1 : 0,
-        q4: q4 ? 1 : 0,
-        q5: q5 ? 1 : 0,
-        q6: q6 ? 1 : 0,
-        q7: q7 ? 1 : 0,
-        q8: q8 ? 1 : 0,
-        q9: q9 ? 1 : 0,
-        q10: q10 ? 1 : 0,
-        q11: q11 ? 1 : 0,
-        q12: q12 ? 1 : 0,
-        q13: q13 ? 1 : 0,
+        q1: !!q1,
+        q2: !!q2,
+        q3: !!q3,
+        q4: !!q4,
+        q5: !!q5,
+        q6: !!q6,
+        q7: !!q7,
+        q8: !!q8,
+        q9: !!q9,
+        q10: !!q10,
+        q11: !!q11,
+        q12: !!q12,
+        q13: !!q13,
         q1_keterangan: q1_keterangan || null,
         q2_keterangan: q2_keterangan || null,
         q3_keterangan: q3_keterangan || null,
@@ -560,10 +562,10 @@ class BankeuQuestionnaireController {
         SELECT id, jabatan, nama, nip, jabatan_label, ttd_path, proposal_id
         FROM tim_verifikasi_kecamatan
         WHERE kecamatan_id = :kecamatan_id 
-          AND is_active = 1
+          AND is_active = TRUE
           AND jabatan IN ('ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3')
           AND (proposal_id IS NULL OR proposal_id = :proposalId)
-        ORDER BY FIELD(jabatan, 'ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3')
+        ORDER BY ${urutanNilai('jabatan', ['ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3'])}
       `, {
         replacements: { kecamatan_id, proposalId },
         type: sequelize.QueryTypes.SELECT

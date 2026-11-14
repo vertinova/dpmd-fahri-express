@@ -1,4 +1,5 @@
 const sequelize = require('../config/database');
+const { jumlah, enumTeks } = require('../config/dialek');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
@@ -172,8 +173,8 @@ class BankeuPerubahanVerificationController {
       const replacements = [kecamatanId];
 
       if (tahun) { whereClause += ' AND bp.tahun_anggaran = ?'; replacements.push(parseInt(tahun)); }
-      if (status) { whereClause += ' AND bp.kecamatan_status = ?'; replacements.push(status); }
-      if (jenis_kegiatan) { whereClause += ' AND bp.jenis_kegiatan = ?'; replacements.push(jenis_kegiatan); }
+      if (status) { whereClause += ` AND ${enumTeks('bp.kecamatan_status')} = ?`; replacements.push(status); }
+      if (jenis_kegiatan) { whereClause += ` AND ${enumTeks('bp.jenis_kegiatan')} = ?`; replacements.push(jenis_kegiatan); }
       if (desa_id) { whereClause += ' AND bp.desa_id = ?'; replacements.push(desa_id); }
 
       const [proposals] = await sequelize.query(`
@@ -678,13 +679,13 @@ class BankeuPerubahanVerificationController {
       const [stats] = await sequelize.query(`
         SELECT
           COUNT(*) AS total,
-          SUM(CASE WHEN bp.kecamatan_status = 'pending' THEN 1 ELSE 0 END) AS pending,
-          SUM(CASE WHEN bp.kecamatan_status = 'approved' THEN 1 ELSE 0 END) AS approved,
-          SUM(CASE WHEN bp.kecamatan_status = 'rejected' THEN 1 ELSE 0 END) AS rejected,
-          SUM(CASE WHEN bp.kecamatan_status = 'revision' THEN 1 ELSE 0 END) AS revision,
-          SUM(CASE WHEN bp.submitted_to_dpmd = TRUE THEN 1 ELSE 0 END) AS submitted_to_dpmd,
-          SUM(CASE WHEN bp.dpmd_status = 'approved' THEN 1 ELSE 0 END) AS dpmd_approved,
-          SUM(CASE WHEN bp.anggaran_usulan IS NOT NULL THEN bp.anggaran_usulan ELSE 0 END) AS total_anggaran
+          ${jumlah("CASE WHEN bp.kecamatan_status = 'pending' THEN 1 ELSE 0 END")} AS pending,
+          ${jumlah("CASE WHEN bp.kecamatan_status = 'approved' THEN 1 ELSE 0 END")} AS approved,
+          ${jumlah("CASE WHEN bp.kecamatan_status = 'rejected' THEN 1 ELSE 0 END")} AS rejected,
+          ${jumlah("CASE WHEN bp.kecamatan_status = 'revision' THEN 1 ELSE 0 END")} AS revision,
+          ${jumlah("CASE WHEN bp.submitted_to_dpmd = TRUE THEN 1 ELSE 0 END")} AS submitted_to_dpmd,
+          ${jumlah("CASE WHEN bp.dpmd_status = 'approved' THEN 1 ELSE 0 END")} AS dpmd_approved,
+          ${jumlah("CASE WHEN bp.anggaran_usulan IS NOT NULL THEN bp.anggaran_usulan ELSE 0 END")} AS total_anggaran
         FROM bankeu_perubahan_proposals bp
         INNER JOIN desas d ON bp.desa_id = d.id
         WHERE d.kecamatan_id = ?

@@ -2,6 +2,7 @@ const PDFDocument = require('pdfkit');
 const fs = require('fs');
 const path = require('path');
 const prisma = require('../config/prisma');
+const { tahunDari } = require('../config/dialek');
 
 // Helper: Convert BigInt values from Prisma raw queries to Number/String
 const convertBigInt = (obj) => {
@@ -1256,7 +1257,7 @@ class BeritaAcaraService {
         bp.judul_proposal,
         d.nama as nama_desa,
         k.nama as nama_kecamatan,
-        YEAR(bp.created_at) as tahun_anggaran
+        ${tahunDari('bp.created_at')} as tahun_anggaran
       FROM bankeu_proposals bp
       INNER JOIN desas d ON bp.desa_id = d.id
       INNER JOIN kecamatans k ON d.kecamatan_id = k.id

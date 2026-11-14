@@ -1,5 +1,6 @@
 const prisma = require('../config/prisma');
 const sequelize = require('../config/database');
+const { sisipAbaikan, akhirAbaikan } = require('../config/dialek');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const path = require('path');
@@ -418,8 +419,8 @@ class BankeuPerubahanProposalController {
         // Insert pivot kegiatan
         for (const kegId of kegiatanIdsArray) {
           await sequelize.query(`
-            INSERT IGNORE INTO bankeu_perubahan_proposal_kegiatan (proposal_id, kegiatan_id)
-            VALUES (?, ?)
+            ${sisipAbaikan('bankeu_perubahan_proposal_kegiatan')} (proposal_id, kegiatan_id)
+            VALUES (?, ?)${akhirAbaikan()}
           `, { replacements: [proposalId, kegId], transaction });
         }
 
@@ -1003,7 +1004,7 @@ class BankeuPerubahanProposalController {
       // setelah ronde revisi terakhir (tidak boleh kirim ulang tanpa perbaikan dokumen).
       const filters = [
         'desa_id = ?',
-        '(status IN ("revision","rejected") OR kecamatan_status IN ("revision","rejected") OR dpmd_status IN ("revision","rejected"))',
+        "(status IN ('revision','rejected') OR kecamatan_status IN ('revision','rejected') OR dpmd_status IN ('revision','rejected'))",
         `EXISTS (
           SELECT 1 FROM bankeu_perubahan_proposal_versions v
           WHERE v.proposal_id = bankeu_perubahan_proposals.id AND v.source = 'revision'

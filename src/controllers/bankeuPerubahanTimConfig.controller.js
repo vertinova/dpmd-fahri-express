@@ -15,6 +15,7 @@
  * route handler Express (menghindari kehilangan binding).
  */
 const sequelize = require('../config/database');
+const { urutanNilai, urutNull } = require('../config/dialek');
 const logger = require('../utils/logger');
 const path = require('path');
 const fs = require('fs');
@@ -85,7 +86,7 @@ class BankeuPerubahanTimConfigController {
           ON q.tim_verifikasi_id = t.id
           AND q.verifikasi_type = 'kecamatan_tim'
           ${proposalId ? 'AND q.proposal_id = :proposalId' : ''}
-        WHERE t.kecamatan_id = :kecamatanId AND t.is_active = 1
+        WHERE t.kecamatan_id = :kecamatanId AND t.is_active = TRUE
       `;
 
       if (proposalId) {
@@ -98,7 +99,7 @@ class BankeuPerubahanTimConfigController {
       // Tie-breaker: bila ada baris duplikat utk posisi yang sama (mis. ketua ganda
       // sisa import lama), dahulukan yang punya nama terisi lalu yang terbaru, agar
       // frontend (yang memakai .find untuk ketua/sekretaris) tidak menampilkan baris kosong.
-      query += ` ORDER BY FIELD(LOWER(TRIM(t.jabatan)), 'ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3', 'anggota_4', 'anggota_5'),
+      query += ` ORDER BY ${urutanNilai('LOWER(TRIM(t.jabatan))', ['ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3', 'anggota_4', 'anggota_5'])},
                  (t.nama IS NULL OR TRIM(t.nama) = '') ASC, t.id DESC`;
 
       const rows = await sequelize.query(query, { replacements, type: sequelize.QueryTypes.SELECT });
@@ -147,7 +148,7 @@ class BankeuPerubahanTimConfigController {
       if (existing) {
         await sequelize.query(
           `UPDATE tim_verifikasi_bankeu_perubahan
-           SET nama = :nama, nip = :nip, jabatan_label = :jabatan, is_active = 1, updated_at = NOW()
+           SET nama = :nama, nip = :nip, jabatan_label = :jabatan, is_active = TRUE, updated_at = NOW()
            WHERE ${whereClause}`,
           { replacements }
         );
@@ -177,7 +178,7 @@ class BankeuPerubahanTimConfigController {
       const [result] = await sequelize.query(
         `INSERT INTO tim_verifikasi_bankeu_perubahan
            (kecamatan_id, proposal_id, jabatan, jabatan_label, nama, nip, ttd_path, is_active)
-         VALUES (:kecamatanId, :proposalId, :posisi, :jabatan, :nama, :nip, :ttdPath, 1)`,
+         VALUES (:kecamatanId, :proposalId, :posisi, :jabatan, :nama, :nip, :ttdPath, TRUE)`,
         { replacements: { kecamatanId, proposalId: effectiveProposalId, posisi, jabatan, nama, nip: nip || null, ttdPath: copiedTtd } }
       );
 
@@ -350,7 +351,7 @@ class BankeuPerubahanTimConfigController {
       const sharedRows = await sequelize.query(
         `SELECT jabatan AS posisi, nama, nip, jabatan_label, ttd_path
          FROM tim_verifikasi_kecamatan
-         WHERE kecamatan_id = :kecamatanId AND is_active = 1
+         WHERE kecamatan_id = :kecamatanId AND is_active = TRUE
            AND jabatan IN ('ketua', 'sekretaris') AND proposal_id IS NULL`,
         { replacements: { kecamatanId }, type: sequelize.QueryTypes.SELECT }
       );
@@ -407,7 +408,7 @@ class BankeuPerubahanTimConfigController {
           }
           await sequelize.query(
             `UPDATE tim_verifikasi_bankeu_perubahan
-             SET jabatan = :posisi, nama = :nama, nip = :nip, jabatan_label = :jabatanLabel, is_active = 1,
+             SET jabatan = :posisi, nama = :nama, nip = :nip, jabatan_label = :jabatanLabel, is_active = TRUE,
                  ttd_path = COALESCE(:ttd, ttd_path), updated_at = NOW()
              WHERE id = :id`,
             { replacements: { posisi, nama: r.nama, nip: r.nip || null, jabatanLabel, ttd: copied, id: keep.id } }
@@ -416,7 +417,7 @@ class BankeuPerubahanTimConfigController {
           await sequelize.query(
             `INSERT INTO tim_verifikasi_bankeu_perubahan
                (kecamatan_id, proposal_id, jabatan, jabatan_label, nama, nip, ttd_path, is_active)
-             VALUES (:kecamatanId, NULL, :posisi, :jabatanLabel, :nama, :nip, :ttd, 1)`,
+             VALUES (:kecamatanId, NULL, :posisi, :jabatanLabel, :nama, :nip, :ttd, TRUE)`,
             { replacements: { kecamatanId, posisi, jabatanLabel, nama: r.nama, nip: r.nip || null, ttd: copied } }
           );
         }
@@ -429,9 +430,9 @@ class BankeuPerubahanTimConfigController {
         const anggotaRows = await sequelize.query(
           `SELECT nama, nip, jabatan_label, ttd_path
            FROM tim_verifikasi_kecamatan
-           WHERE kecamatan_id = :kecamatanId AND is_active = 1
+           WHERE kecamatan_id = :kecamatanId AND is_active = TRUE
              AND jabatan LIKE 'anggota_%' AND nama IS NOT NULL AND nama != ''
-           ORDER BY ttd_path DESC, nama ASC`,
+           ORDER BY ${urutNull('ttd_path', 'DESC')}, nama ASC`,
           { replacements: { kecamatanId }, type: sequelize.QueryTypes.SELECT }
         );
 
@@ -448,7 +449,7 @@ class BankeuPerubahanTimConfigController {
         const existingAnggota = await sequelize.query(
           `SELECT jabatan AS posisi, nama FROM tim_verifikasi_bankeu_perubahan
            WHERE kecamatan_id = :kecamatanId AND proposal_id = :proposalId
-             AND jabatan LIKE 'anggota_%' AND is_active = 1`,
+             AND jabatan LIKE 'anggota_%' AND is_active = TRUE`,
           { replacements: { kecamatanId, proposalId }, type: sequelize.QueryTypes.SELECT }
         );
         const existingNames = new Set(existingAnggota.map(a => (a.nama || '').toLowerCase().trim()));
@@ -466,7 +467,7 @@ class BankeuPerubahanTimConfigController {
           await sequelize.query(
             `INSERT INTO tim_verifikasi_bankeu_perubahan
                (kecamatan_id, proposal_id, jabatan, jabatan_label, nama, nip, ttd_path, is_active)
-             VALUES (:kecamatanId, :proposalId, :posisi, :jabatanLabel, :nama, :nip, :ttd, 1)`,
+             VALUES (:kecamatanId, :proposalId, :posisi, :jabatanLabel, :nama, :nip, :ttd, TRUE)`,
             { replacements: { kecamatanId, proposalId, posisi, jabatanLabel: a.jabatan_label || posisi, nama: a.nama, nip: a.nip || null, ttd: copied } }
           );
           importedAnggota++;
@@ -497,9 +498,9 @@ class BankeuPerubahanTimConfigController {
       const rows = await sequelize.query(
         `SELECT nama, nip, jabatan_label AS jabatan, ttd_path
          FROM tim_verifikasi_bankeu_perubahan
-         WHERE kecamatan_id = :kecamatanId AND jabatan LIKE 'anggota_%' AND is_active = 1
+         WHERE kecamatan_id = :kecamatanId AND jabatan LIKE 'anggota_%' AND is_active = TRUE
            AND nama IS NOT NULL AND nama != ''
-         ORDER BY ttd_path DESC, nama ASC`,
+         ORDER BY ${urutNull('ttd_path', 'DESC')}, nama ASC`,
         { replacements: { kecamatanId }, type: sequelize.QueryTypes.SELECT }
       );
       const seen = new Set();

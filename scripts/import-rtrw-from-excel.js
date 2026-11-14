@@ -26,7 +26,9 @@ const XLSX   = require('xlsx');
 const path   = require('path');
 const fs     = require('fs');
 const crypto = require('crypto');
-const { PrismaClient } = require('@prisma/client');
+const { PrismaClient, Prisma } = require('@prisma/client');
+// Parameter Prisma bertipe text: PostgreSQL butuh cast eksplisit ke enum (MySQL tidak).
+const CAST_JK = Prisma.raw(String(process.env.DATABASE_URL || '').startsWith('postgres') ? '::pengurus_jenis_kelamin' : '');
 
 const prisma = new PrismaClient({ log: [] });
 
@@ -672,15 +674,15 @@ async function main() {
               pengurusable_id      = ${pengurusableId},
               pengurusable_type    = ${pengurusableType},
               jabatan              = ${rec.jabatan},
-              tanggal_mulai_jabatan = ${toDateStr(tanggalMulai)},
-              tanggal_akhir_jabatan = ${toDateStr(tanggalAkhir)},
+              tanggal_mulai_jabatan = CAST(${toDateStr(tanggalMulai)} AS DATE),
+              tanggal_akhir_jabatan = CAST(${toDateStr(tanggalAkhir)} AS DATE),
               status_jabatan       = 'aktif',
               status_verifikasi    = 'unverified',
               nama_lengkap         = ${rec.nama},
               nik                  = ${nik ?? '-'},
               tempat_lahir         = ${rec.tempatLahir},
-              tanggal_lahir        = ${toDateStr(rec.tanggalLahir)},
-              jenis_kelamin        = ${rec.jenisKelamin},
+              tanggal_lahir        = CAST(${toDateStr(rec.tanggalLahir)} AS DATE),
+              jenis_kelamin        = ${rec.jenisKelamin}${CAST_JK},
               status_perkawinan    = ${rec.statusKawin ?? '-'},
               alamat               = ${alamat},
               no_telepon           = ${rec.noTelepon},
@@ -709,16 +711,16 @@ async function main() {
               ${pengurusableId},
               ${pengurusableType},
               ${rec.jabatan},
-              ${toDateStr(tanggalMulai)},
-              ${toDateStr(tanggalAkhir)},
+              CAST(${toDateStr(tanggalMulai)} AS DATE),
+              CAST(${toDateStr(tanggalAkhir)} AS DATE),
               'aktif',
               'unverified',
               NULL,
               ${rec.nama},
               ${nik ?? '-'},
               ${rec.tempatLahir},
-              ${toDateStr(rec.tanggalLahir)},
-              ${rec.jenisKelamin},
+              CAST(${toDateStr(rec.tanggalLahir)} AS DATE),
+              ${rec.jenisKelamin}${CAST_JK},
               ${rec.statusKawin ?? '-'},
               ${alamat},
               ${rec.noTelepon},

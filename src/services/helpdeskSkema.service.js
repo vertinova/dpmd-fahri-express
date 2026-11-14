@@ -14,7 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const Helpdesk = require('./helpdesk.service');
 const logger = require('../utils/logger');
-const { sisipAbaikan, akhirAbaikan } = require('../config/dialek');
+const { sisipAbaikan, akhirAbaikan, DIALEK } = require('../config/dialek');
 
 const BERKAS = path.join(__dirname, '..', '..', 'migrations', '20261102_create_helpdesk.sql');
 
@@ -103,7 +103,8 @@ function pernyataan() {
 
 async function siapkanHelpdesk() {
 	try {
-		for (const sql of pernyataan()) await Helpdesk.q(sql);
+		// PostgreSQL: tabel sudah ada di baseline, DDL MySQL dilewati (seed tetap jalan).
+		if (DIALEK !== 'postgres') for (const sql of pernyataan()) await Helpdesk.q(sql);
 
 		for (const [k, v] of PENGATURAN_BAWAAN) {
 			await Helpdesk.q(`${sisipAbaikan('helpdesk_settings')} (setting_key, setting_value) VALUES (?, ?)${akhirAbaikan()}`, [k, v]);

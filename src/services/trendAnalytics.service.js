@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
+const { id, tahunDari, formatWaktu, cocokRegex } = require('../config/dialek');
 
 const PUBLIC_DIR = path.join(__dirname, '../../public');
 
@@ -191,6 +192,9 @@ const STAGE_GROUPS = [
 ];
 
 // Kolom profil desa yang dihitung kelengkapannya.
+// Kolom non-teks: TRIM()/<> '' galat di PostgreSQL, dan di MySQL selalu benar untuk nilai non-NULL.
+const KOLOM_ANGKA = ['jumlah_penduduk', 'latitude'];
+
 const PROFIL_FIELDS = [
   { column: 'klasifikasi_desa', label: 'Klasifikasi Desa' },
   { column: 'status_desa', label: 'Status Desa' },
@@ -265,13 +269,13 @@ const asSqlDate = (date) =>
 const fetchBuckets = async (tables, fromDate, toDate) => {
   const parts = tables.map((source) => {
     const amount = source.amountColumn
-      ? `COALESCE(SUM(\`${source.amountColumn}\`), 0)`
+      ? `COALESCE(SUM(${id(source.amountColumn)}), 0)`
       : '0';
-    return `SELECT DATE_FORMAT(\`${source.column}\`, '%Y-%m') AS bucket,
+    return `SELECT ${formatWaktu(id(source.column), '%Y-%m')} AS bucket,
                    COUNT(*) AS total,
                    ${amount} AS amount
-            FROM \`${source.table}\`
-            WHERE \`${source.column}\` >= ? AND \`${source.column}\` < ?
+            FROM ${id(source.table)}
+            WHERE ${id(source.column)} >= ? AND ${id(source.column)} < ?
             GROUP BY bucket`;
   });
 
@@ -388,12 +392,12 @@ const yearlyFromColumn = async ({ table, column, years }) => {
   // GROUP BY ekspresi (bukan alias) — beberapa tabel punya kolom bernama
   // `tahun` sendiri yang akan menang atas alias dan memicu ONLY_FULL_GROUP_BY.
   const rows = await prisma.$queryRawUnsafe(
-    `SELECT YEAR(\`${column}\`) AS tahun, COUNT(*) AS total
-     FROM \`${table}\`
-     WHERE \`${column}\` IS NOT NULL
-       AND YEAR(\`${column}\`) BETWEEN ? AND ?
-     GROUP BY YEAR(\`${column}\`)
-     ORDER BY YEAR(\`${column}\`) ASC`,
+    `SELECT ${tahunDari(id(column))} AS tahun, COUNT(*) AS total
+     FROM ${id(table)}
+     WHERE ${id(column)} IS NOT NULL
+       AND EXTRACT(YEAR FROM ${id(column)}) BETWEEN ? AND ?
+     GROUP BY ${tahunDari(id(column))}
+     ORDER BY ${tahunDari(id(column))} ASC`,
     currentYear - years + 1,
     currentYear
   );
@@ -410,12 +414,15 @@ const buildYearlySeries = async (years = 10) => {
   // BUMDes hanya menyimpan tahun pendirian, bukan tanggal.
   try {
     const rows = await prisma.$queryRawUnsafe(
-      `SELECT TahunPendirian AS tahun, COUNT(*) AS total
+      // 4 digit sudah dijamin regex, jadi pembanding string = pembanding angka; CAST dihindari
+      // karena PostgreSQL tidak menjamin urutan evaluasi WHERE.
+      `SELECT ${id('TahunPendirian')} AS tahun, COUNT(*) AS total
        FROM bumdes
-       WHERE TahunPendirian REGEXP '^[0-9]{4}$'
-         AND CAST(TahunPendirian AS UNSIGNED) BETWEEN 1990 AND YEAR(CURDATE())
-       GROUP BY TahunPendirian
-       ORDER BY TahunPendirian ASC`
+       WHERE ${cocokRegex(id('TahunPendirian'), '^[0-9]{4}$')}
+         AND ${id('TahunPendirian')} >= '1990' AND ${id('TahunPendirian')} <= ?
+       GROUP BY ${id('TahunPendirian')}
+       ORDER BY ${id('TahunPendirian')} ASC`,
+      String(new Date().getUTCFullYear())
     );
     const points = rows.slice(-years).map((row) => ({
       year: String(row.tahun),
@@ -493,9 +500,9 @@ const buildKelembagaanComposition = async () => {
     (source) =>
       `SELECT '${source.label}' AS jenis,
               COUNT(*) AS total,
-              SUM(status_kelembagaan = 'aktif') AS aktif,
-              SUM(status_verifikasi = 'verified') AS terverifikasi
-       FROM \`${source.table}\``
+              SUM(CASE WHEN status_kelembagaan = 'aktif' THEN 1 ELSE 0 END) AS aktif,
+              SUM(CASE WHEN status_verifikasi = 'verified' THEN 1 ELSE 0 END) AS terverifikasi
+       FROM ${id(source.table)}`
   );
 
   try {
@@ -517,7 +524,7 @@ const buildKelembagaanComposition = async () => {
 const buildProfilCoverage = async () => {
   const selects = PROFIL_FIELDS.map(
     (field) =>
-      `SUM(\`${field.column}\` IS NOT NULL AND TRIM(\`${field.column}\`) <> '') AS \`${field.column}\``
+      `SUM(CASE WHEN ${id(field.column)} IS NOT NULL${KOLOM_ANGKA.includes(field.column) ? '' : ` AND TRIM(${id(field.column)}) <> ''`} THEN 1 ELSE 0 END) AS ${id(field.column)}`
   ).join(', ');
 
   try {

@@ -14,7 +14,7 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 const store = require('./serverStore.service');
-const { saatBentrok } = require('../config/dialek');
+const { saatBentrok, DIALEK } = require('../config/dialek');
 
 const TTL_MS = 30 * 24 * 3600 * 1000;
 const MAX_CACHE = 20000;
@@ -41,6 +41,7 @@ const privat = (ip) => {
 const aktif = () => store.getConfigSync().security?.geo_lookup !== false;
 
 const siapkanTabel = () => {
+  if (!tabelSiap && DIALEK === 'postgres') tabelSiap = Promise.resolve(); // tabel sudah ada di baseline PostgreSQL
   if (!tabelSiap) {
     tabelSiap = store.execute(`
       CREATE TABLE IF NOT EXISTS server_ip_geo (

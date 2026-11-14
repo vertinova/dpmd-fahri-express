@@ -1,4 +1,5 @@
 const sequelize = require('../config/database');
+const { jumlah, enumTeks } = require('../config/dialek');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const path = require('path');
@@ -180,7 +181,7 @@ class BankeuPerubahanLpjController {
       let where = 'WHERE 1=1';
       const replacements = [];
       if (tahun) { where += ' AND lpj.tahun_anggaran = ?'; replacements.push(parseInt(tahun)); }
-      if (status) { where += ' AND lpj.status = ?'; replacements.push(status); }
+      if (status) { where += ` AND ${enumTeks('lpj.status')} = ?`; replacements.push(status); }
       if (desa_id) { where += ' AND lpj.desa_id = ?'; replacements.push(desa_id); }
 
       const [rows] = await sequelize.query(`
@@ -272,10 +273,10 @@ class BankeuPerubahanLpjController {
         SELECT
           COUNT(*) AS total_files,
           COUNT(DISTINCT desa_id) AS total_desa,
-          SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) AS pending,
-          SUM(CASE WHEN status = 'verified' THEN 1 ELSE 0 END) AS verified,
-          SUM(CASE WHEN status = 'rejected' THEN 1 ELSE 0 END) AS rejected,
-          SUM(CASE WHEN status = 'revision' THEN 1 ELSE 0 END) AS revision
+          ${jumlah("CASE WHEN status = 'pending' THEN 1 ELSE 0 END")} AS pending,
+          ${jumlah("CASE WHEN status = 'verified' THEN 1 ELSE 0 END")} AS verified,
+          ${jumlah("CASE WHEN status = 'rejected' THEN 1 ELSE 0 END")} AS rejected,
+          ${jumlah("CASE WHEN status = 'revision' THEN 1 ELSE 0 END")} AS revision
         FROM bankeu_perubahan_lpj
         ${where}
       `, { replacements });

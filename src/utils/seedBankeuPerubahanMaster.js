@@ -4,6 +4,7 @@
  * Dipanggil saat server startup
  */
 const sequelize = require('../config/database');
+const { skemaIni } = require('../config/dialek');
 const logger = require('./logger');
 
 const KEGIATAN_DATA = [
@@ -38,7 +39,7 @@ async function seedBankeuPerubahanMasterKegiatan() {
     // Cek apakah tabel sudah ada
     const [tableExists] = await sequelize.query(`
       SELECT COUNT(*) AS cnt FROM information_schema.tables
-      WHERE table_schema = DATABASE() AND table_name = 'bankeu_perubahan_master_kegiatan'
+      WHERE table_schema = ${skemaIni()} AND table_name = 'bankeu_perubahan_master_kegiatan'
     `);
     if (tableExists[0].cnt === 0) {
       // Tabel belum dibuat - skip silently (akan dibuat via prisma db push / migration SQL)

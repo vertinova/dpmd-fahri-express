@@ -64,7 +64,7 @@ async function semuaKategori({ hanyaAktif = false } = {}) {
 
 async function simpanKategori(id, d) {
 	const nilai = [d.name, d.slug, d.description || null, d.icon || 'tanya', d.target_level, d.bidang_id || null,
-		d.keywords || null, Number(d.sort_order) || 0, d.is_active ? 1 : 0];
+		d.keywords || null, Number(d.sort_order) || 0, !!d.is_active];
 	if (id) {
 		await q(
 			`UPDATE helpdesk_categories SET name = ?, slug = ?, description = ?, icon = ?, target_level = ?, bidang_id = ?,
@@ -131,7 +131,7 @@ async function faqPopuler(login, batas = 5) {
 
 async function simpanFaq(id, d, userId) {
 	const nilai = [d.category_id, d.question, d.answer, d.keywords || null, d.audience,
-		d.action_label || null, d.action_url || null, d.is_active ? 1 : 0, userId || null];
+		d.action_label || null, d.action_url || null, !!d.is_active, userId || null];
 	if (id) {
 		await q(
 			`UPDATE helpdesk_faqs SET category_id = ?, question = ?, answer = ?, keywords = ?, audience = ?,
@@ -161,7 +161,7 @@ async function catatChat({ userId, kategoriId, pertanyaan, terjawab, sumber, faq
 	const r = await q(
 		`INSERT INTO helpdesk_chat_logs (user_id, category_id, question, answered, source, faq_id)
 		 VALUES (?, ?, ?, ?, ?, ?)`,
-		[userId || null, kategoriId || null, String(pertanyaan).slice(0, 1000), terjawab ? 1 : 0, sumber, faqId || null]
+		[userId || null, kategoriId || null, String(pertanyaan).slice(0, 1000), !!terjawab, sumber, faqId || null]
 	);
 	return r.insertId;
 }
@@ -171,7 +171,7 @@ async function nilaiJawaban(logId, membantu) {
 	const r = await q(
 		`UPDATE helpdesk_chat_logs SET helpful = ?
 		  WHERE id = ? AND helpful IS NULL AND created_at >= NOW() - ${selang(1, 'DAY')}`,
-		[membantu ? 1 : 0, logId]
+		[!!membantu, logId]
 	);
 	return r.affectedRows > 0;
 }

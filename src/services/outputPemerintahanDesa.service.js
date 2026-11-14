@@ -60,17 +60,17 @@ const fetchAparatur = async () => {
   const [ringkas, perJabatan, perDesa] = await Promise.all([
     prisma.$queryRawUnsafe(
       `SELECT COUNT(*) AS total,
-              SUM(status = 'Aktif' AND tanggal_pemberhentian IS NULL) AS aktif,
-              SUM(sumber_data = 'desa') AS input_desa,
-              SUM(sumber_data <> 'desa') AS dari_arsip,
-              SUM(produk_hukum_id IS NOT NULL) AS ber_sk,
-              SUM(bpjs_kesehatan_nomor IS NOT NULL AND bpjs_kesehatan_nomor <> '') AS bpjs_kesehatan,
-              SUM(bpjs_ketenagakerjaan_nomor IS NOT NULL AND bpjs_ketenagakerjaan_nomor <> '') AS bpjs_ketenagakerjaan,
-              SUM(file_ktp IS NOT NULL) AS berkas_ktp,
-              SUM(file_kk IS NOT NULL) AS berkas_kk,
-              SUM(file_ijazah_terakhir IS NOT NULL) AS berkas_ijazah,
-              SUM(file_pas_foto IS NOT NULL) AS berkas_foto,
-              SUM(file_akta_kelahiran IS NOT NULL) AS berkas_akta,
+              SUM(CASE WHEN status = 'Aktif' AND tanggal_pemberhentian IS NULL THEN 1 ELSE 0 END) AS aktif,
+              SUM(CASE WHEN sumber_data = 'desa' THEN 1 ELSE 0 END) AS input_desa,
+              SUM(CASE WHEN sumber_data <> 'desa' THEN 1 ELSE 0 END) AS dari_arsip,
+              SUM(CASE WHEN produk_hukum_id IS NOT NULL THEN 1 ELSE 0 END) AS ber_sk,
+              SUM(CASE WHEN bpjs_kesehatan_nomor IS NOT NULL AND TRIM(bpjs_kesehatan_nomor) <> '' THEN 1 ELSE 0 END) AS bpjs_kesehatan,
+              SUM(CASE WHEN bpjs_ketenagakerjaan_nomor IS NOT NULL AND TRIM(bpjs_ketenagakerjaan_nomor) <> '' THEN 1 ELSE 0 END) AS bpjs_ketenagakerjaan,
+              SUM(CASE WHEN file_ktp IS NOT NULL THEN 1 ELSE 0 END) AS berkas_ktp,
+              SUM(CASE WHEN file_kk IS NOT NULL THEN 1 ELSE 0 END) AS berkas_kk,
+              SUM(CASE WHEN file_ijazah_terakhir IS NOT NULL THEN 1 ELSE 0 END) AS berkas_ijazah,
+              SUM(CASE WHEN file_pas_foto IS NOT NULL THEN 1 ELSE 0 END) AS berkas_foto,
+              SUM(CASE WHEN file_akta_kelahiran IS NOT NULL THEN 1 ELSE 0 END) AS berkas_akta,
               (SELECT COUNT(*) FROM aparatur_desa) AS tercatat
        FROM aparatur_desa
        WHERE status = 'Aktif' AND tanggal_pemberhentian IS NULL`
@@ -86,8 +86,8 @@ const fetchAparatur = async () => {
     prisma.$queryRawUnsafe(
       `SELECT desa_id,
               COUNT(*) AS total,
-              SUM(status = 'Aktif' AND tanggal_pemberhentian IS NULL) AS aktif,
-              SUM(sumber_data = 'desa') AS input_desa
+              SUM(CASE WHEN status = 'Aktif' AND tanggal_pemberhentian IS NULL THEN 1 ELSE 0 END) AS aktif,
+              SUM(CASE WHEN sumber_data = 'desa' THEN 1 ELSE 0 END) AS input_desa
        FROM aparatur_desa
        WHERE status = 'Aktif' AND tanggal_pemberhentian IS NULL
        GROUP BY desa_id`
@@ -100,8 +100,8 @@ const fetchProdukHukum = async () => {
   const [ringkas, perTahun, perJenis, perDesa] = await Promise.all([
     prisma.$queryRawUnsafe(
       `SELECT COUNT(*) AS total,
-              SUM(status_peraturan = 'berlaku') AS berlaku,
-              SUM(status_peraturan <> 'berlaku') AS tidak_berlaku,
+              SUM(CASE WHEN status_peraturan = 'berlaku' THEN 1 ELSE 0 END) AS berlaku,
+              SUM(CASE WHEN status_peraturan <> 'berlaku' THEN 1 ELSE 0 END) AS tidak_berlaku,
               COUNT(DISTINCT desa_id) AS desa
        FROM produk_hukums`
     ),

@@ -1,5 +1,6 @@
 // Controller untuk Kecamatan review Surat Pengantar & Surat Permohonan dari Desa
 const sequelize = require('../config/database');
+const { jumlah, urutNull, enumTeks } = require('../config/dialek');
 const logger = require('../utils/logger');
 const fs = require('fs');
 const path = require('path');
@@ -29,7 +30,7 @@ exports.getAllDesaSurat = async (req, res) => {
     let params = [tahun, kecamatan_id];
 
     if (status) {
-      whereConditions.push('dbs.kecamatan_status = ?');
+      whereConditions.push(`${enumTeks('dbs.kecamatan_status')} = ?`);
       params.push(status);
     }
 
@@ -46,7 +47,7 @@ exports.getAllDesaSurat = async (req, res) => {
       LEFT JOIN kecamatans k ON d.kecamatan_id = k.id
       LEFT JOIN users u ON dbs.kecamatan_reviewed_by = u.id
       WHERE ${whereConditions.join(' AND ')}
-      ORDER BY dbs.submitted_at DESC, d.nama ASC
+      ORDER BY ${urutNull('dbs.submitted_at', 'DESC')}, d.nama ASC
     `;
 
     const suratList = await sequelize.query(suratQuery, {
@@ -71,7 +72,7 @@ exports.getAllDesaSurat = async (req, res) => {
           bp.created_at
         FROM bankeu_proposals bp
         WHERE bp.desa_id = ? 
-          AND YEAR(bp.created_at) = ?
+          AND EXTRACT(YEAR FROM bp.created_at) = ?
           AND bp.submitted_to_kecamatan = TRUE
         ORDER BY bp.created_at DESC
       `;
@@ -311,10 +312,10 @@ exports.getSuratStatistics = async (req, res) => {
     const query = `
       SELECT 
         COUNT(*) as total_surat,
-        SUM(CASE WHEN kecamatan_status = 'pending' THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN kecamatan_status = 'approved' THEN 1 ELSE 0 END) as approved,
-        SUM(CASE WHEN kecamatan_status = 'rejected' THEN 1 ELSE 0 END) as rejected,
-        SUM(CASE WHEN submitted_to_kecamatan = TRUE AND kecamatan_status = 'pending' THEN 1 ELSE 0 END) as menunggu_review
+        ${jumlah("CASE WHEN kecamatan_status = 'pending' THEN 1 ELSE 0 END")} as pending,
+        ${jumlah("CASE WHEN kecamatan_status = 'approved' THEN 1 ELSE 0 END")} as approved,
+        ${jumlah("CASE WHEN kecamatan_status = 'rejected' THEN 1 ELSE 0 END")} as rejected,
+        ${jumlah("CASE WHEN submitted_to_kecamatan = TRUE AND kecamatan_status = 'pending' THEN 1 ELSE 0 END")} as menunggu_review
       FROM desa_bankeu_surat dbs
       INNER JOIN desas d ON dbs.desa_id = d.id
       WHERE d.kecamatan_id = ? AND dbs.tahun = ? AND dbs.submitted_to_kecamatan = TRUE

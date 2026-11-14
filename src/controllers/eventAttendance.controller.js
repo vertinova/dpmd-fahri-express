@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const QRCode = require('qrcode');
 const sequelize = require('../config/database');
-const { formatWaktu } = require('../config/dialek');
+const { formatWaktu, DIALEK } = require('../config/dialek');
 const { getIO } = require('../socket/meeting.socket');
 
 const EVENT_CODE = 'hjb-544-dpmd';
@@ -21,7 +21,8 @@ let initialized = false;
 const ensureTables = async () => {
   if (initialized) return;
 
-  await sequelize.query(`
+  // PostgreSQL: kedua tabel sudah ada di baseline, DDL MySQL dilewati.
+  if (DIALEK !== 'postgres') await sequelize.query(`
     CREATE TABLE IF NOT EXISTS event_attendance_settings (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       event_code VARCHAR(80) NOT NULL UNIQUE,
@@ -36,7 +37,8 @@ const ensureTables = async () => {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
   `);
 
-  await sequelize.query(`
+  // PostgreSQL: kedua tabel sudah ada di baseline, DDL MySQL dilewati.
+  if (DIALEK !== 'postgres') await sequelize.query(`
     CREATE TABLE IF NOT EXISTS event_attendances (
       id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
       event_code VARCHAR(80) NOT NULL,

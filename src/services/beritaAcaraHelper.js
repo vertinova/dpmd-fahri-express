@@ -43,7 +43,7 @@ class BeritaAcaraHelper {
           tc.proposal_id
         FROM tim_verifikasi_kecamatan tc
         WHERE tc.kecamatan_id = :kecamatanId
-          AND tc.is_active = 1
+          AND tc.is_active = TRUE
           AND tc.jabatan IN ('ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3')
           AND (
             tc.proposal_id IS NULL
@@ -339,7 +339,7 @@ class BeritaAcaraHelper {
         SELECT id, jabatan as posisi, nama, nip, jabatan_label as jabatan, ttd_path, proposal_id
         FROM tim_verifikasi_kecamatan
         WHERE kecamatan_id = :kecamatanId
-          AND is_active = 1
+          AND is_active = TRUE
           AND jabatan IN ('ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3')
           AND (
             proposal_id IS NULL

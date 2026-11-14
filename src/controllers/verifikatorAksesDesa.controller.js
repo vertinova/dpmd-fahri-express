@@ -1,6 +1,7 @@
 const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
+const { saatBentrok } = require('../config/dialek');
 
 /**
  * Get all akses desa for a specific verifikator
@@ -150,8 +151,7 @@ exports.addVerifikatorAksesDesa = async (req, res) => {
           (verifikator_id, desa_id, kecamatan_id, created_at, updated_at)
         VALUES 
           (${data.verifikator_id}, ${data.desa_id}, ${data.kecamatan_id}, NOW(), NOW())
-        ON DUPLICATE KEY UPDATE 
-          updated_at = NOW()
+        ${Prisma.raw(saatBentrok(['verifikator_id', 'desa_id'], ['updated_at']))}
       `;
     }
 

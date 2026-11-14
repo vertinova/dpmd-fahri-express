@@ -96,7 +96,15 @@ function urutNull(kolom, arah = 'ASC') {
 /** Skema aktif untuk information_schema. */
 const skemaIni = (d = DIALEK) => (d === 'postgres' ? 'CURRENT_SCHEMA()' : 'DATABASE()');
 
+/**
+ * Kolom enum yang dibandingkan dengan nilai bebas dari pengguna (filter query-string).
+ * MySQL: nilai di luar enum cukup tidak cocok; PG: galat "invalid input value for enum".
+ * Dibandingkan sebagai citext supaya tetap tak peka huruf seperti ENUM MySQL.
+ */
+const enumTeks = (kolom, d = DIALEK) => (d === 'postgres' ? `CAST(${kolom} AS citext)` : kolom);
+
 module.exports = {
 	DIALEK, selang, urutanNilai, gabungTeks, selisihWaktu, saatBentrok, sisipAbaikan, akhirAbaikan,
 	id, tahunDari, formatWaktu, epochDetik, tanggalWib, adaDiDaftar, cocokRegex, jumlah, urutNull, skemaIni,
+	enumTeks,
 };

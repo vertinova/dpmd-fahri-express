@@ -1,4 +1,5 @@
 const sequelize = require('../config/database');
+const { cocokRegex } = require('../config/dialek');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const path = require('path');
@@ -55,7 +56,7 @@ async function loadActiveTim(kecamatanId, proposalId) {
     FROM tim_verifikasi_bankeu_perubahan
     WHERE kecamatan_id = ?
       AND is_active = TRUE
-      AND jabatan REGEXP '^(ketua|sekretaris|anggota_[0-9]+)$'
+      AND ${cocokRegex('jabatan', '^(ketua|sekretaris|anggota_[0-9]+)$')}
       AND (proposal_id IS NULL OR proposal_id = ?)
     ORDER BY
       CASE jabatan
@@ -114,7 +115,7 @@ async function updateProposalQuisionerFlag(proposalId) {
   const [timRows] = await sequelize.query(`
     SELECT COUNT(*) AS total FROM tim_verifikasi_bankeu_perubahan
     WHERE kecamatan_id = ? AND is_active = TRUE
-      AND jabatan REGEXP '^(ketua|sekretaris|anggota_[0-9]+)$'
+      AND ${cocokRegex('jabatan', '^(ketua|sekretaris|anggota_[0-9]+)$')}
       AND (proposal_id IS NULL OR proposal_id = ?)
   `, { replacements: [kecamatanId, proposalId] });
   const totalTim = Number(timRows[0].total);

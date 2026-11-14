@@ -1,4 +1,5 @@
 const sequelize = require('../config/database');
+const { jumlah, gabungTeks } = require('../config/dialek');
 const logger = require('../utils/logger');
 
 class BankeuPerubahanPublicController {
@@ -15,11 +16,11 @@ class BankeuPerubahanPublicController {
       const [statusStats] = await sequelize.query(`
         SELECT
           COUNT(*) AS total,
-          SUM(CASE WHEN kecamatan_status = 'approved' THEN 1 ELSE 0 END) AS approved_kecamatan,
-          SUM(CASE WHEN dpmd_status = 'approved' THEN 1 ELSE 0 END) AS approved_dpmd,
-          SUM(CASE WHEN submitted_to_kecamatan = TRUE THEN 1 ELSE 0 END) AS submitted_to_kecamatan,
-          SUM(CASE WHEN submitted_to_dpmd = TRUE THEN 1 ELSE 0 END) AS submitted_to_dpmd,
-          SUM(CASE WHEN anggaran_usulan IS NOT NULL THEN anggaran_usulan ELSE 0 END) AS total_anggaran
+          ${jumlah("CASE WHEN kecamatan_status = 'approved' THEN 1 ELSE 0 END")} AS approved_kecamatan,
+          ${jumlah("CASE WHEN dpmd_status = 'approved' THEN 1 ELSE 0 END")} AS approved_dpmd,
+          ${jumlah("CASE WHEN submitted_to_kecamatan = TRUE THEN 1 ELSE 0 END")} AS submitted_to_kecamatan,
+          ${jumlah("CASE WHEN submitted_to_dpmd = TRUE THEN 1 ELSE 0 END")} AS submitted_to_dpmd,
+          ${jumlah("CASE WHEN anggaran_usulan IS NOT NULL THEN anggaran_usulan ELSE 0 END")} AS total_anggaran
         FROM bankeu_perubahan_proposals
         WHERE tahun_anggaran = ?
       `, { replacements: [tahun] });
@@ -31,8 +32,8 @@ class BankeuPerubahanPublicController {
           k.nama AS kecamatan_nama,
           COUNT(bp.id) AS total_proposals,
           COUNT(DISTINCT bp.desa_id) AS total_desa,
-          SUM(CASE WHEN bp.submitted_to_dpmd = TRUE THEN 1 ELSE 0 END) AS diterima_dpmd,
-          SUM(CASE WHEN bp.anggaran_usulan IS NOT NULL THEN bp.anggaran_usulan ELSE 0 END) AS total_anggaran
+          ${jumlah("CASE WHEN bp.submitted_to_dpmd = TRUE THEN 1 ELSE 0 END")} AS diterima_dpmd,
+          ${jumlah("CASE WHEN bp.anggaran_usulan IS NOT NULL THEN bp.anggaran_usulan ELSE 0 END")} AS total_anggaran
         FROM bankeu_perubahan_proposals bp
         INNER JOIN desas d ON bp.desa_id = d.id
         INNER JOIN kecamatans k ON d.kecamatan_id = k.id
@@ -46,8 +47,8 @@ class BankeuPerubahanPublicController {
         SELECT
           jenis_kegiatan AS kategori,
           COUNT(*) AS total,
-          SUM(CASE WHEN submitted_to_dpmd = TRUE THEN 1 ELSE 0 END) AS diterima,
-          SUM(CASE WHEN anggaran_usulan IS NOT NULL THEN anggaran_usulan ELSE 0 END) AS total_anggaran
+          ${jumlah("CASE WHEN submitted_to_dpmd = TRUE THEN 1 ELSE 0 END")} AS diterima,
+          ${jumlah("CASE WHEN anggaran_usulan IS NOT NULL THEN anggaran_usulan ELSE 0 END")} AS total_anggaran
         FROM bankeu_perubahan_proposals
         WHERE tahun_anggaran = ?
         GROUP BY jenis_kegiatan
@@ -106,7 +107,7 @@ class BankeuPerubahanPublicController {
       // Nama kegiatan dari tabel pivot (fallback bila kegiatan_nama kosong).
       const [pivotRows] = await sequelize.query(`
         SELECT bppk.proposal_id,
-               GROUP_CONCAT(bmk.nama_kegiatan ORDER BY bmk.urutan SEPARATOR ', ') AS nama_kegiatan
+               ${gabungTeks('bmk.nama_kegiatan', { urut: 'bmk.urutan', pemisah: ', ' })} AS nama_kegiatan
         FROM bankeu_perubahan_proposal_kegiatan bppk
         JOIN bankeu_perubahan_master_kegiatan bmk ON bppk.kegiatan_id = bmk.id
         GROUP BY bppk.proposal_id

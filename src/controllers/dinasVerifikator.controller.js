@@ -3,6 +3,10 @@ const prisma = require('../config/prisma');
 const bcrypt = require('bcrypt');
 const logger = require('../utils/logger');
 const { invalidateRoleCache } = require('../middlewares/auth');
+const { adaDiDaftar, skemaIni } = require('../config/dialek');
+
+// Filter tahun opsional: tanpa tahun tidak ada klausa (menggantikan `param IS NULL OR ...`)
+const filterTahun = (tahun) => (tahun == null ? Prisma.empty : Prisma.sql`AND bp.tahun_anggaran = ${tahun}`);
 
 /**
  * Get all verifikator for a dinas
@@ -15,7 +19,7 @@ exports.getAllVerifikator = async (req, res) => {
     // Check if table exists first
     const tableExists = await prisma.$queryRaw`
       SELECT COUNT(*) as cnt FROM information_schema.tables 
-      WHERE table_schema = DATABASE() AND table_name = 'dinas_verifikator'
+      WHERE table_schema = ${Prisma.raw(skemaIni())} AND table_name = 'dinas_verifikator'
     `;
     
     if (!tableExists[0] || tableExists[0].cnt === 0n) {
@@ -457,11 +461,11 @@ exports.getVerifikatorStats = async (req, res) => {
           INNER JOIN desas d ON bp.desa_id = d.id
           INNER JOIN bankeu_proposal_kegiatan bpk ON bp.id = bpk.proposal_id
           INNER JOIN bankeu_master_kegiatan bmk ON bpk.kegiatan_id = bmk.id
-          WHERE (FIND_IN_SET(${kodeDinasForMatch}, bmk.dinas_terkait) > 0 OR FIND_IN_SET(${dinas.kode_dinas}, bmk.dinas_terkait) > 0)
+          WHERE (${adaDiDaftar(kodeDinasForMatch, 'bmk.dinas_terkait')} OR ${adaDiDaftar(dinas.kode_dinas, 'bmk.dinas_terkait')})
             AND (bp.submitted_to_dinas_at IS NOT NULL OR bp.dinas_status IS NOT NULL OR bp.kecamatan_status IN ('rejected', 'revision'))
             AND d.status_pemerintahan = 'desa'
             AND bp.desa_id IN (${Prisma.join(vDesaIds)})
-            AND (${tahunFilter} IS NULL OR bp.tahun_anggaran = ${tahunFilter})
+            ${filterTahun(tahunFilter)}
         `;
         
         if (result[0]) {
@@ -503,11 +507,11 @@ exports.getVerifikatorStats = async (req, res) => {
         INNER JOIN desas d ON bp.desa_id = d.id
         INNER JOIN bankeu_proposal_kegiatan bpk ON bp.id = bpk.proposal_id
         INNER JOIN bankeu_master_kegiatan bmk ON bpk.kegiatan_id = bmk.id
-        WHERE (FIND_IN_SET(${kodeDinasForMatch}, bmk.dinas_terkait) > 0 OR FIND_IN_SET(${dinas.kode_dinas}, bmk.dinas_terkait) > 0)
+        WHERE (${adaDiDaftar(kodeDinasForMatch, 'bmk.dinas_terkait')} OR ${adaDiDaftar(dinas.kode_dinas, 'bmk.dinas_terkait')})
           AND (bp.submitted_to_dinas_at IS NOT NULL OR bp.dinas_status IS NOT NULL OR bp.kecamatan_status IN ('rejected', 'revision'))
           AND d.status_pemerintahan = 'desa'
           AND bp.desa_id NOT IN (${Prisma.join(allAssignedDesaArray)})
-          AND (${tahunFilter} IS NULL OR bp.tahun_anggaran = ${tahunFilter})
+          ${filterTahun(tahunFilter)}
       `;
       if (unassignedResult[0]) {
         unassignedStats = {
@@ -533,10 +537,10 @@ exports.getVerifikatorStats = async (req, res) => {
         INNER JOIN desas d ON bp.desa_id = d.id
         INNER JOIN bankeu_proposal_kegiatan bpk ON bp.id = bpk.proposal_id
         INNER JOIN bankeu_master_kegiatan bmk ON bpk.kegiatan_id = bmk.id
-        WHERE (FIND_IN_SET(${kodeDinasForMatch}, bmk.dinas_terkait) > 0 OR FIND_IN_SET(${dinas.kode_dinas}, bmk.dinas_terkait) > 0)
+        WHERE (${adaDiDaftar(kodeDinasForMatch, 'bmk.dinas_terkait')} OR ${adaDiDaftar(dinas.kode_dinas, 'bmk.dinas_terkait')})
           AND (bp.submitted_to_dinas_at IS NOT NULL OR bp.dinas_status IS NOT NULL OR bp.kecamatan_status IN ('rejected', 'revision'))
           AND d.status_pemerintahan = 'desa'
-          AND (${tahunFilter} IS NULL OR bp.tahun_anggaran = ${tahunFilter})
+          ${filterTahun(tahunFilter)}
       `;
       if (allResult[0]) {
         unassignedStats = {

@@ -5,6 +5,9 @@
 
 const { prisma, validateDesaAccess } = require('./base.controller');
 const { rekapJenjang } = require('../../utils/jenjangPendidikan');
+const { Prisma } = require('@prisma/client');
+// tanggalWib: kolom TIMESTAMP dibaca mengikuti zona sesi, jadi tanggal WIB dihitung lewat epoch (lihat dialek.js)
+const { tanggalWib, tahunDari, epochDetik } = require('../../config/dialek');
 
 // Lembaga yang dihitung dalam capaian verifikasi (Satlinmas & lembaga lainnya tidak termasuk)
 const VERIFIKASI_TABLES = [
@@ -16,9 +19,6 @@ const VERIFIKASI_TABLES = [
   { key: 'pkk', model: 'pkks', label: 'PKK' },
 ];
 
-// Kolom TIMESTAMP dibaca mengikuti time_zone sesi MySQL (lokal WIB, server bisa UTC).
-// Lewat UNIX_TIMESTAMP (epoch, bebas zona) + 7 jam supaya tanggalnya selalu WIB.
-const tanggalWib = (kolom) => `DATE(DATE_ADD('1970-01-01', INTERVAL UNIX_TIMESTAMP(${kolom}) + 25200 SECOND))`;
 
 // Tab Desa | Kelurahan | Semua. Selain dua nilai ini (termasuk kosong) berarti tanpa filter.
 const parseStatusPemerintahan = (nilai) => (['desa', 'kelurahan'].includes(nilai) ? nilai : null);
@@ -1060,23 +1060,23 @@ class SummaryController {
           const [byYear, byYearVerified, byYearNonaktif, cumulativeActive, cumulativeVerified, totals] = await Promise.all([
             // Records created per year
             prisma.$queryRawUnsafe(
-              `SELECT YEAR(created_at) as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE created_at IS NOT NULL${diWilayah} GROUP BY YEAR(created_at) ORDER BY tahun`
+              `SELECT ${tahunDari('created_at')} as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE created_at IS NOT NULL${diWilayah} GROUP BY ${tahunDari('created_at')} ORDER BY tahun`
             ),
             // Records verified per year
             prisma.$queryRawUnsafe(
-              `SELECT YEAR(verified_at) as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE verified_at IS NOT NULL${diWilayah} GROUP BY YEAR(verified_at) ORDER BY tahun`
+              `SELECT ${tahunDari('verified_at')} as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE verified_at IS NOT NULL${diWilayah} GROUP BY ${tahunDari('verified_at')} ORDER BY tahun`
             ),
             // Records nonaktif per year (by updated_at as proxy)
             prisma.$queryRawUnsafe(
-              `SELECT YEAR(updated_at) as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE status_kelembagaan = 'nonaktif' AND updated_at IS NOT NULL${diWilayah} GROUP BY YEAR(updated_at) ORDER BY tahun`
+              `SELECT ${tahunDari('updated_at')} as tahun, COUNT(*) as jumlah FROM ${t.model} WHERE status_kelembagaan = 'nonaktif' AND updated_at IS NOT NULL${diWilayah} GROUP BY ${tahunDari('updated_at')} ORDER BY tahun`
             ),
             // Cumulative active count per year: created that year (aktif) minus deactivated that year
             prisma.$queryRawUnsafe(
               `SELECT y.tahun,
-                (SELECT COUNT(*) FROM ${t.model} WHERE YEAR(created_at) <= y.tahun${diWilayah}) -
-                (SELECT COUNT(*) FROM ${t.model} WHERE status_kelembagaan = 'nonaktif' AND YEAR(updated_at) <= y.tahun${diWilayah}) as jumlah_aktif,
-                (SELECT COUNT(*) FROM ${t.model} WHERE YEAR(created_at) <= y.tahun${diWilayah}) as jumlah_total
-              FROM (SELECT DISTINCT YEAR(created_at) as tahun FROM ${t.model} WHERE created_at IS NOT NULL${diWilayah}) y
+                (SELECT COUNT(*) FROM ${t.model} WHERE EXTRACT(YEAR FROM created_at) <= y.tahun${diWilayah}) -
+                (SELECT COUNT(*) FROM ${t.model} WHERE status_kelembagaan = 'nonaktif' AND EXTRACT(YEAR FROM updated_at) <= y.tahun${diWilayah}) as jumlah_aktif,
+                (SELECT COUNT(*) FROM ${t.model} WHERE EXTRACT(YEAR FROM created_at) <= y.tahun${diWilayah}) as jumlah_total
+              FROM (SELECT DISTINCT ${tahunDari('created_at')} as tahun FROM ${t.model} WHERE created_at IS NOT NULL${diWilayah}) y
               ORDER BY y.tahun`
             ),
             // Cumulative verified count per year
@@ -1084,9 +1084,9 @@ class SummaryController {
             // Turun: lembaga verified yang dinonaktifkan (nonaktif_at) s/d tahun tsb
             prisma.$queryRawUnsafe(
               `SELECT y.tahun,
-                (SELECT COUNT(*) FROM ${t.model} WHERE status_verifikasi = 'verified' AND YEAR(created_at) <= y.tahun${diWilayah}) -
-                (SELECT COUNT(*) FROM ${t.model} WHERE status_verifikasi = 'verified' AND status_kelembagaan = 'nonaktif' AND nonaktif_at IS NOT NULL AND YEAR(nonaktif_at) <= y.tahun${diWilayah}) as jumlah_verified
-              FROM (SELECT DISTINCT YEAR(created_at) as tahun FROM ${t.model} WHERE created_at IS NOT NULL${diWilayah}) y
+                (SELECT COUNT(*) FROM ${t.model} WHERE status_verifikasi = 'verified' AND EXTRACT(YEAR FROM created_at) <= y.tahun${diWilayah}) -
+                (SELECT COUNT(*) FROM ${t.model} WHERE status_verifikasi = 'verified' AND status_kelembagaan = 'nonaktif' AND nonaktif_at IS NOT NULL AND EXTRACT(YEAR FROM nonaktif_at) <= y.tahun${diWilayah}) as jumlah_verified
+              FROM (SELECT DISTINCT ${tahunDari('created_at')} as tahun FROM ${t.model} WHERE created_at IS NOT NULL${diWilayah}) y
               ORDER BY y.tahun`
             ),
             // Current totals
@@ -1245,8 +1245,8 @@ class SummaryController {
         ...VERIFIKASI_TABLES.map(t => prisma.$queryRawUnsafe(
           `SELECT desa_id,
              COUNT(*) AS total,
-             SUM(status_verifikasi = 'verified') AS verified,
-             SUM(status_verifikasi = 'ditolak') AS ditolak
+             SUM(CASE WHEN status_verifikasi = 'verified' THEN 1 ELSE 0 END) AS verified,
+             SUM(CASE WHEN status_verifikasi = 'ditolak' THEN 1 ELSE 0 END) AS ditolak
            FROM ${t.model} WHERE status_kelembagaan = 'aktif' GROUP BY desa_id`
         )),
         // Pengurus aktif pada lembaga aktif; pengurus purna/nonaktif tidak ikut dihitung
@@ -1254,8 +1254,8 @@ class SummaryController {
         ...VERIFIKASI_TABLES.map(t => prisma.$queryRawUnsafe(
           `SELECT p.desa_id,
              COUNT(*) AS total,
-             SUM(p.status_verifikasi = 'verified') AS verified,
-             SUM(p.status_verifikasi = 'ditolak') AS ditolak
+             SUM(CASE WHEN p.status_verifikasi = 'verified' THEN 1 ELSE 0 END) AS verified,
+             SUM(CASE WHEN p.status_verifikasi = 'ditolak' THEN 1 ELSE 0 END) AS ditolak
            FROM pengurus p
            JOIN ${t.model} l ON l.id = p.pengurusable_id AND l.status_kelembagaan = 'aktif'
            WHERE p.pengurusable_type = '${t.model}' AND p.status_jabatan = 'aktif'
@@ -1444,21 +1444,21 @@ class SummaryController {
         ? (Math.floor((Date.now() / 1000 + 7 * 3600) / DAY) - (hari - 1)) * DAY - 7 * 3600
         : 0;
 
-      const where = `activity_type IN ('verify', 'verify_pengurus') AND UNIX_TIMESTAMP(created_at) >= ?`;
-      const whereLog = `l.activity_type IN ('verify', 'verify_pengurus') AND UNIX_TIMESTAMP(l.created_at) >= ?`
+      const where = `activity_type IN ('verify', 'verify_pengurus') AND ${epochDetik('created_at')} >= ?`;
+      const whereLog = `l.activity_type IN ('verify', 'verify_pengurus') AND ${epochDetik('l.created_at')} >= ?`
         + (userId ? ' AND l.user_id = ?' : '');
-      const logParams = userId ? [sejak, userId] : [sejak];
+      const logParams = userId ? [sejak, BigInt(userId)] : [sejak]; // userId sudah dipastikan digit di atas
 
       const [rekap, logs, jumlah] = await Promise.all([
         prisma.$queryRawUnsafe(
           `SELECT user_id, MAX(user_name) AS nama, MAX(user_role) AS role,
              COUNT(*) AS total,
-             SUM(activity_type = 'verify') AS lembaga,
-             SUM(activity_type = 'verify_pengurus') AS pengurus,
-             SUM(action_description LIKE '%menolak verifikasi%') AS ditolak,
-             SUM(action_description LIKE '%membatalkan verifikasi%') AS dibatalkan,
+             SUM(CASE WHEN activity_type = 'verify' THEN 1 ELSE 0 END) AS lembaga,
+             SUM(CASE WHEN activity_type = 'verify_pengurus' THEN 1 ELSE 0 END) AS pengurus,
+             SUM(CASE WHEN action_description LIKE '%menolak verifikasi%' THEN 1 ELSE 0 END) AS ditolak,
+             SUM(CASE WHEN action_description LIKE '%membatalkan verifikasi%' THEN 1 ELSE 0 END) AS dibatalkan,
              COUNT(DISTINCT ${tanggalWib('created_at')}) AS hari_aktif,
-             MAX(UNIX_TIMESTAMP(created_at)) AS terakhir
+             MAX(${epochDetik('created_at')}) AS terakhir
            FROM kelembagaan_activity_logs
            WHERE ${where}
            GROUP BY user_id
@@ -1467,7 +1467,7 @@ class SummaryController {
         ),
         prisma.$queryRawUnsafe(
           `SELECT l.id, l.user_id, l.user_name, l.kelembagaan_type, l.kelembagaan_nama, l.activity_type,
-             l.entity_name, l.action_description, UNIX_TIMESTAMP(l.created_at) AS waktu,
+             l.entity_name, l.action_description, ${epochDetik('l.created_at')} AS waktu,
              d.id AS desa_id, d.nama AS desa, k.nama AS kecamatan
            FROM kelembagaan_activity_logs l
            LEFT JOIN desas d ON d.id = l.desa_id
@@ -1552,7 +1552,7 @@ class SummaryController {
           orderBy: [{ kecamatan_id: 'asc' }, { nama: 'asc' }],
         }),
         prisma.$queryRawUnsafe(
-          `SELECT desa_id, COUNT(*) AS total, SUM(jenis = 'Keputusan Kepala Desa') AS sk_kades
+          `SELECT desa_id, COUNT(*) AS total, SUM(CASE WHEN jenis = 'Keputusan Kepala Desa' THEN 1 ELSE 0 END) AS sk_kades
            FROM produk_hukums GROUP BY desa_id`
         ),
         prisma.$queryRawUnsafe(
@@ -1565,19 +1565,19 @@ class SummaryController {
         ...VERIFIKASI_TABLES.map(t => prisma.$queryRawUnsafe(
           `SELECT l.desa_id,
              COUNT(*) AS aktif,
-             SUM(l.produk_hukum_id IS NULL) AS tanpa_sk,
-             SUM(l.status_verifikasi = 'ditolak') AS ditolak,
-             SUM(p.pengurusable_id IS NULL) AS tanpa_pengurus,
-             SUM(p.pengurusable_id IS NOT NULL AND p.n_ketua = 0) AS tanpa_ketua,
-             SUM(p.n_ketua > 1) AS ketua_ganda,
+             SUM(CASE WHEN l.produk_hukum_id IS NULL THEN 1 ELSE 0 END) AS tanpa_sk,
+             SUM(CASE WHEN l.status_verifikasi = 'ditolak' THEN 1 ELSE 0 END) AS ditolak,
+             SUM(CASE WHEN p.pengurusable_id IS NULL THEN 1 ELSE 0 END) AS tanpa_pengurus,
+             SUM(CASE WHEN p.pengurusable_id IS NOT NULL AND p.n_ketua = 0 THEN 1 ELSE 0 END) AS tanpa_ketua,
+             SUM(CASE WHEN p.n_ketua > 1 THEN 1 ELSE 0 END) AS ketua_ganda,
              COALESCE(SUM(p.n_pengurus), 0) AS pengurus,
              COALESCE(SUM(p.n_tanpa_sk), 0) AS pengurus_tanpa_sk
            FROM ${t.model} l
            LEFT JOIN (
              SELECT pengurusable_id,
                COUNT(*) AS n_pengurus,
-               SUM(${kondisiKetua}) AS n_ketua,
-               SUM(produk_hukum_id IS NULL) AS n_tanpa_sk
+               SUM(CASE WHEN ${kondisiKetua} THEN 1 ELSE 0 END) AS n_ketua,
+               SUM(CASE WHEN produk_hukum_id IS NULL THEN 1 ELSE 0 END) AS n_tanpa_sk
              FROM pengurus
              WHERE pengurusable_type = '${t.model}' AND status_jabatan = 'aktif'
              GROUP BY pengurusable_id
@@ -1971,7 +1971,7 @@ class SummaryController {
       let availableYears = [];
       try {
         const yearRows = await prisma.$queryRaw`
-          SELECT DISTINCT YEAR(created_at) AS tahun
+          SELECT DISTINCT ${Prisma.raw(tahunDari('created_at'))} AS tahun
           FROM pengurus
           WHERE created_at IS NOT NULL
           ORDER BY tahun DESC

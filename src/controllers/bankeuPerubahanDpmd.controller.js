@@ -1,4 +1,5 @@
 const sequelize = require('../config/database');
+const { jumlah, enumTeks } = require('../config/dialek');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const { fetchVersions, fetchRevisions } = require('../utils/bankeuPerubahanRevisionService');
@@ -24,8 +25,8 @@ class BankeuPerubahanDpmdController {
       const replacements = [];
 
       if (tahun) { whereClause += ' AND bp.tahun_anggaran = ?'; replacements.push(parseInt(tahun)); }
-      if (status) { whereClause += ' AND bp.dpmd_status = ?'; replacements.push(status); }
-      if (jenis_kegiatan) { whereClause += ' AND bp.jenis_kegiatan = ?'; replacements.push(jenis_kegiatan); }
+      if (status) { whereClause += ` AND ${enumTeks('bp.dpmd_status')} = ?`; replacements.push(status); }
+      if (jenis_kegiatan) { whereClause += ` AND ${enumTeks('bp.jenis_kegiatan')} = ?`; replacements.push(jenis_kegiatan); }
       if (desa_id) { whereClause += ' AND bp.desa_id = ?'; replacements.push(desa_id); }
       if (kecamatan_id) { whereClause += ' AND d.kecamatan_id = ?'; replacements.push(kecamatan_id); }
 
@@ -587,11 +588,11 @@ class BankeuPerubahanDpmdController {
       const [stats] = await sequelize.query(`
         SELECT
           COUNT(*) AS total,
-          SUM(CASE WHEN dpmd_status = 'pending' THEN 1 ELSE 0 END) AS pending,
-          SUM(CASE WHEN dpmd_status = 'approved' THEN 1 ELSE 0 END) AS approved,
-          SUM(CASE WHEN dpmd_status = 'rejected' THEN 1 ELSE 0 END) AS rejected,
-          SUM(CASE WHEN dpmd_status = 'revision' THEN 1 ELSE 0 END) AS revision,
-          SUM(CASE WHEN anggaran_usulan IS NOT NULL THEN anggaran_usulan ELSE 0 END) AS total_anggaran
+          ${jumlah("CASE WHEN dpmd_status = 'pending' THEN 1 ELSE 0 END")} AS pending,
+          ${jumlah("CASE WHEN dpmd_status = 'approved' THEN 1 ELSE 0 END")} AS approved,
+          ${jumlah("CASE WHEN dpmd_status = 'rejected' THEN 1 ELSE 0 END")} AS rejected,
+          ${jumlah("CASE WHEN dpmd_status = 'revision' THEN 1 ELSE 0 END")} AS revision,
+          ${jumlah("CASE WHEN anggaran_usulan IS NOT NULL THEN anggaran_usulan ELSE 0 END")} AS total_anggaran
         FROM bankeu_perubahan_proposals
         WHERE (
             submitted_to_dpmd = TRUE

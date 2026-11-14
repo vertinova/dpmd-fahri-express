@@ -1,6 +1,10 @@
 const D = require('../dialek');
 
 describe('dialek', () => {
+	test('enumTeks: citext di PG, apa adanya di MySQL', () => {
+		expect(D.enumTeks('bp.status', 'postgres')).toBe('CAST(bp.status AS citext)');
+		expect(D.enumTeks('bp.status', 'mysql')).toBe('bp.status');
+	});
 	test('selang menolak masukan berbahaya', () => {
 		for (const bad of ['1; DROP', -1, 1.5, '24', 100001, NaN]) expect(() => D.selang(bad, 'DAY')).toThrow();
 		expect(() => D.selang(1, 'WEEK')).toThrow();

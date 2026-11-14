@@ -16,6 +16,10 @@
 //  3. `rts.jumlah_jiwa` / `jumlah_kk` hampir seluruhnya kosong (±1% terisi),
 //     jadi tidak dijadikan output — hanya dilaporkan tingkat keterisiannya.
 const prisma = require('../config/prisma');
+const { DIALEK } = require('../config/dialek');
+
+// Di PG tiap tabel punya tipe enum sendiri; UNION butuh tipe yang sama.
+const teks = (kolom) => (DIALEK === 'postgres' ? `CAST(${kolom} AS TEXT)` : kolom);
 
 // ============================================================
 // Jenis lembaga
@@ -54,8 +58,8 @@ const fetchLembaga = async () => {
   const bagian = Object.entries(JENIS).map(
     ([key, meta]) => `
       SELECT '${key}' AS jenis, desa_id,
-             status_kelembagaan AS status,
-             status_verifikasi AS verifikasi,
+             ${teks('status_kelembagaan')} AS status,
+             ${teks('status_verifikasi')} AS verifikasi,
              imported,
              (produk_hukum_id IS NOT NULL) AS ber_sk,
              COUNT(*) AS jumlah
@@ -98,8 +102,8 @@ const fetchPetaDesa = async () => {
 const fetchKeterisianRt = async () => {
   const rows = await prisma.$queryRawUnsafe(
     `SELECT COUNT(*) AS total,
-            SUM(jumlah_jiwa > 0) AS ada_jiwa,
-            SUM(jumlah_kk > 0) AS ada_kk,
+            SUM(CASE WHEN jumlah_jiwa > 0 THEN 1 ELSE 0 END) AS ada_jiwa,
+            SUM(CASE WHEN jumlah_kk > 0 THEN 1 ELSE 0 END) AS ada_kk,
             COALESCE(SUM(jumlah_jiwa), 0) AS jiwa,
             COALESCE(SUM(jumlah_kk), 0) AS kk
      FROM rts`

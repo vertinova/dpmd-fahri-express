@@ -23,6 +23,7 @@
 //    semacam itu dipisahkan dari penjumlahan DAN dilaporkan, bukan diam-diam
 //    dibuang atau diam-diam ikut menjadi angka utama.
 const prisma = require('../config/prisma');
+const { id } = require('../config/dialek');
 
 const toNumber = (value) => {
   if (value === null || value === undefined) return 0;
@@ -62,12 +63,12 @@ const median = (angka) => {
 };
 
 const fetchBumdes = async () => {
-  const kolomDeret = DERET.flatMap((deret) => deret.tahun.map((tahun) => `b.\`${namaKolom(deret, tahun)}\``));
+  const kolomDeret = DERET.flatMap((deret) => deret.tahun.map((tahun) => `b.${id(namaKolom(deret, tahun))}`));
   return prisma.$queryRawUnsafe(
-    `SELECT b.id, b.desa_id, b.namabumdesa, b.status, b.badanhukum, b.NIB, b.NPWP, b.LKPP,
-            b.TahunPendirian, b.TotalTenagaKerja, b.JenisUsahaUtama, b.DesaWisata,
-            b.NilaiAset, b.NomorPerdes, b.Perdes, b.SK_BUM_Desa,
-            b.LaporanKeuangan2021, b.LaporanKeuangan2022, b.LaporanKeuangan2023, b.LaporanKeuangan2024,
+    `SELECT b.id, b.desa_id, b.namabumdesa, b.status, b.badanhukum, b.${id('NIB')}, b.${id('NPWP')}, b.${id('LKPP')},
+            b.${id('TahunPendirian')}, b.${id('TotalTenagaKerja')}, b.${id('JenisUsahaUtama')}, b.${id('DesaWisata')},
+            b.${id('NilaiAset')}, b.${id('NomorPerdes')}, b.${id('Perdes')}, b.${id('SK_BUM_Desa')},
+            b.${id('LaporanKeuangan2021')}, b.${id('LaporanKeuangan2022')}, b.${id('LaporanKeuangan2023')}, b.${id('LaporanKeuangan2024')},
             ${kolomDeret.join(', ')},
             b.desa AS desa_teks, b.kecamatan AS kecamatan_teks,
             d.id AS desa_ref, d.nama AS nama_desa, k.nama AS nama_kecamatan

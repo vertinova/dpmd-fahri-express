@@ -235,6 +235,8 @@ const fetchReguler = async (tahun) => {
   }));
 };
 
+// Enum status bankeu_perubahan_lpj tidak memuat 'approved' (bug lama, dilaporkan terpisah):
+// syaratnya selalu salah di MySQL, jadi ditulis FALSE agar PostgreSQL tidak galat enum.
 const fetchPerubahan = async (tahun) => {
   const rows = await prisma.$queryRawUnsafe(
     `SELECT bpp.id, bpp.desa_id, bpp.kegiatan_id, bpp.tahun_anggaran,
@@ -246,7 +248,7 @@ const fetchPerubahan = async (tahun) => {
               SELECT 1 FROM bankeu_perubahan_lpj l
               WHERE l.desa_id = bpp.desa_id
                 AND l.tahun_anggaran = bpp.tahun_anggaran
-                AND l.status = 'approved'
+                AND FALSE
             ) AS ada_lpj
      FROM bankeu_perubahan_proposals bpp
      JOIN desas d ON d.id = bpp.desa_id

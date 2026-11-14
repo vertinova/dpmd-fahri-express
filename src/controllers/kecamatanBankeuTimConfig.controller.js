@@ -1,4 +1,5 @@
 const sequelize = require('../config/database');
+const { urutanNilai, urutNull } = require('../config/dialek');
 const path = require('path');
 const fs = require('fs');
 
@@ -45,7 +46,7 @@ class KecamatanBankeuTimConfigController {
           ON q.tim_verifikasi_id = t.id 
           AND q.verifikasi_type = 'kecamatan_tim'
           ${proposalId ? 'AND q.proposal_id = :proposalId' : ''}
-        WHERE t.kecamatan_id = :kecamatanId AND t.is_active = 1
+        WHERE t.kecamatan_id = :kecamatanId AND t.is_active = TRUE
       `;
       
       const replacements = { kecamatanId };
@@ -60,7 +61,7 @@ class KecamatanBankeuTimConfigController {
       }
 
       query += ` ORDER BY 
-          FIELD(t.jabatan, 'ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3', 'anggota_4', 'anggota_5')`;
+          ${urutanNilai('t.jabatan', ['ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3', 'anggota_4', 'anggota_5'])}`;
 
       const timConfig = await sequelize.query(query, {
         replacements,
@@ -254,7 +255,7 @@ class KecamatanBankeuTimConfigController {
 
         const [result] = await sequelize.query(`
           INSERT INTO tim_verifikasi_kecamatan (kecamatan_id, proposal_id, jabatan, nama, nip, jabatan_label, ttd_path, is_active)
-          VALUES (:kecamatanId, :proposalId, :posisi, :nama, :nip, :jabatan, :ttdPath, 1)
+          VALUES (:kecamatanId, :proposalId, :posisi, :nama, :nip, :jabatan, :ttdPath, TRUE)
         `, {
           replacements: insertReplacements
         });
@@ -528,10 +529,10 @@ class KecamatanBankeuTimConfigController {
         FROM tim_verifikasi_kecamatan t
         WHERE t.kecamatan_id = :kecamatanId
           AND t.jabatan LIKE 'anggota_%'
-          AND t.is_active = 1
+          AND t.is_active = TRUE
           AND t.nama IS NOT NULL
           AND t.nama != ''
-        ORDER BY t.ttd_path DESC, t.nama ASC
+        ORDER BY ${urutNull('t.ttd_path', 'DESC')}, t.nama ASC
       `;
 
       const results = await sequelize.query(query, {

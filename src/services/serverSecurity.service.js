@@ -108,7 +108,7 @@ const blockIp = async ({ ip, reason, minutes = null, auto = false, by = null }) 
     `INSERT INTO server_ip_blocklist (ip_address, reason, auto, expires_at, created_by)
      VALUES (?, ?, ?, ?, ?)
      ${saatBentrok(['ip_address'], ['reason', 'auto', 'expires_at', 'created_by'])}, created_at = NOW()`,
-    i, String(reason || '').slice(0, 500), auto ? 1 : 0, expires, by,
+    i, String(reason || '').slice(0, 500), !!auto, expires, by,
   );
   blokir.set(i, { reason, auto, expires_at: expires });
   return { ip: i, expires_at: expires };
@@ -161,7 +161,7 @@ const recordEvent = ({
     ua: userAgent ? String(userAgent).slice(0, 500) : null,
     userId: userId ? String(userId) : null,
     detail: detail ? String(detail).slice(0, 1000) : null,
-    blocked: blocked ? 1 : 0,
+    blocked: !!blocked,
     at: new Date(),
   });
   if (antrean.length > 5000) antrean.splice(0, antrean.length - 5000);
