@@ -1,4 +1,5 @@
-const sequelize = require('../config/database');
+const prisma = require('../config/prisma');
+const { kueri, jalankan, BatalTrx } = require('../config/sqlMentah');
 const { jumlah, enumTeks } = require('../config/dialek');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
@@ -30,7 +31,7 @@ class BankeuPerubahanDpmdController {
       if (desa_id) { whereClause += ' AND bp.desa_id = ?'; replacements.push(desa_id); }
       if (kecamatan_id) { whereClause += ' AND d.kecamatan_id = ?'; replacements.push(kecamatan_id); }
 
-      const [proposals] = await sequelize.query(`
+      const proposals = await kueri(`
         SELECT
           bp.id, bp.desa_id, bp.kecamatan_id, bp.tahun_anggaran,
           bp.jenis_kegiatan, bp.kegiatan_id, bp.kegiatan_nama,
@@ -65,16 +66,16 @@ class BankeuPerubahanDpmdController {
         LEFT JOIN users u_ts ON bp.troubleshoot_by = u_ts.id
         ${whereClause}
         ORDER BY bp.created_at DESC
-      `, { replacements });
+      `, replacements);
 
       for (const proposal of proposals) {
-        const [kegiatan] = await sequelize.query(`
+        const kegiatan = await kueri(`
           SELECT bmk.id, bmk.kategori, bmk.nama_kegiatan, bmk.urutan
           FROM bankeu_perubahan_proposal_kegiatan bppk
           JOIN bankeu_perubahan_master_kegiatan bmk ON bppk.kegiatan_id = bmk.id
           WHERE bppk.proposal_id = ?
           ORDER BY bmk.urutan
-        `, { replacements: [proposal.id] });
+        `, [proposal.id]);
         proposal.kegiatan_list = kegiatan;
       }
 
@@ -102,7 +103,7 @@ class BankeuPerubahanDpmdController {
       const replacements = [];
       if (tahun) { whereClause += ' AND bp.tahun_anggaran = ?'; replacements.push(parseInt(tahun)); }
 
-      const [proposals] = await sequelize.query(`
+      const proposals = await kueri(`
         SELECT
           bp.id, bp.desa_id, bp.kecamatan_id, bp.tahun_anggaran,
           bp.jenis_kegiatan, bp.kegiatan_id, bp.kegiatan_nama, bp.nama_kegiatan_spesifik,
@@ -129,16 +130,16 @@ class BankeuPerubahanDpmdController {
         LEFT JOIN users u_ts ON bp.troubleshoot_by = u_ts.id
         ${whereClause}
         ORDER BY k.nama ASC, d.nama ASC, bp.created_at DESC
-      `, { replacements });
+      `, replacements);
 
       for (const proposal of proposals) {
-        const [kegiatan] = await sequelize.query(`
+        const kegiatan = await kueri(`
           SELECT bmk.id, bmk.kategori, bmk.nama_kegiatan, bmk.urutan
           FROM bankeu_perubahan_proposal_kegiatan bppk
           JOIN bankeu_perubahan_master_kegiatan bmk ON bppk.kegiatan_id = bmk.id
           WHERE bppk.proposal_id = ?
           ORDER BY bmk.urutan
-        `, { replacements: [proposal.id] });
+        `, [proposal.id]);
         proposal.kegiatan_list = kegiatan;
       }
 
@@ -172,12 +173,12 @@ class BankeuPerubahanDpmdController {
         });
       }
 
-      const [users] = await sequelize.query(`SELECT name FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT name FROM users WHERE id = ?`, [userId]);
 
-      const [proposals] = await sequelize.query(`
+      const proposals = await kueri(`
         SELECT id, judul_proposal, dpmd_status, submitted_to_dpmd
         FROM bankeu_perubahan_proposals WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       if (!proposals.length) {
         return res.status(404).json({ success: false, message: 'Proposal tidak ditemukan' });
@@ -205,7 +206,7 @@ class BankeuPerubahanDpmdController {
             surat_pengantar_kecamatan_nomor = NULL,
             surat_pengantar_kecamatan_generated_at = NULL` : '';
 
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_perubahan_proposals
         SET dpmd_status = ?,
             dpmd_catatan = ?,
@@ -215,14 +216,12 @@ class BankeuPerubahanDpmdController {
             status = ?${clearDocsSql},
             updated_at = NOW()
         WHERE id = ?
-      `, {
-        replacements: [
-          status, catatan || null, userId,
-          isRevision ? false : true,
-          isRevision ? 'verified' : 'verified', // tetap verified (kecamatan-approved); keputusan ada di dpmd_status
-          id
-        ]
-      });
+      `, [
+        status, catatan || null, userId,
+        isRevision ? false : true,
+        isRevision ? 'verified' : 'verified', // tetap verified (kecamatan-approved); keputusan ada di dpmd_status
+        id
+      ]);
 
       logger.info(`[BankeuPerubahan DPMD] Proposal #${id} ${isRevision ? 'revisi SP/BA (kembali ke kecamatan)' : 'disetujui'} by user ${userId}`);
 
@@ -266,12 +265,12 @@ class BankeuPerubahanDpmdController {
       const { id } = req.params;
       const userId = req.user.id;
 
-      const [users] = await sequelize.query(`SELECT name FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT name FROM users WHERE id = ?`, [userId]);
 
-      const [proposals] = await sequelize.query(`
+      const proposals = await kueri(`
         SELECT id, judul_proposal, dpmd_status, submitted_to_dpmd
         FROM bankeu_perubahan_proposals WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       if (!proposals.length) {
         return res.status(404).json({ success: false, message: 'Proposal tidak ditemukan' });
@@ -290,7 +289,7 @@ class BankeuPerubahanDpmdController {
 
       // Reset keputusan DPMD, kembalikan ke status menunggu (pending) di DPMD.
       // status legacy dikembalikan ke 'verified' (sudah diverifikasi kecamatan, menunggu DPMD).
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_perubahan_proposals
         SET dpmd_status = 'pending',
             dpmd_catatan = NULL,
@@ -299,7 +298,7 @@ class BankeuPerubahanDpmdController {
             status = 'verified',
             updated_at = NOW()
         WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       logger.info(`[BankeuPerubahan DPMD] Proposal #${id} approval dibatalkan by user ${userId}`);
 
@@ -334,7 +333,6 @@ class BankeuPerubahanDpmdController {
    * PATCH /api/dpmd/bankeu-perubahan/proposals/:id/troubleshoot-revision
    */
   async troubleshootRevision(req, res) {
-    const transaction = await sequelize.transaction();
     try {
       const { id } = req.params;
       const { catatan } = req.body;
@@ -344,15 +342,14 @@ class BankeuPerubahanDpmdController {
       // Hanya pegawai SPKED yang boleh troubleshoot
       const allowedRoles = ['pegawai', 'kepala_bidang', 'ketua_tim', 'kepala_dinas', 'superadmin'];
       if (!allowedRoles.includes(userRole)) {
-        await transaction.rollback();
         return res.status(403).json({ success: false, message: 'Hanya pegawai SPKED yang dapat melakukan troubleshoot revisi' });
       }
       if (!catatan || catatan.trim().length === 0) {
-        await transaction.rollback();
         return res.status(400).json({ success: false, message: 'Catatan/alasan troubleshoot wajib diisi' });
       }
 
-      const [proposals] = await sequelize.query(`
+      const { proposal } = await prisma.$transaction(async (tx) => {
+      const proposals = await kueri(`
         SELECT bp.id, bp.judul_proposal, bp.status, bp.kecamatan_status, bp.dpmd_status,
                bp.submitted_to_kecamatan, bp.submitted_to_dpmd,
                d.nama AS desa_nama, k.nama AS kecamatan_nama
@@ -360,28 +357,18 @@ class BankeuPerubahanDpmdController {
         INNER JOIN desas d ON bp.desa_id = d.id
         LEFT JOIN kecamatans k ON d.kecamatan_id = k.id
         WHERE bp.id = ?
-      `, { replacements: [id], transaction });
+      `, [id], tx);
 
       if (!proposals.length) {
-        await transaction.rollback();
-        return res.status(404).json({ success: false, message: 'Proposal tidak ditemukan' });
+        throw new BatalTrx(404, { success: false, message: 'Proposal tidak ditemukan' });
       }
       const proposal = proposals[0];
-
-      // Tentukan tahap saat ini (untuk log & pesan)
-      let currentStage = 'di_desa';
-      if (proposal.submitted_to_dpmd) currentStage = 'di_dpmd';
-      else if (proposal.kecamatan_status === 'approved') currentStage = 'di_kecamatan';
-      else if (proposal.submitted_to_kecamatan) currentStage = 'di_kecamatan';
-
-      const desaName = proposal.desa_nama || `Desa ID`;
-      const stageLabel = currentStage === 'di_dpmd' ? 'DPMD' : currentStage === 'di_kecamatan' ? 'Kecamatan' : 'Desa';
 
       const tsCatatan = `[${req.user.name || `User ${userId}`} - ${String(userRole).toUpperCase()}] ${catatan.trim()}`;
 
       // Reset SEMUA status verifikasi -> kembali ke Desa (status revision).
       // Kosongkan BA/SP kecamatan & quisioner. Dokumen desa dipertahankan.
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_perubahan_proposals
         SET status = 'revision',
             kecamatan_status = 'pending',
@@ -411,15 +398,21 @@ class BankeuPerubahanDpmdController {
             troubleshoot_at = NOW(),
             updated_at = NOW()
         WHERE id = ?
-      `, { replacements: [tsCatatan, userId, id], transaction });
+      `, [tsCatatan, userId, id], tx);
 
       // Hapus quisioner terkait karena semua tahap di-reset
-      await sequelize.query(
-        `DELETE FROM bankeu_perubahan_questionnaires WHERE proposal_id = ?`,
-        { replacements: [id], transaction }
-      );
+      await jalankan(`DELETE FROM bankeu_perubahan_questionnaires WHERE proposal_id = ?`, [id], tx);
+      return { proposal };
+      }, { timeout: 30000, maxWait: 10000 });
 
-      await transaction.commit();
+      // Tentukan tahap saat ini (untuk log & pesan)
+      let currentStage = 'di_desa';
+      if (proposal.submitted_to_dpmd) currentStage = 'di_dpmd';
+      else if (proposal.kecamatan_status === 'approved') currentStage = 'di_kecamatan';
+      else if (proposal.submitted_to_kecamatan) currentStage = 'di_kecamatan';
+
+      const desaName = proposal.desa_nama || `Desa ID`;
+      const stageLabel = currentStage === 'di_dpmd' ? 'DPMD' : currentStage === 'di_kecamatan' ? 'Kecamatan' : 'Desa';
 
       logger.info(`[BankeuPerubahan DPMD] 🔧 TROUBLESHOOT proposal #${id} (${desaName}) dari tahap ${currentStage} oleh ${req.user.name} (${userRole})`);
 
@@ -446,7 +439,7 @@ class BankeuPerubahanDpmdController {
         data: { id: Number(id), desa_name: desaName, previous_stage: currentStage, returned_to: 'desa', status: 'revision' }
       });
     } catch (error) {
-      try { await transaction.rollback(); } catch (e) {}
+      if (error instanceof BatalTrx) return res.status(error.status).json(error.body);
       logger.error('[BankeuPerubahan DPMD] Error troubleshoot revision:', error);
       res.status(500).json({ success: false, message: 'Gagal melakukan troubleshoot revisi', error: error.message });
     }
@@ -478,13 +471,13 @@ class BankeuPerubahanDpmdController {
         });
       }
 
-      const [proposals] = await sequelize.query(`
+      const proposals = await kueri(`
         SELECT bp.id, bp.judul_proposal, bp.anggaran_usulan, bp.volume,
                bp.lokasi, bp.nama_kegiatan_spesifik, d.nama AS desa_nama
         FROM bankeu_perubahan_proposals bp
         INNER JOIN desas d ON bp.desa_id = d.id
         WHERE bp.id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       if (!proposals.length) {
         return res.status(404).json({ success: false, message: 'Proposal tidak ditemukan' });
@@ -528,11 +521,11 @@ class BankeuPerubahanDpmdController {
       }
 
       replacements.push(id);
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_perubahan_proposals
         SET ${fields.join(', ')}, updated_at = NOW()
         WHERE id = ?
-      `, { replacements });
+      `, replacements);
 
       logger.info(`[BankeuPerubahan DPMD] Detail proposal #${id} diedit oleh user ${userId}`);
 
@@ -585,7 +578,7 @@ class BankeuPerubahanDpmdController {
       const replacements = [];
       if (tahun) { whereTahun = 'AND tahun_anggaran = ?'; replacements.push(parseInt(tahun)); }
 
-      const [stats] = await sequelize.query(`
+      const stats = await kueri(`
         SELECT
           COUNT(*) AS total,
           ${jumlah("CASE WHEN dpmd_status = 'pending' THEN 1 ELSE 0 END")} AS pending,
@@ -600,7 +593,7 @@ class BankeuPerubahanDpmdController {
             OR dpmd_verified_at IS NOT NULL
           )
           ${whereTahun}
-      `, { replacements });
+      `, replacements);
 
       res.json({ success: true, data: stats[0] || {} });
     } catch (error) {
@@ -617,14 +610,14 @@ class BankeuPerubahanDpmdController {
     try {
       const { proposalId } = req.params;
 
-      const [logs] = await sequelize.query(`
+      const logs = await kueri(`
         SELECT id, user_id, user_name, user_role, action, description,
                new_value, old_value, created_at
         FROM activity_logs
         WHERE module = ? AND entity_type = 'bankeu_perubahan_proposal' AND entity_id = ?
         ORDER BY created_at DESC
         LIMIT 100
-      `, { replacements: [MODULE_NAME, proposalId] });
+      `, [MODULE_NAME, proposalId]);
 
       res.json({ success: true, data: logs });
     } catch (error) {

@@ -15,7 +15,7 @@
  * Cakupan 'all' (DLH, lihat req.bankeuPerubahanScope dari authorizeDinasPelihat)
  * melihat SEMUA proposal di semua tahap — tetap tanpa satupun handler tulis.
  */
-const sequelize = require('../config/database');
+const { kueri } = require('../config/sqlMentah');
 const logger = require('../utils/logger');
 const dpmdController = require('./bankeuPerubahanDpmd.controller');
 
@@ -54,9 +54,9 @@ const ensureFinalProposal = async (req, res, next) => {
   if (isScopeAll(req)) return next();
   const id = req.params.id || req.params.proposalId;
   try {
-    const [rows] = await sequelize.query(
+    const rows = await kueri(
       'SELECT submitted_to_dpmd, dpmd_status FROM bankeu_perubahan_proposals WHERE id = ? LIMIT 1',
-      { replacements: [id] }
+      [id]
     );
     if (!rows.length) {
       return res.status(404).json({ success: false, message: 'Proposal tidak ditemukan' });

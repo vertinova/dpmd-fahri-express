@@ -1,4 +1,4 @@
-const sequelize = require('../config/database');
+const { kueri } = require('../config/sqlMentah');
 const { jumlah, gabungTeks } = require('../config/dialek');
 const logger = require('../utils/logger');
 
@@ -13,7 +13,7 @@ class BankeuPerubahanPublicController {
       const tahun = tahun_anggaran ? parseInt(tahun_anggaran) : new Date().getFullYear();
 
       // Total per status
-      const [statusStats] = await sequelize.query(`
+      const statusStats = await kueri(`
         SELECT
           COUNT(*) AS total,
           ${jumlah("CASE WHEN kecamatan_status = 'approved' THEN 1 ELSE 0 END")} AS approved_kecamatan,
@@ -23,10 +23,10 @@ class BankeuPerubahanPublicController {
           ${jumlah("CASE WHEN anggaran_usulan IS NOT NULL THEN anggaran_usulan ELSE 0 END")} AS total_anggaran
         FROM bankeu_perubahan_proposals
         WHERE tahun_anggaran = ?
-      `, { replacements: [tahun] });
+      `, [tahun]);
 
       // Per kecamatan
-      const [perKecamatan] = await sequelize.query(`
+      const perKecamatan = await kueri(`
         SELECT
           k.id AS kecamatan_id,
           k.nama AS kecamatan_nama,
@@ -40,10 +40,10 @@ class BankeuPerubahanPublicController {
         WHERE bp.tahun_anggaran = ? AND bp.submitted_to_kecamatan = TRUE
         GROUP BY k.id, k.nama
         ORDER BY total_proposals DESC
-      `, { replacements: [tahun] });
+      `, [tahun]);
 
       // Per kategori kegiatan (wajib / pilihan_infrastruktur / pilihan_non_infrastruktur)
-      const [perJenis] = await sequelize.query(`
+      const perJenis = await kueri(`
         SELECT
           jenis_kegiatan AS kategori,
           COUNT(*) AS total,
@@ -52,7 +52,7 @@ class BankeuPerubahanPublicController {
         FROM bankeu_perubahan_proposals
         WHERE tahun_anggaran = ?
         GROUP BY jenis_kegiatan
-      `, { replacements: [tahun] });
+      `, [tahun]);
 
       // ─── Partisipasi Desa (untuk dashboard core) ──────────────────────
       // "Mengusulkan" pada alur perubahan = proposal sudah diteruskan ke Kecamatan
@@ -61,7 +61,7 @@ class BankeuPerubahanPublicController {
       // tetap dihitung: status revision/rejected bertahan sampai desa mengirim ulang.
       // Harus sama dengan hitungPartisipasi() di frontend utils/statistikBankeuPerubahan.js.
       // Hanya Desa (status_pemerintahan = 'desa', bukan kelurahan) yang dihitung.
-      const [allDesaList] = await sequelize.query(`
+      const allDesaList = await kueri(`
         SELECT d.id, d.nama, k.nama AS kecamatan_nama
         FROM desas d
         LEFT JOIN kecamatans k ON d.kecamatan_id = k.id
@@ -69,12 +69,12 @@ class BankeuPerubahanPublicController {
         ORDER BY d.nama ASC
       `);
 
-      const [desaSudahRows] = await sequelize.query(`
+      const desaSudahRows = await kueri(`
         SELECT DISTINCT desa_id
         FROM bankeu_perubahan_proposals
         WHERE tahun_anggaran = ?
           AND (submitted_to_kecamatan = TRUE OR status IN ('revision', 'rejected'))
-      `, { replacements: [tahun] });
+      `, [tahun]);
       const desaSudahSet = new Set(desaSudahRows.map(r => Number(r.desa_id)).filter(Boolean));
 
       const desaPartisipasi = {};
@@ -92,7 +92,7 @@ class BankeuPerubahanPublicController {
       // Beda: alur 3 tahap (Desa→Kecamatan→DPMD) & dikelompokkan per JENIS
       // KEGIATAN (bukan dinas) — field `dinas_terkait` diisi label kategori
       // agar komponen frontend bisa dipakai ulang tanpa ubah struktur.
-      const [allProposals] = await sequelize.query(`
+      const allProposals = await kueri(`
         SELECT bp.id, bp.desa_id, bp.jenis_kegiatan, bp.kegiatan_nama,
                bp.nama_kegiatan_spesifik, bp.anggaran_usulan, bp.lokasi, bp.volume,
                bp.status, bp.kecamatan_status, bp.dpmd_status,
@@ -102,10 +102,10 @@ class BankeuPerubahanPublicController {
         INNER JOIN desas d ON bp.desa_id = d.id
         LEFT JOIN kecamatans k ON d.kecamatan_id = k.id
         WHERE bp.tahun_anggaran = ?
-      `, { replacements: [tahun] });
+      `, [tahun]);
 
       // Nama kegiatan dari tabel pivot (fallback bila kegiatan_nama kosong).
-      const [pivotRows] = await sequelize.query(`
+      const pivotRows = await kueri(`
         SELECT bppk.proposal_id,
                ${gabungTeks('bmk.nama_kegiatan', { urut: 'bmk.urutan', pemisah: ', ' })} AS nama_kegiatan
         FROM bankeu_perubahan_proposal_kegiatan bppk
@@ -218,7 +218,7 @@ class BankeuPerubahanPublicController {
    */
   async getAvailableYears(req, res) {
     try {
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT DISTINCT tahun_anggaran
         FROM bankeu_perubahan_proposals
         ORDER BY tahun_anggaran DESC
