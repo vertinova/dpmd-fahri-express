@@ -1,4 +1,4 @@
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const { urutanNilai, urutNull } = require('../config/dialek');
 
 /**
@@ -30,8 +30,8 @@ class BankeuQuestionnaireController {
         });
       }
 
-      let whereClause = 'proposal_id = :proposalId AND verifikasi_type = :verifier_type';
-      const replacements = { proposalId, verifier_type };
+      let whereClause = 'proposal_id = ? AND verifikasi_type = ?';
+      const replacements = [proposalId, verifier_type];
 
       // For kecamatan_tim, verifier_id = "{kecamatan_id}_{posisi}"
       // posisi can be: ketua, sekretaris, anggota_1, anggota_2, etc.
@@ -48,27 +48,24 @@ class BankeuQuestionnaireController {
         
         let timQuery = `
           SELECT id FROM tim_verifikasi_kecamatan 
-          WHERE kecamatan_id = :kecamatanId AND jabatan = :posisi
+          WHERE kecamatan_id = ? AND jabatan = ?
         `;
-        const timReplacements = { kecamatanId, posisi };
+        const timReplacements = [kecamatanId, posisi];
 
         if (isAnggota && queryProposalId) {
-          timQuery += ` AND proposal_id = :proposalId`;
-          timReplacements.proposalId = queryProposalId;
+          timQuery += ` AND proposal_id = ?`;
+          timReplacements.push(queryProposalId);
         } else if (!isAnggota) {
           timQuery += ` AND proposal_id IS NULL`;
         }
         timQuery += ` LIMIT 1`;
         
         // Get tim_verifikasi_id
-        const [timMember] = await sequelize.query(timQuery, {
-          replacements: timReplacements,
-          type: sequelize.QueryTypes.SELECT
-        });
+        const [timMember] = await kueri(timQuery, timReplacements);
 
         if (timMember) {
-          whereClause += ' AND tim_verifikasi_id = :timId';
-          replacements.timId = timMember.id;
+          whereClause += ' AND tim_verifikasi_id = ?';
+          replacements.push(timMember.id);
         } else {
           // Tim member doesn't exist yet, return empty
           return res.json({
@@ -78,18 +75,15 @@ class BankeuQuestionnaireController {
           });
         }
       } else if (verifier_type === 'dinas' && verifier_id) {
-        whereClause += ' AND dinas_id = :dinasId';
-        replacements.dinasId = verifier_id;
+        whereClause += ' AND dinas_id = ?';
+        replacements.push(verifier_id);
       }
 
-      const [questionnaire] = await sequelize.query(`
+      const [questionnaire] = await kueri(`
         SELECT * FROM bankeu_verification_questionnaires
         WHERE ${whereClause}
         LIMIT 1
-      `, {
-        replacements,
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, replacements);
 
       if (!questionnaire) {
         return res.json({
@@ -121,7 +115,7 @@ class BankeuQuestionnaireController {
     try {
       const { proposalId } = req.params;
 
-      const questionnaires = await sequelize.query(`
+      const questionnaires = await kueri(`
         SELECT 
           q.*,
           tv.nama as verifier_nama,
@@ -129,7 +123,7 @@ class BankeuQuestionnaireController {
           tv.jabatan_label as verifier_jabatan
         FROM bankeu_verification_questionnaires q
         LEFT JOIN tim_verifikasi_kecamatan tv ON q.tim_verifikasi_id = tv.id
-        WHERE q.proposal_id = :proposalId
+        WHERE q.proposal_id = ?
         ORDER BY 
           CASE q.verifikasi_type
             WHEN 'kecamatan' THEN 1
@@ -138,10 +132,7 @@ class BankeuQuestionnaireController {
             ELSE 0
           END,
           ${urutNull('tv.jabatan', 'ASC')}
-      `, {
-        replacements: { proposalId },
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, [proposalId]);
 
       res.json({
         success: true,
@@ -206,23 +197,20 @@ class BankeuQuestionnaireController {
         
         let timQuery = `
           SELECT id FROM tim_verifikasi_kecamatan 
-          WHERE kecamatan_id = :kecamatanId AND jabatan = :posisi
+          WHERE kecamatan_id = ? AND jabatan = ?
         `;
-        const timReplacements = { kecamatanId, posisi };
+        const timReplacements = [kecamatanId, posisi];
 
         if (isAnggota) {
-          timQuery += ` AND proposal_id = :proposalId`;
-          timReplacements.proposalId = proposalId;
+          timQuery += ` AND proposal_id = ?`;
+          timReplacements.push(proposalId);
         } else {
           timQuery += ` AND proposal_id IS NULL`;
         }
         timQuery += ` LIMIT 1`;
         
         // Get tim member
-        const [timMember] = await sequelize.query(timQuery, {
-          replacements: timReplacements,
-          type: sequelize.QueryTypes.SELECT
-        });
+        const [timMember] = await kueri(timQuery, timReplacements);
 
         if (!timMember) {
           return res.status(400).json({
@@ -236,26 +224,23 @@ class BankeuQuestionnaireController {
       }
 
       // Check if questionnaire exists
-      let whereClause = 'proposal_id = :proposalId AND verifikasi_type = :verifier_type';
-      const checkReplacements = { proposalId, verifier_type };
+      let whereClause = 'proposal_id = ? AND verifikasi_type = ?';
+      const checkReplacements = [proposalId, verifier_type];
       
       if (timVerifikasiId) {
-        whereClause += ' AND tim_verifikasi_id = :timVerifikasiId';
-        checkReplacements.timVerifikasiId = timVerifikasiId;
+        whereClause += ' AND tim_verifikasi_id = ?';
+        checkReplacements.push(timVerifikasiId);
       }
       if (dinasId) {
-        whereClause += ' AND dinas_id = :dinasId';
-        checkReplacements.dinasId = dinasId;
+        whereClause += ' AND dinas_id = ?';
+        checkReplacements.push(dinasId);
       }
 
-      const [existing] = await sequelize.query(`
+      const [existing] = await kueri(`
         SELECT id FROM bankeu_verification_questionnaires
         WHERE ${whereClause}
         LIMIT 1
-      `, {
-        replacements: checkReplacements,
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, checkReplacements);
 
       const questionData = {
         q1: !!q1,
@@ -288,27 +273,28 @@ class BankeuQuestionnaireController {
         overall_notes: overall_notes || null
       };
 
+      // Urutan nilai: q1..q13, q1..q13_keterangan, overall_recommendation, overall_notes
+      const nilaiPertanyaan = Object.values(questionData);
+
       if (existing) {
         // Update
-        await sequelize.query(`
+        await jalankan(`
           UPDATE bankeu_verification_questionnaires 
           SET 
-            q1 = :q1, q2 = :q2, q3 = :q3, q4 = :q4, q5 = :q5, q6 = :q6, q7 = :q7,
-            q8 = :q8, q9 = :q9, q10 = :q10, q11 = :q11, q12 = :q12, q13 = :q13,
-            q1_keterangan = :q1_keterangan, q2_keterangan = :q2_keterangan,
-            q3_keterangan = :q3_keterangan, q4_keterangan = :q4_keterangan,
-            q5_keterangan = :q5_keterangan, q6_keterangan = :q6_keterangan,
-            q7_keterangan = :q7_keterangan, q8_keterangan = :q8_keterangan,
-            q9_keterangan = :q9_keterangan, q10_keterangan = :q10_keterangan,
-            q11_keterangan = :q11_keterangan, q12_keterangan = :q12_keterangan,
-            q13_keterangan = :q13_keterangan,
-            overall_recommendation = :overall_recommendation,
-            overall_notes = :overall_notes,
+            q1 = ?, q2 = ?, q3 = ?, q4 = ?, q5 = ?, q6 = ?, q7 = ?,
+            q8 = ?, q9 = ?, q10 = ?, q11 = ?, q12 = ?, q13 = ?,
+            q1_keterangan = ?, q2_keterangan = ?,
+            q3_keterangan = ?, q4_keterangan = ?,
+            q5_keterangan = ?, q6_keterangan = ?,
+            q7_keterangan = ?, q8_keterangan = ?,
+            q9_keterangan = ?, q10_keterangan = ?,
+            q11_keterangan = ?, q12_keterangan = ?,
+            q13_keterangan = ?,
+            overall_recommendation = ?,
+            overall_notes = ?,
             updated_at = CURRENT_TIMESTAMP
-          WHERE id = :id
-        `, {
-          replacements: { ...questionData, id: existing.id }
-        });
+          WHERE id = ?
+        `, [...nilaiPertanyaan, existing.id]);
 
         res.json({
           success: true,
@@ -317,7 +303,7 @@ class BankeuQuestionnaireController {
         });
       } else {
         // Insert
-        const [result] = await sequelize.query(`
+        const [{ id: result }] = await kueri(`
           INSERT INTO bankeu_verification_questionnaires 
           (proposal_id, tim_verifikasi_id, verifikasi_type, dinas_id,
            q1, q2, q3, q4, q5, q6, q7, q8, q9, q10, q11, q12, q13,
@@ -326,21 +312,14 @@ class BankeuQuestionnaireController {
            q9_keterangan, q10_keterangan, q11_keterangan, q12_keterangan, q13_keterangan,
            overall_recommendation, overall_notes, status)
           VALUES 
-          (:proposalId, :timVerifikasiId, :verifier_type, :dinasId,
-           :q1, :q2, :q3, :q4, :q5, :q6, :q7, :q8, :q9, :q10, :q11, :q12, :q13,
-           :q1_keterangan, :q2_keterangan, :q3_keterangan, :q4_keterangan,
-           :q5_keterangan, :q6_keterangan, :q7_keterangan, :q8_keterangan,
-           :q9_keterangan, :q10_keterangan, :q11_keterangan, :q12_keterangan, :q13_keterangan,
-           :overall_recommendation, :overall_notes, 'draft')
-        `, {
-          replacements: { 
-            proposalId, 
-            timVerifikasiId, 
-            verifier_type, 
-            dinasId,
-            ...questionData 
-          }
-        });
+          (?, ?, ?, ?,
+           ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+           ?, ?, ?, ?,
+           ?, ?, ?, ?,
+           ?, ?, ?, ?, ?,
+           ?, ?, 'draft')
+          RETURNING id
+        `, [proposalId, timVerifikasiId, verifier_type, dinasId, ...nilaiPertanyaan]);
 
         res.status(201).json({
           success: true,
@@ -382,14 +361,11 @@ class BankeuQuestionnaireController {
         const kecamatanId = parts[0];
         const posisi = parts.slice(1).join('_');
         
-        const [timMember] = await sequelize.query(`
+        const [timMember] = await kueri(`
           SELECT id FROM tim_verifikasi_kecamatan 
-          WHERE kecamatan_id = :kecamatanId AND jabatan = :posisi
+          WHERE kecamatan_id = ? AND jabatan = ?
           LIMIT 1
-        `, {
-          replacements: { kecamatanId, posisi },
-          type: sequelize.QueryTypes.SELECT
-        });
+        `, [kecamatanId, posisi]);
 
         if (timMember) {
           timVerifikasiId = timMember.id;
@@ -398,23 +374,23 @@ class BankeuQuestionnaireController {
         dinasId = verifier_id;
       }
 
-      let whereClause = 'proposal_id = :proposalId AND verifikasi_type = :verifier_type';
-      const replacements = { proposalId, verifier_type };
+      let whereClause = 'proposal_id = ? AND verifikasi_type = ?';
+      const replacements = [proposalId, verifier_type];
       
       if (timVerifikasiId) {
-        whereClause += ' AND tim_verifikasi_id = :timVerifikasiId';
-        replacements.timVerifikasiId = timVerifikasiId;
+        whereClause += ' AND tim_verifikasi_id = ?';
+        replacements.push(timVerifikasiId);
       }
       if (dinasId) {
-        whereClause += ' AND dinas_id = :dinasId';
-        replacements.dinasId = dinasId;
+        whereClause += ' AND dinas_id = ?';
+        replacements.push(dinasId);
       }
 
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_verification_questionnaires 
         SET status = 'submitted', submitted_at = CURRENT_TIMESTAMP
         WHERE ${whereClause}
-      `, { replacements });
+      `, replacements);
 
       res.json({
         success: true,
@@ -439,18 +415,15 @@ class BankeuQuestionnaireController {
       const { proposalId } = req.params;
 
       // Get all questionnaires for this proposal
-      const questionnaires = await sequelize.query(`
+      const questionnaires = await kueri(`
         SELECT 
           q.*,
           tv.nama as verifier_nama,
           tv.jabatan as verifier_posisi
         FROM bankeu_verification_questionnaires q
         LEFT JOIN tim_verifikasi_kecamatan tv ON q.tim_verifikasi_id = tv.id
-        WHERE q.proposal_id = :proposalId
-      `, {
-        replacements: { proposalId },
-        type: sequelize.QueryTypes.SELECT
-      });
+        WHERE q.proposal_id = ?
+      `, [proposalId]);
 
       if (questionnaires.length === 0) {
         return res.json({
@@ -506,16 +479,13 @@ class BankeuQuestionnaireController {
       }
 
       // Check questionnaire
-      const [questionnaire] = await sequelize.query(`
+      const [questionnaire] = await kueri(`
         SELECT id, status FROM bankeu_verification_questionnaires
-        WHERE proposal_id = :proposalId 
+        WHERE proposal_id = ? 
           AND verifikasi_type = 'dinas' 
-          AND dinas_id = :dinas_id
+          AND dinas_id = ?
         LIMIT 1
-      `, {
-        replacements: { proposalId, dinas_id },
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, [proposalId, dinas_id]);
 
       const hasQuestionnaire = !!questionnaire;
       const questionnaireSubmitted = questionnaire?.status === 'submitted';
@@ -558,18 +528,15 @@ class BankeuQuestionnaireController {
       // Ketua & Sekretaris: proposal_id IS NULL (shared)
       // Anggota: proposal_id = specific proposal OR proposal_id IS NULL (backward compatibility)
       // Only include new format 'anggota_X' (exclude deprecated 'anggota' format)
-      const timMembers = await sequelize.query(`
+      const timMembers = await kueri(`
         SELECT id, jabatan, nama, nip, jabatan_label, ttd_path, proposal_id
         FROM tim_verifikasi_kecamatan
-        WHERE kecamatan_id = :kecamatan_id 
+        WHERE kecamatan_id = ? 
           AND is_active = TRUE
           AND jabatan IN ('ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3')
-          AND (proposal_id IS NULL OR proposal_id = :proposalId)
+          AND (proposal_id IS NULL OR proposal_id = ?)
         ORDER BY ${urutanNilai('jabatan', ['ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3'])}
-      `, {
-        replacements: { kecamatan_id, proposalId },
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, [kecamatan_id, proposalId]);
 
       if (timMembers.length === 0) {
         return res.json({
@@ -585,16 +552,13 @@ class BankeuQuestionnaireController {
 
       // Get questionnaires for all tim members
       const timIds = timMembers.map(m => m.id);
-      const questionnaires = await sequelize.query(`
+      const questionnaires = await kueri(`
         SELECT tim_verifikasi_id, status
         FROM bankeu_verification_questionnaires
-        WHERE proposal_id = :proposalId 
+        WHERE proposal_id = ? 
           AND verifikasi_type = 'kecamatan_tim'
-          AND tim_verifikasi_id IN (:timIds)
-      `, {
-        replacements: { proposalId, timIds },
-        type: sequelize.QueryTypes.SELECT
-      });
+          AND tim_verifikasi_id IN (${timIds.map(() => '?').join(', ')})
+      `, [proposalId, ...timIds]);
 
       // Build status for each member
       const memberStatus = timMembers.map(member => {

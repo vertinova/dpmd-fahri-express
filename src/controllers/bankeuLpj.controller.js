@@ -1,5 +1,5 @@
 const prisma = require('../config/prisma');
-const sequelize = require('../config/database');
+const { kueri } = require('../config/sqlMentah');
 const logger = require('../utils/logger');
 const path = require('path');
 const fs = require('fs');
@@ -443,7 +443,7 @@ class BankeuLpjController {
       const tahun = parseInt(req.query.tahun) || 2025;
 
       // Get all desa with their kecamatan, and left join LPJ data (multiple per desa)
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT 
           d.id as desa_id,
           d.nama as desa_nama,
@@ -466,14 +466,12 @@ class BankeuLpjController {
           v.name as verified_by_name
         FROM desas d
         JOIN kecamatans k ON d.kecamatan_id = k.id
-        LEFT JOIN bankeu_lpj l ON l.desa_id = d.id AND l.tahun_anggaran = :tahun
+        LEFT JOIN bankeu_lpj l ON l.desa_id = d.id AND l.tahun_anggaran = ?
         LEFT JOIN users u ON l.uploaded_by = u.id
         LEFT JOIN users v ON l.dpmd_verified_by = v.id
         WHERE d.status_pemerintahan = 'desa'
         ORDER BY k.nama, d.nama, l.created_at DESC
-      `, {
-        replacements: { tahun }
-      });
+      `, [tahun]);
 
       // Group by kecamatan, then by desa (handle multiple LPJ per desa)
       const grouped = {};

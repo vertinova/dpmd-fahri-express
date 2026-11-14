@@ -3,7 +3,7 @@
  * Untuk aggregasi questionnaire, generate QR code, dan history management
  */
 
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const crypto = require('crypto');
 const path = require('path');
 const fs = require('fs');
@@ -35,19 +35,19 @@ class BeritaAcaraHelper {
       // - Ketua & sekretaris: proposal_id IS NULL (shared)
       // - Anggota: proposal_id = specific proposal OR proposal_id IS NULL (for backward compat)
       // Exclude old 'anggota' format
-      const timMembers = await sequelize.query(`
+      const timMembers = await kueri(`
         SELECT 
           tc.id as tim_id,
           tc.jabatan as posisi,
           tc.nama,
           tc.proposal_id
         FROM tim_verifikasi_kecamatan tc
-        WHERE tc.kecamatan_id = :kecamatanId
+        WHERE tc.kecamatan_id = ?
           AND tc.is_active = TRUE
           AND tc.jabatan IN ('ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3')
           AND (
             tc.proposal_id IS NULL
-            OR tc.proposal_id = :proposalId
+            OR tc.proposal_id = ?
           )
         ORDER BY 
           CASE tc.jabatan
@@ -58,10 +58,7 @@ class BeritaAcaraHelper {
             WHEN 'anggota_3' THEN 5
             ELSE 6
           END
-      `, {
-        replacements: { kecamatanId, proposalId },
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, [kecamatanId, proposalId]);
 
       if (timMembers.length === 0) {
         return {
@@ -72,19 +69,16 @@ class BeritaAcaraHelper {
       }
 
       // Get all questionnaires for this proposal from tim members
-      const questionnaires = await sequelize.query(`
+      const questionnaires = await kueri(`
         SELECT 
           q.*,
           tc.jabatan as posisi,
           tc.nama as tim_nama
         FROM bankeu_verification_questionnaires q
         INNER JOIN tim_verifikasi_kecamatan tc ON q.tim_verifikasi_id = tc.id
-        WHERE q.proposal_id = :proposalId
-          AND tc.kecamatan_id = :kecamatanId
-      `, {
-        replacements: { proposalId, kecamatanId },
-        type: sequelize.QueryTypes.SELECT
-      });
+        WHERE q.proposal_id = ?
+          AND tc.kecamatan_id = ?
+      `, [proposalId, kecamatanId]);
 
       const filledCount = questionnaires.length;
       const totalTim = timMembers.length;
@@ -162,54 +156,40 @@ class BeritaAcaraHelper {
       } = data;
 
       // Mark previous versions as superseded
-      await sequelize.query(`
+      await jalankan(`
         UPDATE berita_acara_history 
         SET is_latest = FALSE, status = 'superseded', updated_at = NOW()
-        WHERE desa_id = :desaId 
-          AND (kegiatan_id = :kegiatanId OR (:kegiatanId IS NULL AND kegiatan_id IS NULL))
+        WHERE desa_id = ? 
+          AND kegiatan_id IS NOT DISTINCT FROM ?
           AND is_latest = TRUE
-      `, {
-        replacements: { desaId, kegiatanId }
-      });
+      `, [desaId, kegiatanId]);
 
       // Get next version number
-      const [versionResult] = await sequelize.query(`
+      const [versionResult] = await kueri(`
         SELECT COALESCE(MAX(version), 0) + 1 as next_version
         FROM berita_acara_history
-        WHERE desa_id = :desaId 
-          AND (kegiatan_id = :kegiatanId OR (:kegiatanId IS NULL AND kegiatan_id IS NULL))
-      `, {
-        replacements: { desaId, kegiatanId },
-        type: sequelize.QueryTypes.SELECT
-      });
+        WHERE desa_id = ? 
+          AND kegiatan_id IS NOT DISTINCT FROM ?
+      `, [desaId, kegiatanId]);
 
       const nextVersion = versionResult?.next_version || 1;
 
       // Insert new history record
-      const [result] = await sequelize.query(`
+      const [{ id: result }] = await kueri(`
         INSERT INTO berita_acara_history 
         (proposal_id, desa_id, kecamatan_id, kegiatan_id, file_path, file_name, file_size,
          qr_code, qr_code_path, generated_by, checklist_summary, tim_verifikasi_data, version, is_latest)
         VALUES 
-        (:proposalId, :desaId, :kecamatanId, :kegiatanId, :filePath, :fileName, :fileSize,
-         :qrCode, :qrCodePath, :generatedBy, :checklistSummary, :timVerifikasiData, :version, TRUE)
-      `, {
-        replacements: {
-          proposalId,
-          desaId,
-          kecamatanId,
-          kegiatanId: kegiatanId || null,
-          filePath,
-          fileName,
-          fileSize: fileSize || null,
-          qrCode,
-          qrCodePath: qrCodePath || null,
-          generatedBy,
-          checklistSummary: JSON.stringify(checklistSummary || {}),
-          timVerifikasiData: JSON.stringify(timVerifikasiData || {}),
-          version: nextVersion
-        }
-      });
+        (?, ?, ?, ?, ?, ?, ?,
+         ?, ?, ?, ?, ?, ?, TRUE)
+        RETURNING id
+      `, [
+        proposalId, desaId, kecamatanId, kegiatanId || null, filePath, fileName, fileSize || null,
+        qrCode, qrCodePath || null, generatedBy,
+        JSON.stringify(checklistSummary || {}),
+        JSON.stringify(timVerifikasiData || {}),
+        nextVersion
+      ]);
 
       return {
         id: result,
@@ -230,15 +210,15 @@ class BeritaAcaraHelper {
    */
   async getHistory(desaId, kegiatanId = null) {
     try {
-      let whereClause = 'bah.desa_id = :desaId';
-      const replacements = { desaId };
+      let whereClause = 'bah.desa_id = ?';
+      const replacements = [desaId];
 
       if (kegiatanId) {
-        whereClause += ' AND bah.kegiatan_id = :kegiatanId';
-        replacements.kegiatanId = kegiatanId;
+        whereClause += ' AND bah.kegiatan_id = ?';
+        replacements.push(kegiatanId);
       }
 
-      const history = await sequelize.query(`
+      const history = await kueri(`
         SELECT 
           bah.*,
           u.name as generated_by_name,
@@ -250,10 +230,7 @@ class BeritaAcaraHelper {
         LEFT JOIN kecamatans k ON bah.kecamatan_id = k.id
         WHERE ${whereClause}
         ORDER BY bah.version DESC, bah.created_at DESC
-      `, {
-        replacements,
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, replacements);
 
       return history;
     } catch (error) {
@@ -269,7 +246,7 @@ class BeritaAcaraHelper {
    */
   async verifyByQRCode(qrCode) {
     try {
-      const [record] = await sequelize.query(`
+      const [record] = await kueri(`
         SELECT 
           bah.*,
           u.name as generated_by_name,
@@ -281,12 +258,9 @@ class BeritaAcaraHelper {
         LEFT JOIN desas d ON bah.desa_id = d.id
         LEFT JOIN kecamatans k ON bah.kecamatan_id = k.id
         LEFT JOIN bankeu_proposals bp ON bah.proposal_id = bp.id
-        WHERE bah.qr_code = :qrCode
+        WHERE bah.qr_code = ?
         LIMIT 1
-      `, {
-        replacements: { qrCode },
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, [qrCode]);
 
       if (!record) {
         return {
@@ -335,15 +309,15 @@ class BeritaAcaraHelper {
       // IMPORTANT: only active members and new jabatan format. Tanpa filter ini,
       // baris legacy 'anggota' atau anggota yang sudah dinonaktifkan (is_active=0)
       // ikut tervalidasi -> tidak pernah punya quisioner -> BA selalu terblokir.
-      const timMembers = await sequelize.query(`
+      const timMembers = await kueri(`
         SELECT id, jabatan as posisi, nama, nip, jabatan_label as jabatan, ttd_path, proposal_id
         FROM tim_verifikasi_kecamatan
-        WHERE kecamatan_id = :kecamatanId
+        WHERE kecamatan_id = ?
           AND is_active = TRUE
           AND jabatan IN ('ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3')
           AND (
             proposal_id IS NULL
-            OR proposal_id = :proposalId
+            OR proposal_id = ?
           )
         ORDER BY
           CASE jabatan
@@ -354,10 +328,7 @@ class BeritaAcaraHelper {
             WHEN 'anggota_3' THEN 5
             ELSE 6
           END
-      `, {
-        replacements: { kecamatanId, proposalId },
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, [kecamatanId, proposalId]);
 
       // Check minimum requirements (ketua is required, sekretaris is optional)
       const hasKetua = timMembers.some(t => t.posisi === 'ketua');
@@ -386,14 +357,11 @@ class BeritaAcaraHelper {
         };
 
         // Check questionnaire
-        const [questionnaire] = await sequelize.query(`
+        const [questionnaire] = await kueri(`
           SELECT id FROM bankeu_verification_questionnaires
-          WHERE proposal_id = :proposalId AND tim_verifikasi_id = :timId
+          WHERE proposal_id = ? AND tim_verifikasi_id = ?
           LIMIT 1
-        `, {
-          replacements: { proposalId, timId: member.id },
-          type: sequelize.QueryTypes.SELECT
-        });
+        `, [proposalId, member.id]);
 
         memberStatus.has_questionnaire = !!questionnaire;
 

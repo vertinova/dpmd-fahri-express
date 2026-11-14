@@ -1,4 +1,4 @@
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const path = require('path');
 const fs = require('fs');
 
@@ -14,7 +14,7 @@ class DinasConfigController {
     try {
       const { dinasId } = req.params;
       
-      const [config] = await sequelize.query(`
+      const [config] = await kueri(`
         SELECT 
           dc.id,
           dc.dinas_id,
@@ -25,12 +25,9 @@ class DinasConfigController {
           dc.created_at,
           dc.updated_at
         FROM dinas_config dc
-        WHERE dc.dinas_id = :dinasId
+        WHERE dc.dinas_id = ?
         LIMIT 1
-      `, {
-        replacements: { dinasId },
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, [dinasId]);
 
       if (!config) {
         return res.json({
@@ -72,26 +69,21 @@ class DinasConfigController {
       }
 
       // Check if config exists
-      const [existing] = await sequelize.query(`
-        SELECT id FROM dinas_config WHERE dinas_id = :dinasId LIMIT 1
-      `, {
-        replacements: { dinasId },
-        type: sequelize.QueryTypes.SELECT
-      });
+      const [existing] = await kueri(`
+        SELECT id FROM dinas_config WHERE dinas_id = ? LIMIT 1
+      `, [dinasId]);
 
       if (existing) {
         // Update existing config
-        await sequelize.query(`
+        await jalankan(`
           UPDATE dinas_config 
           SET 
-            nama_pic = :nama_pic,
-            nip_pic = :nip_pic,
-            jabatan_pic = :jabatan_pic,
+            nama_pic = ?,
+            nip_pic = ?,
+            jabatan_pic = ?,
             updated_at = CURRENT_TIMESTAMP
-          WHERE dinas_id = :dinasId
-        `, {
-          replacements: { dinasId, nama_pic, nip_pic, jabatan_pic }
-        });
+          WHERE dinas_id = ?
+        `, [nama_pic, nip_pic, jabatan_pic, dinasId]);
 
         res.json({
           success: true,
@@ -100,12 +92,10 @@ class DinasConfigController {
         });
       } else {
         // Insert new config
-        await sequelize.query(`
+        await jalankan(`
           INSERT INTO dinas_config (dinas_id, nama_pic, nip_pic, jabatan_pic)
-          VALUES (:dinasId, :nama_pic, :nip_pic, :jabatan_pic)
-        `, {
-          replacements: { dinasId, nama_pic, nip_pic, jabatan_pic }
-        });
+          VALUES (?, ?, ?, ?)
+        `, [dinasId, nama_pic, nip_pic, jabatan_pic]);
 
         res.status(201).json({
           success: true,
@@ -139,12 +129,9 @@ class DinasConfigController {
       }
 
       // Ensure config exists
-      const [config] = await sequelize.query(`
-        SELECT id, ttd_path FROM dinas_config WHERE dinas_id = :dinasId LIMIT 1
-      `, {
-        replacements: { dinasId },
-        type: sequelize.QueryTypes.SELECT
-      });
+      const [config] = await kueri(`
+        SELECT id, ttd_path FROM dinas_config WHERE dinas_id = ? LIMIT 1
+      `, [dinasId]);
 
       if (!config) {
         return res.status(404).json({
@@ -175,13 +162,11 @@ class DinasConfigController {
       const ttdPath = `dinas_ttd/${fileName}`;
 
       // Update config with new TTD path
-      await sequelize.query(`
+      await jalankan(`
         UPDATE dinas_config 
-        SET ttd_path = :ttdPath, updated_at = CURRENT_TIMESTAMP
-        WHERE dinas_id = :dinasId
-      `, {
-        replacements: { dinasId, ttdPath }
-      });
+        SET ttd_path = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE dinas_id = ?
+      `, [ttdPath, dinasId]);
 
       res.json({
         success: true,
@@ -206,12 +191,9 @@ class DinasConfigController {
     try {
       const { dinasId } = req.params;
 
-      const [config] = await sequelize.query(`
-        SELECT ttd_path FROM dinas_config WHERE dinas_id = :dinasId LIMIT 1
-      `, {
-        replacements: { dinasId },
-        type: sequelize.QueryTypes.SELECT
-      });
+      const [config] = await kueri(`
+        SELECT ttd_path FROM dinas_config WHERE dinas_id = ? LIMIT 1
+      `, [dinasId]);
 
       if (!config || !config.ttd_path) {
         return res.status(404).json({
@@ -227,13 +209,11 @@ class DinasConfigController {
       }
 
       // Update database
-      await sequelize.query(`
+      await jalankan(`
         UPDATE dinas_config 
         SET ttd_path = NULL, updated_at = CURRENT_TIMESTAMP
-        WHERE dinas_id = :dinasId
-      `, {
-        replacements: { dinasId }
-      });
+        WHERE dinas_id = ?
+      `, [dinasId]);
 
       res.json({
         success: true,

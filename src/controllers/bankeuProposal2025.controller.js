@@ -1,5 +1,5 @@
 const prisma = require('../config/prisma');
-const sequelize = require('../config/database');
+const { kueri } = require('../config/sqlMentah');
 const logger = require('../utils/logger');
 const path = require('path');
 const fs = require('fs');
@@ -202,7 +202,7 @@ class BankeuProposal2025Controller {
     try {
       const tahun = parseInt(req.query.tahun) || 2025;
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT
           d.id AS desa_id,
           d.nama AS desa_nama,
@@ -220,11 +220,11 @@ class BankeuProposal2025Controller {
           u.name AS uploaded_by_name
         FROM desas d
         JOIN kecamatans k ON d.kecamatan_id = k.id
-        LEFT JOIN bankeu_proposal_2025 p ON p.desa_id = d.id AND p.tahun_anggaran = :tahun
+        LEFT JOIN bankeu_proposal_2025 p ON p.desa_id = d.id AND p.tahun_anggaran = ?
         LEFT JOIN users u ON p.uploaded_by = u.id
         WHERE d.status_pemerintahan = 'desa'
         ORDER BY k.nama, d.nama, p.created_at DESC
-      `, { replacements: { tahun } });
+      `, [tahun]);
 
       const perKecamatan = new Map();
       const desaTerdaftar = new Map();

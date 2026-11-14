@@ -1,5 +1,5 @@
 const prisma = require('../config/prisma');
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const { copyFileToReference } = require('../utils/fileHelper');
@@ -50,7 +50,7 @@ class BankeuProposalController {
    */
   async getMasterKegiatan(req, res) {
     try {
-      const [kegiatan] = await sequelize.query(`
+      const kegiatan = await kueri(`
         SELECT 
           id,
           jenis_kegiatan,
@@ -316,12 +316,12 @@ class BankeuProposalController {
       }
 
       // Get desa_id and kecamatan_id from user
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT u.desa_id, d.kecamatan_id 
         FROM users u
         JOIN desas d ON u.desa_id = d.id
         WHERE u.id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || !users[0].desa_id) {
         // Delete uploaded file
@@ -432,9 +432,9 @@ class BankeuProposalController {
       logger.info(`♻️ UPDATE REVISION REQUEST - ID: ${id}, User: ${userId}, Anggaran: ${anggaran_usulan}`);
 
       // Get desa_id from user
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT desa_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || !users[0].desa_id) {
         // Delete uploaded file if exists
@@ -452,11 +452,11 @@ class BankeuProposalController {
 
       // Get existing proposal
       // FIX 2026-03-11: Tambahkan troubleshoot_catatan untuk deteksi troubleshoot case
-      const [proposals] = await sequelize.query(`
+      const proposals = await kueri(`
         SELECT file_proposal, status, desa_id, submitted_to_kecamatan, submitted_to_dinas_at, dinas_status, kecamatan_status, troubleshoot_catatan
         FROM bankeu_proposals
         WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       if (!proposals || proposals.length === 0) {
         // Delete uploaded file if exists
@@ -630,11 +630,11 @@ class BankeuProposalController {
       replacements.push(id);
 
       // Execute update
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_proposals
         SET ${updates.join(', ')}
         WHERE id = ?
-      `, { replacements });
+      `, replacements);
 
       logger.info(`♻️ Bankeu proposal updated (revision): ${id} by user ${userId}`);
 
@@ -709,9 +709,9 @@ class BankeuProposalController {
       }
 
       // Get desa_id from user
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT desa_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || !users[0].desa_id) {
         // Delete uploaded file
@@ -727,11 +727,11 @@ class BankeuProposalController {
       const desaId = users[0].desa_id;
 
       // Get existing proposal
-      const [existingProposal] = await sequelize.query(`
+      const existingProposal = await kueri(`
         SELECT file_proposal, status, desa_id, submitted_to_kecamatan
         FROM bankeu_proposals
         WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       if (!existingProposal || existingProposal.length === 0) {
         // Delete uploaded file
@@ -834,11 +834,11 @@ class BankeuProposalController {
 
       updateValues.push(id);
 
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_proposals
         SET ${updateFields.join(', ')}
         WHERE id = ?
-      `, { replacements: updateValues });
+      `, updateValues);
 
       logger.info(`🔄 Bankeu proposal file replaced: ${id} by user ${userId}`);
 
@@ -896,9 +896,9 @@ class BankeuProposalController {
       const userId = req.user.id;
 
       // Get desa_id from user
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT desa_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || !users[0].desa_id) {
         return res.status(403).json({
@@ -910,11 +910,11 @@ class BankeuProposalController {
       const desaId = users[0].desa_id;
 
       // Get proposal data
-      const [proposals] = await sequelize.query(`
+      const proposals = await kueri(`
         SELECT file_proposal, berita_acara_path, status, desa_id, submitted_to_kecamatan, submitted_to_dinas_at
         FROM bankeu_proposals
         WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       if (!proposals || proposals.length === 0) {
         return res.status(404).json({
@@ -951,9 +951,9 @@ class BankeuProposalController {
       }
 
       // Delete related kegiatan records first
-      await sequelize.query(`
+      await jalankan(`
         DELETE FROM bankeu_proposal_kegiatan WHERE proposal_id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       // Delete files
       const filesToDelete = [proposal.file_proposal];
@@ -969,9 +969,9 @@ class BankeuProposalController {
       });
 
       // Delete from database
-      await sequelize.query(`
+      await jalankan(`
         DELETE FROM bankeu_proposals WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       logger.info(`✅ Bankeu proposal deleted: ${id}`);
 
@@ -1037,9 +1037,9 @@ class BankeuProposalController {
       }
 
       // Get desa_id from user
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT desa_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || !users[0].desa_id) {
         if (req.file && req.file.path) {
@@ -1054,11 +1054,11 @@ class BankeuProposalController {
       const desaId = users[0].desa_id;
 
       // Get existing proposal
-      const [existingProposal] = await sequelize.query(`
+      const existingProposal = await kueri(`
         SELECT surat_pengantar, surat_permohonan, desa_id 
         FROM bankeu_proposals
         WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       if (!existingProposal || existingProposal.length === 0) {
         if (req.file && req.file.path) {
@@ -1097,11 +1097,11 @@ class BankeuProposalController {
       }
 
       // Update proposal
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_proposals
         SET ${fieldName} = ?, updated_at = NOW()
         WHERE id = ?
-      `, { replacements: [filePath, id] });
+      `, [filePath, id]);
 
       logger.info(`✅ Surat ${jenis} uploaded for proposal ${id} by user ${userId}`);
 
@@ -1160,8 +1160,6 @@ class BankeuProposalController {
    * NEW FLOW 2026-01-30: Desa → Dinas Terkait (bukan Kecamatan)
    */
   async submitToDinasTerkait(req, res) {
-    const transaction = await sequelize.transaction();
-    
     try {
       const userId = req.user.id;
       const { tahun, proposal_ids } = req.body; // Tahun anggaran + optional per-proposal IDs
@@ -1171,7 +1169,6 @@ class BankeuProposalController {
       // Check if submission is open (per-year)
       const { isOpen } = await checkSubmissionOpen(tahun);
       if (!isOpen) {
-        await transaction.rollback();
         logger.warn(`⛔ Submission blocked - submission is closed by DPMD`);
         return res.status(403).json({
           success: false,
@@ -1180,12 +1177,11 @@ class BankeuProposalController {
       }
 
       // Get desa_id from user
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT desa_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || !users[0].desa_id) {
-        await transaction.rollback();
         return res.status(403).json({
           success: false,
           message: 'User tidak terkait dengan desa'
@@ -1207,7 +1203,7 @@ class BankeuProposalController {
 
       // NEW FLOW 2026-01-30: Submit proposal yang belum pernah submit
       // Kondisi: submitted_to_dinas_at IS NULL (belum pernah dikirim ke dinas)
-      const [notSubmittedCount] = await sequelize.query(`
+      const notSubmittedCount = await kueri(`
         SELECT COUNT(*) as total
         FROM bankeu_proposals
         WHERE desa_id = ? 
@@ -1215,10 +1211,9 @@ class BankeuProposalController {
           AND (dinas_status IS NULL OR dinas_status = 'pending')
           ${tahunFilter}
           ${proposalIdsFilter}
-      `, { replacements: replacementsCount });
+      `, replacementsCount);
 
       if (notSubmittedCount[0].total < 1) {
-        await transaction.rollback();
         return res.status(400).json({
           success: false,
           message: 'Tidak ada proposal yang perlu dikirim'
@@ -1233,7 +1228,7 @@ class BankeuProposalController {
       if (proposal_ids && Array.isArray(proposal_ids) && proposal_ids.length > 0) {
         replacementsUpdate.push(...proposal_ids.map(id => parseInt(id)));
       }
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_proposals
         SET submitted_to_dinas_at = NOW(),
             dinas_status = 'pending',
@@ -1243,12 +1238,7 @@ class BankeuProposalController {
           AND (dinas_status IS NULL OR dinas_status = 'pending')
           ${tahunFilter}
           ${proposalIdsFilter}
-      `, { 
-        replacements: replacementsUpdate,
-        transaction 
-      });
-
-      await transaction.commit();
+      `, replacementsUpdate);
 
       logger.info(`✅ ${count} proposals from desa ${desaId} (tahun: ${tahun || 'ALL'}) submitted to DINAS TERKAIT`);
 
@@ -1273,9 +1263,6 @@ class BankeuProposalController {
         message: `${count} proposal berhasil dikirim ke Dinas Terkait`
       });
     } catch (error) {
-      if (transaction && !transaction.finished) {
-        await transaction.rollback();
-      }
       logger.error('Error submitting to dinas:', error);
       res.status(500).json({
         success: false,
@@ -1300,8 +1287,6 @@ class BankeuProposalController {
    * UPDATED 2026-02-04: Support destination parameter untuk split Kecamatan vs Dinas
    */
   async resubmitProposal(req, res) {
-    const transaction = await sequelize.transaction();
-    
     try {
       const userId = req.user.id;
       const { destination, tahun, proposal_ids } = req.body; // 'kecamatan' atau 'dinas' + tahun anggaran + optional per-proposal IDs
@@ -1311,7 +1296,6 @@ class BankeuProposalController {
       // Check if submission is open (per-year)
       const { isOpen } = await checkSubmissionOpen(tahun);
       if (!isOpen) {
-        await transaction.rollback();
         logger.warn(`⛔ Resubmit blocked - submission is closed by DPMD`);
         return res.status(403).json({
           success: false,
@@ -1320,12 +1304,11 @@ class BankeuProposalController {
       }
 
       // Get desa_id from user
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT desa_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || !users[0].desa_id) {
-        await transaction.rollback();
         return res.status(403).json({
           success: false,
           message: 'User tidak terkait dengan desa'
@@ -1351,7 +1334,7 @@ class BankeuProposalController {
       // NOTE: submitted_to_dinas_at tidak di-null lagi saat kecamatan revisi, 
       // jadi deteksi hanya pakai submitted_to_kecamatan + status rejection
       // FIX 2026-03-11: Tambahkan troubleshoot_catatan untuk mendeteksi proposal yg di-troubleshoot DPMD
-      const [proposals] = await sequelize.query(`
+      const proposals = await kueri(`
         SELECT id, dinas_status, kecamatan_status, dpmd_status, status, submitted_to_dinas_at, troubleshoot_catatan
         FROM bankeu_proposals
         WHERE desa_id = ? 
@@ -1363,10 +1346,9 @@ class BankeuProposalController {
           )
           ${tahunFilter}
           ${proposalIdsFilter}
-      `, { replacements: baseReplacements });
+      `, baseReplacements);
 
       if (proposals.length < 1) {
-        await transaction.rollback();
         return res.status(400).json({
           success: false,
           message: 'Tidak ada proposal revisi yang perlu dikirim ulang. Upload ulang proposal yang ditolak terlebih dahulu.'
@@ -1470,12 +1452,7 @@ class BankeuProposalController {
         `;
       }
 
-      await sequelize.query(updateQuery, { 
-        replacements: baseReplacements,
-        transaction 
-      });
-
-      await transaction.commit();
+      await jalankan(updateQuery, baseReplacements);
 
       const count = proposals.length;
       logger.info(`✅ ${count} revised proposals from desa ${desaId} resubmitted to ${destinationLabel}`);
@@ -1502,7 +1479,6 @@ class BankeuProposalController {
         data: { count, destination: destinationLabel }
       });
     } catch (error) {
-      await transaction.rollback();
       logger.error('Error resubmitting proposals:', error);
       res.status(500).json({
         success: false,
@@ -1533,9 +1509,9 @@ class BankeuProposalController {
       logger.info(`✏️ EDIT PROPOSAL REQUEST - ID: ${id}, User: ${userId}`);
 
       // Get desa_id from user
-      const [users] = await sequelize.query(`
+      const users = await kueri(`
         SELECT desa_id FROM users WHERE id = ?
-      `, { replacements: [userId] });
+      `, [userId]);
 
       if (!users || users.length === 0 || !users[0].desa_id) {
         // Delete uploaded file if exists
@@ -1552,12 +1528,12 @@ class BankeuProposalController {
       const desaId = users[0].desa_id;
 
       // Get existing proposal
-      const [proposals] = await sequelize.query(`
+      const proposals = await kueri(`
         SELECT bp.*, d.nama as nama_desa
         FROM bankeu_proposals bp
         LEFT JOIN desas d ON bp.desa_id = d.id
         WHERE bp.id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       if (!proposals || proposals.length === 0) {
         // Delete uploaded file if exists
@@ -1690,11 +1666,11 @@ class BankeuProposalController {
       replacements.push(id);
 
       // Execute update
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_proposals
         SET ${updates.join(', ')}
         WHERE id = ?
-      `, { replacements });
+      `, replacements);
 
       logger.info(`✏️ Bankeu proposal edited: ${id} by user ${userId}`);
 

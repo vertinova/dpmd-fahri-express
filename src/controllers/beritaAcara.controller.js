@@ -1,6 +1,6 @@
 const beritaAcaraHelper = require('../services/beritaAcaraHelper');
 const beritaAcaraService = require('../services/beritaAcaraService');
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const logger = require('../utils/logger');
 const { checkTanggalMerah } = require('../utils/tanggalMerah');
 const path = require('path');
@@ -60,28 +60,22 @@ class BeritaAcaraController {
       }
 
       // Get desa info
-      const [desa] = await sequelize.query(`
+      const [desa] = await kueri(`
         SELECT d.*, k.nama as kecamatan_nama
         FROM desas d
         LEFT JOIN kecamatans k ON d.kecamatan_id = k.id
-        WHERE d.id = :desaId
+        WHERE d.id = ?
         LIMIT 1
-      `, {
-        replacements: { desaId },
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, [desaId]);
 
       // Get proposal info
-      const [proposal] = await sequelize.query(`
+      const [proposal] = await kueri(`
         SELECT bp.*, mk.nama_kegiatan, mk.jenis_kegiatan
         FROM bankeu_proposals bp
         LEFT JOIN bankeu_master_kegiatan mk ON bp.kegiatan_id = mk.id
-        WHERE bp.id = :proposalId
+        WHERE bp.id = ?
         LIMIT 1
-      `, {
-        replacements: { proposalId },
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, [proposalId]);
 
       // Get aggregated questionnaire
       const aggregatedQuestionnaire = await beritaAcaraHelper.aggregateQuestionnaire(proposalId, kecamatan_id);
@@ -90,7 +84,7 @@ class BeritaAcaraController {
       const validation = await beritaAcaraHelper.validateTimCompletion(proposalId, kecamatan_id);
 
       // Get tim verifikasi data
-      const timVerifikasi = await sequelize.query(`
+      const timVerifikasi = await kueri(`
         SELECT tc.*, 
           CASE 
             WHEN tc.jabatan = 'ketua' THEN 'Ketua Tim Verifikasi'
@@ -99,7 +93,7 @@ class BeritaAcaraController {
           END as posisi_label,
           tc.jabatan as posisi
         FROM tim_verifikasi_kecamatan tc
-        WHERE tc.kecamatan_id = :kecamatanId
+        WHERE tc.kecamatan_id = ?
         ORDER BY 
           CASE tc.jabatan
             WHEN 'ketua' THEN 1
@@ -109,10 +103,7 @@ class BeritaAcaraController {
             WHEN 'anggota_3' THEN 5
             ELSE 6
           END
-      `, {
-        replacements: { kecamatanId: kecamatan_id },
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, [kecamatan_id]);
 
       // Checklist items berbeda berdasarkan jenis kegiatan (sinkron dengan beritaAcaraService & BankeuQuestionnaireForm)
       const jenisKegiatan = proposal?.jenis_kegiatan || 'infrastruktur';
@@ -295,15 +286,15 @@ class BeritaAcaraController {
 
       // Get tim verifikasi snapshot (ketua/sekretaris shared + anggota per proposal)
       // Exclude old 'anggota' format
-      const timVerifikasi = await sequelize.query(`
+      const timVerifikasi = await kueri(`
         SELECT jabatan as posisi, nama, nip, jabatan_label as jabatan, ttd_path
         FROM tim_verifikasi_kecamatan
-        WHERE kecamatan_id = :kecamatanId
+        WHERE kecamatan_id = ?
           AND is_active = TRUE
           AND jabatan != 'anggota'
           AND (
             proposal_id IS NULL
-            ${proposalId ? 'OR proposal_id = :proposalId' : ''}
+            ${proposalId ? 'OR proposal_id = ?' : ''}
           )
         ORDER BY 
           CASE jabatan 
@@ -312,10 +303,7 @@ class BeritaAcaraController {
             ELSE 3
           END,
           id ASC
-      `, {
-        replacements: { kecamatanId: kecamatan_id, proposalId },
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, proposalId ? [kecamatan_id, proposalId] : [kecamatan_id]);
 
       // Save to history
       const historyResult = await beritaAcaraHelper.saveHistory({
@@ -334,22 +322,15 @@ class BeritaAcaraController {
       });
 
       // Update proposal with berita acara info
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_proposals 
         SET 
-          berita_acara_path = :filePath,
+          berita_acara_path = ?,
           berita_acara_generated_at = NOW(),
-          berita_acara_qr_code = :qrCode,
-          berita_acara_version = :version
-        WHERE id = :proposalId
-      `, {
-        replacements: {
-          filePath,
-          qrCode: codeData.code,
-          version: historyResult.version,
-          proposalId
-        }
-      });
+          berita_acara_qr_code = ?,
+          berita_acara_version = ?
+        WHERE id = ?
+      `, [filePath, codeData.code, historyResult.version, proposalId]);
 
       logger.info(`✅ Berita Acara generated: ${codeData.code} for proposal ${proposalId}`);
 
@@ -382,17 +363,14 @@ class BeritaAcaraController {
       const { kecamatan_id } = req.user;
 
       // Get history record
-      const [history] = await sequelize.query(`
+      const [history] = await kueri(`
         SELECT bah.*, d.nama as desa_nama, k.nama as kecamatan_nama
         FROM berita_acara_history bah
         LEFT JOIN desas d ON bah.desa_id = d.id
         LEFT JOIN kecamatans k ON bah.kecamatan_id = k.id
-        WHERE bah.id = :historyId
+        WHERE bah.id = ?
         LIMIT 1
-      `, {
-        replacements: { historyId },
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, [historyId]);
 
       if (!history) {
         return res.status(404).json({
@@ -402,32 +380,27 @@ class BeritaAcaraController {
       }
 
       // Get desa users to notify
-      const desaUsers = await sequelize.query(`
+      const desaUsers = await kueri(`
         SELECT id, name, email, fcm_token
         FROM users
-        WHERE desa_id = :desaId AND role IN ('desa', 'kepala_desa', 'sekretaris_desa')
-      `, {
-        replacements: { desaId },
-        type: sequelize.QueryTypes.SELECT
-      });
+        WHERE desa_id = ? AND role IN ('desa', 'kepala_desa', 'sekretaris_desa')
+      `, [desaId]);
 
       // Create notification records
       for (const user of desaUsers) {
-        await sequelize.query(`
+        await jalankan(`
           INSERT INTO notifications (user_id, type, title, message, data, created_at)
-          VALUES (:userId, 'berita_acara', :title, :message, :data, NOW())
-        `, {
-          replacements: {
-            userId: user.id,
-            title: 'Berita Acara Verifikasi Tersedia',
-            message: `Berita Acara Verifikasi untuk Desa ${history.desa_nama} telah dibuat oleh Kecamatan ${history.kecamatan_nama}. Silakan unduh dokumen.`,
-            data: JSON.stringify({
-              history_id: historyId,
-              file_path: history.file_path,
-              qr_code: history.qr_code
-            })
-          }
-        });
+          VALUES (?, 'berita_acara', ?, ?, ?, NOW())
+        `, [
+          user.id,
+          'Berita Acara Verifikasi Tersedia',
+          `Berita Acara Verifikasi untuk Desa ${history.desa_nama} telah dibuat oleh Kecamatan ${history.kecamatan_nama}. Silakan unduh dokumen.`,
+          JSON.stringify({
+            history_id: historyId,
+            file_path: history.file_path,
+            qr_code: history.qr_code
+          })
+        ]);
       }
 
       // TODO: Send push notification via FCM if fcm_token available
@@ -487,16 +460,13 @@ class BeritaAcaraController {
       }
 
       // Verify proposal belongs to this kecamatan
-      const [proposal] = await sequelize.query(`
+      const [proposal] = await kueri(`
         SELECT bp.id, bp.desa_id, d.kecamatan_id
         FROM bankeu_proposals bp
         INNER JOIN desas d ON bp.desa_id = d.id
-        WHERE bp.id = :proposalId AND d.kecamatan_id = :kecamatanId
+        WHERE bp.id = ? AND d.kecamatan_id = ?
         LIMIT 1
-      `, {
-        replacements: { proposalId, kecamatanId: kecamatan_id },
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, [proposalId, kecamatan_id]);
 
       if (!proposal) {
         return res.status(404).json({
@@ -514,13 +484,11 @@ class BeritaAcaraController {
       });
 
       // Update proposal with surat pengantar path
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_proposals 
-        SET surat_pengantar = :pdfPath
-        WHERE id = :proposalId
-      `, {
-        replacements: { pdfPath, proposalId }
-      });
+        SET surat_pengantar = ?
+        WHERE id = ?
+      `, [pdfPath, proposalId]);
 
       logger.info(`✅ Surat Pengantar generated and sent to DPMD for proposal ${proposalId}`);
 

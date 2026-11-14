@@ -1,5 +1,5 @@
 const prisma = require('../config/prisma');
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const logger = require('../utils/logger');
 const path = require('path');
 const fs = require('fs');
@@ -36,14 +36,12 @@ class BantuanProvinsiLpjController {
         });
       }
 
-      const [lpjList] = await sequelize.query(`
+      const lpjList = await kueri(`
         SELECT *
         FROM ${TABLE_NAME}
-        WHERE desa_id = :desaId AND tahun_anggaran = :tahun
+        WHERE desa_id = ? AND tahun_anggaran = ?
         ORDER BY created_at DESC
-      `, {
-        replacements: { desaId: user.desa_id, tahun }
-      });
+      `, [user.desa_id, tahun]);
 
       res.json({ success: true, data: lpjList });
     } catch (error) {
@@ -110,22 +108,13 @@ class BantuanProvinsiLpjController {
         fs.renameSync(file.path, targetPath);
 
         const relativePath = `${desa.kecamatan_id}/${user.desa_id}/${file.filename}`;
-        const [result] = await sequelize.query(`
+        const [{ id: result }] = await kueri(`
           INSERT INTO ${TABLE_NAME}
             (desa_id, tahun_anggaran, nama_file, file_path, file_size, keterangan, status, uploaded_by)
           VALUES
-            (:desaId, :tahun, :namaFile, :filePath, :fileSize, :keterangan, 'pending', :uploadedBy)
-        `, {
-          replacements: {
-            desaId: user.desa_id,
-            tahun,
-            namaFile: file.originalname,
-            filePath: relativePath,
-            fileSize: file.size,
-            keterangan,
-            uploadedBy: userId
-          }
-        });
+            (?, ?, ?, ?, ?, ?, 'pending', ?)
+          RETURNING id
+        `, [user.desa_id, tahun, file.originalname, relativePath, file.size, keterangan, userId]);
 
         createdLpjs.push({
           id: result?.insertId || result,
@@ -179,14 +168,12 @@ class BantuanProvinsiLpjController {
         });
       }
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT *
         FROM ${TABLE_NAME}
-        WHERE id = :lpjId AND desa_id = :desaId
+        WHERE id = ? AND desa_id = ?
         LIMIT 1
-      `, {
-        replacements: { lpjId, desaId: user.desa_id }
-      });
+      `, [lpjId, user.desa_id]);
       const lpj = rows[0];
 
       if (!lpj) {
@@ -206,9 +193,7 @@ class BantuanProvinsiLpjController {
       const filePath = path.join(__dirname, `../../storage/uploads/${STORAGE_DIR}`, lpj.file_path);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 
-      await sequelize.query(`DELETE FROM ${TABLE_NAME} WHERE id = :lpjId`, {
-        replacements: { lpjId }
-      });
+      await jalankan(`DELETE FROM ${TABLE_NAME} WHERE id = ?`, [lpjId]);
 
       logger.info(`LPJ ${PROGRAM_LABEL} deleted: id=${lpjId}, desa_id=${user.desa_id}`);
 
@@ -234,7 +219,7 @@ class BantuanProvinsiLpjController {
     try {
       const tahun = parseInt(req.query.tahun) || 2025;
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT
           d.id as desa_id,
           d.nama as desa_nama,
@@ -257,14 +242,12 @@ class BantuanProvinsiLpjController {
           v.name as verified_by_name
         FROM desas d
         JOIN kecamatans k ON d.kecamatan_id = k.id
-        LEFT JOIN ${TABLE_NAME} l ON l.desa_id = d.id AND l.tahun_anggaran = :tahun
+        LEFT JOIN ${TABLE_NAME} l ON l.desa_id = d.id AND l.tahun_anggaran = ?
         LEFT JOIN users u ON l.uploaded_by = u.id
         LEFT JOIN users v ON l.dpmd_verified_by = v.id
         WHERE d.status_pemerintahan = 'desa'
         ORDER BY k.nama, d.nama, l.created_at DESC
-      `, {
-        replacements: { tahun }
-      });
+      `, [tahun]);
 
       const grouped = {};
       const desaTracker = {};
@@ -383,15 +366,13 @@ class BantuanProvinsiLpjController {
         });
       }
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT l.*, d.nama AS desa_nama
         FROM ${TABLE_NAME} l
         LEFT JOIN desas d ON l.desa_id = d.id
-        WHERE l.id = :lpjId
+        WHERE l.id = ?
         LIMIT 1
-      `, {
-        replacements: { lpjId }
-      });
+      `, [lpjId]);
       const lpj = rows[0];
 
       if (!lpj) {
@@ -401,22 +382,15 @@ class BantuanProvinsiLpjController {
         });
       }
 
-      await sequelize.query(`
+      await jalankan(`
         UPDATE ${TABLE_NAME}
-        SET status = :action,
-            dpmd_catatan = :catatan,
-            dpmd_verified_by = :userId,
+        SET status = ?,
+            dpmd_catatan = ?,
+            dpmd_verified_by = ?,
             dpmd_verified_at = NOW(),
             updated_at = NOW()
-        WHERE id = :lpjId
-      `, {
-        replacements: {
-          action,
-          catatan: catatan?.trim() || null,
-          userId,
-          lpjId
-        }
-      });
+        WHERE id = ?
+      `, [action, catatan?.trim() || null, userId, lpjId]);
 
       if (action === 'revision') {
         try {
@@ -435,9 +409,7 @@ class BantuanProvinsiLpjController {
         }
       }
 
-      const [updatedRows] = await sequelize.query(`SELECT * FROM ${TABLE_NAME} WHERE id = :lpjId`, {
-        replacements: { lpjId }
-      });
+      const updatedRows = await kueri(`SELECT * FROM ${TABLE_NAME} WHERE id = ?`, [lpjId]);
 
       const actionLabels = { approved: 'disetujui', rejected: 'ditolak', revision: 'perlu revisi' };
       logger.info(`LPJ ${PROGRAM_LABEL} verified: id=${lpjId}, desa=${lpj.desa_nama}, action=${action}, by=${userId}`);
@@ -466,15 +438,13 @@ class BantuanProvinsiLpjController {
       const lpjId = BigInt(req.params.id);
       const userId = req.user.id;
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT l.*, d.nama AS desa_nama
         FROM ${TABLE_NAME} l
         LEFT JOIN desas d ON l.desa_id = d.id
-        WHERE l.id = :lpjId
+        WHERE l.id = ?
         LIMIT 1
-      `, {
-        replacements: { lpjId }
-      });
+      `, [lpjId]);
       const lpj = rows[0];
 
       if (!lpj) {
@@ -487,9 +457,7 @@ class BantuanProvinsiLpjController {
       const filePath = path.join(__dirname, `../../storage/uploads/${STORAGE_DIR}`, lpj.file_path);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
 
-      await sequelize.query(`DELETE FROM ${TABLE_NAME} WHERE id = :lpjId`, {
-        replacements: { lpjId }
-      });
+      await jalankan(`DELETE FROM ${TABLE_NAME} WHERE id = ?`, [lpjId]);
 
       logger.info(`LPJ ${PROGRAM_LABEL} admin-deleted: id=${lpjId}, desa=${lpj.desa_nama}, by=${userId}`);
 
