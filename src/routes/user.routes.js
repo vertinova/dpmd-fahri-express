@@ -1,7 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const userController = require('../controllers/user.controller');
-const { auth } = require('../middlewares/auth');
+const { auth, requireSuperadmin } = require('../middlewares/auth');
 const multer = require('multer');
 const path = require('path');
 
@@ -87,6 +87,9 @@ router.put('/change-password', auth, userController.changePassword);
 
 // Superadmin masuk sebagai user lain
 router.post('/:id/impersonate', auth, requireUserAdmin, userController.impersonateUser);
+
+// Reset 2FA pegawai (HP hilang/ganti) — khusus superadmin
+router.delete('/:id/2fa', auth, requireSuperadmin, userController.reset2fa);
 
 // Hak akses fitur akun operasional desa (bantuan dari sisi staf DPMD)
 router.get('/:id/desa-permissions', auth, requireUserAdmin, userController.getDesaPermissions);

@@ -11,6 +11,7 @@ const { DESA_PERMISSIONS, sanitizePermissionKeys } = require('../config/desaPerm
 const { mustCompleteDesaProfile } = require('../config/desaProfile');
 const { invalidateDesaPermissions } = require('../middlewares/desaPermission');
 const ActivityLogger = require('../utils/activityLogger');
+const duaLangkah = require('../services/duaLangkah.service');
 
 const DEFAULT_PASSWORD = 'password';
 
@@ -561,7 +562,9 @@ class UserController {
 
       const userForToken = {
         ...targetUser,
-        bidang_id: finalBidangId
+        bidang_id: finalBidangId,
+        // Superadmin pemanggil sudah lolos 2FA (middleware auth mewajibkannya untuk superadmin).
+        mfa: true
       };
       const token = generateToken(userForToken);
       const userResponse = await buildAuthUserResponse(targetUser, finalBidangId, bidangName);
@@ -1061,6 +1064,28 @@ class UserController {
         message: 'Failed to reset password',
         error: error.message
       });
+    }
+  }
+
+  /**
+   * Superadmin mereset 2FA satu akun (HP hilang/ganti); pegawai memasang ulang saat login berikutnya.
+   */
+  async reset2fa(req, res) {
+    try {
+      if (!/^\d+$/.test(String(req.params.id))) {
+        return res.status(400).json({ success: false, message: 'ID user tidak valid' });
+      }
+      const ada = await duaLangkah.reset(req.params.id);
+      console.info(`[2FA] Superadmin ${req.user.email} (${req.user.id}) mereset 2FA user ${req.params.id}`);
+      res.json({
+        success: true,
+        message: ada
+          ? '2FA direset. Pegawai akan memindai QR baru saat login berikutnya.'
+          : 'Akun ini belum memasang 2FA.'
+      });
+    } catch (error) {
+      console.error('Error resetting 2FA:', error);
+      res.status(500).json({ success: false, message: 'Gagal mereset 2FA', error: error.message });
     }
   }
 

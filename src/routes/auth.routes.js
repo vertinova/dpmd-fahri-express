@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { login, verifyToken, getProfile, forceChangePassword, saveDesaProfile, renewToken } = require('../controllers/auth.controller');
+const { login, verifyToken, getProfile, forceChangePassword, saveDesaProfile, renewToken, pasang2fa, aktifkan2fa, verifikasi2fa } = require('../controllers/auth.controller');
 const { auth } = require('../middlewares/auth');
 const loginRateLimiter = require('../middlewares/loginRateLimit');
 
@@ -11,6 +11,12 @@ router.post('/login', loginRateLimiter, login);
 // Tanpa rate limit login: pemanggilnya wajib sudah memegang token bertanda
 // tangan sah, dan ini jalur yang menjaga user tidak keluar sendiri.
 router.post('/renew', renewToken);
+
+// Verifikasi 2 langkah pegawai DPMD. Tanpa loginRateLimiter: dibatasi 5 percobaan
+// per tiket; tiket butuh sandi benar yang sudah dibatasi per IP.
+router.post('/2fa/pasang', pasang2fa);
+router.post('/2fa/aktifkan', aktifkan2fa);
+router.post('/2fa/verifikasi', verifikasi2fa);
 
 // Protected routes
 router.get('/verify', auth, verifyToken);

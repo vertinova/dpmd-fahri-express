@@ -1,6 +1,7 @@
 const jwt = require('jsonwebtoken');
 const logger = require('../utils/logger');
 const { pantauPermintaan } = require('../services/pantauAktivitas');
+const { wajib2fa } = require('../services/duaLangkah.service');
 const prisma = require('../config/prisma');
 
 const JWT_SECRET = process.env.JWT_SECRET;
@@ -110,9 +111,19 @@ const auth = async (req, res, next) => {
       desa_id: Number.isNaN(desaId) ? null : desaId,
       bidang_id: Number.isNaN(bidangId) ? null : bidangId,
       dinas_id: Number.isNaN(dinasId) ? null : dinasId,
-      kecamatan_id: Number.isNaN(kecamatanId) ? null : kecamatanId
+      kecamatan_id: Number.isNaN(kecamatanId) ? null : kecamatanId,
+      mfa: decoded.mfa === true
     };
-    
+
+    // Pegawai DPMD wajib lolos 2FA; sesi lama tanpa tanda mfa diputus di sini.
+    if (wajib2fa(decoded.role) && decoded.mfa !== true) {
+      return res.status(401).json({
+        success: false,
+        code: 'WAJIB_2FA',
+        message: 'Akun pegawai DPMD kini wajib verifikasi 2 langkah. Silakan login kembali.'
+      });
+    }
+
     // Tolak token yang rolenya sudah tidak sama dengan database supaya user
     // dipaksa login ulang dan mendapat token baru. Sengaja fail-open: bila
     // pengecekan gagal (mis. database sedang bermasalah), request tetap diteruskan
@@ -316,7 +327,9 @@ const generateToken = (user) => {
       desa_id: convertBigInt(user.desa_id),
       kecamatan_id: convertBigInt(user.kecamatan_id),
       bidang_id: convertBigInt(user.bidang_id),
-      dinas_id: convertBigInt(user.dinas_id)
+      dinas_id: convertBigInt(user.dinas_id),
+      // Tanda lolos verifikasi 2 langkah; token pegawai tanpa tanda ini ditolak middleware auth.
+      ...(user.mfa === true && { mfa: true })
     },
     JWT_SECRET,
     { expiresIn: JWT_EXPIRES_IN }

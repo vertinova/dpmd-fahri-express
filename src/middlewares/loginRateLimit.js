@@ -11,6 +11,8 @@ const loginRateLimiter = rateLimit({
   max: 5, // Maksimal 5 percobaan login
   standardHeaders: true, // Return rate limit info in `RateLimit-*` headers
   legacyHeaders: false,
+  // 403 langkah 2FA berarti sandi sudah benar, jadi tidak dihitung sebagai percobaan gagal.
+  requestWasSuccessful: (req, res) => res.statusCode < 400 || res.locals.langkah2fa === true,
   skipSuccessfulRequests: true, // Jangan hitung request yang berhasil (status 2xx)
   // Di mesin pengembang pembatas ini hanya menghalangi: salah ketik sandi
   // atau skrip uji (scripts/uji-perangkat-desa.js) yang login berulang

@@ -7,6 +7,7 @@ const { validateDesaProfile, mustCompleteDesaProfile } = require('../config/desa
 const { SANDI_DEFAULT } = require('../config/sandiDefault');
 const serverSecurity = require('../services/serverSecurity.service');
 const { catatAktivitas } = require('../services/pantauAktivitas');
+const duaLangkah = require('../services/duaLangkah.service');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 
@@ -92,6 +93,224 @@ const parseCoordinate = (value, min, max) => {
   return num;
 };
 
+// Kolom user yang dimuat untuk login (sandi + relasi pegawai/bidang).
+const PILIH_USER_LOGIN = {
+  id: true,
+  name: true,
+  email: true,
+  password: true,
+  role: true,
+  avatar: true,
+  desa_id: true,
+  jabatan_desa: true,
+  no_hp: true,
+  kecamatan_id: true,
+  operator_kecamatan: true,
+  is_active: true,
+  bidang_id: true,
+  dinas_id: true,
+  pegawai_id: true,
+  pegawai: {
+    select: {
+      id_pegawai: true,
+      id_bidang: true,
+      sub_bidang: true,
+      nama_pegawai: true,
+      nip: true,
+      jabatan: true,
+      tanggal_lahir: true,
+      status_kepegawaian: true,
+      pangkat: true,
+      golongan: true,
+      bidangs: {
+        select: {
+          id: true,
+          nama: true
+        }
+      }
+    }
+  }
+};
+
+/**
+ * Bagian sukses login: catat riwayat, daftarkan perangkat, susun data user,
+ * lalu terbitkan token. Dipakai login biasa dan jalur 2FA (mfa: true).
+ */
+const selesaikanLogin = async (req, res, user, { latitude = null, longitude = null, mfa = false, tambahan = {} } = {}) => {
+  logger.info(`✅ Login successful: ${user.email} (${user.role})`);
+
+  // Role user disimpan di cache middleware selama 60 detik. Bila rolenya baru
+  // saja diubah langsung di database (migrasi/SQL manual) cache itu masih
+  // memegang role lama, sedangkan token yang dibuat di bawah memakai role baru
+  // dari baris ini — perbandingan keduanya gagal dan request pertama setelah
+  // login dibalas 401 ROLE_CHANGED. Segarkan cache-nya di sini supaya login
+  // yang baru saja berhasil tidak langsung dipentalkan.
+  invalidateRoleCache(user.id);
+
+  // Record success login history (fire-and-forget) — sertakan koordinat lokasi.
+  recordLoginHistory(req, user.id, 'success', { latitude, longitude });
+  catatAktivitas(user, { jenis: 'login', teks: 'Masuk ke aplikasi', ip: req.ip });
+
+  // Auto-register device_id if provided
+  const { device_id } = req.body;
+  if (device_id) {
+    await prisma.users.update({
+      where: { id: user.id },
+      data: { device_id }
+    });
+    logger.info(`📱 Device registered for ${user.email}: ${device_id.substring(0, 8)}...`);
+  }
+
+  // Helper to convert BigInt to string
+  const convertBigInt = (value) => {
+    if (value === null || value === undefined) return value;
+    return typeof value === 'bigint' ? value.toString() : value;
+  };
+
+  // Build complete user response with nested desa and kecamatan (same as verifyToken)
+  // Priority: get bidang_id from pegawai.id_bidang, fallback to users.bidang_id
+  let finalBidangId = user.bidang_id;
+  let bidangName = null;
+  
+  if (user.pegawai && user.pegawai.bidangs) {
+    // Use bidang from pegawai relation (more accurate)
+    finalBidangId = Number(user.pegawai.id_bidang);
+    bidangName = user.pegawai.bidangs.nama;
+    
+    // Sync users.bidang_id if it doesn't match
+    if (user.bidang_id !== finalBidangId) {
+      await prisma.users.update({
+        where: { id: user.id },
+        data: { bidang_id: finalBidangId }
+      });
+      logger.info(`🔧 Synced bidang_id for user ${user.email}: ${user.bidang_id} → ${finalBidangId}`);
+    }
+  }
+
+  // Generate JWT token AFTER finalBidangId is determined
+  // Create user object with correct bidang_id for token generation
+  const userForToken = {
+    ...user,
+    bidang_id: finalBidangId
+  };
+  const token = generateToken({ ...userForToken, mfa });
+  
+  const responseData = {
+    id: convertBigInt(user.id),
+    name: user.name,
+    email: user.email,
+    role: user.role,
+    avatar: user.avatar || null,
+    desa_id: convertBigInt(user.desa_id),
+    kecamatan_id: convertBigInt(user.kecamatan_id),
+    bidang_id: finalBidangId,
+    bidang_name: bidangName,
+    dinas_id: convertBigInt(user.dinas_id),
+    pegawai_id: convertBigInt(user.pegawai_id),
+    nip: user.pegawai?.nip || null,
+    jabatan: user.pegawai?.jabatan || null,
+    tanggal_lahir: user.pegawai?.tanggal_lahir || null,
+    status_kepegawaian: user.pegawai?.status_kepegawaian?.replace(/_/g, ' ') || null,
+    pangkat: user.pegawai?.pangkat || null,
+    golongan: user.pegawai?.golongan || null,
+    sub_bidang: user.pegawai?.sub_bidang || null,
+    // Wajib ganti password bila masih memakai password default 'password'.
+    must_change_password: await isUsingDefaultPassword(user.password),
+    // Fitur halaman desa yang boleh dibuka akun ini (diatur Admin Desa).
+    desa_permissions: await loadDesaPermissions(user.id, user.role),
+    // Akun utama kecamatan atau operator, beserta fitur operatornya.
+    ...(await loadKecamatanAkses(user)),
+    jabatan_desa: user.jabatan_desa || null,
+    no_hp: user.no_hp || null,
+    // Admin Desa wajib melengkapi identitas dulu sebelum boleh beraktivitas.
+    must_complete_profile: mustCompleteDesaProfile(user)
+  };
+
+  // If user has desa_id, fetch related desa and kecamatan
+  if (user.desa_id) {
+    try {
+      const desa = await prisma.desas.findUnique({
+        where: { id: user.desa_id },
+        select: {
+          id: true,
+          nama: true,
+          kode: true,
+          kecamatan_id: true,
+          status_pemerintahan: true
+        }
+      });
+
+      if (desa) {
+        responseData.desa = {
+          id: convertBigInt(desa.id),
+          nama: desa.nama,
+          kode: desa.kode,
+          kecamatan_id: convertBigInt(desa.kecamatan_id),
+          status_pemerintahan: desa.status_pemerintahan
+        };
+
+        // Fetch related kecamatan
+        const kecamatan = await prisma.kecamatans.findUnique({
+          where: { id: desa.kecamatan_id },
+          select: {
+            id: true,
+            nama: true,
+            kode: true
+          }
+        });
+
+        if (kecamatan) {
+          responseData.desa.kecamatan = {
+            id: convertBigInt(kecamatan.id),
+            nama: kecamatan.nama,
+            kode: kecamatan.kode
+          };
+        }
+      }
+    } catch (error) {
+      logger.warn(`Failed to fetch desa/kecamatan for user ${user.email}:`, error);
+      // Continue without desa data if fetch fails
+    }
+  }
+
+  // If user has kecamatan_id (and no desa_id), fetch kecamatan name directly
+  if (user.kecamatan_id && !responseData.desa) {
+    try {
+      const kecamatan = await prisma.kecamatans.findUnique({
+        where: { id: user.kecamatan_id },
+        select: {
+          id: true,
+          nama: true,
+          kode: true
+        }
+      });
+
+      if (kecamatan) {
+        responseData.kecamatan_name = kecamatan.nama;
+        responseData.kecamatan = {
+          id: convertBigInt(kecamatan.id),
+          nama: kecamatan.nama,
+          kode: kecamatan.kode
+        };
+      }
+    } catch (error) {
+      logger.warn(`Failed to fetch kecamatan for user ${user.email}:`, error);
+    }
+  }
+
+  await attachDinasInfo(responseData, user.dinas_id);
+
+  return res.status(200).json({
+    success: true,
+    message: 'Login successful',
+    data: {
+      token,
+      user: responseData,
+      ...tambahan
+    }
+  });
+};
+
 /**
  * Login - Validate credentials and return Express JWT token
  */
@@ -116,43 +335,7 @@ const login = async (req, res) => {
     // Query user from database using Prisma
     const user = await prisma.users.findUnique({
       where: { email },
-      select: {
-        id: true,
-        name: true,
-        email: true,
-        password: true,
-        role: true,
-        avatar: true,
-        desa_id: true,
-        jabatan_desa: true,
-        no_hp: true,
-        kecamatan_id: true,
-        operator_kecamatan: true,
-        is_active: true,
-        bidang_id: true,
-        dinas_id: true,
-        pegawai_id: true,
-        pegawai: {
-          select: {
-            id_pegawai: true,
-            id_bidang: true,
-            sub_bidang: true,
-            nama_pegawai: true,
-            nip: true,
-            jabatan: true,
-            tanggal_lahir: true,
-            status_kepegawaian: true,
-            pangkat: true,
-            golongan: true,
-            bidangs: {
-              select: {
-                id: true,
-                nama: true
-              }
-            }
-          }
-        }
-      }
+      select: PILIH_USER_LOGIN
     });
 
     if (!user) {
@@ -197,177 +380,22 @@ const login = async (req, res) => {
       });
     }
 
-    logger.info(`✅ Login successful: ${user.email} (${user.role})`);
-
-    // Role user disimpan di cache middleware selama 60 detik. Bila rolenya baru
-    // saja diubah langsung di database (migrasi/SQL manual) cache itu masih
-    // memegang role lama, sedangkan token yang dibuat di bawah memakai role baru
-    // dari baris ini — perbandingan keduanya gagal dan request pertama setelah
-    // login dibalas 401 ROLE_CHANGED. Segarkan cache-nya di sini supaya login
-    // yang baru saja berhasil tidak langsung dipentalkan.
-    invalidateRoleCache(user.id);
-
-    // Record success login history (fire-and-forget) — sertakan koordinat lokasi.
-    recordLoginHistory(req, user.id, 'success', { latitude, longitude });
-    catatAktivitas(user, { jenis: 'login', teks: 'Masuk ke aplikasi', ip: req.ip });
-
-    // Auto-register device_id if provided
-    const { device_id } = req.body;
-    if (device_id) {
-      await prisma.users.update({
-        where: { id: user.id },
-        data: { device_id }
+    if (duaLangkah.wajib2fa(user.role)) {
+      const aktif = await duaLangkah.sudahAktif(user.id);
+      // Sandi sudah benar: jangan dihitung login gagal oleh loginRateLimiter (IP kantor dipakai bersama).
+      res.locals.langkah2fa = true;
+      return res.status(403).json({
+        success: false,
+        code: aktif ? 'PERLU_KODE_2FA' : 'PERLU_PASANG_2FA',
+        // Pesan ini dibaca klien lama (aplikasi Flutter/PWA lama) yang belum punya layar 2FA.
+        message: (aktif
+          ? 'Masukkan kode 6 digit dari aplikasi Google Authenticator.'
+          : 'Akun pegawai DPMD wajib memasang verifikasi 2 langkah (Google Authenticator).')
+          + ' Bila kolom kode tidak muncul, perbarui aplikasi atau masuk lewat browser.',
+        data: { tiket_2fa: duaLangkah.buatTiket(user.id), email: user.email }
       });
-      logger.info(`📱 Device registered for ${user.email}: ${device_id.substring(0, 8)}...`);
     }
-
-    // Helper to convert BigInt to string
-    const convertBigInt = (value) => {
-      if (value === null || value === undefined) return value;
-      return typeof value === 'bigint' ? value.toString() : value;
-    };
-
-    // Build complete user response with nested desa and kecamatan (same as verifyToken)
-    // Priority: get bidang_id from pegawai.id_bidang, fallback to users.bidang_id
-    let finalBidangId = user.bidang_id;
-    let bidangName = null;
-    
-    if (user.pegawai && user.pegawai.bidangs) {
-      // Use bidang from pegawai relation (more accurate)
-      finalBidangId = Number(user.pegawai.id_bidang);
-      bidangName = user.pegawai.bidangs.nama;
-      
-      // Sync users.bidang_id if it doesn't match
-      if (user.bidang_id !== finalBidangId) {
-        await prisma.users.update({
-          where: { id: user.id },
-          data: { bidang_id: finalBidangId }
-        });
-        logger.info(`🔧 Synced bidang_id for user ${user.email}: ${user.bidang_id} → ${finalBidangId}`);
-      }
-    }
-
-    // Generate JWT token AFTER finalBidangId is determined
-    // Create user object with correct bidang_id for token generation
-    const userForToken = {
-      ...user,
-      bidang_id: finalBidangId
-    };
-    const token = generateToken(userForToken);
-    
-    const responseData = {
-      id: convertBigInt(user.id),
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      avatar: user.avatar || null,
-      desa_id: convertBigInt(user.desa_id),
-      kecamatan_id: convertBigInt(user.kecamatan_id),
-      bidang_id: finalBidangId,
-      bidang_name: bidangName,
-      dinas_id: convertBigInt(user.dinas_id),
-      pegawai_id: convertBigInt(user.pegawai_id),
-      nip: user.pegawai?.nip || null,
-      jabatan: user.pegawai?.jabatan || null,
-      tanggal_lahir: user.pegawai?.tanggal_lahir || null,
-      status_kepegawaian: user.pegawai?.status_kepegawaian?.replace(/_/g, ' ') || null,
-      pangkat: user.pegawai?.pangkat || null,
-      golongan: user.pegawai?.golongan || null,
-      sub_bidang: user.pegawai?.sub_bidang || null,
-      // Wajib ganti password bila masih memakai password default 'password'.
-      must_change_password: await isUsingDefaultPassword(user.password),
-      // Fitur halaman desa yang boleh dibuka akun ini (diatur Admin Desa).
-      desa_permissions: await loadDesaPermissions(user.id, user.role),
-      // Akun utama kecamatan atau operator, beserta fitur operatornya.
-      ...(await loadKecamatanAkses(user)),
-      jabatan_desa: user.jabatan_desa || null,
-      no_hp: user.no_hp || null,
-      // Admin Desa wajib melengkapi identitas dulu sebelum boleh beraktivitas.
-      must_complete_profile: mustCompleteDesaProfile(user)
-    };
-
-    // If user has desa_id, fetch related desa and kecamatan
-    if (user.desa_id) {
-      try {
-        const desa = await prisma.desas.findUnique({
-          where: { id: user.desa_id },
-          select: {
-            id: true,
-            nama: true,
-            kode: true,
-            kecamatan_id: true,
-            status_pemerintahan: true
-          }
-        });
-
-        if (desa) {
-          responseData.desa = {
-            id: convertBigInt(desa.id),
-            nama: desa.nama,
-            kode: desa.kode,
-            kecamatan_id: convertBigInt(desa.kecamatan_id),
-            status_pemerintahan: desa.status_pemerintahan
-          };
-
-          // Fetch related kecamatan
-          const kecamatan = await prisma.kecamatans.findUnique({
-            where: { id: desa.kecamatan_id },
-            select: {
-              id: true,
-              nama: true,
-              kode: true
-            }
-          });
-
-          if (kecamatan) {
-            responseData.desa.kecamatan = {
-              id: convertBigInt(kecamatan.id),
-              nama: kecamatan.nama,
-              kode: kecamatan.kode
-            };
-          }
-        }
-      } catch (error) {
-        logger.warn(`Failed to fetch desa/kecamatan for user ${user.email}:`, error);
-        // Continue without desa data if fetch fails
-      }
-    }
-
-    // If user has kecamatan_id (and no desa_id), fetch kecamatan name directly
-    if (user.kecamatan_id && !responseData.desa) {
-      try {
-        const kecamatan = await prisma.kecamatans.findUnique({
-          where: { id: user.kecamatan_id },
-          select: {
-            id: true,
-            nama: true,
-            kode: true
-          }
-        });
-
-        if (kecamatan) {
-          responseData.kecamatan_name = kecamatan.nama;
-          responseData.kecamatan = {
-            id: convertBigInt(kecamatan.id),
-            nama: kecamatan.nama,
-            kode: kecamatan.kode
-          };
-        }
-      } catch (error) {
-        logger.warn(`Failed to fetch kecamatan for user ${user.email}:`, error);
-      }
-    }
-
-    await attachDinasInfo(responseData, user.dinas_id);
-
-    return res.status(200).json({
-      success: true,
-      message: 'Login successful',
-      data: {
-        token,
-        user: responseData
-      }
-    });
+    return selesaikanLogin(req, res, user, { latitude, longitude });
   } catch (error) {
     logger.error('Login error:', error);
     return res.status(500).json({
@@ -1191,13 +1219,22 @@ const renewToken = async (req, res) => {
       });
     }
 
+    // Sesi pegawai lama (tanpa tanda 2FA) tidak boleh diperpanjang.
+    if (duaLangkah.wajib2fa(user.role) && decoded.mfa !== true) {
+      return res.status(401).json({
+        success: false,
+        code: 'WAJIB_2FA',
+        message: 'Akun pegawai DPMD kini wajib verifikasi 2 langkah. Silakan login kembali.'
+      });
+    }
+
     invalidateRoleCache(user.id);
     logger.info(`♻️  Sesi diperbarui tanpa login ulang: ${user.email} (${user.role})`);
 
     return res.json({
       success: true,
       message: 'Sesi diperbarui',
-      data: { token: generateToken(user) }
+      data: { token: generateToken({ ...user, mfa: decoded.mfa === true }) }
     });
   } catch (error) {
     logger.error('renewToken error:', error);
@@ -1262,11 +1299,133 @@ const saveDesaProfile = async (req, res) => {
   }
 };
 
+const TIKET_TIDAK_SAH = {
+  success: false,
+  code: 'TIKET_2FA_TIDAK_SAH',
+  message: 'Sesi verifikasi berakhir. Silakan login ulang.'
+};
+
+/** Langkah 2 login pegawai: tampilkan QR (rahasia yang belum aktif dipakai ulang). */
+const pasang2fa = async (req, res) => {
+  try {
+    const isi = duaLangkah.bacaTiket(req.body?.tiket_2fa);
+    if (!isi) return res.status(401).json(TIKET_TIDAK_SAH);
+
+    const user = await prisma.users.findUnique({
+      where: { id: BigInt(String(isi.id)) },
+      select: { id: true, email: true, role: true, is_active: true }
+    });
+    if (!user || user.is_active === false || !duaLangkah.wajib2fa(user.role)) {
+      return res.status(401).json(TIKET_TIDAK_SAH);
+    }
+
+    const hasil = await duaLangkah.mulaiPemasangan(user.id, user.email);
+    if (!hasil) {
+      return res.status(409).json({
+        success: false,
+        code: 'TFA_SUDAH_AKTIF',
+        message: '2FA akun ini sudah aktif. Masukkan kode dari aplikasi.'
+      });
+    }
+    return res.status(200).json({ success: true, data: hasil });
+  } catch (error) {
+    logger.error('pasang2fa error:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+/**
+ * Jalur bersama aktifkan2fa & verifikasi2fa: periksa tiket, jalankan `periksaKode`
+ * (hasil berisi `tambahan`, atau null bila kode salah), lalu terbitkan sesi ber-mfa.
+ */
+const lanjutkanDenganKode = async (req, res, periksaKode) => {
+  const isi = duaLangkah.bacaTiket(req.body?.tiket_2fa);
+  if (!isi) return res.status(401).json(TIKET_TIDAK_SAH);
+
+  // Jatah dipotong SEBELUM await, sinkron dengan bacaTiket: ratusan permintaan
+  // serentak dengan tiket yang sama tidak bisa semuanya lolos pemeriksaan batas.
+  const sisa = duaLangkah.catatGagal(isi);
+  const hasil = await periksaKode(isi.id, req.body?.kode);
+  if (!hasil) {
+    const target = await prisma.users.findUnique({
+      where: { id: BigInt(String(isi.id)) },
+      select: { email: true }
+    });
+    serverSecurity.onLoginFailed({
+      ip: req.ip,
+      email: target?.email || null,
+      userAgent: req.headers['user-agent'],
+      alasan: 'kode 2FA salah'
+    });
+    if (sisa === 0) {
+      return res.status(401).json({
+        ...TIKET_TIDAK_SAH,
+        message: 'Terlalu banyak kode salah. Silakan login ulang.'
+      });
+    }
+    return res.status(401).json({
+      success: false,
+      code: 'KODE_2FA_SALAH',
+      message: `Kode salah. Sisa percobaan ${sisa}.`
+    });
+  }
+
+  duaLangkah.habiskanTiket(isi);
+  const user = await prisma.users.findUnique({
+    where: { id: BigInt(String(isi.id)) },
+    select: PILIH_USER_LOGIN
+  });
+  if (!user) return res.status(401).json(TIKET_TIDAK_SAH);
+  if (user.is_active === false) {
+    return res.status(403).json({
+      success: false,
+      code: 'AKUN_NONAKTIF',
+      message: pesanAkunNonaktif(user.role)
+    });
+  }
+
+  const latitude = parseCoordinate(req.body.latitude, -90, 90);
+  const longitude = parseCoordinate(req.body.longitude, -180, 180);
+  return selesaikanLogin(req, res, user, {
+    latitude,
+    longitude,
+    mfa: true,
+    tambahan: hasil.tambahan
+  });
+};
+
+/** Langkah 3a: kode pertama dari aplikasi mengaktifkan 2FA. */
+const aktifkan2fa = async (req, res) => {
+  try {
+    return await lanjutkanDenganKode(req, res, async (id, kode) => {
+      return (await duaLangkah.aktifkan(id, kode)) ? { tambahan: {} } : null;
+    });
+  } catch (error) {
+    logger.error('aktifkan2fa error:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
+/** Langkah 3b: kode 6 digit untuk akun yang sudah memasang 2FA. */
+const verifikasi2fa = async (req, res) => {
+  try {
+    return await lanjutkanDenganKode(req, res, async (id, kode) => {
+      return (await duaLangkah.verifikasi(id, kode)) ? { tambahan: {} } : null;
+    });
+  } catch (error) {
+    logger.error('verifikasi2fa error:', error);
+    return res.status(500).json({ success: false, message: 'Internal server error' });
+  }
+};
+
 module.exports = {
   login,
   verifyToken,
   getProfile,
   forceChangePassword,
   saveDesaProfile,
-  renewToken
+  renewToken,
+  pasang2fa,
+  aktifkan2fa,
+  verifikasi2fa
 };
