@@ -1,4 +1,4 @@
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const { urutanNilai, urutNull } = require('../config/dialek');
 const path = require('path');
 const fs = require('fs');
@@ -45,16 +45,16 @@ class KecamatanBankeuTimConfigController {
         LEFT JOIN bankeu_verification_questionnaires q 
           ON q.tim_verifikasi_id = t.id 
           AND q.verifikasi_type = 'kecamatan_tim'
-          ${proposalId ? 'AND q.proposal_id = :proposalId' : ''}
-        WHERE t.kecamatan_id = :kecamatanId AND t.is_active = TRUE
+          ${proposalId ? 'AND q.proposal_id = ?' : ''}
+        WHERE t.kecamatan_id = ? AND t.is_active = TRUE
       `;
-      
-      const replacements = { kecamatanId };
+
+      // Urutan ? sesuai kemunculan: join proposal, kecamatan, lalu proposal lagi di WHERE.
+      const params = proposalId ? [proposalId, kecamatanId, proposalId] : [kecamatanId];
 
       if (proposalId) {
         // Get shared members (ketua, sekretaris) + proposal-specific members (anggota)
-        query += ` AND (t.proposal_id IS NULL OR t.proposal_id = :proposalId)`;
-        replacements.proposalId = proposalId;
+        query += ` AND (t.proposal_id IS NULL OR t.proposal_id = ?)`;
       } else {
         // Only get shared members (ketua, sekretaris)
         query += ` AND t.proposal_id IS NULL`;
@@ -63,10 +63,7 @@ class KecamatanBankeuTimConfigController {
       query += ` ORDER BY 
           ${urutanNilai('t.jabatan', ['ketua', 'sekretaris', 'anggota_1', 'anggota_2', 'anggota_3', 'anggota_4', 'anggota_5'])}`;
 
-      const timConfig = await sequelize.query(query, {
-        replacements,
-        type: sequelize.QueryTypes.SELECT
-      });
+      const timConfig = await kueri(query, params);
 
       // Convert has_questionnaire to boolean
       const result = timConfig.map(member => ({
@@ -97,18 +94,18 @@ class KecamatanBankeuTimConfigController {
       const { kecamatanId, posisi } = req.params;
       const { proposalId } = req.query;
 
-      let whereClause = 'kecamatan_id = :kecamatanId AND jabatan = :posisi';
-      const replacements = { kecamatanId, posisi };
+      let whereClause = 'kecamatan_id = ? AND jabatan = ?';
+      const whereParams = [kecamatanId, posisi];
 
       // For anggota, need proposal_id; for ketua/sekretaris, proposal_id is NULL
       if (posisi.startsWith('anggota_') && proposalId) {
-        whereClause += ' AND proposal_id = :proposalId';
-        replacements.proposalId = proposalId;
+        whereClause += ' AND proposal_id = ?';
+        whereParams.push(proposalId);
       } else if (!posisi.startsWith('anggota_')) {
         whereClause += ' AND proposal_id IS NULL';
       }
-      
-      const [config] = await sequelize.query(`
+
+      const [config] = await kueri(`
         SELECT 
           id,
           kecamatan_id,
@@ -124,10 +121,7 @@ class KecamatanBankeuTimConfigController {
         FROM tim_verifikasi_kecamatan
         WHERE ${whereClause}
         LIMIT 1
-      `, {
-        replacements,
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, whereParams);
 
       if (!config) {
         return res.json({
@@ -183,34 +177,29 @@ class KecamatanBankeuTimConfigController {
       const effectiveProposalId = isAnggota ? proposalId : null;
 
       // Check if exists
-      let whereClause = 'kecamatan_id = :kecamatanId AND jabatan = :posisi';
-      const replacements = { kecamatanId, posisi, nama, nip, jabatan };
+      let whereClause = 'kecamatan_id = ? AND jabatan = ?';
+      const whereParams = [kecamatanId, posisi];
 
       if (isAnggota) {
-        whereClause += ' AND proposal_id = :proposalId';
-        replacements.proposalId = proposalId;
+        whereClause += ' AND proposal_id = ?';
+        whereParams.push(proposalId);
       } else {
         whereClause += ' AND proposal_id IS NULL';
       }
 
-      const [existing] = await sequelize.query(`
-        SELECT id FROM tim_verifikasi_kecamatan 
+      const [existing] = await kueri(`
+        SELECT id FROM tim_verifikasi_kecamatan
         WHERE ${whereClause}
         LIMIT 1
-      `, {
-        replacements,
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, whereParams);
 
       if (existing) {
-        // Update
-        await sequelize.query(`
-          UPDATE tim_verifikasi_kecamatan 
-          SET nama = :nama, nip = :nip, jabatan_label = :jabatan, updated_at = CURRENT_TIMESTAMP
+        // Update (nip undefined tetap galat, seperti kode lama)
+        await jalankan(`
+          UPDATE tim_verifikasi_kecamatan
+          SET nama = ?, nip = ?, jabatan_label = ?, updated_at = CURRENT_TIMESTAMP
           WHERE ${whereClause}
-        `, {
-          replacements
-        });
+        `, [nama, nip, jabatan, ...whereParams]);
 
         res.json({
           success: true,
@@ -219,15 +208,6 @@ class KecamatanBankeuTimConfigController {
         });
       } else {
         // Insert
-        const insertReplacements = { 
-          kecamatanId, 
-          posisi, 
-          nama, 
-          nip, 
-          jabatan,
-          proposalId: effectiveProposalId
-        };
-
         // If sourceTtdPath provided, copy the TTD file for the new member
         let copiedTtdPath = null;
         if (sourceTtdPath) {
@@ -251,19 +231,16 @@ class KecamatanBankeuTimConfigController {
           }
         }
 
-        insertReplacements.ttdPath = copiedTtdPath;
-
-        const [result] = await sequelize.query(`
+        // Kode lama membaca result.insertId dari angka (selalu undefined di PG), jadi id tidak ikut di respons; perilaku itu dipertahankan.
+        await jalankan(`
           INSERT INTO tim_verifikasi_kecamatan (kecamatan_id, proposal_id, jabatan, nama, nip, jabatan_label, ttd_path, is_active)
-          VALUES (:kecamatanId, :proposalId, :posisi, :nama, :nip, :jabatan, :ttdPath, TRUE)
-        `, {
-          replacements: insertReplacements
-        });
+          VALUES (?, ?, ?, ?, ?, ?, ?, TRUE)
+        `, [kecamatanId, effectiveProposalId, posisi, nama, nip, jabatan, copiedTtdPath]);
 
         res.status(201).json({
           success: true,
           message: 'Konfigurasi anggota tim berhasil dibuat',
-          data: { id: result.insertId, kecamatan_id: kecamatanId, proposal_id: effectiveProposalId, posisi, nama, nip, jabatan, ttd_path: copiedTtdPath }
+          data: { kecamatan_id: kecamatanId, proposal_id: effectiveProposalId, posisi, nama, nip, jabatan, ttd_path: copiedTtdPath }
         });
       }
     } catch (error) {
@@ -295,25 +272,22 @@ class KecamatanBankeuTimConfigController {
       const isAnggota = posisi.startsWith('anggota_');
       
       // Build where clause
-      let whereClause = 'kecamatan_id = :kecamatanId AND jabatan = :posisi';
-      const replacements = { kecamatanId, posisi };
+      let whereClause = 'kecamatan_id = ? AND jabatan = ?';
+      const whereParams = [kecamatanId, posisi];
 
       if (isAnggota && proposalId) {
-        whereClause += ' AND proposal_id = :proposalId';
-        replacements.proposalId = proposalId;
+        whereClause += ' AND proposal_id = ?';
+        whereParams.push(proposalId);
       } else if (!isAnggota) {
         whereClause += ' AND proposal_id IS NULL';
       }
 
       // Ensure config exists
-      const [config] = await sequelize.query(`
+      const [config] = await kueri(`
         SELECT id, ttd_path FROM tim_verifikasi_kecamatan
         WHERE ${whereClause}
         LIMIT 1
-      `, {
-        replacements,
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, whereParams);
 
       if (!config) {
         return res.status(404).json({
@@ -345,13 +319,11 @@ class KecamatanBankeuTimConfigController {
       const ttdPath = `kecamatan_bankeu_ttd/${fileName}`;
 
       // Update config
-      await sequelize.query(`
-        UPDATE tim_verifikasi_kecamatan 
-        SET ttd_path = :ttdPath, updated_at = CURRENT_TIMESTAMP
+      await jalankan(`
+        UPDATE tim_verifikasi_kecamatan
+        SET ttd_path = ?, updated_at = CURRENT_TIMESTAMP
         WHERE ${whereClause}
-      `, {
-        replacements: { ...replacements, ttdPath }
-      });
+      `, [ttdPath, ...whereParams]);
 
       res.json({
         success: true,
@@ -379,24 +351,21 @@ class KecamatanBankeuTimConfigController {
 
       const isAnggota = posisi.startsWith('anggota_');
       
-      let whereClause = 'kecamatan_id = :kecamatanId AND jabatan = :posisi';
-      const replacements = { kecamatanId, posisi };
+      let whereClause = 'kecamatan_id = ? AND jabatan = ?';
+      const whereParams = [kecamatanId, posisi];
 
       if (isAnggota && proposalId) {
-        whereClause += ' AND proposal_id = :proposalId';
-        replacements.proposalId = proposalId;
+        whereClause += ' AND proposal_id = ?';
+        whereParams.push(proposalId);
       } else if (!isAnggota) {
         whereClause += ' AND proposal_id IS NULL';
       }
 
-      const [config] = await sequelize.query(`
+      const [config] = await kueri(`
         SELECT id, ttd_path FROM tim_verifikasi_kecamatan
         WHERE ${whereClause}
         LIMIT 1
-      `, {
-        replacements,
-        type: sequelize.QueryTypes.SELECT
-      });
+      `, whereParams);
 
       if (!config || !config.ttd_path) {
         return res.status(404).json({
@@ -412,13 +381,11 @@ class KecamatanBankeuTimConfigController {
       }
 
       // Update config
-      await sequelize.query(`
-        UPDATE tim_verifikasi_kecamatan 
+      await jalankan(`
+        UPDATE tim_verifikasi_kecamatan
         SET ttd_path = NULL, updated_at = CURRENT_TIMESTAMP
         WHERE ${whereClause}
-      `, {
-        replacements
-      });
+      `, whereParams);
 
       res.json({
         success: true,
@@ -456,26 +423,20 @@ class KecamatanBankeuTimConfigController {
       
       if (proposalId) {
         // First try to find with specific proposal_id
-        [config] = await sequelize.query(`
+        [config] = await kueri(`
           SELECT id, ttd_path FROM tim_verifikasi_kecamatan
-          WHERE kecamatan_id = :kecamatanId AND jabatan = :posisi AND proposal_id = :proposalId
+          WHERE kecamatan_id = ? AND jabatan = ? AND proposal_id = ?
           LIMIT 1
-        `, {
-          replacements: { kecamatanId, posisi, proposalId },
-          type: sequelize.QueryTypes.SELECT
-        });
+        `, [kecamatanId, posisi, proposalId]);
       }
       
       // If not found with proposal_id, try with NULL (legacy data)
       if (!config) {
-        [config] = await sequelize.query(`
+        [config] = await kueri(`
           SELECT id, ttd_path FROM tim_verifikasi_kecamatan
-          WHERE kecamatan_id = :kecamatanId AND jabatan = :posisi AND proposal_id IS NULL
+          WHERE kecamatan_id = ? AND jabatan = ? AND proposal_id IS NULL
           LIMIT 1
-        `, {
-          replacements: { kecamatanId, posisi },
-          type: sequelize.QueryTypes.SELECT
-        });
+        `, [kecamatanId, posisi]);
       }
 
       if (!config) {
@@ -494,12 +455,10 @@ class KecamatanBankeuTimConfigController {
       }
 
       // Delete record by ID (more precise)
-      await sequelize.query(`
+      await jalankan(`
         DELETE FROM tim_verifikasi_kecamatan
-        WHERE id = :id
-      `, {
-        replacements: { id: config.id }
-      });
+        WHERE id = ?
+      `, [config.id]);
 
       res.json({
         success: true,
@@ -527,7 +486,7 @@ class KecamatanBankeuTimConfigController {
       const query = `
         SELECT t.nama, t.nip, t.jabatan_label as jabatan, t.ttd_path
         FROM tim_verifikasi_kecamatan t
-        WHERE t.kecamatan_id = :kecamatanId
+        WHERE t.kecamatan_id = ?
           AND t.jabatan LIKE 'anggota_%'
           AND t.is_active = TRUE
           AND t.nama IS NOT NULL
@@ -535,10 +494,7 @@ class KecamatanBankeuTimConfigController {
         ORDER BY ${urutNull('t.ttd_path', 'DESC')}, t.nama ASC
       `;
 
-      const results = await sequelize.query(query, {
-        replacements: { kecamatanId },
-        type: sequelize.QueryTypes.SELECT
-      });
+      const results = await kueri(query, [kecamatanId]);
 
       // Deduplicate by nama (case-insensitive), prefer one with ttd_path
       const seen = new Set();

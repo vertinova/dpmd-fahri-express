@@ -3,7 +3,7 @@
  * Idempotent: cek dulu apakah data sudah ada sebelum insert
  * Dipanggil saat server startup
  */
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const { skemaIni } = require('../config/dialek');
 const logger = require('./logger');
 
@@ -37,7 +37,7 @@ const KEGIATAN_DATA = [
 async function seedBankeuPerubahanMasterKegiatan() {
   try {
     // Cek apakah tabel sudah ada
-    const [tableExists] = await sequelize.query(`
+    const tableExists = await kueri(`
       SELECT COUNT(*) AS cnt FROM information_schema.tables
       WHERE table_schema = ${skemaIni()} AND table_name = 'bankeu_perubahan_master_kegiatan'
     `);
@@ -50,7 +50,7 @@ async function seedBankeuPerubahanMasterKegiatan() {
     // ke non-infrastruktur. Jalankan tiap startup agar DB yang sudah ter-seed
     // sebelumnya (mis. di server) ikut terkoreksi, karena db push hanya
     // menyinkronkan skema, bukan data.
-    await sequelize.query(`
+    await jalankan(`
       UPDATE bankeu_perubahan_master_kegiatan
       SET kategori = 'pilihan_non_infrastruktur', urutan = 8
       WHERE nama_kegiatan = 'Sarana dan Prasarana Keagamaan'
@@ -59,12 +59,12 @@ async function seedBankeuPerubahanMasterKegiatan() {
 
     // Self-heal: rename "Pembangunan/Rehab Kantor Desa" -> versi lengkap.
     // Sekaligus sinkronkan nama terdenormalisasi pada proposal yang sudah ada.
-    await sequelize.query(`
+    await jalankan(`
       UPDATE bankeu_perubahan_master_kegiatan
       SET nama_kegiatan = 'Pembangunan/Rehabilitasi/Rekonstruksi Kantor Desa'
       WHERE nama_kegiatan = 'Pembangunan/Rehab Kantor Desa'
     `);
-    await sequelize.query(`
+    await jalankan(`
       UPDATE bankeu_perubahan_proposals
       SET kegiatan_nama = 'Pembangunan/Rehabilitasi/Rekonstruksi Kantor Desa'
       WHERE kegiatan_nama = 'Pembangunan/Rehab Kantor Desa'
@@ -79,20 +79,20 @@ async function seedBankeuPerubahanMasterKegiatan() {
       ['Sarana Prasarana Air Bersih', 'Pembangunan/Rehabilitasi Sarana dan Prasarana Air Bersih Berskala Desa'],
     ];
     for (const [oldName, newName] of RENAMES) {
-      await sequelize.query(`
+      await jalankan(`
         UPDATE bankeu_perubahan_master_kegiatan
         SET nama_kegiatan = ?
         WHERE nama_kegiatan = ?
-      `, { replacements: [newName, oldName] });
-      await sequelize.query(`
+      `, [newName, oldName]);
+      await jalankan(`
         UPDATE bankeu_perubahan_proposals
         SET kegiatan_nama = ?
         WHERE kegiatan_nama = ?
-      `, { replacements: [newName, oldName] });
+      `, [newName, oldName]);
     }
 
     // Cek apakah sudah ada data
-    const [existing] = await sequelize.query(`
+    const existing = await kueri(`
       SELECT COUNT(*) AS cnt FROM bankeu_perubahan_master_kegiatan
     `);
     if (Number(existing[0].cnt) >= KEGIATAN_DATA.length) {
@@ -102,17 +102,17 @@ async function seedBankeuPerubahanMasterKegiatan() {
     // Insert kegiatan yang belum ada (idempotent per nama_kegiatan + kategori)
     let inserted = 0;
     for (const item of KEGIATAN_DATA) {
-      const [check] = await sequelize.query(`
+      const check = await kueri(`
         SELECT id FROM bankeu_perubahan_master_kegiatan
         WHERE kategori = ? AND nama_kegiatan = ?
         LIMIT 1
-      `, { replacements: [item.kategori, item.nama_kegiatan] });
+      `, [item.kategori, item.nama_kegiatan]);
 
       if (check.length === 0) {
-        await sequelize.query(`
+        await jalankan(`
           INSERT INTO bankeu_perubahan_master_kegiatan (kategori, urutan, nama_kegiatan, is_active)
           VALUES (?, ?, ?, TRUE)
-        `, { replacements: [item.kategori, item.urutan, item.nama_kegiatan] });
+        `, [item.kategori, item.urutan, item.nama_kegiatan]);
         inserted++;
       }
     }

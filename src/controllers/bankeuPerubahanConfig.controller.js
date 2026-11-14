@@ -1,4 +1,4 @@
-const sequelize = require('../config/database');
+const { kueri, jalankan } = require('../config/sqlMentah');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
 const path = require('path');
@@ -23,14 +23,14 @@ class BankeuPerubahanConfigController {
       const userId = req.user.id;
 
       // Validate user-kecamatan match
-      const [users] = await sequelize.query(`SELECT kecamatan_id FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT kecamatan_id FROM users WHERE id = ?`, [userId]);
       if (Number(users[0]?.kecamatan_id) !== Number(kecamatanId)) {
         return res.status(403).json({ success: false, message: 'Akses ditolak' });
       }
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT * FROM kecamatan_bankeu_perubahan_config WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       res.json({ success: true, data: rows[0] || null });
     } catch (error) {
@@ -49,7 +49,7 @@ class BankeuPerubahanConfigController {
       const userId = req.user.id;
       const { nama_camat, nip_camat, jabatan_penandatangan, alamat, telepon, email, website, kode_pos } = req.body;
 
-      const [users] = await sequelize.query(`SELECT kecamatan_id FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT kecamatan_id FROM users WHERE id = ?`, [userId]);
       if (Number(users[0]?.kecamatan_id) !== Number(kecamatanId)) {
         return res.status(403).json({ success: false, message: 'Akses ditolak' });
       }
@@ -58,34 +58,30 @@ class BankeuPerubahanConfigController {
         return res.status(400).json({ success: false, message: 'Nama camat wajib diisi' });
       }
 
-      const [existing] = await sequelize.query(`
+      const existing = await kueri(`
         SELECT id FROM kecamatan_bankeu_perubahan_config WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       if (existing.length > 0) {
-        await sequelize.query(`
+        await jalankan(`
           UPDATE kecamatan_bankeu_perubahan_config
           SET nama_camat = ?, nip_camat = ?, jabatan_penandatangan = ?,
               alamat = ?, telepon = ?, email = ?, website = ?, kode_pos = ?, updated_at = NOW()
           WHERE kecamatan_id = ?
-        `, {
-          replacements: [
+        `, [
             nama_camat, nip_camat || null, jabatan_penandatangan || 'Camat',
             alamat || null, telepon || null, email || null, website || null, kode_pos || null,
             kecamatanId
-          ]
-        });
+          ]);
       } else {
-        await sequelize.query(`
+        await jalankan(`
           INSERT INTO kecamatan_bankeu_perubahan_config
             (kecamatan_id, nama_camat, nip_camat, jabatan_penandatangan, alamat, telepon, email, website, kode_pos)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `, {
-          replacements: [
+        `, [
             kecamatanId, nama_camat, nip_camat || null, jabatan_penandatangan || 'Camat',
             alamat || null, telepon || null, email || null, website || null, kode_pos || null
-          ]
-        });
+          ]);
       }
 
       ActivityLogger.log({
@@ -119,32 +115,32 @@ class BankeuPerubahanConfigController {
 
       if (!req.file) return res.status(400).json({ success: false, message: 'File wajib diupload' });
 
-      const [users] = await sequelize.query(`SELECT kecamatan_id FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT kecamatan_id FROM users WHERE id = ?`, [userId]);
       if (Number(users[0]?.kecamatan_id) !== Number(kecamatanId)) {
         cleanupFile(req);
         return res.status(403).json({ success: false, message: 'Akses ditolak' });
       }
 
       // Get old file
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT ${fieldName} FROM kecamatan_bankeu_perubahan_config WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       const oldFile = rows[0]?.[fieldName];
       const newFilename = req.file.filename;
 
       // Insert if not exists
       if (rows.length === 0) {
-        await sequelize.query(`
+        await jalankan(`
           INSERT INTO kecamatan_bankeu_perubahan_config (kecamatan_id, nama_camat, ${fieldName})
           VALUES (?, 'Camat', ?)
-        `, { replacements: [kecamatanId, newFilename] });
+        `, [kecamatanId, newFilename]);
       } else {
-        await sequelize.query(`
+        await jalankan(`
           UPDATE kecamatan_bankeu_perubahan_config
           SET ${fieldName} = ?, updated_at = NOW()
           WHERE kecamatan_id = ?
-        `, { replacements: [newFilename, kecamatanId] });
+        `, [newFilename, kecamatanId]);
       }
 
       // Delete old file
@@ -187,14 +183,14 @@ class BankeuPerubahanConfigController {
       const { kecamatanId } = req.params;
       const userId = req.user.id;
 
-      const [users] = await sequelize.query(`SELECT kecamatan_id FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT kecamatan_id FROM users WHERE id = ?`, [userId]);
       if (Number(users[0]?.kecamatan_id) !== Number(kecamatanId)) {
         return res.status(403).json({ success: false, message: 'Akses ditolak' });
       }
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT ${fieldName} FROM kecamatan_bankeu_perubahan_config WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       const file = rows[0]?.[fieldName];
       if (file) {
@@ -202,11 +198,11 @@ class BankeuPerubahanConfigController {
         if (fs.existsSync(filePath)) { try { fs.unlinkSync(filePath); } catch (e) {} }
       }
 
-      await sequelize.query(`
+      await jalankan(`
         UPDATE kecamatan_bankeu_perubahan_config
         SET ${fieldName} = NULL, updated_at = NOW()
         WHERE kecamatan_id = ?
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       res.json({ success: true, message: `${label} berhasil dihapus` });
     } catch (error) {
@@ -228,16 +224,13 @@ class BankeuPerubahanConfigController {
     try {
       const { kecamatanId } = req.params;
       const userId = req.user.id;
-      const [users] = await sequelize.query(`SELECT kecamatan_id FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT kecamatan_id FROM users WHERE id = ?`, [userId]);
       if (Number(users[0]?.kecamatan_id) !== Number(kecamatanId)) {
         return res.status(403).json({ success: false, message: 'Akses ditolak' });
       }
 
-      const [regRows] = await sequelize.query(
-        `SELECT nama_camat, nip_camat, jabatan_penandatangan, alamat, telepon, email, website, kode_pos, ttd_camat_path, stempel_path
-         FROM kecamatan_bankeu_config WHERE kecamatan_id = ? LIMIT 1`,
-        { replacements: [kecamatanId] }
-      );
+      const regRows = await kueri(`SELECT nama_camat, nip_camat, jabatan_penandatangan, alamat, telepon, email, website, kode_pos, ttd_camat_path, stempel_path
+         FROM kecamatan_bankeu_config WHERE kecamatan_id = ? LIMIT 1`, [kecamatanId]);
       if (!regRows.length) {
         return res.status(404).json({ success: false, message: 'Konfigurasi Bankeu reguler belum dibuat untuk kecamatan ini' });
       }
@@ -264,10 +257,7 @@ class BankeuPerubahanConfigController {
       const newTtd = copyFile(reg.ttd_camat_path, 'ttd');
       const newStempel = copyFile(reg.stempel_path, 'stempel');
 
-      const [existing] = await sequelize.query(
-        `SELECT id, ttd_camat_path, stempel_path FROM kecamatan_bankeu_perubahan_config WHERE kecamatan_id = ? LIMIT 1`,
-        { replacements: [kecamatanId] }
-      );
+      const existing = await kueri(`SELECT id, ttd_camat_path, stempel_path FROM kecamatan_bankeu_perubahan_config WHERE kecamatan_id = ? LIMIT 1`, [kecamatanId]);
 
       const ttdFinal = newTtd || existing[0]?.ttd_camat_path || null;
       const stempelFinal = newStempel || existing[0]?.stempel_path || null;
@@ -278,20 +268,14 @@ class BankeuPerubahanConfigController {
       ];
 
       if (existing.length) {
-        await sequelize.query(
-          `UPDATE kecamatan_bankeu_perubahan_config
+        await jalankan(`UPDATE kecamatan_bankeu_perubahan_config
            SET nama_camat = ?, nip_camat = ?, jabatan_penandatangan = ?, alamat = ?, telepon = ?,
                email = ?, website = ?, kode_pos = ?, ttd_camat_path = ?, stempel_path = ?, updated_at = NOW()
-           WHERE kecamatan_id = ?`,
-          { replacements: [...fields, kecamatanId] }
-        );
+           WHERE kecamatan_id = ?`, [...fields, kecamatanId]);
       } else {
-        await sequelize.query(
-          `INSERT INTO kecamatan_bankeu_perubahan_config
+        await jalankan(`INSERT INTO kecamatan_bankeu_perubahan_config
              (kecamatan_id, nama_camat, nip_camat, jabatan_penandatangan, alamat, telepon, email, website, kode_pos, ttd_camat_path, stempel_path)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-          { replacements: [kecamatanId, ...fields] }
-        );
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, [kecamatanId, ...fields]);
       }
 
       ActivityLogger.log({
@@ -326,16 +310,16 @@ class BankeuPerubahanConfigController {
       const { kecamatanId } = req.params;
       const userId = req.user.id;
 
-      const [users] = await sequelize.query(`SELECT kecamatan_id FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT kecamatan_id FROM users WHERE id = ?`, [userId]);
       if (Number(users[0]?.kecamatan_id) !== Number(kecamatanId)) {
         return res.status(403).json({ success: false, message: 'Akses ditolak' });
       }
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT * FROM tim_verifikasi_bankeu_perubahan
         WHERE kecamatan_id = ? AND is_active = TRUE
         ORDER BY created_at DESC
-      `, { replacements: [kecamatanId] });
+      `, [kecamatanId]);
 
       res.json({ success: true, data: rows });
     } catch (error) {
@@ -354,7 +338,7 @@ class BankeuPerubahanConfigController {
       const userId = req.user.id;
       const { jabatan, jabatan_label, nama, nip, proposal_id } = req.body;
 
-      const [users] = await sequelize.query(`SELECT kecamatan_id FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT kecamatan_id FROM users WHERE id = ?`, [userId]);
       if (Number(users[0]?.kecamatan_id) !== Number(kecamatanId)) {
         return res.status(403).json({ success: false, message: 'Akses ditolak' });
       }
@@ -363,11 +347,12 @@ class BankeuPerubahanConfigController {
         return res.status(400).json({ success: false, message: 'Jabatan dan nama wajib diisi' });
       }
 
-      const [insertResult] = await sequelize.query(`
+      const [{ id: insertResult }] = await kueri(`
         INSERT INTO tim_verifikasi_bankeu_perubahan
           (kecamatan_id, proposal_id, jabatan, jabatan_label, nama, nip, is_active)
         VALUES (?, ?, ?, ?, ?, ?, TRUE)
-      `, { replacements: [kecamatanId, proposal_id || null, jabatan, jabatan_label || null, nama, nip || null] });
+        RETURNING id
+      `, [kecamatanId, proposal_id || null, jabatan, jabatan_label || null, nama, nip || null]);
 
       const insertId = insertResult?.insertId || insertResult;
 
@@ -402,21 +387,21 @@ class BankeuPerubahanConfigController {
       const { id } = req.params;
       const userId = req.user.id;
 
-      const [users] = await sequelize.query(`SELECT kecamatan_id FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT kecamatan_id FROM users WHERE id = ?`, [userId]);
       if (!users[0]?.kecamatan_id) return res.status(403).json({ success: false, message: 'Akses ditolak' });
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT kecamatan_id, nama FROM tim_verifikasi_bankeu_perubahan WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       if (!rows.length) return res.status(404).json({ success: false, message: 'Tim tidak ditemukan' });
       if (Number(rows[0].kecamatan_id) !== Number(users[0].kecamatan_id)) {
         return res.status(403).json({ success: false, message: 'Akses ditolak' });
       }
 
-      await sequelize.query(`
+      await jalankan(`
         UPDATE tim_verifikasi_bankeu_perubahan SET is_active = FALSE, updated_at = NOW() WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       res.json({ success: true, message: 'Anggota tim dihapus' });
     } catch (error) {
@@ -436,15 +421,15 @@ class BankeuPerubahanConfigController {
 
       if (!req.file) return res.status(400).json({ success: false, message: 'File wajib diupload' });
 
-      const [users] = await sequelize.query(`SELECT kecamatan_id FROM users WHERE id = ?`, { replacements: [userId] });
+      const users = await kueri(`SELECT kecamatan_id FROM users WHERE id = ?`, [userId]);
       if (!users[0]?.kecamatan_id) {
         cleanupFile(req);
         return res.status(403).json({ success: false, message: 'Akses ditolak' });
       }
 
-      const [rows] = await sequelize.query(`
+      const rows = await kueri(`
         SELECT kecamatan_id, ttd_path FROM tim_verifikasi_bankeu_perubahan WHERE id = ?
-      `, { replacements: [id] });
+      `, [id]);
 
       if (!rows.length) {
         cleanupFile(req);
@@ -461,9 +446,9 @@ class BankeuPerubahanConfigController {
         if (fs.existsSync(oldPath)) { try { fs.unlinkSync(oldPath); } catch (e) {} }
       }
 
-      await sequelize.query(`
+      await jalankan(`
         UPDATE tim_verifikasi_bankeu_perubahan SET ttd_path = ?, updated_at = NOW() WHERE id = ?
-      `, { replacements: [req.file.filename, id] });
+      `, [req.file.filename, id]);
 
       res.json({ success: true, message: 'TTD berhasil diupload', data: { ttd_path: req.file.filename } });
     } catch (error) {
