@@ -168,13 +168,13 @@ class BankeuPerubahanPublicController {
         }
         programAgg[key].total_anggaran += p.anggaran;
         programAgg[key].jumlah_proposal += 1;
-        if (p.desa && p.desa !== 'Lainnya') programAgg[key].desa_set.add(p.desa);
+        if (p.desa && p.desa !== 'Lainnya') programAgg[key].desa_set.add(`${p.kecamatan}|${p.desa}`);
       });
       const programs = Object.values(programAgg)
         .map(it => ({ nama_program: it.nama_program, dinas_terkait: it.dinas_terkait, total_anggaran: it.total_anggaran, jumlah_proposal: it.jumlah_proposal, jumlah_desa: it.desa_set.size }))
         .sort((a, b) => b.total_anggaran - a.total_anggaran);
       const totalAnggaranFinal = programs.reduce((s, p) => s + p.total_anggaran, 0);
-      const totalDesaFinal = new Set(publicProposals.filter(p => p.stage === 'selesai' && p.desa && p.desa !== 'Lainnya').map(p => p.desa)).size;
+      const totalDesaFinal = new Set(publicProposals.filter(p => p.stage === 'selesai' && p.desa && p.desa !== 'Lainnya').map(p => `${p.kecamatan}|${p.desa}`)).size;
       const totalProposalFinal = publicProposals.filter(p => p.stage === 'selesai').length;
 
       const partisipasiSummary = {

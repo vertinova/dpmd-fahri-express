@@ -219,7 +219,7 @@ class BankeuPublicController {
         programAgg[compositeKey].total_anggaran += (p.anggaran || 0);
         programAgg[compositeKey].jumlah_proposal += 1;
         if (p.desa && p.desa !== 'Lainnya') {
-          programAgg[compositeKey].desa_set.add(p.desa);
+          programAgg[compositeKey].desa_set.add(`${p.kecamatan}|${p.desa}`);
         }
       });
 
@@ -235,7 +235,7 @@ class BankeuPublicController {
 
       const totalAnggaranFinal = anggaranPerProgram.reduce((s, p) => s + p.total_anggaran, 0);
       const totalDesaFinal = new Set(
-        publicProposals.filter(p => p.stage === 'selesai' && p.desa && p.desa !== 'Lainnya').map(p => p.desa)
+        publicProposals.filter(p => p.stage === 'selesai' && p.desa && p.desa !== 'Lainnya').map(p => `${p.kecamatan}|${p.desa}`)
       ).size;
       const totalProposalFinal = publicProposals.filter(p => p.stage === 'selesai').length;
 
