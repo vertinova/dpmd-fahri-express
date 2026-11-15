@@ -4,7 +4,8 @@
  * Aturan:
  * - role `admin_desa` : pengelola akun saja, ditolak di semua fitur operasional
  *   (kecuali route yang lewat opsi `allowAdminDesa`).
- * - role `desa`       : harus punya permission_key yang diminta.
+ * - role `desa`       : harus punya permission_key yang diminta. Opsi `bacaJuga` meloloskan
+ *   permintaan baca bagi pemegang izin modul lain yang datanya bergantung ke sini.
  * - role lain         : diteruskan, kewenangannya diatur `checkRole` masing-masing route.
  */
 
@@ -39,7 +40,7 @@ const invalidateDesaPermissions = (userId) => {
 };
 
 const requireDesaPermission = (permissionKey, options = {}) => {
-  const { allowAdminDesa = false } = options;
+  const { allowAdminDesa = false, bacaJuga = [] } = options;
 
   return async (req, res, next) => {
     if (!req.user) {
@@ -65,6 +66,9 @@ const requireDesaPermission = (permissionKey, options = {}) => {
     try {
       const keys = await getDesaPermissions(req.user.id);
       if (keys.includes(permissionKey)) {
+        return next();
+      }
+      if (req.method === 'GET' && bacaJuga.some((k) => keys.includes(k))) {
         return next();
       }
 

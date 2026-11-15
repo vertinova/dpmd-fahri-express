@@ -13,7 +13,9 @@ const desaContextMiddleware = require('../middlewares/desaContext.middleware');
 const prisma = require('../config/prisma');
 
 // Akun desa hanya boleh masuk bila diberi hak akses "produk-hukum" oleh Admin Desa.
-router.use(auth, requireDesaPermission('produk-hukum'));
+// Kelembagaan & Aparatur boleh membaca saja: SK wajib dipilih saat membentuk lembaga dan
+// pengurus, jadi tanpa ini operatornya tidak bisa bekerja walau modulnya sendiri diizinkan.
+router.use(auth, requireDesaPermission('produk-hukum', { bacaJuga: ['kelembagaan', 'aparatur-desa'] }));
 
 // Kecamatan hanya membaca, dan hanya produk hukum desa di wilayahnya.
 const isKecamatan = (req) => String(req.user?.role || '').trim().toLowerCase() === 'kecamatan';
