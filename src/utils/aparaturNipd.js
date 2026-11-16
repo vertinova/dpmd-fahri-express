@@ -89,6 +89,16 @@ const kodeJabatan = (jabatan) => {
 	return { kode: null, berhak: false };
 };
 
+/**
+ * Alasan jabatan ber-NIPD yang kodenya belum bisa dibentuk (Kadus tanpa nomor,
+ * jabatan gabungan), atau null. Data seperti ini harus dibetulkan desa dulu
+ * sebelum bisa dikirim ke dan diverifikasi DPMD.
+ */
+const kendalaJabatan = (jabatan) => {
+	const jab = kodeJabatan(jabatan);
+	return jab.berhak && !jab.kode ? jab.alasan : null;
+};
+
 /** Pecah kode wilayah "32.01.40.2007" → { kec: '40', desa: '2007' }. */
 const kodeWilayah = (kodeDesa) => {
 	const bagian = String(kodeDesa || '').split('.');
@@ -232,6 +242,7 @@ module.exports = {
 	ITEM_VERIFIKASI,
 	KUNCI_ITEM,
 	kodeJabatan,
+	kendalaJabatan,
 	kodeWilayah,
 	buatNipd,
 	itemBerlaku,

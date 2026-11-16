@@ -5,7 +5,7 @@ const fs = require('fs').promises;
 const { keAparaturDesa, bandingkanDenganAparatur, cariPenghalangArsip } = require('../config/dapurDesa');
 const { AKSI, catatLogAparatur } = require('../utils/aparaturLog');
 const { Prisma } = require('@prisma/client');
-const { buatNipd, itemBerubah, verifikasiSetelahUbah } = require('../utils/aparaturNipd');
+const { buatNipd, itemBerubah, verifikasiSetelahUbah, kendalaJabatan } = require('../utils/aparaturNipd');
 const { periksaKolomSpam, alasanSpam } = require('../utils/teksSpam');
 const { periksaIdentitas, hanyaMelengkapiIdentitas } = require('../utils/aparaturIdentitas');
 
@@ -64,6 +64,17 @@ const tolakBilaIdentitasSalah = async (req, res, data, { desaId, olehBidang, lam
 	data.nik = hasil.nik;
 	data.whatsapp = hasil.whatsapp;
 	return false;
+};
+
+/**
+ * Jabatan ber-NIPD harus bisa dikodekan (Kadus bernomor, satu urusan) sebelum
+ * data masuk ke DPMD. Baris yang dinonaktifkan dikecualikan supaya data lama
+ * tetap bisa ditutup. Mengembalikan true bila permintaan sudah dijawab.
+ */
+const tolakBilaJabatanTakBerkode = async (req, res, data, lama = null) => {
+	if ((data.status || lama?.status || 'Aktif') === 'Tidak_Aktif') return false;
+	const kendala = kendalaJabatan('jabatan' in data ? data.jabatan : lama?.jabatan);
+	return kendala ? tolakKiriman(req, res, 400, `Jabatan belum lengkap: ${kendala}. Pilih jabatan dari daftar lalu simpan lagi.`) : false;
 };
 
 // Dipakai saat arsip Dapur Desa menimpa baris: seluruh keputusan verifikasi
@@ -277,6 +288,7 @@ const createAparaturDesa = async (req, res) => {
 			data.status = data.status.replace(/ /g, '_');
 		}
 
+		if (await tolakBilaJabatanTakBerkode(req, res, data)) return;
 		if (await tolakBilaIdentitasSalah(req, res, data, { desaId: desa_id, olehBidang })) return;
 
 		// Handle file uploads (multer stores files in req.files as arrays)
@@ -441,6 +453,7 @@ const updateAparaturDesa = async (req, res) => {
 			data.status = data.status.replace(/ /g, '_');
 		}
 
+		if (await tolakBilaJabatanTakBerkode(req, res, data, existing)) return;
 		if (await tolakBilaIdentitasSalah(req, res, data, { desaId: desa_id, olehBidang, lama: existing })) return;
 
 		const adaBerkasBaru = Object.keys(req.files || {}).length > 0;

@@ -14,7 +14,7 @@
  * tanpa mengubah tabel ini akan membuat uji gagal.
  */
 
-const { kodeJabatan, kodeWilayah, buatNipd, ringkasVerifikasi, catatanUntukDesa, itemBerubah, verifikasiSetelahUbah } = require('../aparaturNipd');
+const { kodeJabatan, kendalaJabatan, kodeWilayah, buatNipd, ringkasVerifikasi, catatanUntukDesa, itemBerubah, verifikasiSetelahUbah } = require('../aparaturNipd');
 
 const DESA = '32.01.40.2007'; // Kec 40, Desa 2007
 
@@ -70,6 +70,15 @@ describe('kode jabatan sesuai ketetapan', () => {
 		expect(hasil.berhak).toBe(true);
 		expect(hasil.kode).toBeNull();
 		expect(hasil.alasan).toMatch(/nomor dusun/i);
+	});
+
+	it('kendalaJabatan: hanya jabatan ber-NIPD yang kodenya tak terbentuk', () => {
+		expect(kendalaJabatan('Kepala Dusun')).toMatch(/nomor dusun/i);
+		expect(kendalaJabatan('KADUS')).toMatch(/nomor dusun/i);
+		expect(kendalaJabatan('Kaur Umum dan Perencanaan')).toMatch(/gabungan/i);
+		for (const j of ['Kadus I', 'Kepala Dusun 2', 'Sekretaris Desa', 'Kepala Desa', 'Staf Desa', 'Anggota BPD']) {
+			expect(kendalaJabatan(j)).toBeNull();
+		}
 	});
 });
 

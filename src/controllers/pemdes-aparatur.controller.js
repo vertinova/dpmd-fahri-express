@@ -10,6 +10,7 @@ const {
 	ringkasVerifikasi,
 	catatanUntukDesa,
 	kodeJabatan,
+	kendalaJabatan,
 	kodeWilayah,
 } = require('../utils/aparaturNipd');
 const { periksaKolomSpam } = require('../utils/teksSpam');
@@ -759,6 +760,9 @@ const updateAparaturDesa = async (req, res) => {
 			});
 		}
 
+		const kendala = 'jabatan' in data ? kendalaJabatan(data.jabatan) : null;
+		if (kendala) return res.status(400).json({ success: false, message: `Jabatan belum lengkap: ${kendala}.` });
+
 		if (Object.keys(data).length === 0) {
 			return res.status(400).json({ success: false, message: 'Tidak ada perubahan yang dikirim' });
 		}
@@ -902,6 +906,16 @@ const verifikasiAparaturDesa = async (req, res) => {
 			return res.status(400).json({
 				success: false,
 				message: `Biodata belum bisa dinyatakan sesuai: ${kurang.join(' dan ')} belum diisi. Lengkapi datanya atau kembalikan ke desa.`,
+			});
+		}
+
+		// Jabatan yang kodenya belum bisa dibentuk (Kadus tanpa nomor, jabatan
+		// gabungan) harus dibetulkan desa dulu; tanpa itu NIPD tidak bisa terbit.
+		const kendala = kendalaJabatan(aparatur.jabatan);
+		if (kendala && (kiriman.jabatan_sk?.status === 'sesuai' || ringkas === 'terverifikasi')) {
+			return res.status(400).json({
+				success: false,
+				message: `Jabatan belum bisa dinyatakan sesuai: ${kendala}. Kembalikan ke desa untuk dibetulkan.`,
 			});
 		}
 
