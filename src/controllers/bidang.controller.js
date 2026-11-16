@@ -177,6 +177,7 @@ class BidangController {
             total_desa: await prisma.desas.count({ where: { status_pemerintahan: 'desa' } }),
             total_aparatur: await prisma.aparatur_desa.count({ where: { status: 'Aktif' } }),
             total_perangkat: await prisma.aparatur_desa.count({ where: { ...filterJenis('perangkat'), status: 'Aktif' } }),
+            total_staf: await prisma.aparatur_desa.count({ where: { ...filterJenis('staf'), status: 'Aktif' } }),
             total_bpd: await prisma.aparatur_desa.count({ where: { ...filterJenis('bpd'), status: 'Aktif' } }),
             total_produk_hukum: await prisma.produk_hukums.count(),
             produk_hukum_berlaku: await prisma.produk_hukums.count({

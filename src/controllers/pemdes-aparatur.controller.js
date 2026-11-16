@@ -20,17 +20,24 @@ const { identitasKurang } = require('../utils/aparaturIdentitas');
 // satu-satunya penanda ada di teks jabatan. Aturannya ditulis sekali di sini
 // supaya daftar dan statistik tidak pernah memakai definisi yang berbeda.
 const KATA_BPD = ['bpd', 'badan permusyawaratan'];
+// Staf desa ("Staf Desa", "Staf Seksi …", "STAFF") bukan perangkat desa: tidak ber-NIPD, didaftar terpisah.
+const KATA_STAF = ['staf'];
+const JENIS_APARATUR = ['perangkat', 'staf', 'bpd'];
 
 /** Jenis satu baris, dari aturan yang sama dengan penyaring di bawah. */
 const jenisAparatur = (jabatan = '') => {
 	const teks = String(jabatan).toLowerCase();
-	return KATA_BPD.some((kata) => teks.includes(kata)) ? 'bpd' : 'perangkat';
+	if (KATA_BPD.some((kata) => teks.includes(kata))) return 'bpd';
+	return KATA_STAF.some((kata) => teks.includes(kata)) ? 'staf' : 'perangkat';
 };
 
-/** `jenis`: 'bpd' | 'perangkat'. Nilai lain (atau kosong) = tanpa penyaringan. */
+/** `jenis`: 'perangkat' | 'staf' | 'bpd'. Nilai lain (atau kosong) = tanpa penyaringan. */
 const filterJenis = (jenis) => {
-	if (jenis === 'bpd') return { OR: KATA_BPD.map((kata) => ({ jabatan: { contains: kata } })) };
-	if (jenis === 'perangkat') return { AND: KATA_BPD.map((kata) => ({ jabatan: { not: { contains: kata } } })) };
+	const ada = (kata) => ({ jabatan: { contains: kata } });
+	const tanpa = (kata) => ({ jabatan: { not: { contains: kata } } });
+	if (jenis === 'bpd') return { OR: KATA_BPD.map(ada) };
+	if (jenis === 'staf') return { AND: [{ OR: KATA_STAF.map(ada) }, ...KATA_BPD.map(tanpa)] };
+	if (jenis === 'perangkat') return { AND: [...KATA_BPD, ...KATA_STAF].map(tanpa) };
 	return null;
 };
 
@@ -446,7 +453,7 @@ const USIA_LANJUT = 60;
 
 const getNotifikasi = async (req, res) => {
 	try {
-		const jenis = ['bpd', 'perangkat'].includes(req.query.jenis) ? req.query.jenis : null;
+		const jenis = JENIS_APARATUR.includes(req.query.jenis) ? req.query.jenis : null;
 		const dasar = { ...bangunWhere({ jenis }), status: 'Aktif' };
 
 		const batasLahir = new Date();
@@ -468,7 +475,8 @@ const getNotifikasi = async (req, res) => {
 			...dasar,
 			AND: [
 				...(dasar.AND || []),
-				filterJenis('perangkat'),
+				// Staf desa tetap ikut diperiksa seperti sebelum dipisah dari perangkat.
+				{ NOT: filterJenis('bpd') },
 				...['kepala desa', 'kades'].map((kata) => ({ jabatan: { not: { contains: kata } } })),
 			],
 			tanggal_lahir: { lt: batasLahir },
@@ -518,7 +526,7 @@ const getNotifikasi = async (req, res) => {
 const getRiwayatTerbaru = async (req, res) => {
 	try {
 		const batas = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
-		const jenis = ['bpd', 'perangkat'].includes(req.query.jenis) ? req.query.jenis : null;
+		const jenis = JENIS_APARATUR.includes(req.query.jenis) ? req.query.jenis : null;
 
 		// Halaman berikutnya ditunjuk id log terakhir yang sudah dikirim, bukan
 		// offset: dengan begitu server tidak perlu melompati baris yang sudah
@@ -1206,17 +1214,11 @@ const getStats = async (req, res) => {
 			value: g._count._all,
 		}));
 
-		// Jabatan categorization: Pemdes vs BPD
-		let totalPemdes = 0;
-		let totalBPD = 0;
+		// Jabatan per jenis: perangkat desa, staf desa, BPD (aturan jenisAparatur)
+		const totalJenis = { perangkat: 0, staf: 0, bpd: 0 };
 		const perJabatan = new Map();
 		for (const g of jabatanGroups) {
-			const jab = (g.jabatan || '').toLowerCase();
-			if (jab.includes('bpd') || jab.includes('badan permusyawaratan')) {
-				totalBPD += g._count._all;
-			} else {
-				totalPemdes += g._count._all;
-			}
+			totalJenis[jenisAparatur(g.jabatan || '')] += g._count._all;
 
 			// Komposisi jabatan = siapa yang menjabat sekarang. Kepala desa yang
 			// sudah diberhentikan tetap tersimpan sebagai riwayat, tapi kalau ikut
@@ -1282,8 +1284,9 @@ const getStats = async (req, res) => {
 				perempuan: totalPerempuan,
 				desa_count: totalDesaDenganAparatur,
 				cakupan_desa,
-				total_pemdes: totalPemdes,
-				total_bpd: totalBPD,
+				total_pemdes: totalJenis.perangkat,
+				total_staf: totalJenis.staf,
+				total_bpd: totalJenis.bpd,
 				rentang_usia,
 				pendidikan,
 				jabatan,
