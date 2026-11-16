@@ -133,6 +133,13 @@ const app = express();
 // Use 2 for two reverse proxies to get real client IP for rate limiting
 app.set('trust proxy', 2);
 
+// Tanpa ETag, API tidak pernah membalas 304. Pada 304 browser menyajikan header
+// respons lama dari cache-nya, termasuk X-Renewed-Token lama (tanpa tanda 2FA,
+// sudah kedaluwarsa) yang lalu menimpa token login baru: pegawai terpental ke
+// login tepat setelah memasukkan kode 2FA (16 Nov 2026). Berkas statis tidak
+// terpengaruh; express.static punya ETag sendiri.
+app.set('etag', false);
+
 // Manajemen Server: tolak IP yang diblokir & catat trafik/respons. Dipasang
 // sebelum rate limiter supaya respons 429 miliknya ikut terhitung sebagai
 // indikasi serangan.
