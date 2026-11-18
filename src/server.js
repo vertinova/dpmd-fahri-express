@@ -709,6 +709,7 @@ function startServer() {
       require('./services/serverProxmox.service').start();
       require('./services/serverNotify.service').start();
       require('./services/soc.service').start();
+      require('./services/serverBackup.service').start();
       logger.info('🖥️  Server monitor aktif');
     } catch (err) {
       logger.error('🖥️  Server monitor gagal dijalankan —', err.message);

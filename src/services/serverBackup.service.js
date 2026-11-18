@@ -153,4 +153,21 @@ const terakhir = () => {
   return f ? f.mtime.toISOString() : null;
 };
 
-module.exports = { listMysql, startMysqlBackup, terakhir };
+/**
+ * Backup harian 03.15 WIB: salinan kedua di CT 100, terpisah dari DB (CT 109)
+ * dan dari cron host 02.30. Gagal di tengah jalan sudah memunculkan peringatan
+ * lewat `akhir()`; gagal sebelum mulai (mis. disk penuh) ditangani di sini.
+ */
+const start = () => {
+  require('node-cron').schedule('15 3 * * *', () => {
+    try {
+      startMysqlBackup();
+    } catch (e) {
+      lastError = e.message;
+      logger.warn(`[ServerBackup] Backup terjadwal gagal dimulai: ${e.message}`);
+      alerts.raise('mysql_backup', { level: 'warning', kategori: 'backup', title: 'Backup database terjadwal gagal', message: e.message });
+    }
+  }, { timezone: 'Asia/Jakarta' });
+};
+
+module.exports = { listMysql, startMysqlBackup, terakhir, start };
