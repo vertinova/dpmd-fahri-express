@@ -14,6 +14,16 @@ const CONFIG_KEY = 'server_management_config';
 const BACKEND_ROOT = path.join(__dirname, '../..');
 
 const DEFAULT_CONFIG = {
+  soc: {
+    // SOC: korelasi event keamanan menjadi insiden + analisis AI lokal.
+    aktif: true,
+    // IP NAT kantor: login gagal/rate limit dari sini dianggap aktivitas pegawai.
+    ip_kantor: ['103.51.103.197'],
+    jam_sepi_mulai: 22,
+    jam_sepi_selesai: 5,
+    tutup_otomatis_jam: 24,
+    ai_aktif: true,
+  },
   alerts: {
     cpu_percent: 85,
     memory_percent: 90,
@@ -110,6 +120,9 @@ const MITIGASI_WAF = 'Permintaan anonim dengan pola ini langsung ditolak 403 ole
  * benar-benar dilakukan sistem), saran (opsional).
  */
 const EVENT_TYPES = {
+  wazuh_alert: {
+    label: 'Peringatan Wazuh', severity: 'medium', info: 'Peringatan dari sensor Wazuh di host/container Proxmox.',
+  },
   sql_injection: {
     label: 'SQL Injection', severity: 'critical', info: 'Upaya menyisipkan perintah SQL untuk membaca/merusak database.',
     apa: 'Penyerang menyisipkan potongan perintah database (mis. \' OR 1=1 --, UNION SELECT) ke alamat atau isian formulir.',

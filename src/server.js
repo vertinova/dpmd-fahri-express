@@ -474,6 +474,7 @@ app.use('/api/desa-admin', require('./routes/desaAdmin.routes')); // Manajemen a
 app.use('/api/kecamatan-admin', require('./routes/kecamatanAdmin.routes')); // Akun utama kecamatan mengelola akun operatornya
 app.use('/api/superadmin/backup', require('./routes/backup.routes')); // Unduh cadangan database & berkas
 app.use('/api/superadmin/server', require('./routes/serverManagement.routes')); // Manajemen Server (pemantauan, storage, keamanan)
+app.use('/api/soc/ingest', require('./routes/socIngest.routes')); // Ingest Wazuh untuk SOC (token x-soc-token, tanpa JWT)
 app.use('/api/roles', require('./routes/role.routes')); // Role management routes
 app.use('/api/pegawai', pegawaiRoutes); // Pegawai routes
 app.use('/api/absensi', require('./routes/absensi.routes')); // Absensi pegawai routes
@@ -707,6 +708,7 @@ function startServer() {
       require('./services/serverApps.service').start();
       require('./services/serverProxmox.service').start();
       require('./services/serverNotify.service').start();
+      require('./services/soc.service').start();
       logger.info('🖥️  Server monitor aktif');
     } catch (err) {
       logger.error('🖥️  Server monitor gagal dijalankan —', err.message);

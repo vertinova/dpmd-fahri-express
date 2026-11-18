@@ -75,6 +75,15 @@ router.get('/notifications/recipients', c.notificationRecipients);
 router.get('/notifications/users', c.notificationUsers);
 router.post('/notifications/test', c.testNotification);
 
+router.get('/soc/ringkasan', c.socRingkasan);
+router.get('/soc/insiden', c.socDaftar);
+router.get('/soc/insiden/:id', c.socDetail);
+router.patch('/soc/insiden/:id', c.socUbahStatus);
+router.post('/soc/insiden/:id/catatan', c.socCatatan);
+router.post('/soc/insiden/:id/tindakan', c.socTindakan);
+router.post('/soc/insiden/:id/analisis', c.socAnalisis);
+router.get('/soc/insiden/:id/dokumentasi', c.socDokumentasi);
+
 router.get('/config', c.getConfig);
 router.put('/config', c.saveConfig);
 

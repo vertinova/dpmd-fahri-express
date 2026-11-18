@@ -825,3 +825,100 @@ exports.testNotification = async (req, res) => {
     gagal(res, error);
   }
 };
+
+/* ───────────────────────────── SOC (insiden keamanan) ───────────────────────────── */
+
+const soc = require('../services/soc.service');
+
+const idSoc = (req) => {
+  const id = Number(req.params.id);
+  if (!Number.isInteger(id) || id <= 0) throw Object.assign(new Error('ID insiden tidak valid'), { status: 400 });
+  return id;
+};
+const gagalSoc = (res, error) => gagal(res, error, error.status || 500);
+
+exports.socRingkasan = async (req, res) => {
+  try {
+    res.json({ success: true, data: await soc.ringkasan() });
+  } catch (error) {
+    gagalSoc(res, error);
+  }
+};
+
+exports.socDaftar = async (req, res) => {
+  try {
+    const { status, severity, q, halaman } = req.query;
+    res.json({ success: true, data: await soc.daftar({ status, severity, q: q ? String(q).slice(0, 100) : undefined, halaman }) });
+  } catch (error) {
+    gagalSoc(res, error);
+  }
+};
+
+exports.socDetail = async (req, res) => {
+  try {
+    res.json({ success: true, data: await soc.detail(idSoc(req)) });
+  } catch (error) {
+    gagalSoc(res, error);
+  }
+};
+
+exports.socUbahStatus = async (req, res) => {
+  try {
+    const id = idSoc(req);
+    const { status, catatan } = req.body || {};
+    const data = await soc.ubahStatus(id, status, catatan, req.user.name);
+    audit(req, 'soc', data.insiden.kode, `Status insiden ${data.insiden.kode} diubah menjadi ${status}`, { status });
+    res.json({ success: true, data });
+  } catch (error) {
+    gagalSoc(res, error);
+  }
+};
+
+exports.socCatatan = async (req, res) => {
+  try {
+    const id = idSoc(req);
+    const data = await soc.tambahCatatan(id, (req.body || {}).isi, req.user.name);
+    audit(req, 'soc', data.insiden.kode, `Catatan ditambahkan pada insiden ${data.insiden.kode}`);
+    res.json({ success: true, data });
+  } catch (error) {
+    gagalSoc(res, error);
+  }
+};
+
+exports.socTindakan = async (req, res) => {
+  try {
+    const id = idSoc(req);
+    const { aksi } = req.body || {};
+    let { menit } = req.body || {};
+    if (!['blokir_ip', 'buka_blokir'].includes(aksi)) return gagal(res, new Error('Aksi tidak valid'), 400);
+    if (menit === undefined || menit === null || menit === '') menit = null;
+    else {
+      menit = Number(menit);
+      if (!Number.isInteger(menit) || menit < 1 || menit > 43200) return gagal(res, new Error('Menit harus 1–43200 atau kosong (permanen)'), 400);
+    }
+    const data = await soc.tindakan(id, { aksi, menit }, req.user.name);
+    audit(req, 'soc', data.insiden.kode, data.pesan);
+    res.json({ success: true, data });
+  } catch (error) {
+    gagalSoc(res, error);
+  }
+};
+
+exports.socAnalisis = async (req, res) => {
+  try {
+    const id = idSoc(req);
+    const data = await soc.mintaAnalisis(id);
+    audit(req, 'soc', `insiden ${id}`, `Analisis AI diminta untuk insiden ${id}`);
+    res.json({ success: true, data });
+  } catch (error) {
+    gagalSoc(res, error);
+  }
+};
+
+exports.socDokumentasi = async (req, res) => {
+  try {
+    res.json({ success: true, data: await soc.ambilDokumentasi(idSoc(req)) });
+  } catch (error) {
+    gagalSoc(res, error);
+  }
+};
