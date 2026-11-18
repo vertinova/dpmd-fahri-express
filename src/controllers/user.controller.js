@@ -194,6 +194,8 @@ class UserController {
             pegawai_id: true,
             device_id: true,
             plain_password: true, // Include plain_password for admin view
+            // Hak akses fitur akun desa: dasar kategori & filter di tab Akun Desa.
+            desa_user_permissions: { select: { permission_key: true } },
             // Include pegawai relation (which includes bidangs)
             pegawai: {
               select: {
@@ -308,6 +310,7 @@ class UserController {
         jabatan_desa: user.jabatan_desa || null,
         no_hp: user.no_hp || null,
         profile_incomplete: mustCompleteDesaProfile(user),
+        desa_permissions: (user.desa_user_permissions || []).map((p) => p.permission_key),
         dinas_id: user.dinas_id,
         pegawai_id: user.pegawai_id,
         nip: user.pegawai?.nip || null,
