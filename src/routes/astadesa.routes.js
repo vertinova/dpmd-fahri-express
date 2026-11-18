@@ -55,6 +55,8 @@ router.get('/demografi', controller.getDemografi);
 router.get('/demografi/kategori', controller.getKategoriSensus);
 // Bahan ekspor: seluruh rincian per kecamatan DAN per desa dalam satu muatan.
 router.get('/demografi/wilayah', controller.getDemografiWilayah);
+// Daftar nama warga per desa: hanya pegawai internal (dicek di controller).
+router.get('/demografi/nama', controller.getDemografiNama);
 // Harus berdiri SEBELUM '/sensus/:id' di kaki berkas ini, kalau tidak 'ekspor'
 // akan terbaca sebagai sebuah id sensus.
 router.get('/sensus/ekspor', controller.getSensusEkspor);

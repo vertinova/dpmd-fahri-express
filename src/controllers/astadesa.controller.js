@@ -19,6 +19,7 @@ const { promisify } = require('util');
 const zlib = require('zlib');
 
 const asta = require('../services/astadesa.service');
+const ActivityLogger = require('../utils/activityLogger');
 
 const gzip = promisify(zlib.gzip);
 const gunzip = promisify(zlib.gunzip);
@@ -1408,6 +1409,22 @@ const KUNCI_ID_SENSUS = ['sensus_id', 'id_sensus', 'sensuses_id', 'kk_id', 'kelu
 /** Objek keluarga yang mungkin ikut tersemat pada baris anggota. */
 const WADAH_SENSUS = ['sensus', 'sensuses', 'keluarga', 'kk'];
 
+/** Id keluarga induk sebuah baris anggota (string), atau '' bila tak ada. */
+const idSensusAnggota = (a) => {
+  let id = pilih(a, KUNCI_ID_SENSUS);
+  if (id !== null && typeof id === 'object') id = id.id ?? null;
+  if (id === null || id === undefined) {
+    for (const k of WADAH_SENSUS) {
+      const v = a?.[k];
+      if (v && typeof v === 'object' && v.id !== undefined && v.id !== null) {
+        id = v.id;
+        break;
+      }
+    }
+  }
+  return id === null || id === undefined ? '' : String(id);
+};
+
 /**
  * Wilayah sebuah baris anggota: "kecamatan\0desa", atau null bila tak terlacak.
  *
@@ -1431,19 +1448,8 @@ const wilayahAnggota = (a, lookup) => {
   }
 
   if (!lookup || !lookup.size) return null;
-  let id = pilih(a, KUNCI_ID_SENSUS);
-  if (id !== null && typeof id === 'object') id = id.id ?? null;
-  if (id === null || id === undefined) {
-    for (const k of WADAH_SENSUS) {
-      const v = a?.[k];
-      if (v && typeof v === 'object' && v.id !== undefined && v.id !== null) {
-        id = v.id;
-        break;
-      }
-    }
-  }
-  if (id === null || id === undefined) return null;
-  return lookup.get(String(id)) || null;
+  const id = idSensusAnggota(a);
+  return id === '' ? null : lookup.get(id) || null;
 };
 
 /**
@@ -1455,7 +1461,7 @@ const wilayahAnggota = (a, lookup) => {
  * profilnya ikut mengatakan yang mana (lihat `profilAnggota`).
  */
 const olahDemografi = (lookup) => ({
-  buat: () => ({ kab: emberAnggota(), perWilayah: new Map(), terpeta: 0, tanpaWilayah: 0, idTerbesar: null }),
+  buat: () => ({ kab: emberAnggota(), perWilayah: new Map(), orangPerWilayah: new Map(), terpeta: 0, tanpaWilayah: 0, idTerbesar: null }),
   tambah: (s, a) => {
     // id tertinggi dicatat di sini karena barisnya TIDAK disimpan (ringkas ->
     // null). Tanpa angka ini, penyusulan baris terbaru saat ekspor tidak punya
@@ -1478,6 +1484,24 @@ const olahDemografi = (lookup) => ({
       s.perWilayah.set(wilayah, e);
     }
     isiEmber(e, n);
+
+    // Indeks nama untuk daftar warga per desa. Tuple ringkas, TIDAK masuk ember
+    // (supaya tak ikut terkirim di JSON agregat). Tanpa NIK/tgl lahir/alamat.
+    let orang = s.orangPerWilayah.get(wilayah);
+    if (!orang) {
+      orang = [];
+      s.orangPerWilayah.set(wilayah, orang);
+    }
+    orang.push({
+      n: rapikan(pilih(a, ['nama', 'nama_lengkap'])) || null,
+      s: idSensusAnggota(a),
+      h: n.hubungan || null,
+      j: n.jk,
+      u: n.usia,
+      p: n.pendidikan || null,
+      d: n.disabilitas || null,
+      k: n.pekerjaan || null
+    });
   },
   selesai: (s) => ({
     ...bentukEmber(s.kab),
@@ -1487,6 +1511,7 @@ const olahDemografi = (lookup) => ({
     // kebetulan peringkat 21 sebelum susulan masuk.
     mentah: s.kab,
     per_wilayah: s.perWilayah,
+    orang_per_wilayah: s.orangPerWilayah,
     terpeta: s.terpeta,
     tanpa_wilayah: s.tanpaWilayah,
     id_terbesar: s.idTerbesar
@@ -1503,7 +1528,7 @@ const olahDemografi = (lookup) => ({
  * tampak "belum tersedia" tanpa sebab yang kelihatan dari mana pun.
  */
 const profilAnggota = (lookup) => ({
-  nama: lookup && lookup.size ? 'demografi-wilayah' : 'demografi',
+  nama: lookup && lookup.size ? 'demografi-wilayah-v2' : 'demografi-v2',
   ringkas: () => null,
   olah: olahDemografi(lookup || null)
 });
@@ -2085,6 +2110,211 @@ const tolakBelumRealtime = (res, kesiapan, mulaiUlang) => {
           : `Jumlah baris yang dipegang server masih berselisih ${angkaId(kesiapan.selisih)} dari hitungan ASTA DESA saat ini (toleransi ${angkaId(kesiapan.toleransi_selisih)}). Penyusunan ulang sudah berjalan — coba ekspor lagi beberapa menit.`;
   return res.status(409).json({ success: false, kode: 'belum_realtime', message: pesan, kesiapan });
 };
+
+// ── Daftar nama warga per desa ───────────────────────────────────────────────
+
+const PER_HALAMAN_NAMA = 50;
+const DIM_NAMA = { jk: 'j', pendidikan: 'p', hubungan: 'h', disabilitas: 'd', pekerjaan: 'k' };
+const urutNama = new Intl.Collator('id');
+const norm = (v) => String(v ?? '').trim().toLowerCase();
+
+/**
+ * Saring tuple anggota (indeks `orangPerWilayah`) sesuai tipe kartu yang diklik.
+ * Aturan pencocokan sengaja sama dengan agregatnya: label jenis kelamin lewat
+ * 'Laki-laki'/'Perempuan'/'Tidak diketahui', dimensi lain dibandingkan tak peka
+ * huruf dan di-trim.
+ */
+const saringOrang = (orang, { tipe, dim, label, kelompok, sisi }) => {
+  if (tipe === 'anggota') return orang;
+  if (tipe === 'usia') {
+    const rentang = KELOMPOK_USIA.filter((k) => kelompok.includes(k.label));
+    return orang.filter(
+      (o) => o.u !== null && (!sisi || o.j === sisi) && rentang.some((k) => o.u >= k.min && o.u <= k.max)
+    );
+  }
+  const l = norm(label);
+  if (dim === 'jk') {
+    const sasaran = l === 'laki-laki' ? 'L' : l === 'perempuan' ? 'P' : null;
+    return orang.filter((o) => (sasaran ? o.j === sasaran : o.j !== 'L' && o.j !== 'P'));
+  }
+  const kunci = DIM_NAMA[dim];
+  return orang.filter((o) => o[kunci] !== null && norm(o[kunci]) === l);
+};
+
+const jkKeluar = (j) => (j === 'L' || j === 'P' ? j : null);
+
+/** Satu tuple anggota -> item daftar. Hanya field yang aman: tanpa NIK/tgl lahir/alamat. */
+const itemAnggota = (o, kkNama) => ({
+  tampil: o.n || `Anggota keluarga dari ${kkNama || 'kepala keluarga tanpa nama'}`,
+  nama: o.n,
+  keterangan: `${o.h || 'Anggota'} · keluarga ${kkNama || '(tanpa nama KK)'}`,
+  hubungan: o.h,
+  jk: jkKeluar(o.j),
+  usia: o.u,
+  kk_nama: kkNama || null,
+  sensus_id: o.s || null
+});
+
+const itemKeluarga = (k) => ({
+  tampil: k.kk_nama || 'Kepala keluarga tanpa nama',
+  nama: k.kk_nama || null,
+  keterangan: 'Kepala keluarga',
+  hubungan: 'Kepala keluarga',
+  jk: null,
+  usia: null,
+  kk_nama: k.kk_nama || null,
+  sensus_id: k.id === null || k.id === undefined ? null : String(k.id)
+});
+
+/** Urut: nama KK (kosong di akhir), kepala keluarga dulu, lalu nama. */
+const bandingItem = (a, b) => {
+  if (!a.kk_nama !== !b.kk_nama) return a.kk_nama ? -1 : 1;
+  const k = a.kk_nama ? urutNama.compare(a.kk_nama, b.kk_nama) : 0;
+  if (k) return k;
+  const ka = /kepala/i.test(a.hubungan || '');
+  const kb = /kepala/i.test(b.hubungan || '');
+  if (ka !== kb) return ka ? -1 : 1;
+  if (!a.nama !== !b.nama) return a.nama ? -1 : 1;
+  return a.nama ? urutNama.compare(a.nama, b.nama) : 0;
+};
+
+/**
+ * Susun satu halaman daftar nama. `sumber` = tuple anggota (tipe selain
+ * keluarga) atau baris keluarga {id, kk_nama} (tipe keluarga), `kkPerId` = Map
+ * id keluarga -> nama KK. `q` mencari di nama ATAU nama KK.
+ */
+const susunDaftarNama = ({ sumber, kkPerId, filter, q, halaman }) => {
+  let items =
+    filter.tipe === 'keluarga'
+      ? sumber.map(itemKeluarga)
+      : saringOrang(sumber, filter).map((o) => itemAnggota(o, kkPerId.get(o.s)));
+  const cari = norm(q);
+  if (cari) items = items.filter((i) => norm(i.nama).includes(cari) || norm(i.kk_nama).includes(cari));
+  items.sort(bandingItem);
+  const hal = Math.max(1, Number(halaman) || 1);
+  return {
+    total: items.length,
+    halaman: hal,
+    per_halaman: PER_HALAMAN_NAMA,
+    items: items.slice((hal - 1) * PER_HALAMAN_NAMA, hal * PER_HALAMAN_NAMA)
+  };
+};
+
+// Peta id -> nama KK dan keluarga per desa, dibangun sekali per hasil penyusuran
+// /sensuses (WeakMap: ikut hilang bersama potretnya).
+const indeksKeluarga = new WeakMap();
+const keluargaDari = (hasil) => {
+  let x = indeksKeluarga.get(hasil);
+  if (!x) {
+    x = { kkPerId: new Map(), perDesa: new Map() };
+    (hasil.rows || []).forEach((r) => {
+      if (r.id === null || r.id === undefined) return;
+      x.kkPerId.set(String(r.id), r.kk_nama || null);
+      // dirapikan dulu seperti kunci wilayah agregat (spasi ganda dsb.), supaya desa yang sama cocok
+      const kunci = `${norm(rapikan(r.kecamatan))}\u0000${norm(rapikan(r.desa))}`;
+      const l = x.perDesa.get(kunci);
+      if (l) l.push({ id: r.id, kk_nama: r.kk_nama || null });
+      else x.perDesa.set(kunci, [{ id: r.id, kk_nama: r.kk_nama || null }]);
+    });
+    indeksKeluarga.set(hasil, x);
+  }
+  return x;
+};
+
+/**
+ * GET /api/asta-desa/demografi/nama
+ * Daftar NAMA warga per desa di balik sebuah angka demografi. Hanya pegawai
+ * internal; tidak pernah memicu penyusuran paksa.
+ */
+exports.getDemografiNama = jalankan(async (req, res) => {
+  if (req.astaDesaLihatSaja) {
+    return res.status(403).json({ success: false, message: 'Daftar nama warga hanya untuk pegawai internal DPMD.' });
+  }
+  const tolak = (message) => res.status(400).json({ success: false, message });
+
+  const tipe = rapikan(req.query.tipe);
+  if (!['keluarga', 'anggota', 'usia', 'sifat'].includes(tipe)) return tolak('Tipe daftar tidak dikenal.');
+  const kecamatan = rapikan(req.query.kecamatan);
+  const desa = rapikan(req.query.desa);
+  if (!kecamatan || !desa) return tolak('Pilih desa terlebih dahulu.');
+
+  const dim = rapikan(req.query.dim);
+  const label = rapikan(req.query.label);
+  const sisi = rapikan(req.query.sisi);
+  const q = rapikan(req.query.q);
+  if (sisi && !['L', 'P'].includes(sisi)) return tolak('Sisi harus L atau P.');
+  if (q && q.length > 60) return tolak('Kata kunci terlalu panjang.');
+  if (tipe === 'sifat') {
+    if (!Object.prototype.hasOwnProperty.call(DIM_NAMA, dim)) return tolak('Dimensi tidak dikenal.');
+    if (!label || label.length > 120) return tolak('Label wajib diisi (maksimal 120 karakter).');
+  }
+  const kelompok = (rapikan(req.query.kelompok) || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (tipe === 'usia' && !kelompok.some((k) => KELOMPOK_USIA.some((u) => u.label === k))) {
+    return tolak('Kelompok usia tidak dikenal.');
+  }
+  const halaman = Math.max(1, parseInt(req.query.halaman, 10) || 1);
+
+  const belum = () =>
+    res.json({
+      success: true,
+      data: {
+        total: 0,
+        halaman,
+        per_halaman: PER_HALAMAN_NAMA,
+        items: [],
+        siap: false,
+        pesan: 'Data nama sedang disiapkan, coba lagi beberapa menit.',
+        disusun_pada: null
+      }
+    });
+
+  // Sama persis dengan getDemografi supaya memakai cache yang sama, dan tanpa force.
+  const lookup = await lookupWilayah(false);
+  if (!lookup) return belum();
+  const semua = await asta.ambilSemua('/sensus-anggotas', {}, { force: false, latar: true, profil: profilAnggota(lookup) });
+  const peta = semua.olahan?.orang_per_wilayah;
+  if (!(peta instanceof Map) || !peta.size) return belum();
+
+  const pengguna = await asta
+    .ambilSemua('/sensuses', {}, { force: false, pengguna: true, latar: true, profil: PROFIL_PENGGUNA })
+    .catch(() => null);
+  const kel = pengguna ? keluargaDari(pengguna) : { kkPerId: new Map(), perDesa: new Map() };
+
+  const k = kecamatan.toLowerCase();
+  const d = desa.toLowerCase();
+  let sumber = [];
+  if (tipe === 'keluarga') {
+    sumber = kel.perDesa.get(`${k}\u0000${d}`) || [];
+  } else {
+    peta.forEach((orang, kunci) => {
+      const [kc, ds] = kunci.split('\u0000');
+      if (norm(kc) === k && norm(ds) === d) sumber = sumber.concat(orang);
+    });
+  }
+
+  const hasil = susunDaftarNama({ sumber, kkPerId: kel.kkPerId, filter: { tipe, dim, label, kelompok, sisi }, q, halaman });
+
+  if (halaman === 1 && req.user) {
+    const nama = req.user.name || 'Pengguna';
+    ActivityLogger.log({
+      userId: BigInt(String(req.user.id)),
+      userName: req.user.name,
+      userRole: req.user.role,
+      module: 'asta_desa',
+      action: 'lihat_nama',
+      entityType: 'demografi',
+      entityName: `${desa}, ${kecamatan}`,
+      description: `${nama} melihat daftar nama (${tipe}${dim ? '/' + dim : ''}${label ? ': ' + label : ''}) di Desa ${desa}, Kec. ${kecamatan}`,
+      ipAddress: ActivityLogger.getIpFromRequest(req),
+      userAgent: ActivityLogger.getUserAgentFromRequest(req)
+    }).catch(() => {});
+  }
+
+  res.json({ success: true, data: { ...hasil, siap: true, disusun_pada: semua.disusun_pada || null } });
+});
+
+// Hanya untuk uji: fungsi murni di atas.
+exports.__uji = { saringOrang, susunDaftarNama, itemAnggota };
 
 /**
  * GET /api/asta-desa/demografi/wilayah
