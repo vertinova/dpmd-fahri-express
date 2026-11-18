@@ -16,6 +16,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const axios = require('axios');
+const { Prisma } = require('@prisma/client');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const { encrypt, decrypt, tokenMedia } = require('../utils/cctvSecret');
@@ -202,7 +203,9 @@ const daftarKameraLayanan = async () => {
     location: k.lokasi || '',
     status: k.status,
     recognition_enabled: k.recognition_enabled,
-    fall_detection_enabled: k.fall_detection_enabled
+    fall_detection_enabled: k.fall_detection_enabled,
+    zona: k.zona || null,
+    jam_pantau: k.jam_pantau || null
   }));
   return { cameras };
 };
@@ -221,6 +224,8 @@ const kameraDetailLayanan = async (id) => {
     location: k.lokasi || '',
     status: k.status,
     recognition_enabled: k.recognition_enabled,
+    zona: k.zona || null,
+    jam_pantau: k.jam_pantau || null,
     reconnect_interval: 5
   };
 };
@@ -302,8 +307,39 @@ const sebarPeristiwa = async (peristiwa, kamera) => {
   } catch (err) {
     logger.warn(`[SmartCCTV] Gagal broadcast cctv_alert: ${err.message}`);
   }
-  // Sengaja tanpa Web Push: peringatan CCTV hanya tampil di dalam aplikasi
-  // (socket, untuk staf berizin "peringatan") supaya tidak membanjiri ponsel pegawai.
+  // Web Push hanya untuk kejadian kritis (orang jatuh, orang di zona terlarang) —
+  // keputusan user 19 Nov 2026; peristiwa lain cukup lewat socket supaya ponsel tidak banjir.
+  const kritis = peristiwa.type === 'fall' || (peristiwa.type === 'person' && peristiwa.severity === 'warning');
+  if (kritis) kirimPushKritis(peristiwa, kamera).catch((err) => logger.warn(`[SmartCCTV] Push gagal: ${err.message}`));
+};
+
+// shortcut: jeda push disimpan di memori proses; setelah restart bisa terkirim sekali lagi.
+const JEDA_PUSH_MS = 10 * 60 * 1000;
+const terakhirPush = new Map();
+
+const kirimPushKritis = async (peristiwa, kamera) => {
+  const kunci = `${peristiwa.camera_id}:${peristiwa.type}`;
+  const kini = Date.now();
+  if (kini - (terakhirPush.get(kunci) || 0) < JEDA_PUSH_MS) return;
+  terakhirPush.set(kunci, kini);
+
+  const akses = await prisma.cctv_akses.findMany({
+    where: { izin: 'peringatan', OR: [{ berlaku_sampai: null }, { berlaku_sampai: { gt: new Date() } }] },
+    select: { user_id: true }
+  });
+  const userIds = akses.map((a) => a.user_id);
+  const jam = new Date(new Date(peristiwa.occurred_at).getTime() + 7 * 3600e3).toISOString().slice(11, 16);
+  const lokasi = kamera && kamera.lokasi ? ` · ${kamera.lokasi}` : '';
+  await require('./pushNotification.service').sendToRoles(
+    ['superadmin'],
+    {
+      title: peristiwa.type === 'fall' ? '🚨 Orang jatuh terdeteksi' : `⚠️ ${peristiwa.nama || 'Orang di zona'}`,
+      body: `${kamera ? kamera.name : 'Kamera'}${lokasi} · ${jam} WIB`,
+      path: 'cctv/peringatan',
+      data: { type: 'cctv_alert', event_id: Number(peristiwa.id) }
+    },
+    { userIds }
+  );
 };
 
 /**
@@ -400,6 +436,12 @@ const simpanEmergencyEvent = async (fields, buffer) => {
   const kamera = await cariKamera(cameraId);
   if (!kamera) return { status: 422, hasil: { success: false, message: 'Kamera tidak ditemukan' } };
 
+  // Orang biasa tidak dicatat: hanya yang berada di zona (di_zona) yang disimpan.
+  const diZona = [true, 'true', '1', 1].includes(fields.di_zona);
+  if (fields.type === 'person' && !diZona) {
+    return { status: 200, hasil: { success: true, diabaikan: true } };
+  }
+
   // `fall_warning` tidak ada di enum dashboard lama (fall|immobility|other);
   // di sini kita simpan utuh, mirror-nya diturunkan ke `other`.
   const jenis = JENIS_DIKENAL.includes(fields.type) ? fields.type : 'other';
@@ -418,6 +460,7 @@ const simpanEmergencyEvent = async (fields, buffer) => {
     camera_id: kamera.id,
     type: jenis,
     severity,
+    nama: fields.nama ? String(fields.nama).trim().slice(0, 120) : null,
     confidence: angka(fields.confidence),
     bbox: Array.isArray(fields.bbox) ? fields.bbox.map(Number).filter((n) => Number.isFinite(n))
         : fields['bbox[]'] ? [].concat(fields['bbox[]']).map(Number).filter((n) => Number.isFinite(n))
@@ -425,6 +468,7 @@ const simpanEmergencyEvent = async (fields, buffer) => {
     track_id: fields.track_id ? String(fields.track_id).slice(0, 100) : null,
     snapshot_path: snapshot,
     metadata: {
+      nama_zona: fields.nama_zona ? String(fields.nama_zona).slice(0, 40) : null,
       fallen_duration: angka(fields.fallen_duration),
       body_angle: angka(fields.body_angle),
       jumlah_orang: angka(fields.jumlah_orang),
@@ -496,6 +540,16 @@ const simpanDetectionLog = async (payload) => {
 
 // ───────────────────────── Riwayat & pengakuan ─────────────────────────
 
+/** Tanggal polos (YYYY-MM-DD) dibaca sebagai hari WIB; selain itu apa adanya. */
+const batasTanggalWib = (v, akhirHari) => {
+  const s = String(v || '');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return tanggal(v);
+  return tanggal(akhirHari ? `${s}T23:59:59.999+07:00` : `${s}T00:00:00+07:00`);
+};
+
+/** Tanggal kalender WIB (YYYY-MM-DD) dari sebuah Date. */
+const tglWib = (d) => new Date(d.getTime() + 7 * 3600e3).toISOString().slice(0, 10);
+
 const daftarPeristiwa = async (q) => {
   const where = {};
   if (q.camera_id) where.camera_id = BigInt(q.camera_id);
@@ -505,18 +559,13 @@ const daftarPeristiwa = async (q) => {
   }
   if (q.status && STATUS_DIKENAL.includes(q.status)) where.status = q.status;
   if (q.severity) where.severity = q.severity;
-  if (q.nama) where.nama = { contains: String(q.nama) };
-  const dari = tanggal(q.dari);
-  const sampai = tanggal(q.sampai);
+  if (q.nama) where.nama = { contains: String(q.nama), mode: 'insensitive' };
+  const dari = batasTanggalWib(q.dari, false);
+  const sampai = batasTanggalWib(q.sampai, true);
   if (dari || sampai) {
     where.occurred_at = {};
     if (dari) where.occurred_at.gte = dari;
-    if (sampai) {
-      // Sampai = akhir hari itu bila hanya tanggal polos dikirim.
-      const batas = new Date(sampai);
-      if (/^\d{4}-\d{2}-\d{2}$/.test(String(q.sampai))) batas.setHours(23, 59, 59, 999);
-      where.occurred_at.lte = batas;
-    }
+    if (sampai) where.occurred_at.lte = sampai;
   }
 
   const page = Math.max(1, parseInt(q.page, 10) || 1);
@@ -613,7 +662,7 @@ const statistik = async () => {
   const harian = {};
   const perKamera = {};
   semua.forEach((e) => {
-    const tgl = e.occurred_at.toISOString().slice(0, 10);
+    const tgl = tglWib(e.occurred_at);
     harian[tgl] = (harian[tgl] || 0) + 1;
     const kunci = `${e.camera_id}|${e.camera ? e.camera.name : ''}`;
     perKamera[kunci] = perKamera[kunci] || {
@@ -627,10 +676,8 @@ const statistik = async () => {
 
   // rentang 30 hari penuh supaya sumbu grafik tidak melompat
   const grafik = [];
-  for (let i = 30; i >= 1; i--) {
-    const d = new Date();
-    d.setDate(d.getDate() - i);
-    const tgl = d.toISOString().slice(0, 10);
+  for (let i = 29; i >= 0; i--) {
+    const tgl = tglWib(new Date(Date.now() - i * 86400e3));
     grafik.push({ tanggal: tgl, jumlah: harian[tgl] || 0 });
   }
 
@@ -650,12 +697,137 @@ const statistik = async () => {
   };
 };
 
+// ───────────────────────── Kesehatan kamera ─────────────────────────
+
+// shortcut: status diam disimpan di memori proses; setelah restart peringatan bisa muncul sekali lagi. Pindahkan ke DB bila mengganggu.
+const kameraDiam = new Set();
+const BINGKAI_BASI_MS = 5 * 60 * 1000;
+
+const buatPeristiwaKesehatan = async (k, diam, galat) => {
+  const peristiwa = await prisma.cctv_events.create({
+    data: {
+      event_uuid: crypto.randomUUID(),
+      camera_id: BigInt(k.id),
+      type: 'other',
+      severity: diam ? 'warning' : 'info',
+      status: diam ? 'active' : 'resolved',
+      nama: diam ? 'Kamera tidak menjawab' : 'Kamera kembali online',
+      metadata: { jenis: diam ? 'kamera_offline' : 'kamera_online', galat: galat || null },
+      occurred_at: new Date()
+    }
+  });
+  const kamera = await cariKamera(BigInt(k.id)).catch(() => null);
+  await sebarPeristiwa(peristiwa, kamera);
+};
+
+/**
+ * Tanya /health layanan AI: kamera aktif tanpa bingkai segar (≥ 5 menit)
+ * memunculkan peristiwa sekali, dan peristiwa "kembali online" saat pulih.
+ * Status kamera di DB sengaja tidak diubah (layanan AI hanya memproses 'active').
+ * Tidak pernah melempar.
+ */
+const pantauKesehatanKamera = async () => {
+  const alerts = require('./serverAlerts.service');
+  try {
+    let data;
+    let galatAI = null;
+    try {
+      const res = await fetch(`${aiBase()}/health`, { signal: AbortSignal.timeout(5000) });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+    } catch (err) {
+      galatAI = err.message;
+    }
+    // Alert baru muncul setelah beberapa kegagalan beruntun (AI direstart tiap deploy).
+    alerts.periksa('cctv_ai', !!galatAI, {
+      level: 'warning',
+      kategori: 'layanan',
+      title: 'Layanan AI CCTV tidak menjawab',
+      message: galatAI
+    });
+    if (galatAI) return;
+
+    for (const k of (data && data.kamera) || []) {
+      if (k.aktif !== true) continue;
+      try {
+        const pada = k.bingkai_terakhir && k.bingkai_terakhir.pada;
+        const umur = pada ? Date.now() - new Date(pada).getTime() : Infinity;
+        if (umur < BINGKAI_BASI_MS) {
+          await prisma.cctv_cameras
+            .update({ where: { id: BigInt(k.id) }, data: { last_online_at: new Date(pada) } })
+            .catch(() => {});
+          if (kameraDiam.delete(k.id)) await buatPeristiwaKesehatan(k, false, null);
+        } else if (!kameraDiam.has(k.id)) {
+          kameraDiam.add(k.id);
+          await buatPeristiwaKesehatan(k, true, k.galat);
+        }
+      } catch (err) {
+        logger.warn(`[SmartCCTV] Pantau kamera ${k.id} gagal: ${err.message}`);
+      }
+    }
+  } catch (err) {
+    logger.warn(`[SmartCCTV] Pantau kesehatan kamera gagal: ${err.message}`);
+  }
+};
+
 // ───────────────────────── Kamera: CRUD + go2rtc ─────────────────────────
+
+const galat422 = (pesan) => Object.assign(new Error(pesan), { status: 422 });
+
+/**
+ * Normalisasi zona & jam pantau. Hasil: { zona, jam_pantau } dengan kunci yang
+ * undefined = tidak diubah; null = dihapus. Melempar Error status 422 bila salah.
+ */
+const validasiZona = (zona, jamPantau) => {
+  const hasil = {};
+  if (zona !== undefined) {
+    if (zona === null || (Array.isArray(zona) && zona.length === 0)) {
+      hasil.zona = null;
+    } else {
+      if (!Array.isArray(zona)) throw galat422('Zona harus berupa daftar');
+      if (zona.length > 8) throw galat422('Zona maksimal 8 per kamera');
+      hasil.zona = zona.map((z, i) => {
+        const nama = String((z && z.nama) ?? '').trim();
+        if (nama.length < 1 || nama.length > 40) throw galat422(`Nama zona ${i + 1} harus 1–40 karakter`);
+        const titik = z.titik;
+        if (!Array.isArray(titik) || titik.length < 3 || titik.length > 20) {
+          throw galat422(`Zona "${nama}" harus punya 3–20 titik`);
+        }
+        return {
+          nama,
+          titik: titik.map((p) => {
+            const [x, y] = Array.isArray(p) ? p : [];
+            const ok = (n) => typeof n === 'number' && Number.isFinite(n) && n >= 0 && n <= 1;
+            if (!ok(x) || !ok(y)) throw galat422(`Koordinat zona "${nama}" harus angka 0 sampai 1`);
+            return [Math.round(x * 1e4) / 1e4, Math.round(y * 1e4) / 1e4];
+          })
+        };
+      });
+    }
+  }
+  if (jamPantau !== undefined) {
+    if (jamPantau === null) {
+      hasil.jam_pantau = null;
+    } else {
+      const re = /^([01]\d|2[0-3]):[0-5]\d$/;
+      const { mulai, selesai } = jamPantau || {};
+      if (!re.test(String(mulai)) || !re.test(String(selesai))) {
+        throw galat422('Jam pantau harus berformat HH:MM (00:00–23:59)');
+      }
+      if (mulai === selesai) throw galat422('Jam mulai dan selesai pantau tidak boleh sama');
+      hasil.jam_pantau = { mulai, selesai };
+    }
+  }
+  return hasil;
+};
 
 const buatKamera = async (input, user) => {
   const { urlBersih, username, password } = pisahKredensial(input.rtsp_url, input.username, input.password);
+  const { zona, jam_pantau } = validasiZona(input.zona, input.jam_pantau);
   const kamera = await prisma.cctv_cameras.create({
     data: {
+      ...(zona ? { zona } : {}),
+      ...(jam_pantau ? { jam_pantau } : {}),
       name: String(input.name).trim(),
       lokasi: input.lokasi ? String(input.lokasi).trim() : null,
       rtsp_url: urlBersih,
@@ -688,6 +860,10 @@ const ubahKamera = async (id, input, user) => {
   if (!lama) return null;
 
   const data = {};
+  const zj = validasiZona(input.zona, input.jam_pantau);
+  // Prisma: JSON null harus Prisma.DbNull, bukan null biasa.
+  if ('zona' in zj) data.zona = zj.zona === null ? Prisma.DbNull : zj.zona;
+  if ('jam_pantau' in zj) data.jam_pantau = zj.jam_pantau === null ? Prisma.DbNull : zj.jam_pantau;
   if (input.name) data.name = String(input.name).trim();
   if (input.lokasi !== undefined) data.lokasi = input.lokasi ? String(input.lokasi).trim() : null;
   if (input.desa_id !== undefined) data.desa_id = input.desa_id ? BigInt(input.desa_id) : null;
@@ -1005,6 +1181,9 @@ module.exports = {
   ubahStatusPeristiwa,
   akuiSemua,
   statistik,
+  pantauKesehatanKamera,
+  batasTanggalWib,
+  validasiZona,
   buatKamera,
   ubahKamera,
   hapusKamera,

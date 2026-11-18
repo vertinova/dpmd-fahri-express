@@ -139,6 +139,7 @@ const evaluasiMetrik = (m) => {
 module.exports = {
   raise,
   clear,
+  periksa,
   evaluasiMetrik,
   getActive: () => {
     const urutan = { critical: 0, warning: 1, info: 2 };

@@ -739,9 +739,12 @@ function startServer() {
 
     // Smart CCTV: go2rtc menyimpan stream di memori saja — kamera aktif
     // didaftarkan ulang setelah backend atau go2rtc restart.
-    const { sinkronGo2rtc } = require('./services/smartCctv.service');
+    const { sinkronGo2rtc, pantauKesehatanKamera } = require('./services/smartCctv.service');
     setTimeout(sinkronGo2rtc, 15000).unref();
     setInterval(sinkronGo2rtc, 5 * 60 * 1000).unref();
+    // Pemantau kesehatan kamera: kamera mati/beku memunculkan peristiwa & alert.
+    setTimeout(pantauKesehatanKamera, 30000).unref();
+    setInterval(pantauKesehatanKamera, 60 * 1000).unref();
 
     // Auto-seed bankeu_perubahan_master_kegiatan (idempotent)
     // Fire-and-forget - jangan blocking startup, error tidak akan crash server

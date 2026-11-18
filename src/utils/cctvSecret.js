@@ -11,7 +11,10 @@
 
 const crypto = require('crypto');
 
+const logger = require('./logger');
+
 const ALGO = 'aes-256-gcm';
+const sudahDiperingatkan = new Set(); // peringatan dekripsi cukup sekali per nilai
 
 const getKey = () =>
   crypto.createHash('sha256').update(`${process.env.JWT_SECRET || ''}:smart-cctv`).digest();
@@ -48,6 +51,10 @@ const decrypt = (value) => {
     ]).toString('utf8');
   } catch (err) {
     // Bukan ciphertext (kemungkinan besar nilai lama yang polos).
+    if (!sudahDiperingatkan.has(String(value))) {
+      sudahDiperingatkan.add(String(value));
+      logger.warn('[CCTVSecret] Sandi kamera gagal didekripsi — JWT_SECRET berubah? Simpan ulang sandi kamera');
+    }
     return String(value);
   }
 };

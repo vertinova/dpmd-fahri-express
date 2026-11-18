@@ -10,6 +10,7 @@
  * request/response dan memvalidasi input.
  */
 
+const crypto = require('crypto');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
@@ -24,6 +25,13 @@ const gagal = (res, err, pesan = 'Terjadi kesalahan pada server') => {
 
 // ───────────────────── Autentikasi layanan AI ─────────────────────
 
+/** Pembandingan token tahan serangan timing; beda panjang = tidak sama. */
+const samaAman = (a, b) => {
+  const x = Buffer.from(String(a));
+  const y = Buffer.from(String(b));
+  return x.length === y.length && crypto.timingSafeEqual(x, y);
+};
+
 /** Bearer token = CCTV_SERVICE_API_KEY (daftar kamera & embedding wajah). */
 const svcAuth = (req, res, next) => {
   const expected = process.env.CCTV_SERVICE_API_KEY;
@@ -31,7 +39,7 @@ const svcAuth = (req, res, next) => {
     return res.status(503).json({ success: false, message: 'CCTV_SERVICE_API_KEY belum dikonfigurasi' });
   }
   const token = (req.header('Authorization') || '').replace('Bearer ', '');
-  if (token !== expected) {
+  if (!samaAman(token, expected)) {
     logger.warn('[SmartCCTV] API key layanan AI tidak cocok');
     return res.status(401).json({ success: false, message: 'Invalid API key' });
   }
@@ -45,7 +53,7 @@ const internalAuth = (req, res, next) => {
     return res.status(503).json({ success: false, message: 'CCTV_INTERNAL_TOKEN belum dikonfigurasi' });
   }
   const token = req.header('X-Internal-Token') || '';
-  if (token !== expected) {
+  if (!samaAman(token, expected)) {
     logger.warn('[SmartCCTV] Token internal injeksi peristiwa tidak cocok');
     return res.status(401).json({ success: false, message: 'Invalid internal token' });
   }
@@ -186,6 +194,7 @@ const buatKamera = async (req, res) => {
     await catatKamera(req.user, 'create', `Menambah kamera CCTV "${kamera.name}"`, kamera);
     res.status(201).json({ success: true, data: tanpaPassword(kamera) });
   } catch (err) {
+    if (err.status === 422) return res.status(422).json({ success: false, message: err.message });
     gagal(res, err, 'Gagal menambah kamera');
   }
 };
@@ -200,6 +209,7 @@ const ubahKamera = async (req, res) => {
     await catatKamera(req.user, 'update', `Memperbarui kamera CCTV "${kamera.name}"`, kamera);
     res.json({ success: true, data: tanpaPassword(kamera) });
   } catch (err) {
+    if (err.status === 422) return res.status(422).json({ success: false, message: err.message });
     gagal(res, err, 'Gagal memperbarui kamera');
   }
 };

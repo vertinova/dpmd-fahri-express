@@ -13,6 +13,7 @@ const crypto = require('crypto');
 const sharp = require('sharp');
 const cfg = require('./config');
 const deteksi = require('./deteksi');
+const { dalamJamPantau, zonaOrang } = require('./zona');
 
 const kamera = new Map(); // id → { id, nama, aktif, wajahAktif, jatuhAktif, … keadaan }
 const dihentikan = new Set(); // id yang diminta berhenti lewat /cameras/:id/stop
@@ -42,6 +43,8 @@ const segarkanKamera = async () => {
 			aktif: k.status === 'active',
 			wajahAktif: k.recognition_enabled !== false,
 			jatuhAktif: k.fall_detection_enabled !== false,
+			zona: Array.isArray(k.zona) ? k.zona : [],
+			jamPantau: k.jam_pantau || null,
 		});
 	}
 	for (const id of kamera.keys()) if (!ada.has(id)) kamera.delete(id);
@@ -102,13 +105,6 @@ const kirimBingkai = (res, jpg) => {
 };
 const siarkan = (k) => {
 	for (const res of k.penonton) kirimBingkai(res, k.bertanda.jpg);
-};
-
-const jamWib = (ms) => new Date(ms + 7 * 3600 * 1000).getUTCHours();
-const luarJamKerja = (ms) => {
-	const h = jamWib(ms);
-	const hari = new Date(ms + 7 * 3600 * 1000).getUTCDay();
-	return hari === 0 || hari === 6 || h < cfg.JAM_KERJA_MULAI || h >= cfg.JAM_KERJA_SELESAI;
 };
 
 const kirim = async (jalur, isian, potret) => {
@@ -270,26 +266,31 @@ const prosesKamera = async (k, jpg) => {
 		}
 	}
 
-	// ── Orang terdeteksi (termasuk yang membelakangi kamera / di tepi bingkai) ──
-	// Dilaporkan paling sering sekali per JEDA_ORANG_MS per kamera, atau segera bila
-	// jumlah orangnya bertambah. Di luar jam kerja / hari libur menjadi peringatan.
+	// ── Orang di dalam zona ───────────────────────────────────────────────
+	// Orang biasa tidak dicatat. Hanya yang kakinya berada di zona gambaran kamera
+	// pada jam pantau yang dilaporkan: paling sering sekali per JEDA_ORANG_MS per
+	// kamera, atau segera bila jumlah orang di zona bertambah.
 	if (orang.length) {
 		k.terakhirAdaOrang = kini;
-		const bertambah = orang.length > k.orangDilapor;
-		if (!adaPeristiwaWajah && (bertambah || kini - k.jedaOrang >= cfg.JEDA_ORANG_MS) && kini - k.jedaOrang >= 8000) {
+		const diZona = dalamJamPantau(kini, k.jamPantau)
+			? orang.map((o) => ({ o, nama: zonaOrang(o.kotak, lebar, tinggi, k.zona) })).filter((p) => p.nama)
+			: [];
+		const bertambah = diZona.length > k.orangDilapor;
+		if (diZona.length && !adaPeristiwaWajah && (bertambah || kini - k.jedaOrang >= cfg.JEDA_ORANG_MS) && kini - k.jedaOrang >= 8000) {
 			k.jedaOrang = kini;
-			k.orangDilapor = orang.length;
-			const luar = luarJamKerja(kini);
-			const utama = [...orang].sort((a, b) => b.kotak[2] * b.kotak[3] - a.kotak[2] * a.kotak[3])[0];
+			k.orangDilapor = diZona.length;
+			const utama = [...diZona].sort((p, q) => q.o.kotak[2] * q.o.kotak[3] - p.o.kotak[2] * p.o.kotak[3])[0];
 			await kirim('emergency-events', {
 				event_uuid: crypto.randomUUID(),
 				camera_id: k.id,
 				type: 'person',
-				severity: luar ? 'warning' : 'info',
-				confidence: utama.skor.toFixed(4),
-				bbox: utama.kotak,
-				jumlah_orang: orang.length,
-				luar_jam_kerja: luar,
+				severity: 'warning',
+				di_zona: '1',
+				nama: `Orang di zona ${utama.nama}`,
+				nama_zona: utama.nama,
+				confidence: utama.o.skor.toFixed(4),
+				bbox: utama.o.kotak,
+				jumlah_orang: diZona.length,
 				occurred_at: new Date(kini).toISOString(),
 			}, k.bertanda.jpg);
 		}
