@@ -1080,7 +1080,7 @@ class UserController {
       res.json({
         success: true,
         message: ada
-          ? '2FA direset. Pegawai akan memindai QR baru saat login berikutnya.'
+          ? '2FA direset. Pemilik akun akan memindai QR baru saat login berikutnya.'
           : 'Akun ini belum memasang 2FA.'
       });
     } catch (error) {

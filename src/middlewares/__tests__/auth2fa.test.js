@@ -33,7 +33,7 @@ const jalankan = async (payload) => {
   return { lanjut, res };
 };
 
-describe('auth — wajib 2FA pegawai', () => {
+describe('auth — wajib 2FA semua akun', () => {
   afterEach(() => {
     delete process.env.WAJIB_2FA;
   });
@@ -53,8 +53,18 @@ describe('auth — wajib 2FA pegawai', () => {
     expect((await jalankan({ role: 'superadmin' })).res.body?.code).toBe('WAJIB_2FA');
   });
 
-  it('role desa tanpa mfa diteruskan', async () => {
+  it.each(['desa', 'admin_desa', 'kecamatan', 'verifikator_dinas', 'dinas_terkait', 'bpjs'])('%s tanpa mfa ditolak', async (role) => {
+    expect((await jalankan({ role })).res.body?.code).toBe('WAJIB_2FA');
+  });
+
+  it('desa dengan mfa diteruskan', async () => {
+    expect((await jalankan({ role: 'desa', mfa: true })).lanjut).toBe(true);
+  });
+
+  it('WAJIB_2FA=pegawai: desa tanpa mfa diteruskan, pegawai tetap ditolak', async () => {
+    process.env.WAJIB_2FA = 'pegawai';
     expect((await jalankan({ role: 'desa' })).lanjut).toBe(true);
+    expect((await jalankan({ role: 'pegawai' })).res.body?.code).toBe('WAJIB_2FA');
   });
 
   it('WAJIB_2FA=off meloloskan pegawai tanpa mfa', async () => {

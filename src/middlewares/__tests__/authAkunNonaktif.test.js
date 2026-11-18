@@ -23,7 +23,8 @@ const jwt = require('jsonwebtoken');
 const { auth } = require('../auth');
 
 const jalankan = async (id) => {
-  const token = jwt.sign({ id, email: `u${id}@uji`, role: AKUN[id].role }, process.env.JWT_SECRET);
+  // mfa: sesi sudah lolos 2FA (semua akun wajib 2FA), supaya yang diuji di sini status aktifnya.
+  const token = jwt.sign({ id, email: `u${id}@uji`, role: AKUN[id].role, mfa: true }, process.env.JWT_SECRET);
   const req = { header: (nama) => (nama === 'Authorization' ? `Bearer ${token}` : undefined) };
   const res = { statusCode: 200, body: null, setHeader() {} };
   res.status = (kode) => {

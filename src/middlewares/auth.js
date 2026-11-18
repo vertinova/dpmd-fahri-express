@@ -115,12 +115,12 @@ const auth = async (req, res, next) => {
       mfa: decoded.mfa === true
     };
 
-    // Pegawai DPMD wajib lolos 2FA; sesi lama tanpa tanda mfa diputus di sini.
+    // Akun wajib lolos 2FA; sesi lama tanpa tanda mfa diputus di sini.
     if (wajib2fa(decoded.role) && decoded.mfa !== true) {
       return res.status(401).json({
         success: false,
         code: 'WAJIB_2FA',
-        message: 'Akun pegawai DPMD kini wajib verifikasi 2 langkah. Silakan login kembali.'
+        message: 'Semua akun kini wajib verifikasi 2 langkah (Google Authenticator). Silakan login kembali.'
       });
     }
 

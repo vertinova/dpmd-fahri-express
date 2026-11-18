@@ -390,7 +390,7 @@ const login = async (req, res) => {
         // Pesan ini dibaca klien lama (aplikasi Flutter/PWA lama) yang belum punya layar 2FA.
         message: (aktif
           ? 'Masukkan kode 6 digit dari aplikasi Google Authenticator.'
-          : 'Akun pegawai DPMD wajib memasang verifikasi 2 langkah (Google Authenticator).')
+          : 'Akun ini wajib memasang verifikasi 2 langkah (Google Authenticator).')
           + ' Bila kolom kode tidak muncul, perbarui aplikasi atau masuk lewat browser.',
         data: { tiket_2fa: duaLangkah.buatTiket(user.id), email: user.email }
       });
@@ -1219,12 +1219,12 @@ const renewToken = async (req, res) => {
       });
     }
 
-    // Sesi pegawai lama (tanpa tanda 2FA) tidak boleh diperpanjang.
+    // Sesi lama (tanpa tanda 2FA) tidak boleh diperpanjang.
     if (duaLangkah.wajib2fa(user.role) && decoded.mfa !== true) {
       return res.status(401).json({
         success: false,
         code: 'WAJIB_2FA',
-        message: 'Akun pegawai DPMD kini wajib verifikasi 2 langkah. Silakan login kembali.'
+        message: 'Semua akun kini wajib verifikasi 2 langkah (Google Authenticator). Silakan login kembali.'
       });
     }
 

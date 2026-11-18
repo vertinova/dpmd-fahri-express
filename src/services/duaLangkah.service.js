@@ -1,13 +1,14 @@
 /**
- * Verifikasi 2 langkah (2FA) untuk akun pegawai DPMD.
+ * Verifikasi 2 langkah (2FA), wajib untuk semua akun (sejak 19 Nov 2026;
+ * sebelumnya hanya pegawai DPMD + superadmin).
  *
- * Alur login pegawai:
+ * Alur login:
  *   1. POST /auth/login (email + sandi benar) -> 403 PERLU_KODE_2FA / PERLU_PASANG_2FA
  *      berisi `tiket_2fa`: bukti sandi sudah benar, berumur 10 menit.
  *   2a. Belum pasang: /auth/2fa/pasang (QR) lalu /auth/2fa/aktifkan (kode pertama).
  *   2b. Sudah pasang: /auth/2fa/verifikasi (kode 6 digit).
  *   3. Barulah token sesi terbit, bertanda `mfa: true`. Middleware `auth`
- *      menolak token pegawai tanpa tanda itu, jadi sesi lama ikut terputus.
+ *      menolak token tanpa tanda itu, jadi sesi lama ikut terputus.
  */
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
@@ -19,10 +20,18 @@ const { PERAN_INTERNAL_DPMD } = require('../config/peranDpmd');
 const UMUR_TIKET = '10m';
 const MAKS_PERCOBAAN = 5;
 
-/** Peran yang wajib 2FA. WAJIB_2FA=off di .env mematikannya (jalur darurat). */
-const wajib2fa = (role) =>
-  process.env.WAJIB_2FA !== 'off' &&
-  PERAN_INTERNAL_DPMD.includes(String(role || '').trim().toLowerCase());
+/**
+ * Siapa yang wajib 2FA, diatur WAJIB_2FA di .env:
+ *   (kosong)  semua akun
+ *   pegawai   hanya pegawai DPMD + superadmin (mundur tanpa mematikan 2FA pegawai)
+ *   off       tidak ada (jalur darurat)
+ */
+const wajib2fa = (role) => {
+  const mode = process.env.WAJIB_2FA;
+  if (mode === 'off') return false;
+  if (mode === 'pegawai') return PERAN_INTERNAL_DPMD.includes(String(role || '').trim().toLowerCase());
+  return true;
+};
 
 // Tiket ditandatangani kunci TURUNAN, bukan JWT_SECRET apa adanya: kalau sama,
 // middleware `auth` dan /auth/renew akan menerima tiket ini sebagai token sesi.
