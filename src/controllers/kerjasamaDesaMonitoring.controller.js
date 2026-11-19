@@ -259,6 +259,16 @@ class KerjasamaDesaMonitoringController {
    * nomor Perdes tapi dokumennya belum pernah masuk.
    */
   async desaBelumLegalitas(req, res, next) {
+    const KOLOM_PERDES = {
+      judul: true,
+      nomor: true,
+      tahun: true,
+      jenis: true,
+      tempat_penetapan: true,
+      tanggal_penetapan: true,
+      status_peraturan: true,
+      file: true,
+    };
     try {
       const kecamatanId = req.query.kecamatan_id ? parseId(req.query.kecamatan_id) : null;
       // ?status=sudah membalik daftar: desa yang berkas Perdes-nya sudah masuk
@@ -282,7 +292,9 @@ class KerjasamaDesaMonitoringController {
           id: true,
           nama: true,
           kecamatans: { select: { id: true, nama: true } },
-          kerjasama_desa_legalitas: { select: { nomor_perdes: true, updated_at: true } },
+          kerjasama_desa_legalitas: {
+            select: { nomor_perdes: true, updated_at: true, produk_hukums: { select: KOLOM_PERDES } },
+          },
           _count: { select: { kerjasama_desa: true } },
         },
         orderBy: [{ kecamatan_id: 'asc' }, { nama: 'asc' }],
@@ -298,6 +310,8 @@ class KerjasamaDesaMonitoringController {
           // dibedakan dari yang belum menyentuh sama sekali — keduanya perlu
           // ditagih dengan kalimat yang berbeda.
           nomor_perdes: d.kerjasama_desa_legalitas?.nomor_perdes || null,
+          // Isi popup "Lihat" di daftar "sudah": ringkasan produk hukum + nama berkas di storage/produk_hukum.
+          perdes: d.kerjasama_desa_legalitas?.produk_hukums || null,
           jumlah_kerjasama: d._count.kerjasama_desa,
         })),
       });
