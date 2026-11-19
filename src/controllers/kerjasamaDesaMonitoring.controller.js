@@ -261,15 +261,22 @@ class KerjasamaDesaMonitoringController {
   async desaBelumLegalitas(req, res, next) {
     try {
       const kecamatanId = req.query.kecamatan_id ? parseId(req.query.kecamatan_id) : null;
+      // ?status=sudah membalik daftar: desa yang berkas Perdes-nya sudah masuk
+      // (isi klik kartu cakupan). Tanpa parameter tetap "belum" (lampiran ekspor).
+      const sudah = req.query.status === 'sudah';
 
       const desa = await prisma.desas.findMany({
         where: {
           status_pemerintahan: 'desa',
           ...(kecamatanId ? { kecamatan_id: kecamatanId } : {}),
-          OR: [
-            { kerjasama_desa_legalitas: { is: null } },
-            { kerjasama_desa_legalitas: { produk_hukum_id: null } },
-          ],
+          ...(sudah
+            ? { kerjasama_desa_legalitas: { is: { produk_hukum_id: { not: null } } } }
+            : {
+                OR: [
+                  { kerjasama_desa_legalitas: { is: null } },
+                  { kerjasama_desa_legalitas: { produk_hukum_id: null } },
+                ],
+              }),
         },
         select: {
           id: true,
