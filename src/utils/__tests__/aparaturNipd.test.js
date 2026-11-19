@@ -241,6 +241,14 @@ describe('verifikasiSetelahUbah: simpanan desa hanya menggugurkan item yang beru
 		return verifikasiSetelahUbah(lama, { ...lama, ...baru }, berubah);
 	};
 
+	it('pas foto diganti: tidak ada item yang gugur, verifikasi tetap', () => {
+		expect(itemBerubah(baris(), {}, ['file_pas_foto'])).toEqual([]);
+		const sekdes = { jabatan: 'Sekretaris Desa', bpjs_kesehatan_nomor: '1', bpjs_ketenagakerjaan_nomor: '2', file_sk_terakhir: 'a', file_ktp: 'b', file_kk: 'c', file_akta_kelahiran: 'd', file_ijazah_terakhir: 'e', file_bpjs_kesehatan: 'f', file_bpjs_ketenagakerjaan: 'g' };
+		const semua = Object.fromEntries(['biodata', 'jabatan_sk', 'bpjs', 'file_sk_terakhir', 'file_ktp', 'file_kk', 'file_akta_kelahiran', 'file_ijazah_terakhir', 'file_bpjs_kesehatan', 'file_bpjs_ketenagakerjaan'].map((k) => [k, sesuai]));
+		// Sekdes tanpa pas foto tetap bisa valid.
+		expect(ringkasVerifikasi(sekdes, semua)).toBe('terverifikasi');
+	});
+
 	it('KTP diganti pada baris ditolak: hanya keputusan KTP gugur', () => {
 		const hasil = ubah(baris(), {}, ['file_ktp']);
 		expect(Object.keys(hasil.verifikasi_item).sort()).toEqual(['biodata', 'file_sk_terakhir', 'jabatan_sk']);

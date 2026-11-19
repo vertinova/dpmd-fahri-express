@@ -147,6 +147,7 @@ const buatNipd = ({ tanggal_lahir, jenis_kelamin, jabatan, tanggal_lahir_taksira
  * itemBerlaku); `wajib` di sini berlaku juga bagi jabatan lain: harus ada dan sesuai sebelum
  * data bisa dinyatakan valid. Item tidak wajib hanya ikut diperiksa bila ada
  * isinya (berkas terunggah / nomor terisi).
+ * Pas foto sengaja tidak termasuk: desa bebas menggantinya tanpa menggugurkan verifikasi.
  */
 const ITEM_VERIFIKASI = [
 	{ key: 'biodata', label: 'Biodata diri', jenis: 'data', wajib: true, kolom: ['nik', 'whatsapp', 'nama_lengkap', 'tempat_lahir', 'tanggal_lahir', 'jenis_kelamin', 'agama', 'pendidikan_terakhir'], keterangan: 'NIK, WhatsApp, nama, tempat & tanggal lahir, jenis kelamin, agama, pendidikan' },
@@ -154,7 +155,6 @@ const ITEM_VERIFIKASI = [
 	{ key: 'bpjs', label: 'Nomor BPJS', jenis: 'data', wajib: false, kolom: ['bpjs_kesehatan_nomor', 'bpjs_ketenagakerjaan_nomor'] },
 	{ key: 'file_sk_terakhir', label: 'SK terakhir', jenis: 'berkas', wajib: true },
 	{ key: 'file_ktp', label: 'KTP', jenis: 'berkas', wajib: true },
-	{ key: 'file_pas_foto', label: 'Pas foto', jenis: 'berkas', wajib: false },
 	{ key: 'file_kk', label: 'Kartu Keluarga', jenis: 'berkas', wajib: false },
 	{ key: 'file_akta_kelahiran', label: 'Akta kelahiran', jenis: 'berkas', wajib: false },
 	{ key: 'file_ijazah_terakhir', label: 'Ijazah terakhir', jenis: 'berkas', wajib: false },
