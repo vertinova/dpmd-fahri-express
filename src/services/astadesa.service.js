@@ -50,7 +50,19 @@ const MAX_ROWS_DEFAULT = Number(process.env.ASTADESA_MAX_ROWS || 600000);
 // Berapa halaman diminta bersamaan saat menyusuri. 413 halaman keluarga dan
 // ±1.650 halaman anggota tidak mungkin disusuri berurutan (±1 detik/halaman);
 // enam sekaligus memangkasnya ±6x tanpa membanjiri server ASTA DESA.
-const KONKURENSI = Math.max(1, Number(process.env.ASTADESA_KONKURENSI || 6));
+// Diturunkan dari 6 (21 Nov 2026): tiap halaman di sana adalah kueri OFFSET
+// dalam yang memindai ratusan ribu baris, dan enam sekaligus terukur ikut
+// menjenuhkan database ASTA DESA. Demografi & kategori kini dibaca langsung
+// dari database (astadesaDb.service.js), jadi penyusuran tidak lagi mendesak.
+const KONKURENSI = Math.max(1, Number(process.env.ASTADESA_KONKURENSI || 3));
+// Rem penyusuran (lihat `ambilSemua`): kegagalan sesaat beruntun sebelum
+// mengerem, lama satu rem, dan berapa kali rem sebelum menyerah.
+const REM_AMBANG = 8;
+const REM_MS = 60 * 1000;
+const REM_MAKS = 10;
+// Setelah menyerah karena ASTA DESA tidak sehat, tunggu ini sebelum mulai lagi.
+const ISTIRAHAT_MS = 5 * 60 * 1000;
+const istirahat = new Map(); // kunci -> waktu boleh mulai lagi
 // Umur hasil penyusuran penuh. Lebih panjang dari cache per-halaman karena satu
 // penyusuran berarti ratusan permintaan ke ASTA DESA; rincian per kecamatan dan
 // demografi tidak berubah berarti dalam setengah jam. Selama umur ini lewat,
@@ -698,6 +710,13 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
     return opts.latar ? jawabanLatar() : inflight.get(kunci);
   }
 
+  // Baru saja dihentikan rem karena ASTA DESA tidak sehat: jangan langsung
+  // mulai lagi hanya karena ada pengunjung — itulah yang dulu membanjirinya.
+  if ((istirahat.get(kunci) || 0) > Date.now()) {
+    if (opts.latar) return jawabanLatar();
+    throw new AstaDesaError('ASTA DESA baru saja tidak sehat; penyusuran ditunda sebentar.', 503);
+  }
+
   const batasBaris = opts.maxRows || MAX_ROWS_DEFAULT;
   const minta = opts.pengguna ? requestPengguna : requestMentah;
 
@@ -804,17 +823,60 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
 
     if (jumlahPertama > 0 && batasHalaman > 1) {
       let berikut = 2;
+      // REM. ASTA DESA yang sedang tumbang tidak ditembak terus. Diukur 21 Nov
+      // 2026: saat ASTA DESA membalas 502 untuk semua orang (termasuk aplikasi
+      // petugas lapangan), penyusuran ini tetap mengirim ±300 permintaan/menit
+      // karena tiap halaman yang gagal langsung diganti halaman berikutnya.
+      // Sekarang kegagalan sesaat beruntun menghentikan SEMUA pekerja sejenak
+      // dan halaman itu diulang; terlalu sering mengerem berarti server memang
+      // tidak sehat — penyusuran dihentikan dan data lama tetap disajikan.
+      let gagalBeruntun = 0;
+      let kaliRem = 0;
+      let remSampai = 0;
+      let batal = null;
       const pekerja = async () => {
-        while (berikut <= batasHalaman) {
+        while (berikut <= batasHalaman && !batal) {
           const halaman = berikut;
           berikut += 1;
-          try {
-            serap(await mintaHalaman(halaman), halaman);
-          } catch (err) {
-            // Galat izin/token pada halaman mana pun berarti semua halaman lain
-            // juga akan ditolak — hentikan, jangan diam-diam menyajikan nol.
-            if ((err.status === 401 || err.status === 403 || err.status === 503) && !err.dibatasi) throw err;
-            halamanGagal += 1;
+          for (;;) {
+            if (batal) return;
+            const jeda = remSampai - Date.now();
+            if (jeda > 0) await new Promise((r) => setTimeout(r, jeda));
+            try {
+              serap(await mintaHalaman(halaman), halaman);
+              gagalBeruntun = 0;
+              break;
+            } catch (err) {
+              // Galat izin/token pada halaman mana pun berarti semua halaman lain
+              // juga akan ditolak — hentikan, jangan diam-diam menyajikan nol.
+              if ((err.status === 401 || err.status === 403 || err.status === 503) && !err.dibatasi) {
+                batal = err;
+                throw err;
+              }
+              const sesaat = err.dibatasi || err.status === 502 || err.status === 504;
+              if (sesaat) gagalBeruntun += 1;
+              if (!sesaat || gagalBeruntun < REM_AMBANG) {
+                halamanGagal += 1;
+                break;
+              }
+              if (Date.now() >= remSampai) {
+                kaliRem += 1;
+                if (kaliRem > REM_MAKS) {
+                  batal = new AstaDesaError(
+                    `ASTA DESA tidak sehat (${REM_MAKS} kali mengerem); penyusuran dihentikan, data lama tetap disajikan.`,
+                    503
+                  );
+                  batal.tidakSehat = true;
+                  throw batal;
+                }
+                remSampai = Date.now() + REM_MS;
+                // Sesudah rem, SATU kegagalan sesaat lagi langsung mengerem:
+                // server yang masih tumbang tidak boleh menghabiskan halaman.
+                gagalBeruntun = REM_AMBANG - 1;
+                console.warn(`[asta-desa] ${kunci}: ${REM_AMBANG} kegagalan beruntun, mengerem ${REM_MS / 1000} dtk (ke-${kaliRem})`);
+              }
+              // Halaman ini diulang setelah rem.
+            }
           }
           jalanIni.selesai += 1;
           jalanIni.terbaca = terbaca;
@@ -852,6 +914,22 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
       halaman_gagal: halamanGagal,
       disusun_pada: new Date().toISOString()
     };
+    // Hasil yang jauh lebih buruk tidak menimpa potret lama. Terjadi 21 Nov
+    // 2026: penyusuran dengan 2.411 halaman gagal (607 rb baris) menggantikan
+    // potret 1,06 jt baris, dan angka Ringkasan anjlok. Potret lama ditandai
+    // segar supaya tidak langsung disusuri ulang; siklus pemanasan berikutnya
+    // mencoba lagi.
+    const lama = cache.get(kunci)?.value;
+    if (lama && halamanGagal > 0 && Number(lama.terbaca) > 0 && terbaca < lama.terbaca * 0.97) {
+      console.warn(
+        `[asta-desa] penyusuran ${kunci} jauh lebih buruk (${terbaca} vs ${lama.terbaca} baris, ${halamanGagal} halaman gagal) — potret lama dipertahankan`
+      );
+      cache.set(kunci, { value: lama, at: Date.now() });
+      inflight.delete(kunci);
+      progres.delete(kunci);
+      return lama;
+    }
+
     const pada = Date.now();
     cache.set(kunci, { value: hasil, at: pada });
     inflight.delete(kunci);
@@ -864,6 +942,7 @@ const ambilSemua = async (path, params = {}, opts = {}) => {
   })().catch((err) => {
     inflight.delete(kunci);
     progres.delete(kunci);
+    if (err?.tidakSehat) istirahat.set(kunci, Date.now() + ISTIRAHAT_MS);
     throw err;
   });
 

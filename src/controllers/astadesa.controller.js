@@ -19,6 +19,7 @@ const { promisify } = require('util');
 const zlib = require('zlib');
 
 const asta = require('../services/astadesa.service');
+const asdb = require('../services/astadesaDb.service');
 const ActivityLogger = require('../utils/activityLogger');
 
 const gzip = promisify(zlib.gzip);
@@ -1245,11 +1246,143 @@ const usiaDari = (row) => {
  * GET /api/asta-desa/demografi
  * Agregat anggota keluarga: jenis kelamin, kelompok usia, pendidikan, pekerjaan.
  */
+// ── Jalur database ASTA DESA (lihat services/astadesaDb.service.js) ─────────
+//
+// Agregat yang sama dengan penyusuran API, tetapi dari SQL: lengkap (tanpa
+// pagar baris), wilayah tiap anggota langsung dari keluarga induknya, dan
+// selesai dalam detik, bukan jam. Bentuk keluarannya SENGAJA sama dengan hasil
+// `olahDemografi`/`OLAH_KATEGORI`, sehingga emberWilayah, lingkupKategori, dan
+// ekspor tidak perlu tahu dari mana angkanya datang.
+
+const TTL_DB_DEMOGRAFI = 10 * 60 * 1000;
+const TTL_DB_KELUARGA = 30 * 60 * 1000;
+const LABEL_JK = { L: 'Laki-laki', P: 'Perempuan', lain: 'Tidak diketahui' };
+
+/** Satu baris GROUPING SETS -> ember. Aturan = isiEmber, dengan bobot `n`. */
+const isiKelompok = (e, r) => {
+  const w = r.n;
+  if (r.gj === 0) {
+    e.total += w;
+    const jk = jkDari(r.jk);
+    tambah(e.perJk, LABEL_JK[jk], w);
+    const u = r.usia;
+    // usiaDari: di luar 0–129 tahun dianggap tak terbaca.
+    if (u === null || u < 0 || u >= 130) {
+      e.tanpaUsia += w;
+      return;
+    }
+    const idx = KELOMPOK_USIA.findIndex((k) => u >= k.min && u <= k.max);
+    if (idx >= 0) {
+      e.piramida[idx][jk] += w;
+      e.piramida[idx].total += w;
+    }
+  } else if (r.gp === 0) {
+    if (r.pend) tambah(e.perPendidikan, r.pend, w);
+  } else if (r.gh === 0) {
+    if (r.hub) tambah(e.perHubungan, r.hub, w);
+  } else if (r.gd === 0) {
+    if (r.dis) tambah(e.perDisabilitas, r.dis, w);
+  }
+};
+
+const susunDemografiDb = (rows) => {
+  const kab = emberAnggota();
+  const perWilayah = new Map();
+  rows.forEach((r) => {
+    const kunci = `${r.kec}\u0000${r.desa}`;
+    let e = perWilayah.get(kunci);
+    if (!e) {
+      e = emberAnggota();
+      perWilayah.set(kunci, e);
+    }
+    isiKelompok(kab, r);
+    isiKelompok(e, r);
+  });
+  return {
+    ...bentukEmber(kab),
+    mentah: kab,
+    per_wilayah: perWilayah,
+    terpeta: kab.total,
+    tanpa_wilayah: 0,
+    id_terbesar: null
+  };
+};
+
+/** Agregat anggota dari database: { nilai, pada, basi } atau null (belum siap / tanpa DB). */
+const demografiDb = (force = false) =>
+  asdb.aktif()
+    ? asdb.ambilAtauMulai('demografi', TTL_DB_DEMOGRAFI, async () => susunDemografiDb(await asdb.agregatAnggota()), {
+        force
+      })
+    : null;
+
+/**
+ * Profil kategori keluarga dari database, dalam bentuk hasil `ambilSemua` dengan
+ * profil PROFIL_PENGGUNA (tanpa `rows`: baris peta tetap dari penyusuran).
+ */
+const keluargaDb = (force = false) => {
+  if (!asdb.aktif()) return null;
+  const x = asdb.ambilAtauMulai(
+    'keluarga',
+    TTL_DB_KELUARGA,
+    async () => {
+      const s = OLAH_KATEGORI.buat();
+      const n = await asdb.susuriKeluarga((rows) => rows.forEach((r) => OLAH_KATEGORI.tambah(s, r)));
+      const olahan = OLAH_KATEGORI.selesai(s);
+      // Peta id -> wilayah (±1 juta entri) hanya dibutuhkan penyusuran anggota;
+      // di jalur database anggota membawa wilayahnya sendiri dari SQL.
+      olahan.wilayahPerId.clear();
+      return {
+        rows: [],
+        olahan,
+        terbaca: n,
+        total: n,
+        truncated: false,
+        kena_pagar: false,
+        halaman_gagal: 0,
+        disusun_pada: new Date().toISOString()
+      };
+    },
+    { force }
+  );
+  return x ? { ...x.nilai, basi: x.basi } : null;
+};
+
 exports.getDemografi = jalankan(async (req, res) => {
   const force = paksa(req);
   const fKec = rapikan(req.query.kecamatan);
   const fDesa = rapikan(req.query.desa);
   const adaFilter = Boolean(fKec || fDesa);
+
+  // Jalur database: seluruh anggota (tanpa pagar baris), wilayah langsung dari
+  // keluarga induknya, tanpa menunggu penyusuran. Belum siap -> jalur lama.
+  const db = demografiDb(force);
+  if (db) {
+    const o = db.nilai;
+    const isi = adaFilter ? emberWilayah(o, fKec, fDesa) : o;
+    return res.json({
+      success: true,
+      data: {
+        total_anggota: isi.total,
+        per_jenis_kelamin: isi.per_jenis_kelamin,
+        piramida: isi.piramida,
+        tanpa_usia: isi.tanpa_usia,
+        per_pendidikan: isi.per_pendidikan,
+        per_pekerjaan: isi.per_pekerjaan,
+        per_hubungan: isi.per_hubungan,
+        per_disabilitas: isi.per_disabilitas,
+        filter: { kecamatan: fKec, desa: fDesa },
+        per_wilayah_siap: true,
+        anggota_terpeta: o.terpeta,
+        anggota_tanpa_wilayah: 0,
+        sebagian: false,
+        rincian_siap: true,
+        rincian_basi: db.basi,
+        disusun_pada: new Date(db.pada).toISOString(),
+        sumber: 'database'
+      }
+    });
+  }
 
   // Peta id keluarga -> wilayah lebih dulu, lalu penyusuran anggota memakainya.
   // Urutan ini yang membuat angka anggota bisa dipecah per kecamatan/desa —
@@ -1317,12 +1450,16 @@ const emberAnggota = () => ({
  * desanya). Tanpa pemisahan ini setiap baris melewati belasan `pilih` dua kali
  * — dan barisnya ada ±330 ribu.
  */
+// Sumbernya tidak seragam: ada "L"/"P", ada "LAKI-LAKI"/"PEREMPUAN", ada
+// "1"/"2". Ketiganya harus jatuh ke ember yang sama — di jalur API maupun SQL.
+const jkDari = (mentah) => {
+  const t = (rapikan(mentah) || '').toUpperCase();
+  return /^(L|1|LAKI)/.test(t) ? 'L' : /^(P|2|PEREM|WANITA)/.test(t) ? 'P' : 'lain';
+};
+
 const bacaAnggota = (a) => {
-  const jkMentah = (rapikan(pilih(a, ['jenis_kelamin', 'jk', 'gender'])) || '').toUpperCase();
   return {
-    // Sumbernya tidak seragam: ada "L"/"P", ada "LAKI-LAKI"/"PEREMPUAN",
-    // ada "1"/"2". Ketiganya harus jatuh ke ember yang sama.
-    jk: /^(L|1|LAKI)/.test(jkMentah) ? 'L' : /^(P|2|PEREM|WANITA)/.test(jkMentah) ? 'P' : 'lain',
+    jk: jkDari(pilih(a, ['jenis_kelamin', 'jk', 'gender'])),
     pendidikan: rapikan(pilih(a, ['pendidikan', 'pendidikan_terakhir', 'tingkat_pendidikan'])),
     // Kolom pekerjaan TIDAK ada di `sensus_anggotas` per hari ini. Pembacaannya
     // dibiarkan supaya angkanya langsung muncul bila mereka menambahkannya.
@@ -1460,6 +1597,18 @@ const wilayahAnggota = (a, lookup) => {
  * baris pertama, entah ia memang penyusuran tanpa rincian wilayah — dan nama
  * profilnya ikut mengatakan yang mana (lihat `profilAnggota`).
  */
+/** Tuple ringkas satu anggota untuk daftar nama — tanpa NIK/tgl lahir/alamat. */
+const tupleOrang = (a, n, idSensus) => ({
+  n: rapikan(pilih(a, ['nama', 'nama_lengkap'])) || null,
+  s: idSensus,
+  h: n.hubungan || null,
+  j: n.jk,
+  u: n.usia,
+  p: n.pendidikan || null,
+  d: n.disabilitas || null,
+  k: n.pekerjaan || null
+});
+
 const olahDemografi = (lookup) => ({
   buat: () => ({ kab: emberAnggota(), perWilayah: new Map(), orangPerWilayah: new Map(), terpeta: 0, tanpaWilayah: 0, idTerbesar: null }),
   tambah: (s, a) => {
@@ -1492,16 +1641,7 @@ const olahDemografi = (lookup) => ({
       orang = [];
       s.orangPerWilayah.set(wilayah, orang);
     }
-    orang.push({
-      n: rapikan(pilih(a, ['nama', 'nama_lengkap'])) || null,
-      s: idSensusAnggota(a),
-      h: n.hubungan || null,
-      j: n.jk,
-      u: n.usia,
-      p: n.pendidikan || null,
-      d: n.disabilitas || null,
-      k: n.pekerjaan || null
-    });
+    orang.push(tupleOrang(a, n, idSensusAnggota(a)));
   },
   selesai: (s) => ({
     ...bentukEmber(s.kab),
@@ -1974,12 +2114,16 @@ exports.getKategoriSensus = jalankan(async (req, res) => {
   const fKec = rapikan(req.query.kecamatan)?.toLowerCase() || null;
   const fDesa = rapikan(req.query.desa)?.toLowerCase() || null;
 
-  const semua = await asta.ambilSemua('/sensuses', {}, {
-    force,
-    pengguna: true,
-    latar: true,
-    profil: PROFIL_PENGGUNA
-  });
+  // Database lebih dulu (seluruh keluarga, tanpa halaman gagal); penyusuran
+  // hanya selama perhitungan pertama dari database belum selesai.
+  const semua =
+    keluargaDb(force) ||
+    (await asta.ambilSemua('/sensuses', {}, {
+      force,
+      pengguna: true,
+      latar: true,
+      profil: PROFIL_PENGGUNA
+    }));
   const o = semua.olahan;
   const lingkup = o ? lingkupKategori(o, fKec, fDesa) : { total: 0, wilayah: rekapWilayah([], fKec), kategori: [] };
 
@@ -2233,7 +2377,7 @@ exports.getDemografiNama = jalankan(async (req, res) => {
   const tolak = (message) => res.status(400).json({ success: false, message });
 
   const tipe = rapikan(req.query.tipe);
-  if (!['keluarga', 'anggota', 'usia', 'sifat'].includes(tipe)) return tolak('Tipe daftar tidak dikenal.');
+  if (!['keluarga', 'anggota', 'usia', 'sifat', 'kolom'].includes(tipe)) return tolak('Tipe daftar tidak dikenal.');
   const kecamatan = rapikan(req.query.kecamatan);
   const desa = rapikan(req.query.desa);
   if (!kecamatan || !desa) return tolak('Pilih desa terlebih dahulu.');
@@ -2252,7 +2396,71 @@ exports.getDemografiNama = jalankan(async (req, res) => {
   if (tipe === 'usia' && !kelompok.some((k) => KELOMPOK_USIA.some((u) => u.label === k))) {
     return tolak('Kelompok usia tidak dikenal.');
   }
+  // Kolom kategori keluarga (mis. "Kemampuan baca tulis: Bisa"). Nama kolomnya
+  // masuk ke SQL sebagai identifier, jadi WAJIB lolos tiga pagar: bentuk nama,
+  // bukan kolom terlarang, dan memang termasuk kolom yang boleh dibaca role DB.
+  const kunciKolom = rapikan(req.query.kunci);
+  const nilaiKolom = rapikan(req.query.nilai);
+  if (tipe === 'kolom') {
+    if (!asdb.aktif()) {
+      return res.status(503).json({ success: false, message: 'Daftar keluarga per kolom sensus membutuhkan akses database ASTA DESA.' });
+    }
+    if (!kunciKolom || !/^[a-z][a-z0-9_]{0,62}$/.test(kunciKolom) || terlarang(kunciKolom)) return tolak('Kolom tidak dikenal.');
+    if (!(await asdb.daftarKolomSensus()).has(kunciKolom)) return tolak('Kolom tidak dikenal.');
+    if (!nilaiKolom || nilaiKolom.length > 200) return tolak('Nilai wajib diisi (maksimal 200 karakter).');
+  }
   const halaman = Math.max(1, parseInt(req.query.halaman, 10) || 1);
+
+  const catat = () => {
+    if (halaman !== 1 || !req.user) return;
+    const nama = req.user.name || 'Pengguna';
+    const rincian = tipe === 'kolom' ? `kolom/${kunciKolom}: ${nilaiKolom}` : `${tipe}${dim ? '/' + dim : ''}${label ? ': ' + label : ''}`;
+    ActivityLogger.log({
+      userId: BigInt(String(req.user.id)),
+      userName: req.user.name,
+      userRole: req.user.role,
+      module: 'asta_desa',
+      action: 'lihat_nama',
+      entityType: 'demografi',
+      entityName: `${desa}, ${kecamatan}`,
+      description: `${nama} melihat daftar nama (${rincian}) di Desa ${desa}, Kec. ${kecamatan}`,
+      ipAddress: ActivityLogger.getIpFromRequest(req),
+      userAgent: ActivityLogger.getUserAgentFromRequest(req)
+    }).catch(() => {});
+  };
+
+  // Jalur database: seluruh warga desa itu, saat ini juga — bukan dari potret
+  // penyusuran yang terpotong pagar baris. Gagal -> jalur lama (kecuali kolom).
+  if (asdb.aktif()) {
+    try {
+      let hasil;
+      if (tipe === 'kolom' || tipe === 'keluarga') {
+        const baris = await asdb.keluargaDesa(kecamatan, desa, tipe === 'kolom' ? kunciKolom : null);
+        const cocok = tipe === 'kolom' ? baris.filter((r) => cocokNilaiKolom(r.nilai, nilaiKolom)) : baris;
+        hasil = susunDaftarNama({
+          sumber: cocok.map((r) => ({ id: r.id, kk_nama: r.kk_nama || null })),
+          kkPerId: new Map(),
+          filter: { tipe: 'keluarga' },
+          q,
+          halaman
+        });
+      } else {
+        const kkPerId = new Map();
+        const orang = (await asdb.anggotaDesa(kecamatan, desa)).map((a) => {
+          kkPerId.set(a.sensus_id, a.kk_nama || null);
+          return tupleOrang(a, bacaAnggota(a), a.sensus_id);
+        });
+        hasil = susunDaftarNama({ sumber: orang, kkPerId, filter: { tipe, dim, label, kelompok, sisi }, q, halaman });
+      }
+      catat();
+      return res.json({ success: true, data: { ...hasil, siap: true, disusun_pada: new Date().toISOString(), sumber: 'database' } });
+    } catch (err) {
+      console.error('[asta-desa-db] daftar nama gagal:', err.message);
+      if (tipe === 'kolom') {
+        return res.status(503).json({ success: false, message: 'Database ASTA DESA sedang tidak bisa dibaca. Coba lagi sebentar.' });
+      }
+    }
+  }
 
   const belum = () =>
     res.json({
@@ -2293,28 +2501,21 @@ exports.getDemografiNama = jalankan(async (req, res) => {
   }
 
   const hasil = susunDaftarNama({ sumber, kkPerId: kel.kkPerId, filter: { tipe, dim, label, kelompok, sisi }, q, halaman });
-
-  if (halaman === 1 && req.user) {
-    const nama = req.user.name || 'Pengguna';
-    ActivityLogger.log({
-      userId: BigInt(String(req.user.id)),
-      userName: req.user.name,
-      userRole: req.user.role,
-      module: 'asta_desa',
-      action: 'lihat_nama',
-      entityType: 'demografi',
-      entityName: `${desa}, ${kecamatan}`,
-      description: `${nama} melihat daftar nama (${tipe}${dim ? '/' + dim : ''}${label ? ': ' + label : ''}) di Desa ${desa}, Kec. ${kecamatan}`,
-      ipAddress: ActivityLogger.getIpFromRequest(req),
-      userAgent: ActivityLogger.getUserAgentFromRequest(req)
-    }).catch(() => {});
-  }
-
+  catat();
   res.json({ success: true, data: { ...hasil, siap: true, disusun_pada: semua.disusun_pada || null } });
 });
 
+/** Nilai mentah satu kolom keluarga cocok dengan label kategori? Aturan = OLAH_KATEGORI. */
+const cocokNilaiKolom = (mentah, nilai) => {
+  const label = nilaiKe(mentah);
+  // '__kosong__' = keluarga yang kolomnya tidak terisi (lihat KOSONG di frontend).
+  if (nilai === '__kosong__') return Array.isArray(label) && label.length === 0;
+  const sasaran = nilai.toLowerCase();
+  return Array.isArray(label) && label.some((l) => l.toLowerCase() === sasaran);
+};
+
 // Hanya untuk uji: fungsi murni di atas.
-exports.__uji = { saringOrang, susunDaftarNama, itemAnggota };
+exports.__uji = { saringOrang, susunDaftarNama, itemAnggota, cocokNilaiKolom, susunDemografiDb, jkDari };
 
 /**
  * GET /api/asta-desa/demografi/wilayah
@@ -2350,12 +2551,24 @@ exports.getDemografiWilayah = jalankan(async (req, res) => {
   // ASTA DESA di sini (hingga 2 x 10 halaman berurutan) hanya membuat tiap klik
   // menunggu belasan detik demi angka yang justru berbeda dari kartunya.
   const ringan = req.query.ringan === '1';
-  const abaikan = ringan || req.query.abaikan_kesegaran === '1';
 
-  const [peta, hidup] = await Promise.all([
-    asta.ambilSemua('/sensuses', {}, { force, pengguna: true, latar: true, profil: PROFIL_PENGGUNA }),
-    ringan ? null : hitungTerkini(force)
-  ]);
+  // Jalur database: keluarga dan anggota sama-sama dihitung langsung dari
+  // ASTA DESA (paling tua satu TTL), jadi tidak ada yang perlu disusul dan
+  // tidak ada potret yang bisa "belum realtime". Dipakai hanya bila KEDUANYA
+  // siap — mencampur potret penyusuran dengan angka database menghasilkan
+  // rincian yang tidak saling cocok.
+  const dbKeluarga = keluargaDb(force);
+  const dbAnggota = demografiDb(force);
+  const dariDb = Boolean(dbKeluarga?.olahan && dbAnggota);
+  const abaikan = ringan || dariDb || req.query.abaikan_kesegaran === '1';
+  const susul = !ringan && !dariDb;
+
+  const [peta, hidup] = dariDb
+    ? [{ ...dbKeluarga, basi: false }, null]
+    : await Promise.all([
+        asta.ambilSemua('/sensuses', {}, { force, pengguna: true, latar: true, profil: PROFIL_PENGGUNA }),
+        ringan ? null : hitungTerkini(force)
+      ]);
   const o = peta.olahan;
 
   // Baris keluarga terbaru disusul LEBIH DULU, dan kesiapan dinilai SETELAHNYA.
@@ -2363,7 +2576,7 @@ exports.getDemografiWilayah = jalankan(async (req, res) => {
   // berarti menolak potret yang sebenarnya hanya tertinggal beberapa ratus
   // baris — baris yang bisa ditarik dalam satu dua permintaan.
   const susulanKeluarga =
-    o && !ringan ? await susulBaris('/sensuses', { pengguna: true }, idTerbesarBaris(peta.rows)) : null;
+    o && susul ? await susulBaris('/sensuses', { pengguna: true }, idTerbesarBaris(peta.rows)) : null;
   const kesiapanKeluarga = kesiapanSusur(peta, hidup, susulanKeluarga);
 
   if (!o || (!kesiapanKeluarga.realtime && !abaikan)) {
@@ -2378,16 +2591,25 @@ exports.getDemografiWilayah = jalankan(async (req, res) => {
   const grupSemua = gabungan.grup;
   const lookup = gabungan.wilayahPerId?.size ? gabungan.wilayahPerId : null;
 
-  const potretAnggota = await asta.ambilSemua('/sensus-anggotas', {}, {
-    force,
-    latar: true,
-    profil: profilAnggota(lookup)
-  });
+  const potretAnggota = dariDb
+    ? {
+        olahan: dbAnggota.nilai,
+        terbaca: dbAnggota.nilai.total,
+        total: dbAnggota.nilai.total,
+        truncated: false,
+        basi: false,
+        disusun_pada: new Date(dbAnggota.pada).toISOString()
+      }
+    : await asta.ambilSemua('/sensus-anggotas', {}, {
+        force,
+        latar: true,
+        profil: profilAnggota(lookup)
+      });
   // Anggota keluarga baru ikut disusul dengan cara yang sama. Tanpa ini,
   // keluarga yang baru masuk akan tampil di rekap keluarga tetapi anggotanya
   // tidak terhitung — selisih yang justru paling mudah dikira kesalahan hitung.
   const susulanAnggota =
-    potretAnggota.olahan && !ringan
+    potretAnggota.olahan && susul
       ? await susulBaris('/sensus-anggotas', {}, potretAnggota.olahan.id_terbesar)
       : null;
   const kesiapanAnggota = kesiapanSusur(potretAnggota, null, susulanAnggota);
@@ -3163,6 +3385,8 @@ exports.segarkan = jalankan(async (req, res) => {
   // Langsung mulai menyusun ulang di latar — halaman tetap menyajikan angka
   // terakhir (bersihkanCache hanya menandainya kedaluwarsa) sampai yang baru siap.
   panaskan(true);
+  // Satu perhitungan per kunci berjalan sekaligus, jadi klik beruntun tidak menumpuk kueri.
+  panaskanDb(true).catch(() => {});
   res.json({ success: true, message: 'Data Asta Desa sedang disegarkan di latar' });
 });
 
@@ -3242,6 +3466,10 @@ const panaskan = async (force = false) => {
     if (peta?.olahan) {
       lingkupKategori(peta.olahan, null, null);
     }
+    // Dengan akses database, demografi dan daftar nama tidak memakai penyusuran
+    // anggota lagi; menyusurinya hanya membebani ASTA DESA dan memori ini.
+    if (asdb.aktif()) return;
+
     const lookup = peta?.olahan?.wilayahPerId?.size ? peta.olahan.wilayahPerId : null;
     if (!lookup) {
       console.warn(
@@ -3260,10 +3488,28 @@ const panaskan = async (force = false) => {
   }
 };
 
+/**
+ * Agregat dari database, dipanaskan TERPISAH dari penyusuran: penyusuran bisa
+ * berjalan berjam-jam dan menahan `panaskan`, sedangkan ini selesai dalam
+ * hitungan detik. Hanya menghitung ulang yang sudah lewat TTL (atau `force`).
+ */
+const panaskanDb = async (force = false) => {
+  if (!asdb.aktif()) return;
+  demografiDb(force);
+  keluargaDb(force);
+  await Promise.all([asdb.tungguBerjalan('demografi'), asdb.tungguBerjalan('keluarga')]);
+  const kel = keluargaDb(false);
+  if (kel?.olahan) lingkupKategori(kel.olahan, null, null);
+};
+
 let pemanasanAktif = false;
 exports.mulaiPemanasan = () => {
   if (pemanasanAktif || !asta.terkonfigurasi()) return;
   pemanasanAktif = true;
+  if (asdb.aktif()) {
+    setTimeout(() => panaskanDb(false), 5 * 1000).unref();
+    setInterval(() => panaskanDb(false), 10 * 60 * 1000).unref();
+  }
   // Jeda awal supaya tidak berebut dengan pekerjaan menyala lainnya.
   setTimeout(() => panaskan(false), 20 * 1000).unref();
   // Sedikit sebelum TTL habis, supaya pengunjung hampir tidak pernah menjumpai
