@@ -2339,13 +2339,22 @@ exports.__uji = { saringOrang, susunDaftarNama, itemAnggota };
  * menuliskannya sebagai keterangan, bukan menyajikan angka kabupaten di bawah
  * nama desa.
  */
+// Muatan mode ringan yang sudah diserialkan, per potret keluarga. Kuncinya objek
+// `olahan`, jadi entri lama ikut lenyap begitu potret diganti penyusuran baru.
+const muatanRingan = new WeakMap(); // olahan keluarga -> { anggota, teks }
+
 exports.getDemografiWilayah = jalankan(async (req, res) => {
   const force = paksa(req);
-  const abaikan = req.query.abaikan_kesegaran === '1';
+  // `ringan=1` dipakai popup rincian per wilayah: angkanya harus sama dengan
+  // kartu Demografi, yang dibaca dari potret tanpa susulan. Menyusul baris ke
+  // ASTA DESA di sini (hingga 2 x 10 halaman berurutan) hanya membuat tiap klik
+  // menunggu belasan detik demi angka yang justru berbeda dari kartunya.
+  const ringan = req.query.ringan === '1';
+  const abaikan = ringan || req.query.abaikan_kesegaran === '1';
 
   const [peta, hidup] = await Promise.all([
     asta.ambilSemua('/sensuses', {}, { force, pengguna: true, latar: true, profil: PROFIL_PENGGUNA }),
-    hitungTerkini(force)
+    ringan ? null : hitungTerkini(force)
   ]);
   const o = peta.olahan;
 
@@ -2353,7 +2362,8 @@ exports.getDemografiWilayah = jalankan(async (req, res) => {
   // Urutan ini yang membuat ekspor sepadan dengan ASTA DESA: menilai lebih dulu
   // berarti menolak potret yang sebenarnya hanya tertinggal beberapa ratus
   // baris — baris yang bisa ditarik dalam satu dua permintaan.
-  const susulanKeluarga = o ? await susulBaris('/sensuses', { pengguna: true }, idTerbesarBaris(peta.rows)) : null;
+  const susulanKeluarga =
+    o && !ringan ? await susulBaris('/sensuses', { pengguna: true }, idTerbesarBaris(peta.rows)) : null;
   const kesiapanKeluarga = kesiapanSusur(peta, hidup, susulanKeluarga);
 
   if (!o || (!kesiapanKeluarga.realtime && !abaikan)) {
@@ -2364,7 +2374,7 @@ exports.getDemografiWilayah = jalankan(async (req, res) => {
     });
   }
 
-  const gabungan = terapkanSusulanKeluarga(o, susulanKeluarga.rows);
+  const gabungan = terapkanSusulanKeluarga(o, susulanKeluarga?.rows || []);
   const grupSemua = gabungan.grup;
   const lookup = gabungan.wilayahPerId?.size ? gabungan.wilayahPerId : null;
 
@@ -2376,9 +2386,10 @@ exports.getDemografiWilayah = jalankan(async (req, res) => {
   // Anggota keluarga baru ikut disusul dengan cara yang sama. Tanpa ini,
   // keluarga yang baru masuk akan tampil di rekap keluarga tetapi anggotanya
   // tidak terhitung — selisih yang justru paling mudah dikira kesalahan hitung.
-  const susulanAnggota = potretAnggota.olahan
-    ? await susulBaris('/sensus-anggotas', {}, potretAnggota.olahan.id_terbesar)
-    : null;
+  const susulanAnggota =
+    potretAnggota.olahan && !ringan
+      ? await susulBaris('/sensus-anggotas', {}, potretAnggota.olahan.id_terbesar)
+      : null;
   const kesiapanAnggota = kesiapanSusur(potretAnggota, null, susulanAnggota);
 
   if (potretAnggota.olahan && !kesiapanAnggota.realtime && !abaikan) {
@@ -2387,6 +2398,13 @@ exports.getDemografiWilayah = jalankan(async (req, res) => {
         .ambilSemua('/sensus-anggotas', {}, { force: true, latar: true, profil: profilAnggota(lookup) })
         .catch(() => {});
     });
+  }
+
+  // Tanpa susulan, isi muatan hanya ditentukan kedua potret: sajikan salinan
+  // yang sudah disusun, bukan menyusun ulang ratusan desa x ±80 kolom per klik.
+  const simpananRingan = ringan ? muatanRingan.get(o) : null;
+  if (simpananRingan && simpananRingan.anggota === potretAnggota.olahan) {
+    return res.type('application/json').send(simpananRingan.teks);
   }
 
   const anggota = terapkanSusulanAnggota(potretAnggota.olahan, susulanAnggota?.rows || [], lookup);
@@ -2484,7 +2502,7 @@ exports.getDemografiWilayah = jalankan(async (req, res) => {
     })
     .sort((a, b) => a.kecamatan.localeCompare(b.kecamatan, 'id'));
 
-  res.json({
+  const teks = JSON.stringify({
     success: true,
     data: {
       total_keluarga: grupSemua.reduce((a, g) => a + g.n, 0),
@@ -2522,6 +2540,10 @@ exports.getDemografiWilayah = jalankan(async (req, res) => {
       }
     }
   });
+  // Potret anggota yang belum selesai (olahan null) tidak disimpan: muatannya
+  // tanpa demografi dan harus disusun lagi begitu penyusurannya rampung.
+  if (ringan && potretAnggota.olahan) muatanRingan.set(o, { anggota: potretAnggota.olahan, teks });
+  res.type('application/json').send(teks);
 });
 
 /**
