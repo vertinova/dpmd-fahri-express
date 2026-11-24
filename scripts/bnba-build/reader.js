@@ -18,7 +18,18 @@ function readWorkbook(filePath) {
 }
 
 function sheetRows(ws) {
-  return xlsx.utils.sheet_to_json(ws, { header: 1, raw: true, defval: null, blankrows: true });
+  // Indeks baris hasil harus sama dengan nomor baris absolut, karena posisi
+  // merge (`!merges`) selalu absolut. Sheet yang `!ref`-nya tidak mulai di A1
+  // (mis. A2) akan menggeser keduanya dan membuat header bertingkat gagal
+  // direkonstruksi.
+  const opts = { header: 1, raw: true, defval: null, blankrows: true };
+  if (ws['!ref']) {
+    const range = xlsx.utils.decode_range(ws['!ref']);
+    range.s.r = 0;
+    range.s.c = 0;
+    opts.range = xlsx.utils.encode_range(range);
+  }
+  return xlsx.utils.sheet_to_json(ws, opts);
 }
 
 /** Merge horizontal pada satu baris, dipetakan anchor kolom → lebar. */

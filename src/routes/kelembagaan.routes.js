@@ -77,7 +77,10 @@ router.get('/rtrw-comparison', rtrwComparisonController.getComparison.bind(rtrwC
 
 // Import Excel sumber Persandingan RT/RW (BPJS / ADD).
 // Mengganti Excel wajib diikuti regenerasi cache JSON — ditangani controller.
-const RTRW_IMPORT_ROLES = ['superadmin', 'pemerintahan_desa', 'kepala_bidang', 'kepala_dinas'];
+// 'pemberdayaan_masyarakat' & 'pemerintahan_desa' adalah pseudo-peran berbasis
+// bidang di checkRole() (BIDANG_ROLE_MAP: bidang 5 & 6), jadi SELURUH pegawai
+// bidang itu lolos — termasuk pegawai & ketua_tim, bukan hanya kepala bidang.
+const RTRW_IMPORT_ROLES = ['superadmin', 'pemberdayaan_masyarakat', 'pemerintahan_desa', 'kepala_bidang', 'kepala_dinas'];
 router.get('/rtrw-comparison/import/info', rtrwImportController.getInfo.bind(rtrwImportController));
 router.get('/rtrw-comparison/import/status', rtrwImportController.getStatus.bind(rtrwImportController));
 router.post(

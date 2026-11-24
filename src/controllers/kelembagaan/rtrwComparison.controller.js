@@ -1274,10 +1274,19 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
       nama: Array.from(sourceNames).join(' / '),
       normalized: Array.from(normalizedNames)[0] || '',
       dbNama: [...new Set(entry.dbItems.map((item) => item.nama))],
+      // Id pengurus di database + namanya, supaya kolom Database di UI bisa
+      // ditautkan ke halaman detail pengurus. Satu baris bisa memuat >1 record.
+      dbRefs: [...new Map(entry.dbItems.map((item) => [String(item.id), {
+        id: String(item.id),
+        nama: item.namaLengkap || item.nama,
+      }])).values()],
       addNama: [...new Set(entry.addItems.map((item) => item.nama))],
       bpjsNama: [...new Set(entry.bpjsItems.map((item) => item.nama))],
       dbNik: dbNiks,
       bpjsNik: bpjsNiks,
+      // Nomor KPJ peserta BPJS. Diambil dari detail sumber (selalu ada di cache),
+      // jadi tetap terisi walau response tidak menyertakan detail per baris.
+      bpjsKpj: [...new Set(entry.bpjsItems.flatMap((item) => (item.details || []).map((d) => d.kpj)).filter(Boolean))],
       // Status jabatan pengurus di database: 'aktif' | 'selesai' | 'nonaktif'.
       // Array karena satu entri hasil merge bisa membawa >1 record DB.
       dbStatusJabatan: [...new Set(entry.dbItems.map((item) => item.statusJabatan).filter(Boolean))],
@@ -1452,6 +1461,15 @@ async function computeComparison({
       const { addData, bpjsData, bpjsUnmappableRaw, addMeta, bpjsMeta, sourceType, membershipByNik, membershipByKpj, membershipByNameDesa, baruData, statusMeta } = readSourceData();
       logTiming('excel loaded');
       const desaByKode = new Map(allDesa.map((desa) => [desa.kode, desa]));
+      // Persandingan hanya mencakup desa (416), kelurahan (19) dikeluarkan: insentif
+      // RT/RW dari ADD hanya untuk desa, dan file ADD/BPJS memang tak memuat kelurahan.
+      // desaByKode tetap lengkap (termasuk kelurahan) supaya baris sumber berkode
+      // kelurahan tidak salah dilaporkan sebagai "kode tidak dikenal database".
+      // shortcut: baris ADD/BPJS berkode kelurahan (saat ini 0 baris) akan hilang
+      // dari persandingan tanpa masuk daftar mana pun; tambahkan ke unmatched*Desa
+      // bila suatu saat file sumber memuat kelurahan.
+      const desaOnly = allDesa.filter((desa) => desa.status_pemerintahan !== 'kelurahan');
+      const desaOnlyKode = new Set(desaOnly.map((desa) => desa.kode));
       const rwById = new Map(allRws.map((rw) => [rw.id, rw]));
       const rtById = new Map(allRts.map((rt) => [rt.id, rt]));
 
@@ -1495,7 +1513,7 @@ async function computeComparison({
           alamat: toText(p.alamat),
           pendidikan: toText(p.pendidikan),
         };
-      }).filter((item) => item.nama && item.desaKode && isKetuaRtRw(item.jabatan));
+      }).filter((item) => item.nama && desaOnlyKode.has(item.desaKode) && isKetuaRtRw(item.jabatan));
 
       const tangkilBpjsFallback = applyTangkilBpjsFallback(bpjsData, addData, dbItems, desaByKode);
       const crossDesaFallback = applyCrossDesaNikFallback(tangkilBpjsFallback.confirmed, dbItems, desaByKode);
@@ -1511,7 +1529,7 @@ async function computeComparison({
       const bpjsNikSet = new Set(effectiveBpjsData.flatMap((b) => (b.details || []).map((d) => d.nik)).filter(Boolean));
       const matchedBaruKeys = new Set();
 
-      const comparison = allDesa.map((desa) => {
+      const comparison = desaOnly.map((desa) => {
         const desaKode = desa.kode;
         const dbList = dbByKode[desaKode] || [];
         const addList = addByKode[desaKode] || [];
@@ -1642,7 +1660,7 @@ async function computeComparison({
       const desaWithoutBpjs = emptyEntries((desa) => desa.totalBpjs === 0);
 
       const summary = {
-        totalDesa: allDesa.length,
+        totalDesa: comparison.length,
         totalDbPengurus: dbItems.length,
         totalAddPenerima: addMeta.totalPenerima,
         totalAddRows: addMeta.filteredRows,

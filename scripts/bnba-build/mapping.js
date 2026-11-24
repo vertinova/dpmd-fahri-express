@@ -152,7 +152,7 @@ function resolveField(topLabel, subLabel) {
     if (sub === 'KODE POS') return `${prefix}_kode_pos`;
     return `${prefix}_jalan`;
   };
-  if (top === 'ALAMAT RUMAH') {
+  if (top === 'ALAMAT RUMAH' || top === 'ALAMAT') {
     const part = addressPart('rumah');
     return {
       rumah_jalan: 'alamat_rumah',
@@ -176,7 +176,7 @@ function resolveField(topLabel, subLabel) {
 
   if (top === 'NO' || top === 'NO.' || top === 'NOMOR') return null;
   if (top === 'NAMA' || top === 'NAMA LENGKAP') return 'nama_lengkap';
-  if (top === 'NIK' || top === 'NO.NIK' || top === 'NO NIK' || top === 'N I K') return 'nik';
+  if (top === 'NIK' || top === 'NO.NIK' || top === 'NO NIK' || top === 'N I K' || top === 'NO KTP' || top === 'NO. KTP') return 'nik';
   if (top === 'L/P' || top === 'JENIS KELAMIN' || top === 'L / P') return 'jenis_kelamin';
   if (top === 'TEMPAT' || top === 'TEMPAT LAHIR') return 'tempat_lahir';
   if (top.startsWith('TANGGAL LAHIR') || top === 'TGL LAHIR' || top === 'TGL.LAHIR') return 'tanggal_lahir';
