@@ -67,6 +67,7 @@ const heroGalleryRoutes = require('./routes/heroGallery.routes');
 const publicRoutes = require('./routes/public.routes');
 const locationRoutes = require('./routes/location.routes');
 const kepalaDinasRoutes = require('./routes/kepalaDinas.routes');
+const coreDashboardRoutes = require('./routes/coreDashboard.routes');
 const kelembagaanRoutes = require('./routes/kelembagaan.routes');
 const desaKelembagaanRoutes = require('./routes/desa.kelembagaan.routes');
 const aparaturDesaRoutes = require('./routes/aparatur-desa.routes');
@@ -574,6 +575,7 @@ app.use('/api/berita-acara', gerbangOperatorKecamatan('bankeu'), beritaAcaraRout
 app.use('/api/contoh-proposal', require('./routes/contohProposal.routes')); // Example proposal files
 app.use('/api/hero-gallery', heroGalleryRoutes);
 app.use('/api/kepala-dinas', kepalaDinasRoutes); // Kepala Dinas dashboard
+app.use('/api/core-dashboard', coreDashboardRoutes); // Ringkasan & rapor wilayah Core Dashboard
 app.use('/api/prolap', require('./routes/prolap.routes')); // Prolap — rekap output kegiatan (Sekretariat)
 app.use('/api/jadwal-kegiatan', require('./routes/jadwalKegiatan.routes')); // Jadwal Kegiatan routes
 app.use('/api/status', require('./routes/status.routes')); // User status/story routes
