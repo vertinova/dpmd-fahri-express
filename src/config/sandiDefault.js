@@ -8,4 +8,7 @@
  */
 const SANDI_DEFAULT = 'password';
 
-module.exports = { SANDI_DEFAULT };
+// Sandi awal akun presensi perangkat desa (login dengan NIPD).
+const SANDI_DEFAULT_PERANGKAT = 'perangkatdesa';
+
+module.exports = { SANDI_DEFAULT, SANDI_DEFAULT_PERANGKAT };

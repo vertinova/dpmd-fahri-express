@@ -478,7 +478,8 @@ app.use('/api/superadmin/server', require('./routes/serverManagement.routes')); 
 app.use('/api/soc/ingest', require('./routes/socIngest.routes')); // Ingest Wazuh untuk SOC (token x-soc-token, tanpa JWT)
 app.use('/api/roles', require('./routes/role.routes')); // Role management routes
 app.use('/api/pegawai', pegawaiRoutes); // Pegawai routes
-app.use('/api/absensi', require('./routes/absensi.routes')); // Absensi pegawai routes
+app.use('/api/absensi', require('./routes/absensi.routes')('pegawai')); // Absensi pegawai routes
+app.use('/api/absensi-perangkat', require('./routes/absensi.routes')('perangkat_desa')); // Presensi perangkat desa (login NIPD)
 // WAJIB sebelum '/api/bidang': bidangRoutes punya GET '/:id', yang akan
 // menelan path satu segmen di bawahnya kalau urutannya terbalik.
 app.use('/api/bidang/akun-desa', require('./routes/bidangAkunDesa.routes')); // Staf bidang membuat akun operator desa

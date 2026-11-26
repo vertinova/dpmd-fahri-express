@@ -156,16 +156,26 @@ class SchedulerService {
     const now = new Date();
     // WIB = UTC+7
     const wib = new Date(now.getTime() + 7 * 60 * 60 * 1000);
-    const currentHour = wib.getUTCHours();
-    const currentMinute = wib.getUTCMinutes();
-    const currentMinutes = currentHour * 60 + currentMinute;
+    const currentMinutes = wib.getUTCHours() * 60 + wib.getUTCMinutes();
 
     // Fetch absensi settings
     const settingsRows = await prisma.absensi_settings.findMany();
     const settings = {};
     settingsRows.forEach(s => { settings[s.key] = s.value; });
-    const jamMasuk = settings.jam_masuk || '08:00';
-    const jamPulang = settings.jam_pulang || '16:00';
+
+    await this.kirimPengingatAbsensi('pegawai', wib, currentMinutes, settings);
+    await this.kirimPengingatAbsensi('perangkat_desa', wib, currentMinutes, settings);
+  }
+
+  /**
+   * Pengingat untuk satu kelompok. Perangkat desa memakai pengaturan berawalan
+   * 'perangkat_desa.', template 'pd_*', penerima per user id (bukan broadcast).
+   */
+  async kirimPengingatAbsensi(kelompok, wib, currentMinutes, settings) {
+    const pd = kelompok === 'perangkat_desa';
+    const awalan = pd ? 'perangkat_desa.' : '';
+    const jamMasuk = settings[awalan + 'jam_masuk'] || '08:00';
+    const jamPulang = settings[awalan + 'jam_pulang'] || '16:00';
 
     const [masukH, masukM] = jamMasuk.split(':').map(Number);
     const [pulangH, pulangM] = jamPulang.split(':').map(Number);
@@ -183,7 +193,7 @@ class SchedulerService {
 
     // Fetch the customizable template from DB
     const template = await prisma.absensi_reminder_templates.findUnique({
-      where: { type: reminderType }
+      where: { type: (pd ? 'pd_' : '') + reminderType }
     });
 
     if (template && !template.is_active) return;
@@ -197,6 +207,9 @@ class SchedulerService {
     const dayOfWeek = wib.getUTCDay();
     const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
 
+    // Perangkat desa libur di akhir pekan (tanpa pekerja akhir pekan).
+    if (pd && isWeekend) return;
+
     // Di weekend, hanya kirim ke Tenaga Keamanan & Tenaga Kebersihan
     // Di hari kerja, kirim ke semua pegawai yang wajib absen
     const statusFilter = isWeekend
@@ -205,10 +218,9 @@ class SchedulerService {
 
     // Get eligible user IDs
     const eligibleUsers = await prisma.users.findMany({
-      where: {
-        is_active: true,
-        pegawai: { status_kepegawaian: { in: statusFilter } }
-      },
+      where: pd
+        ? { is_active: true, role: 'perangkat_desa' }
+        : { is_active: true, pegawai: { status_kepegawaian: { in: statusFilter } } },
       select: { id: true }
     });
 
@@ -224,7 +236,7 @@ class SchedulerService {
       tag: reminderType,
       data: {
         type: reminderType,
-        url: '/dpmd/absensi',
+        url: pd ? '/presensi-desa' : '/dpmd/absensi',
       },
       actions: [
         { action: 'open', title: 'Buka Absensi' },
@@ -235,7 +247,7 @@ class SchedulerService {
     const result = await PushNotificationServiceStatic.sendToMultipleUsers(userIds, payload);
     await PushNotificationServiceStatic.storeNotifications(userIds, payload, null);
 
-    console.log(`⏰ [Absensi Reminder] ${reminderType} sent to ${userIds.length} users: ${result.sent || 0} success, ${result.failed || 0} failed`);
+    console.log(`⏰ [Absensi Reminder] ${kelompok} ${reminderType} sent to ${userIds.length} users: ${result.sent || 0} success, ${result.failed || 0} failed`);
   }
 
   /**
@@ -293,11 +305,12 @@ class SchedulerService {
   /**
    * Manual trigger for absensi reminder
    */
-  async triggerAbsensiReminder(type) {
+  async triggerAbsensiReminder(type, kelompok = 'pegawai') {
+    const pd = kelompok === 'perangkat_desa';
     console.log(`🔧 Manual trigger: Absensi reminder (${type})`);
     // Override to force send regardless of time
     const template = await prisma.absensi_reminder_templates.findUnique({
-      where: { type }
+      where: { type: (pd ? 'pd_' : '') + type }
     });
 
     const title = template?.title || (type === 'reminder_masuk' ? '⏰ Waktunya Absen Masuk!' : '🏠 Waktunya Absen Pulang!');
@@ -306,10 +319,9 @@ class SchedulerService {
       : 'Jangan lupa absen keluar!');
 
     const eligibleUsers = await prisma.users.findMany({
-      where: {
-        is_active: true,
-        pegawai: { status_kepegawaian: { in: ABSENSI_REQUIRED_STATUS } }
-      },
+      where: pd
+        ? { is_active: true, role: 'perangkat_desa' }
+        : { is_active: true, pegawai: { status_kepegawaian: { in: ABSENSI_REQUIRED_STATUS } } },
       select: { id: true }
     });
     const userIds = eligibleUsers.map(u => Number(u.id));
@@ -318,7 +330,7 @@ class SchedulerService {
       title, body,
       icon: '/logo-192.png', badge: '/logo-96.png',
       tag: type,
-      data: { type, url: '/dpmd/absensi' }
+      data: { type, url: pd ? '/presensi-desa' : '/dpmd/absensi' }
     };
 
     const result = await PushNotificationServiceStatic.sendToMultipleUsers(userIds, payload);

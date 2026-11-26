@@ -133,7 +133,9 @@ model aparatur_desa {
   updated_at                 DateTime? @db.Timestamp(0)
   desas                      desas                       @relation(fields: [desa_id], references: [id], onDelete: Cascade, onUpdate: NoAction, map: "aparatur_desa_desa_id_foreign_fk")
   produk_hukums              produk_hukums?              @relation(fields: [produk_hukum_id], references: [id], onUpdate: NoAction, map: "aparatur_desa_produk_hukum_id_foreign_fk")
+  users                      users?
 
+  @@index([nipd], map: "aparatur_desa_nipd_index")
   @@index([desa_id], map: "aparatur_desa_desa_id_foreign")
   @@index([produk_hukum_id], map: "aparatur_desa_produk_hukum_id_foreign")
   @@index([dapur_id], map: "aparatur_desa_dapur_id_index")
@@ -2232,6 +2234,7 @@ model users {
   updated_at                                                     DateTime? @db.Timestamp(0)
   is_active                                                      Boolean                              @default(true)
   pegawai_id                                                     BigInt?
+  aparatur_desa_id                                               String? @unique(map: "users_aparatur_desa_id_unique") @db.Citext
   device_id                                                      String? @db.Citext
   last_active_at                                                 DateTime? @db.Timestamp(0)
   absensi_lokasi_khusus_absensi_lokasi_khusus_created_byTousers  absensi_lokasi_khusus[]              @relation("absensi_lokasi_khusus_created_byTousers")
@@ -2310,6 +2313,7 @@ model users {
   tugas_pribadi                                                  tugas_pribadi[]
   user_statuses                                                  user_statuses[]
   pegawai                                                        pegawai?                             @relation(fields: [pegawai_id], references: [id_pegawai], onDelete: Cascade, onUpdate: NoAction, map: "users_pegawai_id_foreign")
+  aparatur_desa                                                  aparatur_desa?                       @relation(fields: [aparatur_desa_id], references: [id], onDelete: SetNull, onUpdate: NoAction, map: "users_aparatur_desa_id_foreign")
 
   @@index([pegawai_id], map: "users_pegawai_id_index")
 }

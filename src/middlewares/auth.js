@@ -65,6 +65,9 @@ const invalidateRoleCache = (userId) => {
   roleCache.delete(String(userId));
 };
 
+// Satu-satunya jalur yang boleh dibuka akun role perangkat_desa (semuanya berakhiran '/').
+const JALUR_PERANGKAT_DESA = ['/api/auth/', '/api/absensi-perangkat/', '/api/push-notification/'];
+
 // Express JWT Auth Middleware (Independent from Laravel)
 const auth = async (req, res, next) => {
   try {
@@ -122,6 +125,19 @@ const auth = async (req, res, next) => {
         code: 'WAJIB_2FA',
         message: 'Semua akun kini wajib verifikasi 2 langkah (Google Authenticator). Silakan login kembali.'
       });
+    }
+
+    // Akun perangkat desa hanya untuk presensi: selain jalur di bawah, tolak
+    // (desaPermission meloloskan semua role non-'desa', dan banyak rute hanya memasang auth).
+    if (decoded.role === 'perangkat_desa') {
+      const jalur = String(req.originalUrl || '').split('?')[0];
+      if (!JALUR_PERANGKAT_DESA.some((awalan) => jalur.startsWith(awalan))) {
+        return res.status(403).json({
+          success: false,
+          code: 'DI_LUAR_WEWENANG',
+          message: 'Akun perangkat desa hanya untuk presensi.'
+        });
+      }
     }
 
     // Tolak token yang rolenya sudah tidak sama dengan database supaya user
@@ -272,6 +288,16 @@ const checkRole = (...roles) => {
 const checkAbsensiAdmin = async (req, res, next) => {
   if (!req.user) {
     return res.status(401).json({ success: false, message: 'Unauthorized' });
+  }
+
+  // Kelompok perangkat desa: dikelola Bidang Pemerintahan Desa (bidang_id 6)
+  if (req.kelompokAbsensi === 'perangkat_desa') {
+    const bolehKelola = ['superadmin', 'sekretaris_dinas'].includes(req.user.role) || Number(req.user.bidang_id) === 6;
+    if (bolehKelola) return next();
+    return res.status(403).json({
+      success: false,
+      message: 'Akses ditolak - Hanya superadmin, sekretaris dinas, atau bidang Pemerintahan Desa'
+    });
   }
 
   // Superadmin always allowed

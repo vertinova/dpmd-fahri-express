@@ -4,6 +4,178 @@ const fs = require('fs');
 const PushNotificationService = require('../services/pushNotificationService');
 const attendanceAwardService = require('../services/attendanceAward.service');
 const { getHolidayReason } = require('../services/holidayCache.service');
+const bcrypt = require('bcryptjs');
+const logger = require('../utils/logger');
+const { SANDI_DEFAULT_PERANGKAT } = require('../config/sandiDefault');
+const { invalidateRoleCache } = require('../middlewares/auth');
+const duaLangkah = require('../services/duaLangkah.service');
+
+// Mesin yang sama melayani dua kelompok: 'pegawai' (/api/absensi) dan
+// 'perangkat_desa' (/api/absensi-perangkat). Kelompok dipasang oleh routes.
+const kelompokDari = (req) => req.kelompokAbsensi || 'pegawai';
+const adalahPerangkat = (req) => kelompokDari(req) === 'perangkat_desa';
+
+const AWALAN_PENGATURAN_PD = 'perangkat_desa.';
+const AWALAN_PESAN_PD = 'pd_';
+const RADIUS_PERANGKAT_DEFAULT = 200;
+const awalanPesan = (req) => (adalahPerangkat(req) ? AWALAN_PESAN_PD : '');
+
+// Bentuk user perangkat desa dari DB; dipetakan ke bentuk pegawai oleh petakanUserPD.
+const SELECT_USER_PD = {
+  id: true, name: true, email: true, avatar: true, device_id: true, desa_id: true, role: true,
+  aparatur_desa: { select: { nama_lengkap: true, jabatan: true, nipd: true } },
+};
+
+// Aparatur yang boleh presensi: aktif, terverifikasi, ber-NIPD.
+const FILTER_APARATUR_PRESENSI = {
+  status: 'Aktif',
+  status_verifikasi: 'terverifikasi',
+  AND: [{ nipd: { not: null } }, { nipd: { not: '' } }],
+};
+
+/**
+ * Ubah user perangkat desa ke bentuk user pegawai (supaya frontend rekap bisa
+ * dipakai ulang) plus info desa & kecamatan. Satu query desa untuk semua user.
+ */
+async function petakanUserPD(daftar) {
+  const idDesa = [...new Set(daftar.map(u => u?.desa_id).filter(v => v != null).map(String))].map(BigInt);
+  const desas = idDesa.length
+    ? await prisma.desas.findMany({
+        where: { id: { in: idDesa } },
+        select: { id: true, nama: true, kecamatans: { select: { id: true, nama: true } } },
+      })
+    : [];
+  const petaDesa = new Map(desas.map(d => [String(d.id), d]));
+  return daftar.map(u => {
+    if (!u) return u;
+    const { aparatur_desa: a, ...sisa } = u;
+    const d = petaDesa.get(String(u.desa_id));
+    return {
+      ...sisa,
+      pegawai: {
+        nama_pegawai: a?.nama_lengkap ?? u.name,
+        jabatan: a?.jabatan ?? null,
+        nip: a?.nipd ?? null,
+        status_kepegawaian: null,
+      },
+      desa: d ? { id: d.id, nama: d.nama, kecamatan: d.kecamatans } : null,
+    };
+  });
+}
+
+async function ambilUserPD(userWhere) {
+  const users = await prisma.users.findMany({ where: userWhere, select: SELECT_USER_PD, orderBy: { name: 'asc' } });
+  return petakanUserPD(users);
+}
+
+/** Baris absensi + daftar user perangkat dalam cakupan, keduanya sudah dipetakan. */
+async function ambilDataPD(where, userWhere) {
+  const [rows, users] = await Promise.all([
+    prisma.absensi_pegawai.findMany({
+      where: { ...where, user: userWhere },
+      include: { user: { select: SELECT_USER_PD } },
+      orderBy: [{ tanggal: 'desc' }, { jam_masuk: 'asc' }],
+    }),
+    prisma.users.findMany({ where: userWhere, select: SELECT_USER_PD, orderBy: { name: 'asc' } }),
+  ]);
+  const dipetakan = await petakanUserPD([...users, ...rows.map(r => r.user)]);
+  const userPetaan = dipetakan.slice(0, users.length);
+  const userBaris = dipetakan.slice(users.length);
+  return [rows.map((r, i) => ({ ...r, user: userBaris[i] })), userPetaan];
+}
+
+/**
+ * Cakupan user untuk endpoint admin. Kelompok pegawai: baris perangkat desa
+ * disingkirkan. Kelompok perangkat desa: user perangkat aktif, dipersempit
+ * ?desa_id / ?kecamatan_id (wajib salah satu bila wajib=true).
+ */
+async function filterAdmin(req, { wajib = false } = {}) {
+  if (!adalahPerangkat(req)) return { userWhere: { role: { not: 'perangkat_desa' } } };
+  const { desa_id, kecamatan_id } = req.query;
+  if (wajib && !desa_id && !kecamatan_id) return { error: 'Pilih kecamatan atau desa' };
+  if ((desa_id && !/^\d+$/.test(desa_id)) || (kecamatan_id && !/^\d+$/.test(kecamatan_id))) {
+    return { error: 'Filter kecamatan/desa tidak valid' };
+  }
+  const userWhere = { is_active: true, role: 'perangkat_desa' };
+  if (desa_id) {
+    userWhere.desa_id = BigInt(desa_id);
+  } else if (kecamatan_id) {
+    const desas = await prisma.desas.findMany({ where: { kecamatan_id: BigInt(kecamatan_id) }, select: { id: true } });
+    userWhere.desa_id = { in: desas.map(d => d.id) };
+  }
+  return { userWhere };
+}
+
+/** Apakah user sasaran termasuk kelompok yang sedang dikelola. */
+async function sasaranSesuai(req, userId) {
+  const u = await prisma.users.findUnique({ where: { id: BigInt(userId) }, select: { role: true } });
+  return !!u && (u.role === 'perangkat_desa') === adalahPerangkat(req);
+}
+
+/**
+ * Data presensi satu akun perangkat desa: kelayakan (aparatur aktif, terverifikasi,
+ * ber-NIPD), desa, dan titik kantor dari profil_desas.
+ */
+async function muatPerangkat(userId) {
+  const user = await prisma.users.findUnique({
+    where: { id: userId },
+    select: {
+      name: true, device_id: true, desa_id: true,
+      aparatur_desa: { select: { nama_lengkap: true, jabatan: true, nipd: true, status: true, status_verifikasi: true } },
+    },
+  });
+  const a = user?.aparatur_desa;
+  let alasan = null;
+  if (!a) alasan = 'Akun belum terhubung ke data aparatur desa';
+  else if (a.status !== 'Aktif') alasan = 'Data aparatur tidak berstatus Aktif';
+  else if (a.status_verifikasi !== 'terverifikasi') alasan = 'Data aparatur belum diverifikasi Bidang Pemerintahan Desa';
+  else if (!a.nipd) alasan = 'NIPD belum diterbitkan';
+
+  const desa = user?.desa_id
+    ? await prisma.desas.findUnique({
+        where: { id: user.desa_id },
+        select: {
+          id: true, nama: true,
+          kecamatans: { select: { id: true, nama: true } },
+          profil_desas: { select: { latitude: true, longitude: true } },
+        },
+      })
+    : null;
+  const p = desa?.profil_desas;
+  const adaKoordinat = p && p.latitude != null && p.longitude != null;
+  return {
+    user, aparatur: a, desa, alasan, eligible: !alasan,
+    kantor: adaKoordinat ? { lat: Number(p.latitude), lng: Number(p.longitude) } : null,
+  };
+}
+
+/**
+ * Pemeriksaan server untuk clock-in/out perangkat desa. Mengembalikan
+ * { tolak: {status, body} } atau { kantor } siap untuk resolveTitikAbsen.
+ */
+async function siapkanPerangkat(userId, radius) {
+  const info = await muatPerangkat(userId);
+  if (!info.eligible) {
+    return { tolak: { status: 403, body: { success: false, code: 'TIDAK_LAYAK', message: info.alasan } } };
+  }
+  const libur = checkHoliday(new Date());
+  if (libur.isHoliday) {
+    return { tolak: { status: 400, body: { success: false, code: 'HARI_LIBUR', message: `Hari ini libur (${libur.reason}). Presensi tidak dibuka.` } } };
+  }
+  if (!info.kantor) {
+    return {
+      tolak: {
+        status: 400,
+        body: {
+          success: false,
+          code: 'KANTOR_TANPA_KOORDINAT',
+          message: 'Koordinat kantor desa belum diisi. Minta operator desa mengisi titik kantor di Profil Desa.',
+        },
+      },
+    };
+  }
+  return { kantor: { ...info.kantor, label: `Kantor Desa ${info.desa?.nama || ''}`.trim(), radius, tanpaKhusus: true } };
+}
 
 // Koordinat kantor DPMD Bogor
 const KANTOR_LAT = -6.47553948391432;
@@ -88,6 +260,7 @@ function checkHoliday(date = new Date()) {
 }
 
 function isWeekendWorker(user) {
+  if (user?.role === 'perangkat_desa') return false;
   const status = user?.pegawai?.status_kepegawaian || '';
   const jabatan = (user?.pegawai?.jabatan || '').toLowerCase();
   return WEEKEND_WORK_STATUS.includes(status) ||
@@ -148,22 +321,26 @@ const formatKoordinat = (lat, lng) => `${Number(lat).toFixed(6)}, ${Number(lng).
  * @returns {{ diterima: boolean, jarak: number, titikKhusus: string|null, terdekat: {label: string, jarak: number, radius: number} }}
  *          titikKhusus null berarti kantor DPMD (konsisten dengan data lama).
  */
-async function resolveTitikAbsen(userId, lat, lng, tanggal) {
-  const jarakKantor = calculateDistance(lat, lng, KANTOR_LAT, KANTOR_LNG);
+async function resolveTitikAbsen(
+  userId, lat, lng, tanggal,
+  kantor = { lat: KANTOR_LAT, lng: KANTOR_LNG, label: 'Kantor DPMD', radius: MAX_DISTANCE_METERS }
+) {
+  const jarakKantor = calculateDistance(lat, lng, kantor.lat, kantor.lng);
 
-  if (jarakKantor <= MAX_DISTANCE_METERS) {
+  if (jarakKantor <= kantor.radius) {
     return {
       diterima: true,
       jarak: jarakKantor,
       titikKhusus: null,
-      terdekat: { label: 'Kantor DPMD', jarak: jarakKantor, radius: MAX_DISTANCE_METERS }
+      terdekat: { label: kantor.label, jarak: jarakKantor, radius: kantor.radius }
     };
   }
 
-  const titikKhusus = await getLokasiKhususAktif(userId, tanggal);
+  // Perangkat desa hanya boleh dari kantor desanya, tanpa titik khusus.
+  const titikKhusus = kantor.tanpaKhusus ? [] : await getLokasiKhususAktif(userId, tanggal);
 
   // Titik terdekat dipakai untuk pesan error yang berguna, bukan sekadar "terlalu jauh".
-  let terdekat = { label: 'Kantor DPMD', jarak: jarakKantor, radius: MAX_DISTANCE_METERS };
+  let terdekat = { label: kantor.label, jarak: jarakKantor, radius: kantor.radius };
 
   for (const titik of titikKhusus) {
     const jarak = calculateDistance(lat, lng, titik.latitude, titik.longitude);
@@ -285,16 +462,20 @@ function getWIB(date = new Date()) {
 /**
  * Fetch absensi settings and return parsed values
  */
-async function getAbsensiSettings() {
+async function getAbsensiSettings(kelompok = 'pegawai') {
   const rows = await prisma.absensi_settings.findMany();
   const map = {};
   rows.forEach(s => { map[s.key] = s.value; });
+  // Perangkat desa memakai kunci berawalan 'perangkat_desa.'.
+  const awalan = kelompok === 'perangkat_desa' ? AWALAN_PENGATURAN_PD : '';
+  const baca = (k) => map[awalan + k];
   return {
-    jamMasuk: map.jam_masuk || '08:00',
-    jamPulang: map.jam_pulang || '16:00',
-    toleransi: parseInt(map.toleransi_terlambat || '15', 10),
-    jamBukaAbsen: map.jam_buka_absen || '06:00',
-    jamTutupAbsen: map.jam_tutup_absen || '17:00',
+    jamMasuk: baca('jam_masuk') || '08:00',
+    jamPulang: baca('jam_pulang') || '16:00',
+    toleransi: parseInt(baca('toleransi_terlambat') || '15', 10),
+    jamBukaAbsen: baca('jam_buka_absen') || '06:00',
+    jamTutupAbsen: baca('jam_tutup_absen') || '17:00',
+    radiusMeter: parseInt(map[AWALAN_PENGATURAN_PD + 'radius_meter'] || String(RADIUS_PERANGKAT_DEFAULT), 10),
   };
 }
 
@@ -395,16 +576,18 @@ async function checkAndNotifySecurityGuards(today, wib) {
     }
   };
 
-  // Kirim ke semua user DPMD (broadcast)
-  const result = await PushNotificationService.sendToAll(payload);
-
-  // Simpan log
+  // Kirim ke semua user aktif kecuali akun perangkat desa (bukan sendToAll:
+  // broadcast itu ikut menjangkau langganan push perangkat desa).
   const allUsers = await prisma.users.findMany({
-    where: { is_active: true },
+    where: { is_active: true, role: { not: 'perangkat_desa' } },
     select: { id: true }
   });
+  const penerimaIds = allUsers.map(u => Number(u.id));
+  const result = await PushNotificationService.sendToMultipleUsers(penerimaIds, payload);
+
+  // Simpan log
   await PushNotificationService.storeNotifications(
-    allUsers.map(u => Number(u.id)),
+    penerimaIds,
     payload,
     null
   );
@@ -442,6 +625,15 @@ const absensiController = {
       // Validasi mode
       if (!['hadir', 'dinas_luar', 'wfh', 'wfa'].includes(absensiMode)) {
         return res.status(400).json({ success: false, message: 'Mode absensi tidak valid' });
+      }
+
+      // Perangkat desa hanya boleh hadir di kantor desanya.
+      if (adalahPerangkat(req) && absensiMode !== 'hadir') {
+        return res.status(400).json({
+          success: false,
+          code: 'MODE_TIDAK_DIIZINKAN',
+          message: 'Perangkat desa hanya dapat presensi dengan mode Hadir di kantor desa.'
+        });
       }
 
       // Validasi: harus ada foto
@@ -486,6 +678,14 @@ const absensiController = {
       const todayStr = wib.dateString;
       const today = new Date(`${todayStr}T00:00:00.000Z`);
 
+      const absensiSettings = await getAbsensiSettings(kelompokDari(req));
+      let kantorPD;
+      if (adalahPerangkat(req)) {
+        const siap = await siapkanPerangkat(userId, absensiSettings.radiusMeter);
+        if (siap.tolak) return res.status(siap.tolak.status).json(siap.tolak.body);
+        kantorPD = siap.kantor;
+      }
+
       // Cek lokasi hanya untuk mode 'hadir' (WFH/WFA/dinas luar bebas lokasi).
       // Titik absen bisa kantor DPMD atau titik khusus yang ditetapkan superadmin
       // untuk pegawai ini — tanggal dipakai untuk mengecek masa berlaku titik.
@@ -493,7 +693,7 @@ const absensiController = {
       let titikAbsenKhusus = null;
 
       if (absensiMode === 'hadir') {
-        const titik = await resolveTitikAbsen(userId, parseFloat(latitude), parseFloat(longitude), today);
+        const titik = await resolveTitikAbsen(userId, parseFloat(latitude), parseFloat(longitude), today, kantorPD);
 
         if (!titik.diterima) {
           return res.status(400).json({ success: false, message: pesanTerlaluJauh(titik) });
@@ -505,8 +705,7 @@ const absensiController = {
         jarak = calculateDistance(parseFloat(latitude), parseFloat(longitude), KANTOR_LAT, KANTOR_LNG);
       }
 
-      // Cek jam buka/tutup absensi dari settings sekretariat
-      const absensiSettings = await getAbsensiSettings();
+      // Cek jam buka/tutup absensi dari settings sekretariat (perangkat desa: pengaturan berawalan)
       const currentMinutes = wib.hours * 60 + wib.minutes;
       const [bukaH, bukaM] = absensiSettings.jamBukaAbsen.split(':').map(Number);
       const [tutupH, tutupM] = absensiSettings.jamTutupAbsen.split(':').map(Number);
@@ -675,6 +874,14 @@ const absensiController = {
       const wib = getWIB(now);
       const today = new Date(`${wib.dateString}T00:00:00.000Z`);
 
+      let kantorPD;
+      if (adalahPerangkat(req)) {
+        const { radiusMeter } = await getAbsensiSettings('perangkat_desa');
+        const siap = await siapkanPerangkat(userId, radiusMeter);
+        if (siap.tolak) return res.status(siap.tolak.status).json(siap.tolak.body);
+        kantorPD = siap.kantor;
+      }
+
       const existing = await prisma.absensi_pegawai.findUnique({
         where: { user_id_tanggal: { user_id: userId, tanggal: today } }
       });
@@ -693,7 +900,7 @@ const absensiController = {
       let jarak;
 
       if (existing.status === 'hadir') {
-        const titik = await resolveTitikAbsen(userId, parseFloat(latitude), parseFloat(longitude), today);
+        const titik = await resolveTitikAbsen(userId, parseFloat(latitude), parseFloat(longitude), today, kantorPD);
 
         if (!titik.diterima) {
           return res.status(400).json({ success: false, message: pesanTerlaluJauh(titik) });
@@ -756,14 +963,12 @@ const absensiController = {
       const isNoTelat = NO_TELAT_STATUS.includes(userInfo?.pegawai?.status_kepegawaian);
 
       // Fetch settings for late calculation
-      const settingsRows = await prisma.absensi_settings.findMany();
-      const settings = {};
-      settingsRows.forEach(s => { settings[s.key] = s.value; });
-      const jamMasukSetting = settings.jam_masuk || '08:00';
-      const jamPulangSetting = settings.jam_pulang || '16:00';
-      const toleransi = parseInt(settings.toleransi_terlambat || '15', 10);
-      const jamBukaAbsen = settings.jam_buka_absen || '06:00';
-      const jamTutupAbsen = settings.jam_tutup_absen || '17:00';
+      const pengaturan = await getAbsensiSettings(kelompokDari(req));
+      const jamMasukSetting = pengaturan.jamMasuk;
+      const jamPulangSetting = pengaturan.jamPulang;
+      const toleransi = pengaturan.toleransi;
+      const jamBukaAbsen = pengaturan.jamBukaAbsen;
+      const jamTutupAbsen = pengaturan.jamTutupAbsen;
 
       let telat_masuk_menit = 0;
       let telat_pulang_menit = 0;
@@ -916,6 +1121,9 @@ const absensiController = {
    */
   async getRekapAdmin(req, res) {
     try {
+      const f = await filterAdmin(req, { wajib: true });
+      if (f.error) return res.status(400).json({ success: false, message: f.error });
+      const pd = adalahPerangkat(req);
       const { tanggal, bulan, tahun } = req.query;
       let where = {};
       let startDate;
@@ -941,10 +1149,10 @@ const absensiController = {
         where.tanggal = startDate;
       }
 
-      const settings = await getAbsensiSettings();
-      const [rawRecords, eligibleUsers] = await Promise.all([
+      const settings = await getAbsensiSettings(kelompokDari(req));
+      const [rawRecords, eligibleUsers] = pd ? await ambilDataPD(where, f.userWhere) : await Promise.all([
         prisma.absensi_pegawai.findMany({
-          where,
+          where: { ...where, user: f.userWhere },
           include: {
             user: {
               select: {
@@ -1032,6 +1240,11 @@ const absensiController = {
    */
   async getPegawaiAbsensi(req, res) {
     try {
+      if (adalahPerangkat(req)) {
+        const f = await filterAdmin(req);
+        if (f.error) return res.status(400).json({ success: false, message: f.error });
+        return res.json({ success: true, data: await ambilUserPD(f.userWhere) });
+      }
       const users = await prisma.users.findMany({
         where: {
           is_active: true,
@@ -1065,6 +1278,14 @@ const absensiController = {
       }
 
       const attendanceDate = new Date(`${tanggal}T00:00:00.000Z`);
+
+      if (adalahPerangkat(req)) {
+        const f = await filterAdmin(req);
+        if (f.error) return res.status(400).json({ success: false, message: f.error });
+        const belum = await ambilUserPD({ ...f.userWhere, absensi_pegawai: { none: { tanggal: attendanceDate } } });
+        return res.json({ success: true, data: belum.filter(u => isExpectedAttendanceDay(u, attendanceDate)) });
+      }
+
       const users = await prisma.users.findMany({
         where: {
           is_active: true,
@@ -1103,6 +1324,33 @@ const absensiController = {
   async checkEligible(req, res) {
     try {
       const userId = BigInt(req.user.id);
+
+      if (adalahPerangkat(req)) {
+        const info = await muatPerangkat(userId);
+        const { radiusMeter } = await getAbsensiSettings('perangkat_desa');
+        const libur = checkHoliday(new Date());
+        const labelKantor = `Kantor Desa ${info.desa?.nama || ''}`.trim();
+        return res.json({
+          success: true,
+          data: {
+            eligible: info.eligible,
+            alasan: info.alasan,
+            status_kepegawaian: null,
+            nama: info.aparatur?.nama_lengkap || info.user?.name,
+            jabatan: info.aparatur?.jabatan || null,
+            nipd: info.aparatur?.nipd || null,
+            desa: info.desa ? { id: info.desa.id, nama: info.desa.nama, kecamatan: info.desa.kecamatans } : null,
+            device_registered: !!info.user?.device_id,
+            is_holiday: libur.isHoliday,
+            holiday_reason: libur.isHoliday ? libur.reason : null,
+            kantor_berkoordinat: !!info.kantor,
+            radius_meter: radiusMeter,
+            lokasi_absen: info.kantor
+              ? [{ label: labelKantor, latitude: info.kantor.lat, longitude: info.kantor.lng, radius_meter: radiusMeter, khusus: false }]
+              : [],
+          }
+        });
+      }
 
       const user = await prisma.users.findUnique({
         where: { id: userId },
@@ -1178,6 +1426,22 @@ const absensiController = {
         return res.status(400).json({ success: false, message: 'Device ID wajib diisi' });
       }
 
+      if (adalahPerangkat(req)) {
+        // Atomik: hanya terisi bila masih kosong atau sama; HP lain ditolak sampai Pemdes mereset.
+        const { count } = await prisma.users.updateMany({
+          where: { id: userId, OR: [{ device_id: null }, { device_id }] },
+          data: { device_id }
+        });
+        if (count === 0) {
+          return res.status(409).json({
+            success: false,
+            code: 'PERANGKAT_TERKUNCI',
+            message: 'Akun ini sudah terkunci ke HP lain. Minta Bidang Pemdes mereset perangkat.'
+          });
+        }
+        return res.json({ success: true, message: 'Device berhasil didaftarkan' });
+      }
+
       await prisma.users.update({
         where: { id: userId },
         data: { device_id }
@@ -1219,6 +1483,10 @@ const absensiController = {
     try {
       const targetUserId = BigInt(req.params.userId);
       const { device_id } = req.body;
+
+      if (!(await sasaranSesuai(req, targetUserId))) {
+        return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
+      }
 
       await prisma.users.update({
         where: { id: targetUserId },
@@ -1401,7 +1669,13 @@ const absensiController = {
     try {
       const settings = await prisma.absensi_settings.findMany();
       const result = {};
-      settings.forEach(s => { result[s.key] = s.value; });
+      const pd = adalahPerangkat(req);
+      settings.forEach(s => {
+        const berawalan = s.key.startsWith(AWALAN_PENGATURAN_PD);
+        if (pd && berawalan) result[s.key.slice(AWALAN_PENGATURAN_PD.length)] = s.value;
+        else if (!pd && !berawalan) result[s.key] = s.value;
+      });
+      if (pd && !result.radius_meter) result.radius_meter = String(RADIUS_PERANGKAT_DEFAULT);
 
       // Defaults
       if (!result.jam_masuk) result.jam_masuk = '08:00';
@@ -1424,8 +1698,9 @@ const absensiController = {
    */
   async updateSettings(req, res) {
     try {
-      const { jam_masuk, jam_pulang, toleransi_terlambat, jam_buka_absen, jam_tutup_absen } = req.body;
+      const { jam_masuk, jam_pulang, toleransi_terlambat, jam_buka_absen, jam_tutup_absen, radius_meter } = req.body;
       const userId = BigInt(req.user.id);
+      const awalan = adalahPerangkat(req) ? AWALAN_PENGATURAN_PD : '';
 
       const settingsToUpdate = [];
       if (jam_masuk !== undefined) settingsToUpdate.push({ key: 'jam_masuk', value: jam_masuk, description: 'Jam masuk kantor' });
@@ -1433,12 +1708,20 @@ const absensiController = {
       if (toleransi_terlambat !== undefined) settingsToUpdate.push({ key: 'toleransi_terlambat', value: String(toleransi_terlambat), description: 'Toleransi terlambat (menit)' });
       if (jam_buka_absen !== undefined) settingsToUpdate.push({ key: 'jam_buka_absen', value: jam_buka_absen, description: 'Jam buka absensi' });
       if (jam_tutup_absen !== undefined) settingsToUpdate.push({ key: 'jam_tutup_absen', value: jam_tutup_absen, description: 'Jam tutup absensi' });
+      if (awalan && radius_meter !== undefined) {
+        const radius = parseInt(radius_meter, 10);
+        if (Number.isNaN(radius) || radius < 20 || radius > 10000) {
+          return res.status(400).json({ success: false, message: 'Radius harus antara 20 dan 10000 meter' });
+        }
+        settingsToUpdate.push({ key: 'radius_meter', value: String(radius), description: 'Radius absen dari kantor desa (meter)' });
+      }
 
       for (const setting of settingsToUpdate) {
+        const kunci = awalan + setting.key;
         await prisma.absensi_settings.upsert({
-          where: { key: setting.key },
+          where: { key: kunci },
           update: { value: setting.value, updated_by: userId, updated_at: new Date() },
-          create: { key: setting.key, value: setting.value, description: setting.description, updated_by: userId },
+          create: { key: kunci, value: setting.value, description: setting.description, updated_by: userId },
         });
       }
 
@@ -1512,11 +1795,13 @@ const absensiController = {
       }
 
       const user = await prisma.users.findFirst({
-        where: {
-          id: BigInt(user_id),
-          is_active: true,
-          pegawai: { status_kepegawaian: { in: ABSENSI_REQUIRED_STATUS } },
-        },
+        where: adalahPerangkat(req)
+          ? { id: BigInt(user_id), is_active: true, role: 'perangkat_desa' }
+          : {
+              id: BigInt(user_id),
+              is_active: true,
+              pegawai: { status_kepegawaian: { in: ABSENSI_REQUIRED_STATUS } },
+            },
         select: {
           id: true,
           name: true,
@@ -1600,7 +1885,7 @@ const absensiController = {
       const { status, keterangan, jam_masuk, jam_keluar, tujuan_dinas } = req.body;
 
       const existing = await prisma.absensi_pegawai.findUnique({ where: { id: absensiId } });
-      if (!existing) {
+      if (!existing || !(await sasaranSesuai(req, existing.user_id))) {
         return res.status(404).json({ success: false, message: 'Data absensi tidak ditemukan' });
       }
 
@@ -1642,7 +1927,7 @@ const absensiController = {
       const absensiId = BigInt(req.params.id);
 
       const existing = await prisma.absensi_pegawai.findUnique({ where: { id: absensiId } });
-      if (!existing) {
+      if (!existing || !(await sasaranSesuai(req, existing.user_id))) {
         return res.status(404).json({ success: false, message: 'Data absensi tidak ditemukan' });
       }
 
@@ -1652,6 +1937,85 @@ const absensiController = {
     } catch (error) {
       console.error('[Absensi] Admin delete error:', error);
       return res.status(500).json({ success: false, message: 'Gagal hapus data absensi', error: error.message });
+    }
+  },
+
+  /**
+   * Admin perangkat desa: desa yang punya perangkat layak presensi tetapi
+   * titik kantornya (profil_desas) belum diisi.
+   * GET /api/absensi-perangkat/admin/desa-tanpa-koordinat?kecamatan_id=
+   */
+  async getDesaTanpaKoordinat(req, res) {
+    try {
+      const { kecamatan_id } = req.query;
+      if (kecamatan_id && !/^\d+$/.test(kecamatan_id)) {
+        return res.status(400).json({ success: false, message: 'kecamatan_id tidak valid' });
+      }
+
+      const desas = await prisma.desas.findMany({
+        where: {
+          ...(kecamatan_id ? { kecamatan_id: BigInt(kecamatan_id) } : {}),
+          aparatur_desa: { some: FILTER_APARATUR_PRESENSI },
+          OR: [
+            { profil_desas: { is: null } },
+            { profil_desas: { is: { OR: [{ latitude: null }, { longitude: null }] } } },
+          ],
+        },
+        select: {
+          id: true,
+          nama: true,
+          kecamatans: { select: { id: true, nama: true } },
+          _count: { select: { aparatur_desa: { where: FILTER_APARATUR_PRESENSI } } },
+        },
+      });
+
+      const data = desas
+        .map(d => ({
+          desa_id: d.id,
+          nama: d.nama,
+          kecamatan: d.kecamatans,
+          jumlah_perangkat: d._count.aparatur_desa,
+        }))
+        .sort((a, b) => String(a.kecamatan?.nama).localeCompare(String(b.kecamatan?.nama)) || String(a.nama).localeCompare(String(b.nama)));
+
+      return res.json({ success: true, data });
+    } catch (error) {
+      console.error('[Absensi] Desa tanpa koordinat error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal mengambil daftar desa', error: error.message });
+    }
+  },
+
+  /**
+   * Admin perangkat desa: kembalikan sandi ke default dan lepas ikatan HP.
+   * POST /api/absensi-perangkat/admin/reset-akun/:userId
+   */
+  async resetAkunPerangkat(req, res) {
+    try {
+      const { userId } = req.params;
+      const target = /^\d+$/.test(userId)
+        ? await prisma.users.findUnique({ where: { id: BigInt(userId) }, select: { id: true, role: true, email: true } })
+        : null;
+      if (!target || target.role !== 'perangkat_desa') {
+        return res.status(404).json({ success: false, message: 'Akun perangkat desa tidak ditemukan' });
+      }
+
+      await prisma.users.update({
+        where: { id: target.id },
+        data: {
+          password: await bcrypt.hash(SANDI_DEFAULT_PERANGKAT, 10),
+          device_id: null,
+          updated_at: new Date(),
+        },
+      });
+      // HP hilang/ganti = authenticator ikut hilang; tanpa ini perangkat menunggu superadmin.
+      await duaLangkah.reset(target.id);
+      invalidateRoleCache(target.id);
+      logger.info(`Reset akun perangkat desa ${target.email} (sandi, HP, 2FA) oleh user ${req.user.id}`);
+
+      return res.json({ success: true, message: 'Sandi dikembalikan ke default, HP dilepas, dan 2FA direset' });
+    } catch (error) {
+      console.error('[Absensi] Reset akun perangkat error:', error);
+      return res.status(500).json({ success: false, message: 'Gagal mereset akun', error: error.message });
     }
   },
 
@@ -1666,6 +2030,9 @@ const absensiController = {
    */
   async getDashboardHariIni(req, res) {
     try {
+      const f = await filterAdmin(req);
+      if (f.error) return res.status(400).json({ success: false, message: f.error });
+      const pd = adalahPerangkat(req);
       const { periode = 'hari', tanggal, bulan, tahun } = req.query;
       const wibNow = getWIB();
       let where = {};
@@ -1694,9 +2061,9 @@ const absensiController = {
         where.tanggal = new Date(`${todayStr}T00:00:00.000Z`);
       }
 
-      const settings = await getAbsensiSettings();
-      const rawRecords = await prisma.absensi_pegawai.findMany({
-        where,
+      const settings = await getAbsensiSettings(kelompokDari(req));
+      const [rawRecords, usersPD] = pd ? await ambilDataPD(where, f.userWhere) : [await prisma.absensi_pegawai.findMany({
+        where: { ...where, user: f.userWhere },
         include: {
           user: {
             select: {
@@ -1706,7 +2073,7 @@ const absensiController = {
           }
         },
         orderBy: [{ tanggal: 'desc' }, { jam_masuk: 'asc' }]
-      });
+      }), null];
 
       const records = enrichRecordsWithTelat(rawRecords, settings.jamMasuk);
 
@@ -1727,7 +2094,7 @@ const absensiController = {
       // If hari ini, also show belum absen (eligible users without record today)
       let belumAbsen = [];
       if (periode === 'hari') {
-        const allEligible = await prisma.users.findMany({
+        const allEligible = pd ? usersPD : await prisma.users.findMany({
           where: {
             is_active: true,
             pegawai: { status_kepegawaian: { in: ABSENSI_REQUIRED_STATUS } }
@@ -1757,6 +2124,9 @@ const absensiController = {
    */
   async getRekapPegawai(req, res) {
     try {
+      const f = await filterAdmin(req, { wajib: true });
+      if (f.error) return res.status(400).json({ success: false, message: f.error });
+      const pd = adalahPerangkat(req);
       const { periode = 'bulan', bulan, tahun, tanggal } = req.query;
       const wibNow = getWIB();
       let where = {};
@@ -1798,7 +2168,7 @@ const absensiController = {
       }
 
       // Get all eligible users
-      const allUsers = await prisma.users.findMany({
+      const allUsers = pd ? await ambilUserPD(f.userWhere) : await prisma.users.findMany({
         where: {
           is_active: true,
           pegawai: { status_kepegawaian: { in: ABSENSI_REQUIRED_STATUS } }
@@ -1811,9 +2181,9 @@ const absensiController = {
       });
 
       // Get all records for the period
-      const settings = await getAbsensiSettings();
+      const settings = await getAbsensiSettings(kelompokDari(req));
       const rawRecords = await prisma.absensi_pegawai.findMany({
-        where,
+        where: { ...where, user: f.userWhere },
         select: {
           id: true,
           user_id: true,
@@ -1982,19 +2352,21 @@ const absensiController = {
         where.tanggal = { gte: new Date(Date.UTC(y, m - 1, 1)), lte: new Date(Date.UTC(y, m, 0)) };
       }
 
-      const user = await prisma.users.findUnique({
+      const pd = adalahPerangkat(req);
+      let user = await prisma.users.findUnique({
         where: { id: userId },
-        select: {
+        select: pd ? SELECT_USER_PD : {
           id: true, name: true, avatar: true,
           pegawai: { select: { nama_pegawai: true, jabatan: true, status_kepegawaian: true, nip: true } }
         }
       });
 
-      if (!user) {
+      if (!user || !(await sasaranSesuai(req, userId))) {
         return res.status(404).json({ success: false, message: 'User tidak ditemukan' });
       }
+      if (pd) [user] = await petakanUserPD([user]);
 
-      const settings = await getAbsensiSettings();
+      const settings = await getAbsensiSettings(kelompokDari(req));
       const rawRecords = await prisma.absensi_pegawai.findMany({
         where,
         orderBy: { tanggal: 'desc' }
@@ -2030,13 +2402,16 @@ const absensiController = {
    */
   async getSuccessMessages(req, res) {
     try {
-      const messages = await prisma.absensi_success_messages.findMany({
+      const awalan = awalanPesan(req);
+      const semuaPesan = await prisma.absensi_success_messages.findMany({
         where: { is_active: true },
         orderBy: { type: 'asc' },
       });
+      // Tipe perangkat desa berawalan pd_; frontend menerima tipe tanpa awalan.
+      const messages = semuaPesan.filter(m => m.type.startsWith(AWALAN_PESAN_PD) === !!awalan);
       const result = {};
       messages.forEach(m => {
-        result[m.type] = {
+        result[m.type.slice(awalan.length)] = {
           id: Number(m.id),
           title: m.title,
           message: m.message,
@@ -2057,9 +2432,13 @@ const absensiController = {
    */
   async getAdminSuccessMessages(req, res) {
     try {
-      const messages = await prisma.absensi_success_messages.findMany({
+      const awalan = awalanPesan(req);
+      const semuaPesan = await prisma.absensi_success_messages.findMany({
         orderBy: { type: 'asc' },
       });
+      const messages = semuaPesan
+        .filter(m => m.type.startsWith(AWALAN_PESAN_PD) === !!awalan)
+        .map(m => ({ ...m, type: m.type.slice(awalan.length) }));
       return res.json({ success: true, data: messages });
     } catch (error) {
       console.error('[Absensi] Admin get success messages error:', error);
@@ -2082,6 +2461,7 @@ const absensiController = {
       if (!validTypes.includes(type)) {
         return res.status(400).json({ success: false, message: 'Tipe tidak valid' });
       }
+      const tipeDb = awalanPesan(req) + type;
 
       const updateData = { updated_by: userId, updated_at: new Date() };
       if (title !== undefined) updateData.title = title;
@@ -2102,7 +2482,7 @@ const absensiController = {
         updateData.image_path = `uploads/absensi_popup/${filename}`;
 
         // Delete old image if exists
-        const existing = await prisma.absensi_success_messages.findUnique({ where: { type } });
+        const existing = await prisma.absensi_success_messages.findUnique({ where: { type: tipeDb } });
         if (existing?.image_path) {
           const oldPath = path.join(__dirname, '../../storage', existing.image_path);
           if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
@@ -2111,7 +2491,7 @@ const absensiController = {
 
       // Handle image removal
       if (remove_image) {
-        const existing = await prisma.absensi_success_messages.findUnique({ where: { type } });
+        const existing = await prisma.absensi_success_messages.findUnique({ where: { type: tipeDb } });
         if (existing?.image_path) {
           const oldPath = path.join(__dirname, '../../storage', existing.image_path);
           if (fs.existsSync(oldPath)) fs.unlinkSync(oldPath);
@@ -2120,10 +2500,10 @@ const absensiController = {
       }
 
       const result = await prisma.absensi_success_messages.upsert({
-        where: { type },
+        where: { type: tipeDb },
         update: updateData,
         create: {
-          type,
+          type: tipeDb,
           title: title || '',
           message: message || '',
           image_path: updateData.image_path || null,
@@ -2132,7 +2512,7 @@ const absensiController = {
         },
       });
 
-      return res.json({ success: true, message: 'Berhasil diupdate', data: result });
+      return res.json({ success: true, message: 'Berhasil diupdate', data: { ...result, type } });
     } catch (error) {
       console.error('[Absensi] Update success message error:', error);
       return res.status(500).json({ success: false, message: 'Gagal update', error: error.message });
@@ -2149,9 +2529,10 @@ const absensiController = {
    */
   async getReminderTemplates(req, res) {
     try {
-      const templates = await prisma.absensi_reminder_templates.findMany({
+      const awalan = awalanPesan(req);
+      const templates = (await prisma.absensi_reminder_templates.findMany({
         orderBy: { type: 'asc' }
-      });
+      })).filter(t => t.type.startsWith(awalan)).map(t => ({ ...t, type: t.type.slice(awalan.length) }));
 
       // Ensure both types exist (return defaults if not in DB)
       const defaults = [
@@ -2186,9 +2567,10 @@ const absensiController = {
       if (!validTypes.includes(type)) {
         return res.status(400).json({ success: false, message: 'Tipe tidak valid' });
       }
+      const tipeDb = awalanPesan(req) + type;
 
       const result = await prisma.absensi_reminder_templates.upsert({
-        where: { type },
+        where: { type: tipeDb },
         update: {
           title: title !== undefined ? title : undefined,
           message: message !== undefined ? message : undefined,
@@ -2197,7 +2579,7 @@ const absensiController = {
           updated_at: new Date(),
         },
         create: {
-          type,
+          type: tipeDb,
           title: title || '',
           message: message || '',
           is_active: is_active !== undefined ? is_active : true,
@@ -2205,7 +2587,7 @@ const absensiController = {
         },
       });
 
-      return res.json({ success: true, message: 'Template berhasil diupdate', data: result });
+      return res.json({ success: true, message: 'Template berhasil diupdate', data: { ...result, type } });
     } catch (error) {
       console.error('[Absensi] Update reminder template error:', error);
       return res.status(500).json({ success: false, message: 'Gagal update template', error: error.message });
@@ -2226,7 +2608,7 @@ const absensiController = {
       }
 
       const schedulerService = require('../services/scheduler.service');
-      const result = await schedulerService.triggerAbsensiReminder(type);
+      const result = await schedulerService.triggerAbsensiReminder(type, kelompokDari(req));
 
       return res.json({ success: true, message: `Test reminder ${type} terkirim`, data: result });
     } catch (error) {

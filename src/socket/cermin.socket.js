@@ -63,6 +63,7 @@ const initCerminSocket = (io) => {
         select: { id: true, name: true, role: true, is_active: true },
       });
       if (!akun?.is_active) return next(new Error('Akun tidak aktif'));
+      if (akun.role === 'perangkat_desa') return next(new Error('Akun perangkat desa hanya untuk presensi'));
       socket.data.akun = { id: String(akun.id), name: akun.name, role: akun.role };
       next();
     } catch {

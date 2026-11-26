@@ -21,6 +21,8 @@ function authOpsional(req, res, next) {
 	if (token) {
 		try {
 			const d = jwt.verify(token, process.env.JWT_SECRET);
+			// Akun perangkat desa hanya untuk presensi: diperlakukan sebagai tamu.
+			if (d.role === 'perangkat_desa') return next();
 			req.user = { id: d.id, name: d.name, role: d.role };
 		} catch {
 			/* tamu */

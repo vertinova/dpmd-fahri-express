@@ -209,6 +209,11 @@ function initSocketServer(httpServer) {
           return next();
         }
 
+        // Akun perangkat desa hanya untuk presensi.
+        if (user.role === 'perangkat_desa') {
+          return next(new Error('Akun perangkat desa hanya untuk presensi'));
+        }
+
         socket.user = {
           id: user.id.toString(),
           name: user.name,

@@ -278,6 +278,8 @@ const desaDariToken = (req) => {
   if (!h || !h.startsWith('Bearer ')) return null;
   try {
     const p = jwt.verify(h.slice(7), process.env.JWT_SECRET);
+    // Akun perangkat desa hanya untuk presensi: tidak mewarisi akses desa.
+    if (p.role === 'perangkat_desa') return null;
     return p.desa_id ? Number(p.desa_id) : null;
   } catch {
     return null;

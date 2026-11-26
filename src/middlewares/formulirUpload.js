@@ -82,7 +82,8 @@ const authOpsional = async (req, res, next) => {
       where: { id: BigInt(payload.id) },
       select: { id: true, name: true, email: true, role: true, bidang_id: true },
     });
-    if (user) {
+    // Akun perangkat desa hanya untuk presensi: diperlakukan sebagai tamu.
+    if (user && user.role !== 'perangkat_desa') {
       req.user = {
         id: Number(user.id),
         name: user.name,

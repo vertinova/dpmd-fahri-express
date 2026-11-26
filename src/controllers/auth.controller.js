@@ -4,7 +4,7 @@ const { generateToken, invalidateRoleCache, pesanAkunNonaktif } = require('../mi
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const { validateDesaProfile, mustCompleteDesaProfile } = require('../config/desaProfile');
-const { SANDI_DEFAULT } = require('../config/sandiDefault');
+const { SANDI_DEFAULT, SANDI_DEFAULT_PERANGKAT } = require('../config/sandiDefault');
 const serverSecurity = require('../services/serverSecurity.service');
 const { catatAktivitas } = require('../services/pantauAktivitas');
 const duaLangkah = require('../services/duaLangkah.service');
@@ -17,9 +17,10 @@ const JWT_SECRET = process.env.JWT_SECRET;
 const DEFAULT_PASSWORD = SANDI_DEFAULT;
 
 // Apakah hash password ini masih sama dengan password default?
-const isUsingDefaultPassword = async (passwordHash) => {
+const isUsingDefaultPassword = async (passwordHash, role) => {
   try {
-    return await bcrypt.compare(DEFAULT_PASSWORD, passwordHash);
+    const sandi = role === 'perangkat_desa' ? SANDI_DEFAULT_PERANGKAT : DEFAULT_PASSWORD;
+    return await bcrypt.compare(sandi, passwordHash);
   } catch {
     return false;
   }
@@ -152,8 +153,9 @@ const selesaikanLogin = async (req, res, user, { latitude = null, longitude = nu
   catatAktivitas(user, { jenis: 'login', teks: 'Masuk ke aplikasi', ip: req.ip });
 
   // Auto-register device_id if provided
+  // Akun perangkat desa dikecualikan: ikatan HP hanya lewat register-device di halaman presensi.
   const { device_id } = req.body;
-  if (device_id) {
+  if (device_id && user.role !== 'perangkat_desa') {
     await prisma.users.update({
       where: { id: user.id },
       data: { device_id }
@@ -215,7 +217,7 @@ const selesaikanLogin = async (req, res, user, { latitude = null, longitude = nu
     golongan: user.pegawai?.golongan || null,
     sub_bidang: user.pegawai?.sub_bidang || null,
     // Wajib ganti password bila masih memakai password default 'password'.
-    must_change_password: await isUsingDefaultPassword(user.password),
+    must_change_password: await isUsingDefaultPassword(user.password, user.role),
     // Fitur halaman desa yang boleh dibuka akun ini (diatur Admin Desa).
     desa_permissions: await loadDesaPermissions(user.id, user.role),
     // Akun utama kecamatan atau operator, beserta fitur operatornya.
@@ -312,6 +314,89 @@ const selesaikanLogin = async (req, res, user, { latitude = null, longitude = nu
 };
 
 /**
+ * Login perangkat desa dengan NIPD. Akun dibuat otomatis pada login pertama
+ * (sandi awal 'perangkatdesa') dan diikat ke aparatur_desa.id, bukan ke angka
+ * NIPD, karena NIPD bisa dihitung ulang Pemdes. Hanya aparatur Aktif yang
+ * sudah terverifikasi (berNIPD) yang boleh masuk.
+ */
+/** Sandi sudah benar tapi akun wajib 2FA: kirim tiket untuk langkah kode/pemasangan, sesi belum terbit. */
+const minta2fa = async (res, user) => {
+  const aktif = await duaLangkah.sudahAktif(user.id);
+  // Sandi sudah benar: jangan dihitung login gagal oleh loginRateLimiter (IP kantor dipakai bersama).
+  res.locals.langkah2fa = true;
+  return res.status(403).json({
+    success: false,
+    code: aktif ? 'PERLU_KODE_2FA' : 'PERLU_PASANG_2FA',
+    // Pesan ini dibaca klien lama (aplikasi Flutter/PWA lama) yang belum punya layar 2FA.
+    message: (aktif
+      ? 'Masukkan kode 6 digit dari aplikasi Google Authenticator.'
+      : 'Akun ini wajib memasang verifikasi 2 langkah (Google Authenticator).')
+      + ' Bila kolom kode tidak muncul, perbarui aplikasi atau masuk lewat browser.',
+    data: { tiket_2fa: duaLangkah.buatTiket(user.id), email: user.email }
+  });
+};
+
+const loginPerangkatDesa = async (req, res, nipd, password, koordinat) => {
+  const gagal = (alasan) => {
+    serverSecurity.onLoginFailed({ ip: req.ip, email: nipd, userAgent: req.headers['user-agent'], alasan });
+    return res.status(401).json({ success: false, message: 'NIPD atau kata sandi salah' });
+  };
+
+  const aparatur = await prisma.aparatur_desa.findFirst({
+    where: { nipd, status: 'Aktif', status_verifikasi: 'terverifikasi' },
+    select: { id: true, desa_id: true, nama_lengkap: true, jabatan: true }
+  });
+  if (!aparatur) {
+    logger.warn(`Login perangkat desa gagal: NIPD tidak terdaftar - ${nipd}`);
+    return gagal('NIPD tidak terdaftar');
+  }
+
+  let user = await prisma.users.findUnique({ where: { aparatur_desa_id: aparatur.id }, select: PILIH_USER_LOGIN });
+
+  if (!user) {
+    if (password !== SANDI_DEFAULT_PERANGKAT) return gagal('sandi salah');
+    const data = {
+      name: aparatur.nama_lengkap,
+      email: `perangkat-${aparatur.id}@presensi.dpmd.local`,
+      password: await bcrypt.hash(SANDI_DEFAULT_PERANGKAT, 10),
+      role: 'perangkat_desa',
+      desa_id: aparatur.desa_id,
+      jabatan_desa: aparatur.jabatan,
+      aparatur_desa_id: aparatur.id,
+      is_active: true,
+      created_at: new Date(),
+      updated_at: new Date()
+    };
+    try {
+      user = await prisma.users.create({ data, select: PILIH_USER_LOGIN });
+    } catch (error) {
+      // Dua login pertama serentak: yang kedua mengambil akun yang baru dibuat.
+      if (error.code !== 'P2002') throw error;
+      user = await prisma.users.findUnique({ where: { aparatur_desa_id: aparatur.id }, select: PILIH_USER_LOGIN });
+      if (!user) throw error;
+    }
+  } else if (!(await bcrypt.compare(password, user.password))) {
+    return gagal('sandi salah');
+  }
+
+  if (user.is_active === false) {
+    return res.status(403).json({ success: false, code: 'AKUN_NONAKTIF', message: pesanAkunNonaktif(user.role) });
+  }
+
+  // Nama/desa/jabatan mengikuti data aparatur terkini.
+  const sinkron = {};
+  if (user.name !== aparatur.nama_lengkap) sinkron.name = aparatur.nama_lengkap;
+  if (String(user.desa_id) !== String(aparatur.desa_id)) sinkron.desa_id = aparatur.desa_id;
+  if (user.jabatan_desa !== aparatur.jabatan) sinkron.jabatan_desa = aparatur.jabatan;
+  if (Object.keys(sinkron).length) {
+    user = await prisma.users.update({ where: { id: user.id }, data: { ...sinkron, updated_at: new Date() }, select: PILIH_USER_LOGIN });
+  }
+
+  if (duaLangkah.wajib2fa(user.role)) return minta2fa(res, user);
+  return selesaikanLogin(req, res, user, koordinat);
+};
+
+/**
  * Login - Validate credentials and return Express JWT token
  */
 const login = async (req, res) => {
@@ -331,6 +416,12 @@ const login = async (req, res) => {
     // tetap berjalan dan riwayatnya berisi null.
     const latitude = parseCoordinate(req.body.latitude, -90, 90);
     const longitude = parseCoordinate(req.body.longitude, -180, 180);
+
+    // NIPD (20 digit) dikirim di field `email`: jalur login perangkat desa.
+    const kandidatNipd = String(email).trim();
+    if (/^\d{20}$/.test(kandidatNipd)) {
+      return loginPerangkatDesa(req, res, kandidatNipd, password, { latitude, longitude });
+    }
 
     // Query user from database using Prisma
     const user = await prisma.users.findUnique({
@@ -380,21 +471,7 @@ const login = async (req, res) => {
       });
     }
 
-    if (duaLangkah.wajib2fa(user.role)) {
-      const aktif = await duaLangkah.sudahAktif(user.id);
-      // Sandi sudah benar: jangan dihitung login gagal oleh loginRateLimiter (IP kantor dipakai bersama).
-      res.locals.langkah2fa = true;
-      return res.status(403).json({
-        success: false,
-        code: aktif ? 'PERLU_KODE_2FA' : 'PERLU_PASANG_2FA',
-        // Pesan ini dibaca klien lama (aplikasi Flutter/PWA lama) yang belum punya layar 2FA.
-        message: (aktif
-          ? 'Masukkan kode 6 digit dari aplikasi Google Authenticator.'
-          : 'Akun ini wajib memasang verifikasi 2 langkah (Google Authenticator).')
-          + ' Bila kolom kode tidak muncul, perbarui aplikasi atau masuk lewat browser.',
-        data: { tiket_2fa: duaLangkah.buatTiket(user.id), email: user.email }
-      });
-    }
+    if (duaLangkah.wajib2fa(user.role)) return minta2fa(res, user);
     return selesaikanLogin(req, res, user, { latitude, longitude });
   } catch (error) {
     logger.error('Login error:', error);
@@ -551,7 +628,7 @@ const verifyToken = async (req, res) => {
       golongan: user.pegawai?.golongan || null,
       sub_bidang: user.pegawai?.sub_bidang || null,
       // Wajib ganti password bila masih memakai password default 'password'.
-      must_change_password: await isUsingDefaultPassword(user.password),
+      must_change_password: await isUsingDefaultPassword(user.password, user.role),
       // Fitur halaman desa yang boleh dibuka akun ini (diatur Admin Desa).
       desa_permissions: await loadDesaPermissions(user.id, user.role),
       // Akun utama kecamatan atau operator, beserta fitur operatornya.
@@ -729,7 +806,7 @@ const getProfile = async (req, res) => {
       golongan: user.pegawai?.golongan || null,
       sub_bidang: user.pegawai?.sub_bidang || null,
       // Wajib ganti password bila masih memakai password default 'password'.
-      must_change_password: await isUsingDefaultPassword(user.password),
+      must_change_password: await isUsingDefaultPassword(user.password, user.role),
       // Fitur halaman desa yang boleh dibuka akun ini (diatur Admin Desa).
       desa_permissions: await loadDesaPermissions(user.id, user.role),
       // Akun utama kecamatan atau operator, beserta fitur operatornya.
@@ -1068,8 +1145,8 @@ const forceChangePassword = async (req, res) => {
     if (newPassword.length < 8) {
       return res.status(422).json({ success: false, message: 'Password baru minimal 8 karakter' });
     }
-    if (newPassword === DEFAULT_PASSWORD) {
-      return res.status(422).json({ success: false, message: "Password tidak boleh memakai password default '" + DEFAULT_PASSWORD + "'" });
+    if (newPassword === DEFAULT_PASSWORD || newPassword === SANDI_DEFAULT_PERANGKAT) {
+      return res.status(422).json({ success: false, message: "Password tidak boleh memakai password default '" + newPassword + "'" });
     }
 
     const user = await prisma.users.findUnique({ where: { id: BigInt(userId) } });
@@ -1078,14 +1155,14 @@ const forceChangePassword = async (req, res) => {
     }
 
     // Hanya boleh dipakai bila memang masih memakai password default.
-    if (!(await isUsingDefaultPassword(user.password))) {
+    if (!(await isUsingDefaultPassword(user.password, user.role))) {
       return res.status(409).json({ success: false, message: 'Password Anda sudah bukan default, tidak perlu diganti di sini' });
     }
 
     const hashedPassword = await bcrypt.hash(newPassword, 10);
     const dataUpdate = {
       password: hashedPassword,
-      plain_password: user.role === 'superadmin' ? null : newPassword
+      plain_password: (user.role === 'superadmin' || user.role === 'perangkat_desa') ? null : newPassword
     };
 
     // Identitas operator desa. Hanya untuk role 'desa': role lain sudah punya
