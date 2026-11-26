@@ -37,6 +37,15 @@ data/jelajah/
 data/rtrwbpjs20*.xlsx
 data/rtrwadd20*.xlsx
 
+# Sumber aktif Persandingan RT/RW (Excel + cache JSON). JANGAN di-track:
+# deploy menjalankan `git reset --hard origin/main`, jadi file yang di-track
+# akan menimpa hasil import lewat UI dengan versi di commit.
+data/rtrwbpjs.xlsx
+data/rtrwbpjs.json
+data/rtrwadd.xlsx
+data/rtrwadd.json
+data/rtrwbpjsstatus.json
+
 # OS
 .DS_Store
 Thumbs.db
