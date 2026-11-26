@@ -65,11 +65,19 @@ async function main() {
     },
   });
 
+  const tahunIni = new Date().getFullYear();
   const perbaikan = [];
   const dilewati = [];
   rows.forEach((r) => {
     const isoLama = isoOf(r.tanggal_lahir);
     if (nikErrorSebab(r.nik, isoLama) !== 'tgl_lahir_tertukar') return;
+    // Tahun lahir rusak (mis. 0068) tidak bisa dipulihkan dari NIK — NIK cuma
+    // memuat 2 digit terakhir. Jangan ditulis balik; laporkan untuk cek manual.
+    const tahun = Number(isoLama.slice(0, 4));
+    if (tahun < 1900 || tahun > tahunIni) {
+      dilewati.push({ ...r, isoLama, alasan: 'tahun lahir tidak masuk akal' });
+      return;
+    }
     const isoBaru = usulanDariNik(r.nik, isoLama);
     if (!isoBaru || isoBaru === isoLama) {
       dilewati.push({ ...r, isoLama, alasan: 'usulan tanggal tidak sah' });
@@ -96,8 +104,8 @@ async function main() {
   console.log(`Pengurus      : ${rows.length} baris diperiksa`);
   console.log(`Akan diperbaiki: ${perbaikan.length}`, perTipe);
   if (dilewati.length) {
-    console.log(`Dilewati      : ${dilewati.length} (usulan tanggalnya tidak sah, perlu dicek manual)`);
-    dilewati.slice(0, 5).forEach((d) => console.log(`  ${d.nik} | ${d.isoLama} | ${d.nama_lengkap}`));
+    console.log(`Dilewati      : ${dilewati.length} (perlu dicek manual)`);
+    dilewati.slice(0, 5).forEach((d) => console.log(`  ${d.nik} | ${d.isoLama} | ${d.nama_lengkap} | ${d.alasan}`));
   }
 
   if (perbaikan.length === 0) {
