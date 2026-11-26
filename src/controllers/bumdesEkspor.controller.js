@@ -33,6 +33,7 @@ const archiver = require('archiver');
 const prisma = require('../config/prisma');
 const logger = require('../utils/logger');
 const ActivityLogger = require('../utils/activityLogger');
+const { labelKolom, labelIsian } = require('../config/labelKolomBumdes');
 
 const JWT_SECRET = process.env.JWT_SECRET;
 const UMUR_TIKET_DETIK = 120;
@@ -264,6 +265,16 @@ const nilaiSel = (v) => {
   return v;
 };
 
+/** Isian centang tersimpan sebagai '["Pertanian","Peternakan"]': tampilkan 'Pertanian, Peternakan'. */
+const daftarTeks = (v) => {
+  if (typeof v !== 'string' || !v.startsWith('[')) return v;
+  try {
+    const x = JSON.parse(v);
+    if (!Array.isArray(x) || x.some((e) => e !== null && typeof e === 'object')) return v;
+    return x.filter((e) => e !== null && String(e).trim() !== '').join(', ') || null;
+  } catch { return v; }
+};
+
 const rapikanKepala = (ws) => {
   ws.getRow(1).font = { bold: true };
   ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
@@ -447,16 +458,17 @@ class BumdesEksporController {
     for (const [judul, isi] of lembarUtama) {
       const utama = wb.addWorksheet(judul);
       utama.columns = [
-        { header: 'SumberData', key: '__sumber' },
-        ...kolomUtama.map((k) => ({ header: k, key: k })),
-        { header: 'JumlahProdukAktif', key: '__produk' },
+        { header: 'Sumber Data', key: '__sumber' },
+        // Judul = label di formulir pengisian, bukan nama kolom database.
+        ...kolomUtama.map((k) => ({ header: labelKolom(k), key: k })),
+        { header: 'Jumlah Produk Aktif', key: '__produk' },
       ];
       for (const r of isi) {
         const baris = {
           __sumber: LABEL_SUMBER[sumberBaris(r)],
           __produk: (r.bumdes_produk || []).filter((p) => p.is_active).length,
         };
-        kolomUtama.forEach((k) => { baris[k] = nilaiSel(r[k]); });
+        kolomUtama.forEach((k) => { baris[k] = daftarTeks(nilaiSel(r[k])); });
         utama.addRow(baris);
       }
       rapikanKepala(utama);
@@ -467,12 +479,12 @@ class BumdesEksporController {
     for (const [kolom, judul, isian] of LEMBAR_DAFTAR) {
       const ws = wb.addWorksheet(judul.slice(0, 31));
       ws.columns = [
-        { header: 'BumdesID', key: 'id' },
+        { header: 'ID BUM Desa', key: 'id' },
         { header: 'Kecamatan', key: 'kecamatan' },
-        { header: 'Desa', key: 'desa' },
-        { header: 'NamaBUMDesa', key: 'nama' },
-        { header: 'SumberData', key: '__sumber' },
-        ...isian.map((k) => ({ header: k, key: k })),
+        { header: 'Nama Desa', key: 'desa' },
+        { header: 'Nama BUM Desa', key: 'nama' },
+        { header: 'Sumber Data', key: '__sumber' },
+        ...isian.map((k) => ({ header: labelIsian(kolom, k), key: k })),
       ];
       for (const r of rows) {
         for (const entri of bacaDaftar(r[kolom])) {
