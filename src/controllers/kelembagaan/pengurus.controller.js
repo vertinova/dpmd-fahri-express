@@ -6,6 +6,7 @@
 
 const { prisma, ACTIVITY_TYPES, ENTITY_TYPES, logKelembagaanActivity, validateDesaAccess, toUpper, validateKecamatanScope, ADMIN_LINTAS_DESA_ROLES } = require('./base.controller');
 const { v4: uuidv4 } = require('uuid');
+const { nikErrorInfo } = require('../../utils/nikAnomali');
 
 /**
  * Batas tahun yang masuk akal untuk tanggal lahir maupun masa jabatan.
@@ -256,7 +257,9 @@ class PengurusController {
         });
       }
 
-      res.json({ success: true, data: { ...pengurus, produk_hukum } });
+      // Peringatan mutu data NIK (aturan sama dengan tab "NIK Error Database"
+      // di persandingan RT/RW) supaya desa tahu di mana NIK-nya mungkin salah.
+      res.json({ success: true, data: { ...pengurus, produk_hukum, nik_error: nikErrorInfo(pengurus.nik, pengurus.tanggal_lahir) } });
     } catch (error) {
       console.error('Error in showDesaPengurus:', error);
       res.status(500).json({ success: false, message: 'Gagal mengambil data pengurus', error: error.message });
@@ -537,7 +540,9 @@ class PengurusController {
         userAgent: req.get('user-agent')
       });
 
-      res.json({ success: true, data: updated });
+      // nik_error ikut dikirim supaya peringatan NIK di detail pengurus langsung
+      // hilang/berubah setelah disimpan, tanpa perlu muat ulang halaman.
+      res.json({ success: true, data: { ...updated, nik_error: nikErrorInfo(updated.nik, updated.tanggal_lahir) } });
     } catch (error) {
       console.error('Error in updatePengurus:', error);
       res.status(500).json({ success: false, message: 'Gagal mengubah pengurus', error: error.message });
@@ -739,7 +744,9 @@ class PengurusController {
         });
       }
 
-      res.json({ success: true, data: { ...pengurus, produk_hukum } });
+      // Peringatan mutu data NIK (aturan sama dengan tab "NIK Error Database"
+      // di persandingan RT/RW) supaya desa tahu di mana NIK-nya mungkin salah.
+      res.json({ success: true, data: { ...pengurus, produk_hukum, nik_error: nikErrorInfo(pengurus.nik, pengurus.tanggal_lahir) } });
     } catch (error) {
       console.error('Error in showPengurus:', error);
       res.status(500).json({ success: false, message: 'Gagal mengambil data pengurus', error: error.message });
