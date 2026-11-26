@@ -50,6 +50,19 @@ const REPOS = {
     commands: [
       '/usr/bin/git fetch origin',
       '/usr/bin/git reset --hard origin/main',
+      // Sumber Persandingan RT/RW (Excel + cache JSON) sengaja tidak di-track
+      // supaya `reset --hard` di atas tidak menimpa hasil import lewat UI.
+      // Konsekuensinya server baru / file yang terhapus perlu di-seed dari
+      // commit terakhir yang masih memuatnya. Hanya jalan bila file hilang atau
+      // kosong, dan menulis via .seed supaya `git show` yang gagal tidak
+      // meninggalkan JSON kosong (JSON kosong lebih berbahaya: dianggap cache
+      // siap pakai lalu JSON.parse gagal).
+      // shortcut: seed-nya versi 13 Okt 2026 (3df25bd), bukan data terbaru —
+      // data terbaru tetap di-import lewat UI Persandingan RT/RW.
+      // `mv -n` dipakai sebagai pengaman kedua: kalaupun uji `-s` keliru
+      // menganggap file hilang, mv menolak menimpa file yang sudah ada,
+      // jadi hasil import di server tidak mungkin tertimpa seed ini.
+      `/bin/bash -c 'cd /var/www/backend && for f in rtrwbpjs.xlsx rtrwbpjs.json rtrwadd.xlsx rtrwadd.json rtrwbpjsstatus.json; do [ -s "data/$f" ] && continue; /usr/bin/git show "3df25bd:data/$f" > "data/$f.seed" 2>/dev/null && [ -s "data/$f.seed" ] && mv -n "data/$f.seed" "data/$f" && echo "seed data/$f"; rm -f "data/$f.seed"; done; exit 0'`,
       `${NODE_BIN}/npm install --production`,
       // Skema dipilih dari DATABASE_URL di .env (MySQL atau PostgreSQL).
       `${NODE_BIN}/node /var/www/backend/scripts/pg/generate-prisma.js`,
