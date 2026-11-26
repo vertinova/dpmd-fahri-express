@@ -12,7 +12,13 @@ const NIK_ERROR_LABEL = {
   digit_lebih: 'Digit NIK Lebih dari 16',
   nol_belakang: 'Enam Angka Nol di Belakang',
   tgl_lahir: 'Tanggal Lahir pada NIK Tidak Sesuai',
+  tgl_lahir_tertukar: 'Tanggal & Bulan Lahir Tertukar',
 };
+
+// Dua sebab di bawah ini soal kecocokan NIK dengan tanggal lahir, bukan bentuk
+// NIK-nya — dipisah ke tab sendiri karena bobot masalahnya jauh lebih ringan
+// (penomoran Dukcapil pun tidak selalu mengikuti tanggal lahir).
+const NIK_ERROR_TGL = ['tgl_lahir', 'tgl_lahir_tertukar'];
 
 /** Tanggal (Date dari Prisma @db.Date, atau string) menjadi 'YYYY-MM-DD'. */
 function toIsoDate(value) {
@@ -37,9 +43,16 @@ function nikErrorSebab(rawNik, tglLahir) {
   if (iso) {
     const [yyyy, mm, dd] = iso.split('-');
     const nikHari = Number(digits.slice(6, 8)) % 40; // perempuan: tanggal + 40
-    if (nikHari !== Number(dd)
-      || Number(digits.slice(8, 10)) !== Number(mm)
-      || digits.slice(10, 12) !== String(yyyy).slice(2)) return 'tgl_lahir';
+    const nikBulan = Number(digits.slice(8, 10));
+    const tahunSama = digits.slice(10, 12) === String(yyyy).slice(2);
+    if (nikHari === Number(dd) && nikBulan === Number(mm) && tahunSama) return '';
+    // Tanggal & bulan tertukar: NIK-nya justru benar, yang keliru biasanya
+    // tanggal lahir di database (terinput/terimpor dengan urutan terbalik).
+    // Bulan pada NIK harus bulan yang benar-benar ada — kalau 17, itu NIK-nya
+    // yang salah ketik, bukan tanggal lahirnya yang terbalik.
+    if (tahunSama && nikBulan >= 1 && nikBulan <= 12
+      && nikHari === Number(mm) && nikBulan === Number(dd)) return 'tgl_lahir_tertukar';
+    return 'tgl_lahir';
   }
   return '';
 }
@@ -50,4 +63,4 @@ function nikErrorInfo(rawNik, tglLahir) {
   return sebab ? { sebab, label: NIK_ERROR_LABEL[sebab] || sebab } : null;
 }
 
-module.exports = { nikErrorSebab, nikErrorInfo, NIK_ERROR_LABEL };
+module.exports = { nikErrorSebab, nikErrorInfo, NIK_ERROR_LABEL, NIK_ERROR_TGL };

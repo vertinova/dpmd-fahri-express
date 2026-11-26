@@ -199,6 +199,20 @@ describe('nikErrorSebab', () => {
     expect(nikErrorSebab('3201031506800001', '1980-05-15')).toBe('tgl_lahir'); // bulan beda
     expect(nikErrorSebab('3201031505810001', '1980-05-15')).toBe('tgl_lahir'); // tahun beda
   });
+
+  it('membedakan tanggal & bulan yang tertukar dari tanggal lahir yang memang beda', () => {
+    // Kasus nyata: NIK 10-09-93, database mencatat 9 Oktober 1993.
+    expect(nikErrorSebab('3201011009930001', '1993-10-09')).toBe('tgl_lahir_tertukar');
+    expect(nikErrorSebab('3201050305760005', '1976-03-05')).toBe('tgl_lahir_tertukar');
+    // Perempuan (tanggal + 40) yang tertukar juga ketahuan.
+    expect(nikErrorSebab('3201015009930001', '1993-10-09')).toBe('tgl_lahir_tertukar');
+    // Tanggal = bulan -> tidak mungkin tertukar, dan memang cocok.
+    expect(nikErrorSebab('3201010909930001', '1993-09-09')).toBe('');
+    // Tahun beda tetap 'tgl_lahir' walau tanggal/bulannya bertukar.
+    expect(nikErrorSebab('3201011009940001', '1993-10-09')).toBe('tgl_lahir');
+    // Bulan mustahil (17) berarti NIK-nya yang salah ketik, bukan tanggal lahir yang terbalik.
+    expect(nikErrorSebab('3201060617430001', '1943-06-17')).toBe('tgl_lahir');
+  });
 });
 
 describe('buildBpjsUnmappableList — saran kodefikasi', () => {
