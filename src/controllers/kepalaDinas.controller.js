@@ -478,6 +478,7 @@ class KepalaDinasController {
           // pangan. Tanpa ini SPKED hanya melihat kolom tahunan lama, sehingga
           // modal/omset/PADes 2026, LPJ tahun baru, MoU, dsb. tidak terlihat.
           JenisUsahaLainnya: true, KategoriUsaha: true, UnitUsaha: true,
+          KeteranganUsahaKetahananPangan: true,
           RiwayatPermodalan: true, RiwayatAset: true, RiwayatOmsetLaba: true,
           RiwayatKontribusiPADes: true, RiwayatKemitraan: true, PeranProgram: true,
           LaporanPertanggungjawaban: true, MediaSosial: true,
@@ -621,6 +622,7 @@ class KepalaDinasController {
           // Isian formulir baru, untuk detail SPKED.
           kategori_usaha: daftar(r.KategoriUsaha) || [],
           unit_usaha: (daftar(r.UnitUsaha) || []).filter((s) => String(s || '').trim()),
+          keterangan_ketahanan_pangan: r.KeteranganUsahaKetahananPangan,
           media_sosial: objek(r.MediaSosial),
           peran_program: peranProgram,
           riwayat: {
