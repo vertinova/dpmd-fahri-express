@@ -7,16 +7,13 @@ const fs = require('fs');
 const path = require('path');
 const XLSX = require('xlsx');
 const { prisma } = require('./base.controller');
+const { nikErrorSebab } = require('../../utils/nikAnomali');
 
 const DATA_DIR = path.join(__dirname, '..', '..', '..', 'data');
 const ADD_FILE = path.join(DATA_DIR, 'rtrwadd.xlsx');
 const BPJS_FILE = path.join(DATA_DIR, 'rtrwbpjs.xlsx');
 const ADD_JSON_FILE = path.join(DATA_DIR, 'rtrwadd.json');
 const BPJS_JSON_FILE = path.join(DATA_DIR, 'rtrwbpjs.json');
-// Overlay status kepesertaan BPJS (aktif/non-aktif) + daftar pengurus BARU,
-// dihasilkan scripts/generate-bpjs-status-cache.js. Opsional: bila file tak ada,
-// persandingan tetap jalan tanpa overlay (backward-compatible).
-const BPJS_STATUS_JSON_FILE = path.join(DATA_DIR, 'rtrwbpjsstatus.json');
 const RT_RW_TYPES = ['rw', 'rt', 'rws', 'rts'];
 // Persandingan hanya untuk Ketua RT/RW: ADD & BPJS memang hanya menanggung ketua,
 // sedangkan kelembagaan RT/RW juga memuat sekretaris/bendahara/seksi yang bukan
@@ -38,11 +35,6 @@ let sourceCache = {
   addMeta: {},
   bpjsMeta: {},
   sourceType: null,
-  membershipByNik: {},
-  membershipByKpj: {},
-  membershipByNameDesa: {},
-  baruData: [],
-  statusMeta: null,
 };
 let sourceCacheBuildPromise = null;
 
@@ -251,54 +243,22 @@ function isSimilarName(a, b) {
   return false;
 }
 
-// Tanda-tangan file status agar perubahan JSON status meng-invalidasi cache.
-// Wajib ikut dalam cache key; kalau tidak, regen status akan diam-diam terabaikan.
-function statusFileSignature() {
-  if (!fs.existsSync(BPJS_STATUS_JSON_FILE)) return 'status|none';
-  const stat = fs.statSync(BPJS_STATUS_JSON_FILE);
-  return `status|${stat.mtimeMs}:${stat.size}`;
-}
-
 function getSourceCacheKey() {
-  const status = statusFileSignature();
   if (hasPreparedJsonCache()) {
     const addStat = fs.statSync(ADD_JSON_FILE);
     const bpjsStat = fs.statSync(BPJS_JSON_FILE);
-    return `json|${addStat.mtimeMs}:${addStat.size}|${bpjsStat.mtimeMs}:${bpjsStat.size}|${status}`;
+    return `json|${addStat.mtimeMs}:${addStat.size}|${bpjsStat.mtimeMs}:${bpjsStat.size}`;
   }
 
   const addStat = fs.statSync(ADD_FILE);
   const bpjsStat = fs.statSync(BPJS_FILE);
-  return `excel|${addStat.mtimeMs}:${addStat.size}|${bpjsStat.mtimeMs}:${bpjsStat.size}|${status}`;
+  return `excel|${addStat.mtimeMs}:${addStat.size}|${bpjsStat.mtimeMs}:${bpjsStat.size}`;
 }
 
 function hasPreparedJsonCache() {
   return fs.existsSync(ADD_JSON_FILE) && fs.existsSync(BPJS_JSON_FILE);
 }
 
-// Muat overlay status BPJS + daftar BARU. Aman bila file tidak ada.
-function readBpjsStatus() {
-  const empty = { membershipByNik: {}, membershipByKpj: {}, membershipByNameDesa: {}, baruData: [], statusMeta: null };
-  if (!fs.existsSync(BPJS_STATUS_JSON_FILE)) return empty;
-  try {
-    const payload = JSON.parse(fs.readFileSync(BPJS_STATUS_JSON_FILE, 'utf8'));
-    return {
-      membershipByNik: payload.membershipByNik || {},
-      membershipByKpj: payload.membershipByKpj || {},
-      membershipByNameDesa: payload.membershipByNameDesa || {},
-      baruData: Array.isArray(payload.baru) ? payload.baru : [],
-      statusMeta: payload.meta || null,
-    };
-  } catch (error) {
-    console.error('Gagal membaca rtrwbpjsstatus.json (overlay dilewati):', error.message);
-    return empty;
-  }
-}
-
-// Daftar mentah Data Status BPJS (rtrwbpjsstatus.json) untuk ditampilkan sebagai
-// sumber data tersendiri — beda dari Data BPJS (rtrwbpjs.json). Cache status tidak
-// menyimpan nama peserta AKTIF (indexnya NIK), jadi nama diambil dari master BPJS
-// via NIK/KPJ; peserta NON-AKTIF namanya ada di key `nama|desaKode`.
 // Peserta BPJS yang tidak bisa dipetakan ke satu desa di database, sehingga
 // tidak pernah muncul di persandingan (comparison hanya mengiterasi desa DB).
 // Dua asalnya: baris yang dibuang saat parsing (ID_PEGAWAI/nama kosong) dan
@@ -332,27 +292,52 @@ function buildBpjsUnmappableList(bpjsUnmappableRaw, bpjsData, desaByKode, dbItem
     dbDesaByNik.get(nik).set(d.desaKode, d);
   });
 
-  const petunjuk = (nik) => {
+  // Cadangan bila NIK kosong/tak ada di database: cocokkan nama. Nama kembar
+  // antar desa disempitkan dengan tanggal lahir.
+  // shortcut: nama dicocokkan persis (setelah normalizeName), bukan fuzzy —
+  // upgrade ke isSimilarName bila banyak baris yang ejaannya beda tipis.
+  const dbDesaByNama = new Map();
+  (dbItems || []).forEach((d) => {
+    if (!d.normalized) return;
+    if (!dbDesaByNama.has(d.normalized)) dbDesaByNama.set(d.normalized, []);
+    dbDesaByNama.get(d.normalized).push(d);
+  });
+
+  const hasil = (d, dasar) => ({
+    petunjukKode: d.desaKode,
+    petunjukLabel: `${d.desaKode} ${d.desaNama || ''}`.trim(),
+    petunjukDasar: dasar,
+  });
+  const ragu = (label) => ({ petunjukKode: '', petunjukLabel: label, petunjukDasar: 'ragu' });
+
+  const petunjuk = (nik, nama, tglLahir) => {
     const found = dbDesaByNik.get(toText(nik).replace(/\D/g, ''));
-    if (!found || found.size === 0) return { petunjukKode: '', petunjukLabel: '' };
-    const list = [...found.values()];
-    if (list.length > 1) {
-      return {
-        petunjukKode: '',
-        petunjukLabel: `NIK ada di ${list.length} desa — perlu verifikasi`,
-      };
+    if (found && found.size > 0) {
+      const list = [...found.values()];
+      if (list.length > 1) return ragu(`NIK ada di ${list.length} desa — perlu verifikasi`);
+      return hasil(list[0], 'nik');
     }
-    const d = list[0];
-    return {
-      petunjukKode: d.desaKode,
-      petunjukLabel: `${d.desaKode} ${d.desaNama || ''}`.trim(),
-    };
+
+    const sameName = dbDesaByNama.get(normalizeName(nama)) || [];
+    if (sameName.length === 0) return { petunjukKode: '', petunjukLabel: '', petunjukDasar: '' };
+
+    const byDesa = new Map(sameName.map((d) => [d.desaKode, d]));
+    if (byDesa.size === 1) {
+      const d = sameName[0];
+      const tglCocok = Boolean(tglLahir && d.tglLahir && d.tglLahir === toText(tglLahir));
+      return hasil(d, tglCocok ? 'nama_tgl' : 'nama');
+    }
+
+    const cocokTgl = tglLahir ? sameName.filter((d) => d.tglLahir === toText(tglLahir)) : [];
+    const desaTgl = new Map(cocokTgl.map((d) => [d.desaKode, d]));
+    if (desaTgl.size === 1) return hasil(cocokTgl[0], 'nama_tgl');
+    return ragu(`Nama ada di ${byDesa.size} desa — perlu verifikasi`);
   };
 
   (bpjsUnmappableRaw || []).forEach((rec, index) => {
     rows.push({
       key: `unmap-raw::${index}`,
-      ...petunjuk(rec.nik),
+      ...petunjuk(rec.nik, rec.namaLengkap, rec.tglLahir),
       sebab: rec.sebab,
       sebabLabel: UNMAPPABLE_SEBAB[rec.sebab] || rec.sebab,
       barisExcel: rec.barisExcel ?? null,
@@ -377,7 +362,7 @@ function buildBpjsUnmappableList(bpjsUnmappableRaw, bpjsData, desaByKode, dbItem
     (item.details || []).forEach((d, i) => {
       rows.push({
         key: `unmap-kode::${item.desaKode}::${item.nik || item.nama}::${i}`,
-        ...petunjuk(d.nik || item.nik),
+        ...petunjuk(d.nik || item.nik, d.namaLengkap || item.nama, d.tglLahir),
         sebab,
         sebabLabel: UNMAPPABLE_SEBAB[sebab],
         barisExcel: null,
@@ -398,88 +383,6 @@ function buildBpjsUnmappableList(bpjsUnmappableRaw, bpjsData, desaByKode, dbItem
     String(a.sebab).localeCompare(String(b.sebab))
     || String(a.idPegawai).localeCompare(String(b.idPegawai))
     || String(a.nama).localeCompare(String(b.nama)));
-}
-
-function buildBpjsStatusList(membershipByNik, membershipByKpj, membershipByNameDesa, bpjsData, desaByKode) {
-  const namaByNik = new Map();
-  const namaByKpj = new Map();
-  const masterByNameDesa = new Map();
-  bpjsData.forEach((p) => {
-    if (p.nik && !namaByNik.has(p.nik)) namaByNik.set(p.nik, p.nama);
-    const key = `${p.normalized}|${p.desaKode}`;
-    if (!masterByNameDesa.has(key)) masterByNameDesa.set(key, p);
-    (p.details || []).forEach((d) => {
-      if (d.kpj && !namaByKpj.has(d.kpj)) namaByKpj.set(d.kpj, d.namaLengkap || p.nama);
-    });
-  });
-
-  // Kode desa dari file DESK bisa tidak dikenal database — barisnya tetap ditampilkan
-  // dengan label eksplisit supaya tidak terlihat sebagai desa kosong.
-  const wilayah = (desaKode) => {
-    const desa = desaByKode.get(desaKode);
-    return {
-      desaKode: desaKode || '',
-      desaNama: desa?.nama || `${desaKode || '-'} (tidak dikenal DB)`,
-      kecamatanNama: desa?.kecamatans?.nama || 'Tidak Dikenal',
-    };
-  };
-
-  // adaDiMaster: peserta ini ketemu di master Data BPJS. Yang false = selisih —
-  // tercatat di DESK BPJS tapi tak ada di rtrwbpjs.json (dipakai tab "Selisih vs Master").
-  const aktif = [];
-  Object.entries(membershipByNik).forEach(([nik, rec]) => {
-    if (rec.status !== 'aktif') return;
-    const nama = namaByNik.get(nik) || namaByKpj.get(rec.kpj) || '';
-    aktif.push({
-      ...wilayah(rec.desaKode),
-      sheet: 'AKTIF',
-      nama,
-      nik,
-      kpj: rec.kpj || '',
-      kodeTk: rec.kodeTk || '',
-      upah: rec.upah || 0,
-      tglLahir: rec.tglLahir || '',
-      adaDiMaster: Boolean(nama),
-      cocokVia: namaByNik.has(nik) ? 'nik' : namaByKpj.has(rec.kpj) ? 'kpj' : '',
-    });
-  });
-  // Peserta AKTIF yang hanya terindeks via KPJ (NIK kosong / tergeser duplikat).
-  Object.entries(membershipByKpj).forEach(([kpj, rec]) => {
-    if (rec.status !== 'aktif') return;
-    if (rec.nik && membershipByNik[rec.nik]) return;
-    const nama = namaByKpj.get(kpj) || (rec.nik ? namaByNik.get(rec.nik) : '') || '';
-    aktif.push({
-      ...wilayah(rec.desaKode),
-      sheet: 'AKTIF',
-      nama,
-      nik: rec.nik || '',
-      kpj,
-      kodeTk: '',
-      upah: 0,
-      tglLahir: rec.tglLahir || '',
-      adaDiMaster: Boolean(nama),
-      cocokVia: namaByKpj.has(kpj) ? 'kpj' : rec.nik && namaByNik.has(rec.nik) ? 'nik' : '',
-    });
-  });
-
-  const nonAktif = Object.entries(membershipByNameDesa).map(([key, rec]) => {
-    const nama = key.slice(0, key.lastIndexOf('|'));
-    const master = masterByNameDesa.get(`${nama}|${rec.desaKode}`);
-    return {
-      ...wilayah(rec.desaKode),
-      sheet: 'NON AKTIF',
-      nama,
-      nik: master?.nik || '',
-      kpj: (master?.details || [])[0]?.kpj || '',
-      sebab: rec.sebab || '',
-      tglLahir: rec.tglLahir || '',
-      adaDiMaster: Boolean(master),
-      cocokVia: master ? 'nama_desa' : '',
-    };
-  });
-
-  const bySort = (a, b) => a.desaKode.localeCompare(b.desaKode) || String(a.nama).localeCompare(String(b.nama));
-  return { aktif: aktif.sort(bySort), nonAktif: nonAktif.sort(bySort) };
 }
 
 function readPreparedJson(filePath, label) {
@@ -661,7 +564,6 @@ function readSourceData() {
   const usingJsonCache = hasPreparedJsonCache();
   const add = usingJsonCache ? readPreparedJson(ADD_JSON_FILE, 'ADD') : parseAddData();
   const bpjs = usingJsonCache ? readPreparedJson(BPJS_JSON_FILE, 'BPJS') : parseBpjsData();
-  const status = readBpjsStatus();
   sourceCache = {
     key,
     addData: add.data,
@@ -670,11 +572,6 @@ function readSourceData() {
     addMeta: add.meta,
     bpjsMeta: bpjs.meta,
     sourceType: usingJsonCache ? 'json' : 'excel',
-    membershipByNik: status.membershipByNik,
-    membershipByKpj: status.membershipByKpj,
-    membershipByNameDesa: status.membershipByNameDesa,
-    baruData: status.baruData,
-    statusMeta: status.statusMeta,
   };
 
   return sourceCache;
@@ -1114,98 +1011,9 @@ function consolidateBySimilarName(canonMap) {
   }
 }
 
-// Verifikasi kandidat status BPJS thd peserta BPJS: desa WAJIB termasuk salah satu
-// desa peserta (supaya status tidak "berpindah desa" saat NIK/KPJ kebetulan sama
-// antar-desa) dan tgl lahir cocok bila kedua sisi tersedia. desaSet = himpunan desa
-// peserta (desa efektif + desa asal BPJS bila di-reassign); dl = tgl lahir peserta.
-function membershipMatches(cand, desaSet, dl) {
-  if (!cand) return false;
-  if (cand.desaKode && desaSet && desaSet.size && !desaSet.has(cand.desaKode)) return false;
-  if (cand.tglLahir && dl && cand.tglLahir !== dl) return false;
-  return true;
-}
-
-// Tentukan status kepesertaan (aktif/non-aktif) sebuah item BPJS dari overlay.
-// Match per-detail: NIK dulu (peserta aktif punya NIK), lalu KPJ (non-aktif hanya
-// punya KPJ). Tiap kandidat divalidasi via membershipMatches (desa + tgl lahir) agar
-// status tidak terbawa ke desa lain. Item bisa mengagregasi beberapa peserta.
-function resolveMembership(bpjsItems, byNik, byKpj, byNameDesa = {}) {
-  let aktif = 0;
-  let nonAktif = 0;
-  let sebab = '';
-  let tglTidakAktif = '';
-  (bpjsItems || []).forEach((bi) => {
-    // Desa peserta: desa efektif + desa asal BPJS (bila di-reassign lintas-desa/Tangkil).
-    const desaSet = new Set([bi.desaKode, bi.bpjsOriginalDesaKode].filter(Boolean));
-    (bi.details || []).forEach((d) => {
-      const dl = dateToStr(d.tglLahir);
-      // Coba NIK lalu KPJ; ambil kandidat pertama yang lolos verifikasi desa+tgl lahir.
-      const nikCand = d.nik ? byNik[d.nik] : null;
-      const kpjCand = d.kpj ? byKpj[d.kpj] : null;
-      let hit = membershipMatches(nikCand, desaSet, dl) ? nikCand
-        : membershipMatches(kpjCand, desaSet, dl) ? kpjCand
-          : null;
-      // Fallback non-aktif via nama+desa: dipakai saat NIK & KPJ gagal (mis. KPJ
-      // peserta di master BPJS kosong). Key sudah desa-scoped; verifikasi tgl lahir.
-      if (!hit && bi.desaKode) {
-        const nm = normalizeName(d.namaLengkap);
-        const cand = nm ? byNameDesa[`${nm}|${bi.desaKode}`] : null;
-        if (cand && (!cand.tglLahir || !dl || cand.tglLahir === dl)) hit = cand;
-      }
-      if (!hit) return;
-      if (hit.status === 'non_aktif') {
-        nonAktif += 1;
-        if (!sebab) sebab = hit.sebab || '';
-        if (!tglTidakAktif) tglTidakAktif = hit.tglTidakAktif || '';
-      } else if (hit.status === 'aktif') {
-        aktif += 1;
-      }
-    });
-  });
-  const membership = aktif && nonAktif ? 'mixed'
-    : nonAktif ? 'non_aktif'
-      : aktif ? 'aktif'
-        : 'unmarked';
-  return { membership, aktif, nonAktif, sebab, tglTidakAktif };
-}
-
-// Tandai item bila pengurusnya muncul di daftar BARU desa tsb. Cocokkan lewat
-// NIK (DB ∪ BPJS) dulu, lalu nama ternormalisasi persis. Berlaku untuk SEMUA item:
-//  - item non-BPJS  -> pengurus baru yang wajar (belum terdaftar BPJS)
-//  - item ada-BPJS  -> ANOMALI (ditandai baru padahal NIK sudah ada di BPJS)
-// baruMatchType menandai kekuatan match ('nik' kuat, 'name' lemah).
-function markBaruOnItems(items, baruList, matchedKeys) {
-  if (!baruList || !baruList.length) return;
-  const byNik = new Map();
-  const byName = new Map();
-  baruList.forEach((b) => {
-    if (b.nik) byNik.set(b.nik, b);
-    if (b.normalized && !byName.has(b.normalized)) byName.set(b.normalized, b);
-  });
-  items.forEach((item) => {
-    let hit = null;
-    let matchType = '';
-    const niks = [...(item.dbNik || []), ...(item.bpjsNik || [])];
-    for (const nik of niks) {
-      if (nik && byNik.has(nik)) { hit = byNik.get(nik); matchType = 'nik'; break; }
-    }
-    if (!hit && item.normalized && byName.has(item.normalized)) { hit = byName.get(item.normalized); matchType = 'name'; }
-    if (!hit) return;
-    item.inBaru = true;
-    item.baruJabatan = hit.jabatan || '';
-    item.baruNama = hit.nama || '';
-    item.baruMatchType = matchType;
-    item.baruAnomali = Boolean(item.inBpjs); // di-BPJS tapi tercatat baru = anomali
-    matchedKeys.add(`${hit.desaKode}|${hit.nik || hit.normalized}`);
-  });
-}
-
 function compareItems(dbList, addList, bpjsList, options = {}) {
   const enableFuzzy = typeof options === 'boolean' ? options : Boolean(options.enableFuzzy);
   const includeDetails = typeof options === 'object' && Boolean(options.includeDetails);
-  const membershipByNik = (typeof options === 'object' && options.membershipByNik) || {};
-  const membershipByKpj = (typeof options === 'object' && options.membershipByKpj) || {};
-  const membershipByNameDesa = (typeof options === 'object' && options.membershipByNameDesa) || {};
   const canonMap = new Map();
   const indexes = createMatchIndexes();
 
@@ -1266,9 +1074,6 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
     const dbDetails = entry.dbItems;
     const addDetails = entry.addItems.flatMap((item) => item.details || []);
     const bpjsDetails = entry.bpjsItems.flatMap((item) => item.details || []);
-    const membership = hasBpjs
-      ? resolveMembership(entry.bpjsItems, membershipByNik, membershipByKpj, membershipByNameDesa)
-      : { membership: null, aktif: 0, nonAktif: 0, sebab: '', tglTidakAktif: '' };
     const item = {
       key,
       nama: Array.from(sourceNames).join(' / '),
@@ -1283,6 +1088,11 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
       addNama: [...new Set(entry.addItems.map((item) => item.nama))],
       bpjsNama: [...new Set(entry.bpjsItems.map((item) => item.nama))],
       dbNik: dbNiks,
+      // NIK database apa adanya + sebab cacatnya + tgl lahir pembandingnya,
+      // untuk tab "NIK Error Database" (tak perlu memuat detail per baris).
+      dbNikRaw: [...new Set(entry.dbItems.map((item) => item.nikRaw).filter(Boolean))],
+      dbNikError: [...new Set(entry.dbItems.map((item) => item.nikError).filter(Boolean))],
+      dbTglLahir: dbTglLahirs,
       bpjsNik: bpjsNiks,
       // Nomor KPJ peserta BPJS. Diambil dari detail sumber (selalu ada di cache),
       // jadi tetap terisi walau response tidak menyertakan detail per baris.
@@ -1338,18 +1148,6 @@ function compareItems(dbList, addList, bpjsList, options = {}) {
       addDetailCount: addDetails.length,
       bpjsDetailCount: bpjsDetails.length,
       detailsLoaded: includeDetails,
-      // Overlay status kepesertaan BPJS (dari DESK BPJS JULI 2026).
-      bpjsMembership: membership.membership,      // 'aktif' | 'non_aktif' | 'mixed' | 'unmarked' | null
-      bpjsAktifCount: membership.aktif,
-      bpjsNonAktifCount: membership.nonAktif,
-      bpjsNonAktifSebab: membership.sebab,
-      bpjsNonAktifTgl: membership.tglTidakAktif,
-      // Penandaan pengurus BARU (diisi di computeComparison per desa).
-      inBaru: false,
-      baruJabatan: '',
-      baruNama: '',
-      baruMatchType: '',
-      baruAnomali: false,
     };
 
     if (includeDetails) {
@@ -1458,7 +1256,7 @@ async function computeComparison({
       ]);
       logTiming('database loaded');
 
-      const { addData, bpjsData, bpjsUnmappableRaw, addMeta, bpjsMeta, sourceType, membershipByNik, membershipByKpj, membershipByNameDesa, baruData, statusMeta } = readSourceData();
+      const { addData, bpjsData, bpjsUnmappableRaw, addMeta, bpjsMeta, sourceType } = readSourceData();
       logTiming('excel loaded');
       const desaByKode = new Map(allDesa.map((desa) => [desa.kode, desa]));
       // Persandingan hanya mencakup desa (416), kelurahan (19) dikeluarkan: insentif
@@ -1480,6 +1278,7 @@ async function computeComparison({
         const rw = normalizedType === 'rws' ? rwById.get(p.pengurusable_id) : null;
         const rt = normalizedType === 'rts' ? rtById.get(p.pengurusable_id) : null;
         const nama = normalizeName(p.nama_lengkap);
+        const tglLahir = dateToStr(p.tanggal_lahir);
 
         return {
           source: 'db',
@@ -1488,6 +1287,9 @@ async function computeComparison({
           namaLengkap: toText(p.nama_lengkap),
           normalized: nama,
           nik: normalizeNik(p.nik),
+          // NIK apa adanya + sebab cacatnya (tab "NIK Error Database").
+          nikRaw: toText(p.nik),
+          nikError: nikErrorSebab(p.nik, tglLahir),
           desaId: p.desa_id.toString(),
           desaKode: p.desas?.kode || '',
           desaNama: p.desas?.nama || '',
@@ -1506,7 +1308,7 @@ async function computeComparison({
           statusVerifikasi: p.status_verifikasi || '',
           tanggalMulaiJabatan: dateToStr(p.tanggal_mulai_jabatan),
           tanggalAkhirJabatan: dateToStr(p.tanggal_akhir_jabatan),
-          tglLahir: dateToStr(p.tanggal_lahir),
+          tglLahir,
           tempatLahir: toText(p.tempat_lahir),
           jenisKelamin: toText(p.jenis_kelamin),
           statusPerkawinan: toText(p.status_perkawinan),
@@ -1522,23 +1324,15 @@ async function computeComparison({
       const dbByKode = groupBy(dbItems, (item) => item.desaKode);
       const addByKode = groupBy(addData, (item) => item.desaKode);
       const bpjsByKode = groupBy(effectiveBpjsData, (item) => item.desaKode);
-      const baruByKode = groupBy(baruData || [], (item) => item.desaKode);
       logTiming('source grouped');
-
-      // Untuk deteksi anomali: BARU yang ternyata sudah punya NIK di BPJS master.
-      const bpjsNikSet = new Set(effectiveBpjsData.flatMap((b) => (b.details || []).map((d) => d.nik)).filter(Boolean));
-      const matchedBaruKeys = new Set();
 
       const comparison = desaOnly.map((desa) => {
         const desaKode = desa.kode;
         const dbList = dbByKode[desaKode] || [];
         const addList = addByKode[desaKode] || [];
         const bpjsList = bpjsByKode[desaKode] || [];
-        const items = compareItems(dbList, addList, bpjsList, { enableFuzzy, includeDetails, membershipByNik, membershipByKpj, membershipByNameDesa })
+        const items = compareItems(dbList, addList, bpjsList, { enableFuzzy, includeDetails })
           .filter((item) => !itemKeyFilter || item.key === itemKeyFilter);
-
-        // Tandai pengurus BARU pada item DB-yang-belum-di-BPJS (join NIK -> nama).
-        markBaruOnItems(items, baruByKode[desaKode] || [], matchedBaruKeys);
 
         return {
           desaId: desa.id.toString(),
@@ -1564,75 +1358,10 @@ async function computeComparison({
           bpjsDesaBerbeda: items.filter((item) => item.bpjsDesaBerbeda).length,
           bpjsDesaBerbedaNik: items.filter((item) => item.bpjsDesaBerbedaSumber === 'nik_lintas_desa').length,
           nikInvalid: items.filter((item) => item.bpjsNikInvalid).length,
-          bpjsAktif: items.filter((item) => item.bpjsMembership === 'aktif').length,
-          bpjsNonAktif: items.filter((item) => item.bpjsMembership === 'non_aktif' || item.bpjsMembership === 'mixed').length,
-          bpjsUnmarked: items.filter((item) => item.bpjsMembership === 'unmarked').length,
-          baruMarked: items.filter((item) => item.inBaru).length,
           items,
         };
       });
       logTiming('comparison built');
-
-      // Index DB per desa (NIK & nama ternormalisasi) untuk menyandingkan Data Baru
-      // dengan record database yang cocok.
-      const dbNikByKode = new Map();
-      const dbNameByKode = new Map();
-      dbItems.forEach((d) => {
-        if (!dbNikByKode.has(d.desaKode)) {
-          dbNikByKode.set(d.desaKode, new Map());
-          dbNameByKode.set(d.desaKode, new Map());
-        }
-        if (d.nik) dbNikByKode.get(d.desaKode).set(d.nik, d);
-        if (d.normalized && !dbNameByKode.get(d.desaKode).has(d.normalized)) {
-          dbNameByKode.get(d.desaKode).set(d.normalized, d);
-        }
-      });
-
-      // Daftar BARU untuk tab khusus: perkaya dengan nama desa/kecamatan, flag, dan
-      // record DB yang cocok (untuk penyandingan Baru <-> Database).
-      const baruList = (baruData || []).map((b) => {
-        const desa = desaByKode.get(b.desaKode);
-        const nikMap = dbNikByKode.get(b.desaKode);
-        const nameMap = dbNameByKode.get(b.desaKode);
-        let dbMatch = null;
-        if (b.nik && nikMap && nikMap.has(b.nik)) dbMatch = nikMap.get(b.nik);
-        else if (b.normalized && nameMap && nameMap.has(b.normalized)) dbMatch = nameMap.get(b.normalized);
-        return {
-          desaKode: b.desaKode,
-          desaNama: desa?.nama || '',
-          kecamatanNama: desa?.kecamatans?.nama || '',
-          nama: b.nama,
-          nik: b.nik || '',
-          jenis: b.jenis || '',
-          rwNomor: b.rwNomor || '',
-          rtNomor: b.rtNomor || '',
-          jabatan: b.jabatan || '',
-          tglLahir: b.tglLahir || '',
-          alamat: b.alamat || '',
-          pendidikan: b.pendidikan || '',
-          matchedDb: Boolean(dbMatch),
-          matchType: dbMatch ? (b.nik && dbMatch.nik === b.nik ? 'nik' : 'nama') : '',
-          db: dbMatch ? {
-            nama: dbMatch.namaLengkap,
-            nik: dbMatch.nik || '',
-            jenis: dbMatch.jenis || '',
-            rwNomor: dbMatch.rwNomor || '',
-            rtNomor: dbMatch.rtNomor || '',
-            jabatan: dbMatch.jabatan || '',
-            tglLahir: dbMatch.tglLahir || '',
-            tempatLahir: dbMatch.tempatLahir || '',
-            alamat: dbMatch.alamat || '',
-            pendidikan: dbMatch.pendidikan || '',
-            statusJabatan: dbMatch.statusJabatan || '',
-          } : null,
-          anomaliBpjs: Boolean(b.nik && bpjsNikSet.has(b.nik)),
-          desaDikenal: Boolean(desa),
-        };
-      });
-      logTiming('baru list built');
-
-      const bpjsStatus = buildBpjsStatusList(membershipByNik, membershipByKpj, membershipByNameDesa, bpjsData, desaByKode);
-      logTiming('bpjs status list built');
 
       // Dipakai tab "Tidak Terpetakan". WAJIB memakai effectiveBpjsData (hasil
       // fallback), bukan bpjsData mentah: applyCrossDesaNikFallback memindahkan
@@ -1689,20 +1418,6 @@ async function computeComparison({
         totalNikInvalidNama: crossDesaFallback.stats.nikInvalidNama,
         totalNikInvalidTgl: crossDesaFallback.stats.nikInvalidTgl,
         totalNikInvalidBanyakDesa: crossDesaFallback.stats.nikInvalidBanyakDesa,
-        // Overlay status kepesertaan BPJS (DESK BPJS JULI 2026).
-        totalBpjsAktif: comparison.reduce((sum, desa) => sum + desa.bpjsAktif, 0),
-        totalBpjsNonAktif: comparison.reduce((sum, desa) => sum + desa.bpjsNonAktif, 0),
-        totalBpjsUnmarked: comparison.reduce((sum, desa) => sum + desa.bpjsUnmarked, 0),
-        totalBaru: baruList.length,
-        totalBaruMatchedDb: baruList.filter((b) => b.matchedDb).length,
-        totalBaruUnmatched: baruList.filter((b) => !b.matchedDb).length,
-        totalBaruAnomali: baruList.filter((b) => b.anomaliBpjs).length,
-        // Data Status BPJS sebagai sumber tersendiri (bukan hasil persandingan).
-        totalStatusAktif: bpjsStatus.aktif.length,
-        totalStatusNonAktif: bpjsStatus.nonAktif.length,
-        totalStatusTanpaMaster: [...bpjsStatus.aktif, ...bpjsStatus.nonAktif].filter((r) => !r.adaDiMaster).length,
-        statusOverlayAvailable: Boolean(statusMeta),
-        statusOverlayMeta: statusMeta,
         fuzzyEnabled: enableFuzzy,
         unmatchedAddDesa,
         unmatchedBpjsDesa,
@@ -1733,14 +1448,11 @@ async function computeComparison({
     summary,
     comparison,
     tangkilUnresolved: tangkilUnresolvedForResponse,
-    baruList,
-    bpjsStatus,
     bpjsUnmappable,
     meta: {
       cacheReady: true,
       sourceType,
       includeDetails,
-      statusOverlay: Boolean(statusMeta),
       filteredDesaKode: desaKodeFilter || null,
       filteredItemKey: itemKeyFilter || null,
     },
@@ -1788,7 +1500,7 @@ class RtrwComparisonController {
         await warming;
       }
 
-      const { summary, comparison, tangkilUnresolved, baruList, bpjsStatus, bpjsUnmappable, meta } = await computeComparison({
+      const { summary, comparison, tangkilUnresolved, bpjsUnmappable, meta } = await computeComparison({
         enableFuzzy,
         includeDetails,
         desaKodeFilter,
@@ -1802,8 +1514,6 @@ class RtrwComparisonController {
           summary,
           comparison,
           tangkilUnresolved,
-          baruList,
-          bpjsStatus,
           bpjsUnmappable,
           meta,
         },
@@ -1848,7 +1558,6 @@ class RtrwComparisonController {
       const details = peserta?.details || [];
       const bulanIni = details.find((d) => String(d.blth || '').startsWith(bulan)) || null;
       const terakhir = [...details].sort((a, b) => String(b.blth).localeCompare(String(a.blth)))[0] || null;
-      const statusDesk = source.membershipByNik?.[nik] || null;
 
       res.json({
         success: true,
@@ -1865,7 +1574,6 @@ class RtrwComparisonController {
             upah: (bulanIni || terakhir)?.upah ?? null,
             blth_terakhir: terakhir?.blth || null,
           },
-          status_desk: statusDesk && { status: statusDesk.status, kpj: statusDesk.kpj || null },
         },
       });
     } catch (error) {
@@ -1897,4 +1605,4 @@ module.exports.computeComparison = computeComparison;
 module.exports.warmSourceCache = warmSourceCache;
 module.exports.isSourceCacheReady = isSourceCacheReady;
 // Exposed for unit tests (see __tests__/rtrwMatching.test.js).
-module.exports._internals = { normalizeName, isSimilarName, tokenSimilar, compareItems, resolveMembership, markBaruOnItems, applyCrossDesaNikFallback, buildBpjsStatusList, isKetuaRtRw };
+module.exports._internals = { normalizeName, isSimilarName, tokenSimilar, compareItems, applyCrossDesaNikFallback, isKetuaRtRw, nikErrorSebab, buildBpjsUnmappableList };
