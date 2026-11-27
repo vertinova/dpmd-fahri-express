@@ -1537,7 +1537,7 @@ class RtrwComparisonController {
     try {
       const pengurus = await prisma.pengurus.findUnique({
         where: { id: String(req.params.id) },
-        select: { nik: true, jabatan: true, pengurusable_type: true, desa_id: true },
+        select: { nik: true, jabatan: true, pengurusable_type: true, desa_id: true, desas: { select: { kode: true } } },
       });
       if (!pengurus) return res.status(404).json({ success: false, message: 'Pengurus tidak ditemukan' });
       if (req.user.role === 'desa' && Number(req.user.desa_id) !== Number(pengurus.desa_id)) {
@@ -1559,6 +1559,18 @@ class RtrwComparisonController {
       const bulanIni = details.find((d) => String(d.blth || '').startsWith(bulan)) || null;
       const terakhir = [...details].sort((a, b) => String(b.blth).localeCompare(String(a.blth)))[0] || null;
 
+      // NIK tak ditemukan → cek persandingan desa ini: mungkin terdaftar di BPJS
+      // dengan nama & kode desa sama tapi NIK berbeda (sama dengan tab "NIK Berbeda").
+      // ponytail: menghitung persandingan satu desa per request; cache bila profil jadi lambat.
+      let nikBerbeda = null;
+      if (!peserta && pengurus.desas?.kode) {
+        const { comparison } = await computeComparison({ enableFuzzy: true, desaKodeFilter: pengurus.desas.kode });
+        const row = comparison[0]?.items.find(
+          (it) => it.nikMismatch && it.dbRefs.some((r) => r.id === String(req.params.id)),
+        );
+        if (row) nikBerbeda = { nik_bpjs: row.bpjsNik, nama_bpjs: row.bpjsNama, kpj: row.bpjsKpj };
+      }
+
       res.json({
         success: true,
         data: {
@@ -1568,6 +1580,7 @@ class RtrwComparisonController {
           data_bulan_ini_tersedia: index.periodeTerbaru === bulan,
           terdaftar: Boolean(peserta),
           tercover: Boolean(bulanIni),
+          nik_berbeda: nikBerbeda,
           peserta: peserta && {
             nama: peserta.nama,
             kpj: (bulanIni || terakhir)?.kpj || null,

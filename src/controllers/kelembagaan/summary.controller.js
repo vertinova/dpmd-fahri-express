@@ -1546,7 +1546,7 @@ class SummaryController {
       // Ketua Bidang / Ketua Pokja / Wakil Ketua tidak dihitung sebagai ketua lembaga.
       const kondisiKetua = `(jabatan LIKE 'KETUA%' AND jabatan NOT LIKE 'KETUA BIDANG%' AND jabatan NOT LIKE 'KETUA POKJA%')`;
 
-      const [desas, produkHukum, rwTanpaRt, ...perTabel] = await Promise.all([
+      const [desas, produkHukum, rwTanpaRt, rtPenomoran, ...perTabel] = await Promise.all([
         prisma.desas.findMany({
           select: { id: true, nama: true, status_pemerintahan: true, kecamatans: { select: { id: true, nama: true } } },
           orderBy: [{ kecamatan_id: 'asc' }, { nama: 'asc' }],
@@ -1560,6 +1560,17 @@ class SummaryController {
            WHERE r.status_kelembagaan = 'aktif'
              AND NOT EXISTS (SELECT 1 FROM rts t WHERE t.rw_id = r.id AND t.status_kelembagaan = 'aktif')
            GROUP BY r.desa_id`
+        ),
+        // RT di tiap RW wajib bernomor 1..n (bukan melanjutkan nomor RW sebelumnya,
+        // mis. RW 2 berisi RT 4, 5, 6). Nomor disimpan teks ("001"), diambil digitnya saja.
+        prisma.$queryRawUnsafe(
+          `SELECT r.desa_id, r.nomor AS rw, STRING_AGG(t.nomor::text, ', ' ORDER BY t.n) AS rts
+           FROM rws r
+           JOIN (SELECT rw_id, nomor, NULLIF(regexp_replace(nomor::text, '\\D', '', 'g'), '')::int AS n
+                 FROM rts WHERE status_kelembagaan = 'aktif') t ON t.rw_id = r.id
+           WHERE r.status_kelembagaan = 'aktif'
+           GROUP BY r.id, r.desa_id, r.nomor
+           HAVING MIN(t.n) <> 1 OR MAX(t.n) <> COUNT(DISTINCT t.n)`
         ),
         // pengurusable_type memakai nama tabel lembaga (rws, rts, posyandus, ...)
         ...VERIFIKASI_TABLES.map(t => prisma.$queryRawUnsafe(
@@ -1596,6 +1607,7 @@ class SummaryController {
         kecamatan: d.kecamatans?.nama || null,
         produk_hukum: { total: 0, sk_kades: 0 },
         rw_tanpa_rt: 0,
+        rt_penomoran: [],
         lembaga: Object.fromEntries(VERIFIKASI_TABLES.map(t => [t.key, kosong()])),
       }]));
 
@@ -1606,6 +1618,10 @@ class SummaryController {
       rwTanpaRt.forEach(r => {
         const d = byDesa.get(String(r.desa_id));
         if (d) d.rw_tanpa_rt = Number(r.jumlah);
+      });
+      rtPenomoran.forEach(r => {
+        const d = byDesa.get(String(r.desa_id));
+        if (d) d.rt_penomoran.push({ rw: r.rw, rts: r.rts });
       });
       VERIFIKASI_TABLES.forEach((t, idx) => {
         perTabel[idx].forEach(r => {
@@ -1648,6 +1664,7 @@ class SummaryController {
           tambah(metrik, jumlah, rincian);
         });
         tambah('rw_tanpa_rt', d.rw_tanpa_rt);
+        tambah('penomoran_rt', d.rt_penomoran.length);
 
         if (masalah.length) hasil.push({ ...d, masalah });
       });
