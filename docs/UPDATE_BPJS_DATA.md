@@ -1,5 +1,21 @@
 # Update Data BPJS untuk RT/RW Comparison
 
+## Arsip bulanan di database (sejak Nov 2026)
+
+Setiap import Excel BPJS (tombol **Import Excel BPJS** di halaman **Data BPJS**
+— kartu di dashboard bidang PM — atau **Import Excel** di Persandingan RT/RW) kini
+disimpan permanen ke tabel `bpjs_periode` + `bpjs_peserta`, per bulan BLTH
+(`YYYY-MM`). Import ulang bulan yang sama mengganti bulan itu saja; bulan lain
+tidak tersentuh. Lihat di halaman **Data BPJS** (`.../kelembagaan/bpjs-arsip`),
+termasuk filter *baru masuk* / *keluar* dibanding bulan sebelumnya.
+
+- `rtrwbpjs.json` tetap jadi cache persandingan, dan hanya dibangun ulang bila
+  file yang diimport memuat **bulan terbaru** di arsip. Import bulan lama
+  (backfill) hanya masuk arsip.
+- Backfill dari CLI: `node src/services/bpjsArsip.service.js <file.xlsx> [...]`
+- Kode: `src/services/bpjsArsip.service.js`, `scripts/rtrw-import-job.js`,
+  migrasi `migrations/20261127_create_bpjs_arsip.sql`.
+
 ## Ringkasan
 
 Data BPJS peserta RT/RW disimpan sebagai JSON cache di `data/rtrwbpjs.json`.

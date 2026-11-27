@@ -13,6 +13,7 @@ const path = require('path');
 const { fork } = require('child_process');
 const XLSX = require('xlsx');
 const ActivityLogger = require('../../utils/activityLogger');
+const bpjsArsip = require('../../services/bpjsArsip.service');
 
 const DATA_DIR = path.join(__dirname, '..', '..', '..', 'data');
 const BACKUP_DIR = path.join(DATA_DIR, 'backups');
@@ -37,7 +38,6 @@ const SOURCES = {
       ['UPAH'],
       ['BLTH'],
     ],
-    periodeColumn: 'BLTH',
   },
   add: {
     label: 'Data ADD',
@@ -53,11 +53,11 @@ const SOURCES = {
       ['Keterangan'],
       ['Nilai', ' Nilai ', ' Nilai'],
     ],
-    periodeColumn: null,
   },
 };
 
 const toText = (value) => String(value ?? '').trim();
+const PERIODE_RE = /^\d{4}-\d{2}$/;
 
 // Satu job sekaligus. Regenerasi menulis file JSON yang sedang dibaca
 // controller lain, jadi dua job paralel bisa saling menimpa.
@@ -195,7 +195,13 @@ function startRegenerate(jenis, config, context) {
   activeJob = job;
   const startedAt = Date.now();
   const args = [`--only=${jenis}`];
-  if (config.periodeColumn) args.push(`--periode-column=${config.periodeColumn}`);
+  // BPJS: job menyimpan file ke arsip DB lalu memutuskan sendiri apakah file
+  // ini menjadi sumber persandingan (hanya bila memuat periode terbaru).
+  if (jenis === 'bpjs') {
+    args.push(`--file=${context.archivedPath}`, `--nama-file=${context.uploadedFile}`);
+    if (context.user?.id) args.push(`--user-id=${context.user.id}`);
+    if (context.user?.name) args.push(`--user-name=${context.user.name}`);
+  }
   const child = fork(IMPORT_JOB, args, { silent: true });
   let stdout = '';
   let stderr = '';
@@ -226,7 +232,8 @@ function startRegenerate(jenis, config, context) {
     if (code === 0) {
       job.status = 'done';
       try {
-        const payload = JSON.parse(stdout);
+        // Baris terakhir = hasil; baris sebelumnya bisa berisi log Prisma.
+        const payload = JSON.parse(stdout.trim().split('\n').pop());
         job.result = payload;
         job.summary = payload.summary || null;
       } catch {
@@ -253,11 +260,14 @@ function writeImportLog(job, logMeta) {
   const before = job.before?.cache?.meta || null;
   const after = job.result?.[job.jenis] || null;
   const periode = job.summary?.periode?.length ? `, periode ${job.summary.periode.join(', ')}` : '';
+  const cacheTetap = job.result?.cacheDiperbarui === false
+    ? ` — disimpan ke arsip saja, persandingan tetap memakai periode ${job.result.periodeTerbaru}`
+    : '';
   const description = job.status === 'done'
     ? `Import Excel ${job.label} (${job.uploadedFile}): `
-      + `${before?.totalRows ?? '?'} → ${after?.totalRows ?? '?'} baris, `
-      + `${before?.totalDesa ?? '?'} → ${after?.totalDesa ?? '?'} desa${periode}`
-    : `Import Excel ${job.label} (${job.uploadedFile}) GAGAL saat regenerasi cache: ${job.error}`;
+      + `${before?.totalRows ?? '?'} → ${after?.totalRows ?? job.summary?.totalRows ?? '?'} baris, `
+      + `${before?.totalDesa ?? '?'} → ${after?.totalDesa ?? '?'} desa${periode}${cacheTetap}`
+    : `Import Excel ${job.label} (${job.uploadedFile}) GAGAL: ${job.error}`;
 
   ActivityLogger.log({
     userId: logMeta.userId,
@@ -376,8 +386,10 @@ class RtrwImportController {
 
       // Simpan salinan bertanggal sebagai arsip, lalu pasang sebagai file aktif.
       const archivedAs = `${path.basename(config.targetFile, '.xlsx')}${stamp.slice(0, 10).replace(/-/g, '')}.xlsx`;
-      fs.copyFileSync(req.file.path, path.join(DATA_DIR, archivedAs));
-      fs.copyFileSync(req.file.path, config.targetFile);
+      const archivedPath = path.join(DATA_DIR, archivedAs);
+      fs.copyFileSync(req.file.path, archivedPath);
+      // BPJS dipasang sebagai file aktif oleh job (lihat rtrw-import-job.js).
+      if (jenis !== 'bpjs') fs.copyFileSync(req.file.path, config.targetFile);
       cleanup();
 
       // Activity log ditulis saat job selesai, bukan sekarang: jumlah baris &
@@ -385,6 +397,7 @@ class RtrwImportController {
       const job = startRegenerate(jenis, config, {
         backups,
         archivedAs,
+        archivedPath,
         uploadedFile: req.file.originalname,
         before,
         user: { id: req.user?.id, name: req.user?.name },
@@ -407,6 +420,55 @@ class RtrwImportController {
       cleanup();
       console.error('Error import Excel RT/RW:', error);
       res.status(500).json({ success: false, message: 'Gagal memproses file import', error: error.message });
+    }
+  }
+
+  /**
+   * Arsip bulanan BPJS (database). Read-only, mengikuti akses halaman persandingan.
+   * GET /api/kelembagaan/bpjs-arsip
+   */
+  async getArsipPeriode(req, res) {
+    try {
+      res.json({ success: true, data: await bpjsArsip.daftarPeriode() });
+    } catch (error) {
+      console.error('Error getArsipPeriode:', error);
+      res.status(500).json({ success: false, message: 'Gagal memuat daftar periode BPJS', error: error.message });
+    }
+  }
+
+  /**
+   * Infografis satu periode. GET /api/kelembagaan/bpjs-arsip/:periode/ringkasan
+   */
+  async getArsipRingkasan(req, res) {
+    try {
+      const periode = toText(req.params.periode);
+      if (!PERIODE_RE.test(periode)) {
+        return res.status(400).json({ success: false, message: 'Periode harus berformat YYYY-MM' });
+      }
+      res.json({ success: true, data: await bpjsArsip.ringkasanPeriode(periode) });
+    } catch (error) {
+      console.error('Error getArsipRingkasan:', error);
+      res.status(500).json({ success: false, message: 'Gagal memuat ringkasan BPJS', error: error.message });
+    }
+  }
+
+  /**
+   * GET /api/kelembagaan/bpjs-arsip/:periode?q=&banding=baru|keluar&page=&limit=
+   */
+  async getArsipPeserta(req, res) {
+    try {
+      const periode = toText(req.params.periode);
+      if (!PERIODE_RE.test(periode)) {
+        return res.status(400).json({ success: false, message: 'Periode harus berformat YYYY-MM' });
+      }
+      const banding = ['baru', 'keluar'].includes(req.query.banding) ? req.query.banding : '';
+      const page = Math.max(1, parseInt(req.query.page, 10) || 1);
+      const limit = Math.min(200, Math.max(1, parseInt(req.query.limit, 10) || 50));
+      const data = await bpjsArsip.daftarPeserta(periode, { q: req.query.q, banding, page, limit });
+      res.json({ success: true, data });
+    } catch (error) {
+      console.error('Error getArsipPeserta:', error);
+      res.status(500).json({ success: false, message: 'Gagal memuat data peserta BPJS', error: error.message });
     }
   }
 }

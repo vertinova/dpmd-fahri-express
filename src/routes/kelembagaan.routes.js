@@ -89,6 +89,10 @@ router.post(
   handleRtrwUpload,
   rtrwImportController.importExcel.bind(rtrwImportController)
 );
+// Arsip bulanan BPJS di database (riwayat tiap import).
+router.get('/bpjs-arsip', rtrwImportController.getArsipPeriode.bind(rtrwImportController));
+router.get('/bpjs-arsip/:periode/ringkasan', rtrwImportController.getArsipRingkasan.bind(rtrwImportController));
+router.get('/bpjs-arsip/:periode',rtrwImportController.getArsipPeserta.bind(rtrwImportController));
 
 // Summary and overview endpoints
 router.get('/', summaryController.index.bind(summaryController));

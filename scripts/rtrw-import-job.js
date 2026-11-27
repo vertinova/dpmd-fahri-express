@@ -6,18 +6,18 @@
  * utuh butuh ~19 detik, dan kalau itu dilakukan di dalam request handler
  * seluruh API ikut membeku selama itu.
  *
- * Mencetak satu objek JSON ke stdout:
- *   { ms, summary: { sheetName, totalRows, periode[] }, bpjs?/add?: {...} }
+ * BPJS: file disimpan dulu ke arsip database (per periode BLTH). Cache JSON
+ * persandingan hanya diganti bila file memuat periode terbaru di arsip, supaya
+ * meng-import bulan lama (backfill) tidak memundurkan persandingan.
  *
- * Usage: node scripts/rtrw-import-job.js --only=bpjs [--periode-column=BLTH]
+ * Mencetak satu objek JSON di baris terakhir stdout:
+ *   { ms, summary: { sheetName, totalRows, periode[] }, arsip?, cacheDiperbarui, bpjs?/add?: {...} }
+ *
+ * Usage: node scripts/rtrw-import-job.js --only=bpjs --file=<xlsx> [--nama-file=..] [--user-id=..] [--user-name=..]
+ *        node scripts/rtrw-import-job.js --only=add
  */
-const XLSX = require('xlsx');
-const { regenerate, ADD_FILE, BPJS_FILE } = require('./generate-rtrw-json-cache');
-
-const SHEET_CANDIDATES = {
-  bpjs: ['DATABASE', 'data_upah'],
-  add: ['Sheet2'],
-};
+const fs = require('fs');
+const { regenerate, BPJS_FILE } = require('./generate-rtrw-json-cache');
 
 function argValue(name) {
   const prefix = `--${name}=`;
@@ -25,29 +25,36 @@ function argValue(name) {
   return found ? found.slice(prefix.length) : null;
 }
 
-/**
- * Kumpulkan daftar periode (kolom BLTH) dari file sumber.
- *
- * Hanya dijalankan bila sumbernya punya kolom periode — praktisnya hanya BPJS
- * (~2 dtk). Untuk ADD ini dilewati: file 16MB-nya butuh ~19 dtk untuk dibaca
- * dan `regenerate` sudah membacanya sendiri, jadi menjalankan keduanya berarti
- * mem-parse file yang sama dua kali.
- */
-function collectPeriode(filePath, candidates, periodeColumn) {
-  const workbook = XLSX.readFile(filePath);
-  const sheetName = candidates.find((name) => workbook.Sheets[name]) || workbook.SheetNames[0];
-  const rows = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName], { defval: '' });
-  const periode = new Set();
+async function importBpjs(startedAt) {
+  const arsipSvc = require('../src/services/bpjsArsip.service');
+  const file = argValue('file');
+  if (!file || !fs.existsSync(file)) throw new Error(`--file tidak ditemukan: ${file}`);
 
-  rows.forEach((row) => {
-    const value = String(row[periodeColumn] ?? '').trim();
-    if (value) periode.add(value);
+  const arsip = await arsipSvc.simpanExcelBpjs(file, {
+    namaFile: argValue('nama-file'),
+    userId: argValue('user-id') || null,
+    userName: argValue('user-name') || null,
   });
+  const terbaru = await arsipSvc.periodeTerbaru();
+  const cacheDiperbarui = arsip.periode.some((p) => p.periode === terbaru);
 
-  return { sheetName, totalRows: rows.length, periode: [...periode].slice(0, 12) };
+  let result = {};
+  if (cacheDiperbarui) {
+    fs.copyFileSync(file, BPJS_FILE);
+    result = regenerate({ only: 'bpjs' });
+  }
+
+  return {
+    ...result,
+    ms: Date.now() - startedAt,
+    summary: { sheetName: arsip.sheetName, totalRows: arsip.totalRows, periode: arsip.periode.map((p) => p.periode) },
+    arsip: arsip.periode,
+    periodeTerbaru: terbaru,
+    cacheDiperbarui,
+  };
 }
 
-function main() {
+async function main() {
   const only = argValue('only');
   if (!['add', 'bpjs'].includes(only)) {
     console.error(`--only wajib 'add' atau 'bpjs', dapat: ${only}`);
@@ -55,21 +62,26 @@ function main() {
   }
 
   const startedAt = Date.now();
-  const periodeColumn = argValue('periode-column');
-  const sourceFile = only === 'bpjs' ? BPJS_FILE : ADD_FILE;
-  const summary = periodeColumn
-    ? collectPeriode(sourceFile, SHEET_CANDIDATES[only], periodeColumn)
-    : { sheetName: null, totalRows: null, periode: [] };
-
-  const result = regenerate({ only });
-
-  // Jumlah baris diambil dari generator kalau summarize dilewati.
-  if (summary.totalRows === null) {
-    summary.totalRows = result[only]?.totalRows ?? null;
-    summary.sheetName = result[only]?.sheetName ?? null;
+  let output;
+  if (only === 'bpjs') {
+    output = await importBpjs(startedAt);
+    await require('../src/config/prisma').$disconnect();
+  } else {
+    const result = regenerate({ only });
+    output = {
+      ...result,
+      ms: Date.now() - startedAt,
+      summary: { sheetName: result.add?.sheetName ?? null, totalRows: result.add?.totalRows ?? null, periode: [] },
+      cacheDiperbarui: true,
+    };
   }
 
-  console.log(JSON.stringify({ ...result, ms: Date.now() - startedAt, summary }));
+  // Baris terakhir stdout = hasil; log Prisma/logger bisa saja tercetak sebelumnya.
+  // exit eksplisit: handle logger/pool yang tersisa tidak boleh menahan job.
+  process.stdout.write(`\n${JSON.stringify(output)}\n`, () => process.exit(0));
 }
 
-main();
+main().catch((error) => {
+  console.error(error?.stack || String(error));
+  process.exit(1);
+});

@@ -351,4 +351,8 @@ function main() {
 
 if (require.main === module) main();
 
-module.exports = { regenerate, parseAddData, parseBpjsData, ADD_FILE, BPJS_FILE, ADD_JSON_FILE, BPJS_JSON_FILE };
+module.exports = {
+  regenerate, parseAddData, parseBpjsData, ADD_FILE, BPJS_FILE, ADD_JSON_FILE, BPJS_JSON_FILE,
+  // Dipakai arsip BPJS (src/services/bpjsArsip.service.js) agar parsing satu aturan.
+  toText, normalizeNik, normalizeName, numberValue, dateToStr, normalizeBpjsDesaKode,
+};

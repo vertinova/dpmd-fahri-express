@@ -2213,6 +2213,42 @@ model user_totp {
   updated_at       DateTime  @default(now()) @updatedAt @db.Timestamp(0)
 }
 
+/// Arsip bulanan data BPJS RT/RW (migrations/20261127_create_bpjs_arsip.sql).
+model bpjs_periode {
+  periode          String         @id @db.Char(7)
+  nama_file        String         @db.VarChar(255)
+  total_baris      Int            @default(0)
+  total_desa       Int            @default(0)
+  total_upah       Decimal        @default(0) @db.Decimal(18, 2)
+  imported_by      BigInt?
+  imported_by_name String?        @db.VarChar(255)
+  imported_at      DateTime       @default(now()) @db.Timestamp(0)
+  bpjs_peserta     bpjs_peserta[]
+}
+
+model bpjs_peserta {
+  id           BigInt       @id @default(autoincrement())
+  periode      String       @db.Char(7)
+  baris_excel  Int
+  kunci        String       @db.VarChar(255)
+  nik          String       @default("") @db.VarChar(32)
+  id_pegawai   String       @default("") @db.VarChar(64)
+  desa_kode    String       @default("") @db.VarChar(32)
+  kpj          String       @default("") @db.VarChar(32)
+  kode_tk      String       @default("") @db.VarChar(64)
+  nama_lengkap String       @default("") @db.VarChar(255)
+  tgl_lahir    String       @default("") @db.VarChar(32)
+  upah         Decimal      @default(0) @db.Decimal(18, 2)
+  rapel        Decimal      @default(0) @db.Decimal(18, 2)
+  blth         String       @default("") @db.VarChar(32)
+  npp          String       @default("") @db.VarChar(64)
+  bpjs_periode bpjs_periode @relation(fields: [periode], references: [periode], onDelete: Cascade)
+
+  @@index([periode, kunci], map: "bpjs_peserta_periode_kunci_index")
+  @@index([periode, desa_kode], map: "bpjs_peserta_periode_desa_index")
+  @@index([nik], map: "bpjs_peserta_nik_index")
+}
+
 model users {
   id                                                             BigInt                               @id @default(autoincrement())
   name                                                           String @db.Citext
