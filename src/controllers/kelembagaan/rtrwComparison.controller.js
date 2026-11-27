@@ -1192,8 +1192,9 @@ async function computeComparison({
   logTiming = () => {},
 } = {}) {
       const [allDesa, allPengurus, allRws, allRts] = await Promise.all([
+        // Semua desa tetap dimuat walau ada desaKodeFilter: pengecekan NIK lintas desa
+        // (Tangkil, NIK Invalid) butuh DB semua desa. Filter hanya membatasi keluaran.
         prisma.desas.findMany({
-          ...(desaKodeFilter ? { where: { kode: desaKodeFilter } } : {}),
           select: {
             id: true,
             kode: true,
@@ -1321,18 +1322,41 @@ async function computeComparison({
       const crossDesaFallback = applyCrossDesaNikFallback(tangkilBpjsFallback.confirmed, dbItems, desaByKode);
       const effectiveBpjsData = crossDesaFallback.reassigned;
       const tangkilUnresolved = tangkilBpjsFallback.unresolved;
+      // NIK database yang dipakai peserta BPJS lain (ditandai NIK Invalid di desa asal
+      // BPJS-nya), supaya baris DB pemilik NIK juga diberi tahu, bukan hanya desa BPJS.
+      const nikInvalidByNik = groupBy(effectiveBpjsData.filter((item) => item.bpjsNikInvalid), (item) => item.nik);
       const dbByKode = groupBy(dbItems, (item) => item.desaKode);
       const addByKode = groupBy(addData, (item) => item.desaKode);
       const bpjsByKode = groupBy(effectiveBpjsData, (item) => item.desaKode);
       logTiming('source grouped');
 
-      const comparison = desaOnly.map((desa) => {
+      const comparison = desaOnly.filter((desa) => !desaKodeFilter || desa.kode === desaKodeFilter).map((desa) => {
         const desaKode = desa.kode;
         const dbList = dbByKode[desaKode] || [];
         const addList = addByKode[desaKode] || [];
         const bpjsList = bpjsByKode[desaKode] || [];
         const items = compareItems(dbList, addList, bpjsList, { enableFuzzy, includeDetails })
-          .filter((item) => !itemKeyFilter || item.key === itemKeyFilter);
+          .filter((item) => !itemKeyFilter || item.key === itemKeyFilter)
+          .map((item) => {
+            const dipakai = item.dbNik.flatMap((nik) => nikInvalidByNik[nik] || [])
+              .filter((b) => !item.bpjsKpj.some((kpj) => (b.details || []).some((d) => d.kpj === kpj)))
+              .map((b) => ({
+                nama: b.nama,
+                nik: b.nik,
+                desaKode: b.desaKode,
+                desaNama: desaByKode.get(b.desaKode)?.nama || '',
+                kecamatanNama: desaByKode.get(b.desaKode)?.kecamatans?.nama || '',
+              }));
+            if (!dipakai.length) return item;
+            const daftar = dipakai
+              .map((b) => `${b.nama} – ${b.desaNama || b.desaKode}${b.kecamatanNama ? ` (${b.kecamatanNama})` : ''}`)
+              .join('; ');
+            return {
+              ...item,
+              dbNikDipakaiBpjsLain: dipakai,
+              keterangan: `${item.keterangan}. NIK database ini dipakai peserta BPJS lain: ${daftar}.`,
+            };
+          });
 
         return {
           desaId: desa.id.toString(),
@@ -1537,7 +1561,7 @@ class RtrwComparisonController {
     try {
       const pengurus = await prisma.pengurus.findUnique({
         where: { id: String(req.params.id) },
-        select: { nik: true, jabatan: true, pengurusable_type: true, desa_id: true, desas: { select: { kode: true } } },
+        select: { nik: true, nama_lengkap: true, jabatan: true, pengurusable_type: true, desa_id: true, desas: { select: { kode: true } } },
       });
       if (!pengurus) return res.status(404).json({ success: false, message: 'Pengurus tidak ditemukan' });
       if (req.user.role === 'desa' && Number(req.user.desa_id) !== Number(pengurus.desa_id)) {
@@ -1554,7 +1578,13 @@ class RtrwComparisonController {
 
       const source = await warmSourceCache();
       const index = getBpjsNikIndex(source);
-      const peserta = index.byNik.get(nik) || null;
+      const pesertaNik = index.byNik.get(nik) || null;
+      // NIK sama tapi nama lain (mis. DB "JUNAEDI", BPJS "SANDI B ARIP") = bukan orang
+      // yang sama; jangan dianggap tercover, laporkan sebagai NIK dipakai peserta lain.
+      const nikDipakaiLain = pesertaNik && !isSimilarName(pesertaNik.nama, pengurus.nama_lengkap)
+        ? { nama: pesertaNik.nama, kpj: pesertaNik.details?.[0]?.kpj || null }
+        : null;
+      const peserta = nikDipakaiLain ? null : pesertaNik;
       const details = peserta?.details || [];
       const bulanIni = details.find((d) => String(d.blth || '').startsWith(bulan)) || null;
       const terakhir = [...details].sort((a, b) => String(b.blth).localeCompare(String(a.blth)))[0] || null;
@@ -1581,6 +1611,7 @@ class RtrwComparisonController {
           terdaftar: Boolean(peserta),
           tercover: Boolean(bulanIni),
           nik_berbeda: nikBerbeda,
+          nik_dipakai_lain: nikDipakaiLain,
           peserta: peserta && {
             nama: peserta.nama,
             kpj: (bulanIni || terakhir)?.kpj || null,
