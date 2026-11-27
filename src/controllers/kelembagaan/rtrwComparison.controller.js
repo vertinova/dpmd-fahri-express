@@ -1571,35 +1571,16 @@ class RtrwComparisonController {
       const eligible = RT_RW_TYPES.includes(pengurus.pengurusable_type) && isKetuaRtRw(pengurus.jabatan);
       if (!eligible) return res.json({ success: true, data: { eligible: false } });
 
-      // Bulan berjalan menurut WIB, format YYYY-MM (sama dengan awalan BLTH)
-      const bulan = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }).slice(0, 7);
-      const nik = normalizeNik(pengurus.nik);
-      if (!nik) return res.json({ success: true, data: { eligible: true, bulan, nik_kosong: true } });
+      const bulan = bulanBerjalanWib();
+      if (!normalizeNik(pengurus.nik)) return res.json({ success: true, data: { eligible: true, bulan, nik_kosong: true } });
 
-      const source = await warmSourceCache();
-      const index = getBpjsNikIndex(source);
-      const pesertaNik = index.byNik.get(nik) || null;
-      // NIK sama tapi nama lain (mis. DB "JUNAEDI", BPJS "SANDI B ARIP") = bukan orang
-      // yang sama; jangan dianggap tercover, laporkan sebagai NIK dipakai peserta lain.
-      const nikDipakaiLain = pesertaNik && !isSimilarName(pesertaNik.nama, pengurus.nama_lengkap)
-        ? { nama: pesertaNik.nama, kpj: pesertaNik.details?.[0]?.kpj || null }
-        : null;
-      const peserta = nikDipakaiLain ? null : pesertaNik;
-      const details = peserta?.details || [];
-      const bulanIni = details.find((d) => String(d.blth || '').startsWith(bulan)) || null;
-      const terakhir = [...details].sort((a, b) => String(b.blth).localeCompare(String(a.blth)))[0] || null;
-
-      // NIK tak ditemukan → cek persandingan desa ini: mungkin terdaftar di BPJS
-      // dengan nama & kode desa sama tapi NIK berbeda (sama dengan tab "NIK Berbeda").
-      // ponytail: menghitung persandingan satu desa per request; cache bila profil jadi lambat.
-      let nikBerbeda = null;
-      if (!peserta && pengurus.desas?.kode) {
-        const { comparison } = await computeComparison({ enableFuzzy: true, desaKodeFilter: pengurus.desas.kode });
-        const row = comparison[0]?.items.find(
-          (it) => it.nikMismatch && it.dbRefs.some((r) => r.id === String(req.params.id)),
-        );
-        if (row) nikBerbeda = { nik_bpjs: row.bpjsNik, nama_bpjs: row.bpjsNama, kpj: row.bpjsKpj };
-      }
+      const index = getBpjsNikIndex(await warmSourceCache());
+      const status = await bpjsStatusPengurus(
+        { ...pengurus, id: String(req.params.id) },
+        index,
+        bulan,
+        desaComparisonItems(pengurus.desas?.kode),
+      );
 
       res.json({
         success: true,
@@ -1608,16 +1589,7 @@ class RtrwComparisonController {
           bulan,
           periode_data: index.periodeTerbaru, // BLTH terbaru di data master (YYYY-MM)
           data_bulan_ini_tersedia: index.periodeTerbaru === bulan,
-          terdaftar: Boolean(peserta),
-          tercover: Boolean(bulanIni),
-          nik_berbeda: nikBerbeda,
-          nik_dipakai_lain: nikDipakaiLain,
-          peserta: peserta && {
-            nama: peserta.nama,
-            kpj: (bulanIni || terakhir)?.kpj || null,
-            upah: (bulanIni || terakhir)?.upah ?? null,
-            blth_terakhir: terakhir?.blth || null,
-          },
+          ...status,
         },
       });
     } catch (error) {
@@ -1625,6 +1597,66 @@ class RtrwComparisonController {
       res.status(500).json({ success: false, message: 'Gagal mengambil status BPJS pengurus', error: error.message });
     }
   }
+}
+
+/** Bulan berjalan menurut WIB, format YYYY-MM (sama dengan awalan BLTH). */
+function bulanBerjalanWib() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jakarta' }).slice(0, 7);
+}
+
+/**
+ * Pengambil baris persandingan satu desa, dihitung paling banyak sekali per
+ * pemanggil (persandingan mahal; daftar masalah desa memanggilnya per ketua).
+ */
+function desaComparisonItems(desaKode) {
+  let memo = null;
+  return () => {
+    if (!desaKode) return Promise.resolve([]);
+    memo ??= computeComparison({ enableFuzzy: true, desaKodeFilter: desaKode })
+      .then(({ comparison }) => comparison[0]?.items || []);
+    return memo;
+  };
+}
+
+/**
+ * Status BPJS satu Ketua RT/RW terhadap data master. Satu aturan untuk detail
+ * pengurus (getPengurusBpjs) dan daftar masalah desa (masalahDesa.controller).
+ * `pengurus` minimal { id, nik, nama_lengkap }; NIK kosong ditangani pemanggil.
+ */
+async function bpjsStatusPengurus(pengurus, index, bulan, getDesaItems) {
+  const pesertaNik = index.byNik.get(normalizeNik(pengurus.nik)) || null;
+  // NIK sama tapi nama lain (mis. DB "JUNAEDI", BPJS "SANDI B ARIP") = bukan orang
+  // yang sama; jangan dianggap tercover, laporkan sebagai NIK dipakai peserta lain.
+  const nikDipakaiLain = pesertaNik && !isSimilarName(pesertaNik.nama, pengurus.nama_lengkap)
+    ? { nama: pesertaNik.nama, kpj: pesertaNik.details?.[0]?.kpj || null }
+    : null;
+  const peserta = nikDipakaiLain ? null : pesertaNik;
+  const details = peserta?.details || [];
+  const bulanIni = details.find((d) => String(d.blth || '').startsWith(bulan)) || null;
+  const terakhir = [...details].sort((a, b) => String(b.blth).localeCompare(String(a.blth)))[0] || null;
+
+  // NIK tak ditemukan → cek persandingan desa ini: mungkin terdaftar di BPJS
+  // dengan nama & kode desa sama tapi NIK berbeda (sama dengan tab "NIK Berbeda").
+  let nikBerbeda = null;
+  if (!peserta) {
+    const row = (await getDesaItems()).find(
+      (it) => it.nikMismatch && it.dbRefs.some((r) => r.id === String(pengurus.id)),
+    );
+    if (row) nikBerbeda = { nik_bpjs: row.bpjsNik, nama_bpjs: row.bpjsNama, kpj: row.bpjsKpj };
+  }
+
+  return {
+    terdaftar: Boolean(peserta),
+    tercover: Boolean(bulanIni),
+    nik_berbeda: nikBerbeda,
+    nik_dipakai_lain: nikDipakaiLain,
+    peserta: peserta && {
+      nama: peserta.nama,
+      kpj: (bulanIni || terakhir)?.kpj || null,
+      upah: (bulanIni || terakhir)?.upah ?? null,
+      blth_terakhir: terakhir?.blth || null,
+    },
+  };
 }
 
 // Indeks NIK → peserta BPJS, dibangun sekali per versi cache sumber (~20rb baris).
@@ -1648,5 +1680,6 @@ module.exports = new RtrwComparisonController();
 module.exports.computeComparison = computeComparison;
 module.exports.warmSourceCache = warmSourceCache;
 module.exports.isSourceCacheReady = isSourceCacheReady;
+module.exports.bpjs = { bulanBerjalanWib, desaComparisonItems, bpjsStatusPengurus, getBpjsNikIndex, normalizeNik, isKetuaRtRw };
 // Exposed for unit tests (see __tests__/rtrwMatching.test.js).
 module.exports._internals = { normalizeName, isSimilarName, tokenSimilar, compareItems, applyCrossDesaNikFallback, isKetuaRtRw, nikErrorSebab, buildBpjsUnmappableList };

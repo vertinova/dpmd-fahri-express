@@ -25,6 +25,8 @@ const {
   lembagaLainnyaController
 } = require('../controllers/kelembagaan/index');
 
+const masalahDesaController = require('../controllers/kelembagaan/masalahDesa.controller');
+
 // Import dashboard controller
 const { getDesaDashboardSummary, getDesaBankeuPenyaluran } = require('../controllers/dashboard/desa.dashboard.controller');
 
@@ -60,6 +62,7 @@ router.use(KELEMBAGAAN_PATHS, requireDesaPermission('kelembagaan'));
 
 // Summary endpoint for logged-in desa (for Kelembagaan Page)
 router.get('/kelembagaan/summary', summaryController.getDesaSummary.bind(summaryController));
+router.get('/kelembagaan/masalah', masalahDesaController.getMasalahDesa.bind(masalahDesaController));
 
 // RW routes
 router.get('/rw', rwController.listDesaRW.bind(rwController));
